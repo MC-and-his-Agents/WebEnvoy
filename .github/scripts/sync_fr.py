@@ -5,6 +5,11 @@ import subprocess
 
 FR_FILE_PATH = "docs/FR.md"
 
+# 从环境变量获取配置，如果未设置则使用默认值
+# 建议在 GitHub Actions 中设置这些环境变量
+PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "2")
+GH_OWNER = os.environ.get("GH_OWNER") # 如果不设置，脚本会自动尝试获取
+
 MODULE_LABELS = {
     "ENV": "模块: 核心环境",
     "COM": "模块: CLI通信",
@@ -36,7 +41,7 @@ def run_gh_command(cmd, ignore_error=False):
 
 def get_existing_issues():
     print("获取远端已有 Issues...")
-    stdout = run_gh_command('gh issue list --state all --limit 1000 --json title,number,state')
+    stdout = run_gh_command('gh issue list --state all --limit 1000 --json title,number,state,url')
     if stdout is None:
         return {}
     issues = json.loads(stdout)
@@ -99,10 +104,17 @@ def parse_fr_md():
     return items
 
 def main():
-    repo_path = run_gh_command('gh repo view --json nameWithOwner -q .nameWithOwner')
-    if not repo_path:
+    # 自动获取仓库全名和所有者
+    repo_info = run_gh_command('gh repo view --json nameWithOwner,owner -q "{nameWithOwner: .nameWithOwner, owner: .owner.login}"')
+    if not repo_info:
         print("无法获取仓库信息")
         return
+    
+    repo_data = json.loads(repo_info)
+    repo_path = repo_data['nameWithOwner']
+    owner = GH_OWNER or repo_data['owner']
+    
+    print(f"当前仓库: {repo_path}, 所有者: {owner}, Project 编号: {PROJECT_NUMBER}")
         
     existing_issues = get_existing_issues()
     fr_items = parse_fr_md()
@@ -130,14 +142,17 @@ def main():
             issue = existing_issues[issue_title]
             if issue['state'] == 'OPEN':
                 print(f"更新已有 Issue: {issue_title}")
-                # GH Action 更新时不覆写用户的自定义 label 和 milestone，只更新基础描述，或全覆写取决于策略。
-                # 稳妥起见，我们重新赋予解析出的属性。
                 run_gh_command(f'gh issue edit {issue["number"]} --body-file tmp_issue_body.md --add-label {labels_str} {milestone_arg}')
+                # 确保已在 Project 中
+                run_gh_command(f'gh project item-add {PROJECT_NUMBER} --owner "{owner}" --url {issue["url"]}', ignore_error=True)
             else:
                 print(f"跳过已关闭的 Issue: {issue_title}")
         else:
             print(f"创建全新 Issue: {issue_title}")
-            run_gh_command(f'gh issue create --title "{issue_title}" --body-file tmp_issue_body.md --label {labels_str} {milestone_arg}')
+            new_issue_url = run_gh_command(f'gh issue create --title "{issue_title}" --body-file tmp_issue_body.md --label {labels_str} {milestone_arg}')
+            if new_issue_url:
+                print(f"将新 Issue 添加到 Project: {new_issue_url}")
+                run_gh_command(f'gh project item-add {PROJECT_NUMBER} --owner "{owner}" --url {new_issue_url}', ignore_error=True)
             
     if os.path.exists("tmp_issue_body.md"):
         os.remove("tmp_issue_body.md")
