@@ -16,6 +16,8 @@ jobs:
 
       - name: Check Commit Messages
         run: |
+          CC_REGEX='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?: .+$'
+
           # 获取 PR 的所有提交记录
           COMMITS=$(git log --format=%s origin/${{ github.base_ref }}..origin/${{ github.head_ref }})
           
@@ -30,7 +32,7 @@ jobs:
             
             # 1. 校验 Conventional Commits 规范
             # 格式: type(scope): description 或 type: description
-            if [[ ! "$msg" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?: .+$ ]]; then
+            if [[ ! "$msg" =~ $CC_REGEX ]]; then
               echo "错误: 提交信息必须符合 Conventional Commits 规范 (例如: feat: 增加某项功能)"
               exit 1
             fi
