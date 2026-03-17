@@ -34,6 +34,19 @@
 
 ---
 
+## 🟢 多账号管理专项调研（2026-03-17 新增）
+
+针对多账号管理场景的专项调研，成果已整合入 `account.md` 和 `anti-detection.md`。
+
+| 项目 | 调研报告 | 核心贡献 |
+|---|---|---|
+| **`Crawlee SessionPool`** | [crawlee_analysis.md](./crawlee_analysis.md) | Session 健康度三退场机制（errorScore+usageCount+maxAge）、代理黏性绑定（sessionId→proxyUrl）、操作间隔长尾分布 → 已吸收入 `anti-detection.md §4.1 + §5.3`，`account.md §7.1` |
+| **`Camoufox 指纹隔离`** | [camoufox_analysis.md](./camoufox_analysis.md) | C++ 内核 LCG 确定性指纹种子；Worker 线程 JS hook 盲区确认（ServiceWorker/WebWorker 中 navigator 不受主线程 hook 影响） → 已补充入 `anti-detection.md §2.1` |
+| **`Selenoid 容器隔离`** | [selenoid_analysis.md](./selenoid_analysis.md) | Docker 容器级代理隔离（每容器独立 HTTP_PROXY 环境变量，天然无泄漏）→ Phase 2 云端部署参考，已记录入 `dependencies.md` |
+| **`Profile Seeding 养号模式`** | [profile_seeding_analysis.md](./profile_seeding_analysis.md) | 三阶段预热（全局→目标平台→基线记录）；行为人格固定种子一致性；操作间隔长尾分布；冷却指数退避（1h→4h→24h）；状态机 NEW→WARMING_UP→IDLE→ACTIVE→COOLING_DOWN→SUSPENDED → 已整合入 `account.md §7.2`，`anti-detection.md §4.1 + §5.3` |
+
+---
+
 ## ⚪ 第三梯队：了解即可（边界价值，间接启发）
 
 这些项目对 WebEnvoy 有一定参考价值，但不在核心能力链路上，不需要花大量时间深挖。
