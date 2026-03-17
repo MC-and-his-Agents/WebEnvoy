@@ -9,18 +9,25 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install Dependencies
+        if: ${{ hashFiles('package.json') != '' }}
         run: |
-          if [ -f package.json ]; then
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
             npm install
           else
             echo "No package.json found. Skipping npm install."
@@ -28,22 +35,37 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          if [ -d src ]; then
-            # 运行业务代码同级的 __tests__ 目录下的单元测试
+          set -euo pipefail
+          if [ ! -f package.json ]; then
+            echo "No package.json found. Skipping unit tests."
+            exit 0
+          fi
+
+          has_test_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts.test ? 'yes' : 'no')")"
+          has_unit_tests="no"
+          if find . -type d -name __tests__ -print -quit | grep -q .; then
+            has_unit_tests="yes"
+          fi
+
+          if [ "$has_test_script" = "yes" ] && [ "$has_unit_tests" = "yes" ]; then
             echo "Running unit tests..."
-            # 这里应替换为实际的测试命令，如 npm test
-            npm test -- --testPathPattern=__tests__ || echo "No tests found or test command failed."
+            npm test -- --testPathPattern=__tests__
           else
-            echo "No src directory found. Skipping unit tests."
+            echo "No unit test command or __tests__ directories found. Skipping unit tests."
           fi
 
       - name: Run E2E/Integration Tests
         run: |
-          if [ -d tests ]; then
-            # 运行根目录 tests 目录下的验收测试
-            echo "Running E2E tests..."
-            # 这里应替换为实际的测试命令
-            npm run test:e2e || echo "No E2E tests found or test command failed."
+          set -euo pipefail
+          if [ ! -f package.json ]; then
+            echo "No package.json found. Skipping E2E/integration tests."
+            exit 0
+          fi
+
+          has_e2e_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts['test:e2e'] ? 'yes' : 'no')")"
+          if [ -d tests ] && [ "$has_e2e_script" = "yes" ]; then
+            echo "Running E2E/integration tests..."
+            npm run test:e2e
           else
-            echo "No tests directory found. Skipping E2E tests."
+            echo "No tests directory or test:e2e script found. Skipping E2E/integration tests."
           fi
