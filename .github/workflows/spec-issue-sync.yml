@@ -60,7 +60,7 @@ jobs:
                 --search "\"[$DIR_NAME]\" in:title" \
                 --limit 100 \
                 --json number,title \
-                --jq '.[] | select(.title == "'"$ISSUE_TITLE"'") | .number' \
+                --jq '.[] | select(.title | startswith("['"$DIR_NAME"'] ")) | .number' \
                 | head -n 1
             )"
 
@@ -75,8 +75,7 @@ jobs:
               gh issue create \
                 --repo "${{ github.repository }}" \
                 --title "[$DIR_NAME] $TITLE" \
-                --body "$ISSUE_BODY" \
-                --label "type:feature"
+                --body "$ISSUE_BODY"
             else
               echo "Issue #$EXISTING_ISSUE 已存在，更新正文。"
               gh issue edit "$EXISTING_ISSUE" \
