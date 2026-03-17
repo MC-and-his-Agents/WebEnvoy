@@ -38,8 +38,8 @@ jobs:
             fi
             
             # 2. 校验是否包含中文
-            # GitHub Actions 默认 bash 对 \u4e00-\u9fa5 的正则兼容性不稳定，统一改为 perl 判断。
-            if ! printf '%s\n' "$msg" | perl -Mutf8 -ne 'exit 0 if /[\x{4e00}-\x{9fff}]/; exit 1'; then
+            # 统一交给 Python 做 Unicode 判断，避免 shell/perl 在 runner 上的编码兼容问题。
+            if ! python3 -c 'import sys; msg = sys.argv[1]; sys.exit(0 if any("\u4e00" <= ch <= "\u9fff" for ch in msg) else 1)' "$msg"; then
               echo "错误: 提交信息必须包含中文。"
               exit 1
             fi
