@@ -1,49 +1,136 @@
 # AGENTS.md
 
-## 核心纪律与入口导航
+## Quick Load
 
-所有 AI Agent 在操作此项目前，必须严格遵守以下法则。
+- 先读 `vision.md`，再读 `docs/dev/AGENTS.md`
+- 当前仓库以文档、架构、脚本、CI 为主，业务代码骨架尚未完整建立
+- WebEnvoy 是 Web 执行工具，不是 Agent 大脑
+- 技术主线：TypeScript/Node CLI + Chrome Extension + Native Messaging + Playwright + SQLite
+- 优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
+- 架构红线：浏览器内执行是唯一 HTTP 出口；不缝合外部异构爬虫为核心运行时
+- 禁止直推主分支；提交必须用中文 Conventional Commits；主干只用 Squash Merge
+- 单测放同级 `__tests__/`，E2E/集成放根目录 `tests/`
+- 本地不保留 backlog / sprint 进度文件，GitHub Issues / Projects 是唯一进度真理
+- 高风险改动包括 `.github/workflows/`、`scripts/`、执行引擎、账号、安全、数据读写
+- 证据不足默认不放行；先审查后合并
+- 正式契约看 `docs/dev/specs/`；研究目录只作参考
+- 参考研究不是正式规范；如与架构或 spec 冲突，以正式文档为准
 
-- **项目愿景与产品边界**：请首先阅读 `vision.md` 以了解 WebEnvoy 的宏观目标与核心哲学。
-- **详细文档与后续导航**：各目录架构树与研究报告指引请参见 `docs/AGENTS.md`。
+## 按任务加载顺序
 
-### 全局开发纪律
+所有 AI Agent 在操作此仓库前，按以下顺序恢复上下文：
 
-1. **分支与 PR 机制**：**严禁直推主分支**！所有的需求开发和文档修改必须凭依 FR 说明书拉取独立的分支（如 `dev`，`feat/FR-0012`）完成，并通过 Pull Request 测试拦截门禁后再合入主干。
-2. **持续整洁的提交线**：提交信息（Commit Message）**必须使用中文且符合 Conventional Commits 规范**。向主分支合入 PR 时，必须采用 **Squash（压缩）合并**，以保持主干历史日志的绝对清晰与干净。
-3. **测试代码物理位置**：单元测试 (Unit Tests) 遵循同目录分离放置原则（归拢于被测源文件同级的 `__tests__/` 子目录下，如 `__tests__/[name].test.ts`）；验收 Spec AC 的核心端到端/集成测试 (E2E/Integration) 必须统一收拢于项目根目录的 `tests/` 下，以便 CI 后续执行门禁拦截。
+1. `docs/dev/roadmap.md`
+2. `docs/dev/architecture/system-design.md`
+3. 与当前任务直接相关的架构子文档
+4. 对应 `docs/dev/specs/FR-XXXX-*/`
+5. 当前分支的 `TODO.md`（如果有）
+6. 用户当前提供的 Issue / PR / 任务描述
 
-### PR Review Policy
+不要默认每次都需要完整读取 `docs/dev/architecture/` 全目录。应先看总览，再按任务进入相关子文档，例如：
 
-所有 AI Agent 在审查或决定是否合并 PR 时，必须遵循以下规则：
+- 执行链路：`docs/dev/architecture/system-design/execution.md`
+- 读写与页面交互：`docs/dev/architecture/system-design/read-write.md`
+- 通信协议：`docs/dev/architecture/system-design/communication.md`
+- 账号与配置空间：`docs/dev/architecture/system-design/account.md`
+- 适配器与规则：`docs/dev/architecture/system-design/adapter.md`
+- 反检测与账号安全：`docs/dev/architecture/anti-detection.md`
+- 非功能指标：`docs/dev/architecture/system_nfr.md`
 
-1. **先审查，后合并**：任何合并动作前都必须先执行完整 review，不允许跳过审查直接 merge。
-2. **Review 目标必须明确**：PR review 在看的是“这段改动值不值得进入主干”，而不只是“测试有没有通过”。测试负责证明行为正确性，review 负责判断需求是否正确、设计是否合理、风险是否可控、是否适合纳入系统长期演进。
-3. **自动门禁与人工审查分工必须清晰**：自动门禁负责尽可能吃掉低层正确性问题，包括单元测试、集成测试、lint、type check、contract test、CI 工作流健康、基础安全扫描等；PR review 不应重复这些机械检查，而应把重点放在需求、设计、系统影响和残余风险上。
-4. **必审项一：需求与意图**：必须检查这次改动是否真的在解决正确的问题，是否符合 `vision.md`、`docs/dev/AGENTS.md`、架构文档以及对应 FR/spec/TODO 的边界。即使测试全绿，只要实现偏离需求、断言本身设错、超出范围或破坏既定契约，也应视为阻断项。
-5. **必审项二：设计与边界**：必须检查接口设计、模块边界、抽象层次、命名、耦合度、可扩展性与可替换性。测试可以证明“能工作”，但不能证明设计不会让未来演进变得困难；明显的边界失衡、职责混乱或抽象退化应视为阻断项或至少高风险项。
-6. **必审项三：行为正确性与回归风险**：必须检查改动是否会引入明显 bug、边界条件错误、状态流转错误、脚本误判、自动化误执行、接口契约破坏、兼容性问题，或导致已有能力回退。
-7. **必审项四：风险与副作用**：必须检查改动对兼容性、性能、并发、缓存、回滚、数据迁移、可观测性、发布与恢复路径的影响。凡是“测试能过但上线可能出事”的问题，例如删字段破坏旧客户端、迁移不可回滚、日志泄露敏感信息、缓存引入竞态，都属于 review 的核心职责。
-8. **必审项五：测试与验证证据**：必须检查变更是否提供了与风险相匹配的验证证据，也要审测试本身是否有效。要特别注意只测 happy path、mock 过多、测试实现细节、缺少失败断言、fixture 掩盖问题等“看似有测试、实际上保护力不足”的情况。凡是涉及用户可见行为、核心流程、自动化守卫、CI 规则、合并门禁、数据读写或跨模块交互的改动，如缺少必要测试、脚本验证或 CI 证据，默认不能直接放行。
-9. **必审项六：安全与滥用面**：必须检查是否引入提示词注入、命令注入、越权操作、错误自动合并、信任不可信输入、泄露敏感信息或其他会放大执行权限的风险。凡是影响 review、merge、执行链路或账号安全的问题，一律按阻断项处理。
-10. **必审项七：项目流程与元数据合规**：必须检查分支、提交信息、PR 标题/描述、`Fixes #...` 关联、目标分支、CI 状态、Squash 合并要求是否符合仓库规范。流程不合规属于阻断项，不得以“代码本身没问题”为由放行。
-11. **高风险改动必须升级审查强度**：涉及 `.github/workflows/`、`scripts/`、自动 merge / review 守卫、账号与权限、执行引擎、适配器协议、数据读写、公共接口语义、缓存/并发、数据库 schema、迁移、安全与风控链路的变更，默认按高风险 PR 处理，必须重点审查风险、副作用、回滚性与验证证据。
-12. **阻断项优先**：Review 的首要目标是发现会阻止合并的问题。只要存在高概率错误、关键验证缺失、规范违背、安全隐患、设计明显失衡或证据不足，就应给出 `REQUEST_CHANGES`。
-13. **非阻断项单独归类**：命名、排版、可读性、小幅重构建议、可选优化等不应与阻断项混在一起。若不影响安全合并，可作为建议提出，但不得伪装成必须修改项。
-14. **证据不足即不放行**：如果无法确认改动“安全可合并”，默认结论必须是 `REQUEST_CHANGES`，而不是乐观放行。
-15. **合并门禁必须同时满足**：只有当 AI Review 结论为 `APPROVE`、判定 `safe_to_merge = true`、PR 非 Draft、GitHub Required Checks 全绿、且目标分支允许合入时，才可执行合并。
-16. **统一合并策略**：PR 合入必须使用 **Squash Merge**，不得擅自改用 merge commit 或 rebase merge。
-17. **评论风格要求**：Review 输出应尽量贴近 GitHub Code Review 习惯，先给结论，再列出阻断问题、影响文件和合并前动作，避免泛泛而谈。若没有发现阻断项，也应明确说明“未发现新的阻断性问题”，并注明残余风险或验证边界。
-18. **本机按需审查入口**：本仓库默认使用 `scripts/pr-guardian.sh` 作为本机按需 review / merge 入口；详细说明见 `docs/dev/local-pr-review.md`。
+## 项目快照
 
-### AI-Native 项目管理机制 (全托管模式)
+当前仓库处于“规范、架构、流程先行”的阶段。
 
-本项目采用**人类决策 + AI 全托管执行**的极简工作流，AI 需利用 `git` 和 `gh` CLI 自动完成所有底层操作，人类仅用自然语言下达指令：
+- 顶层内容以文档、脚本、CI 工作流为主
+- 业务代码骨架尚未完整建立
+- `docs/dev/specs/` 是未来特性契约的落点
+- `.github/workflows/` 与 `scripts/` 已承担流程门禁职责
 
-1. **立项与设计**：人类下达指令 -> AI 自动拉取 `docs/FR-*` 分支，在 `docs/dev/specs/` 下编写 `spec.md` 与 `TODO.md` -> AI 自动提 PR。
-2. **自动化派发**：人类合并设计 PR -> CI 脚本 (`spec-issue-sync.yml`) 自动在 GitHub 生成 Issue 编号。
-3. **编码与清账**：人类下达编码指令 -> AI 自动拉取 `feat/FR-*` 分支 -> 依据 `TODO.md` 跨会话执行 -> AI 自动提 PR 并带上 `Fixes #Issue编号` -> 人类合并 PR 自动关闭 Issue。
+不要默认仓库已经具备完整的 `src/`、依赖管理、测试框架或可运行应用入口；开始实现前应先确认对应 FR 规约与最小工程骨架是否已存在。
 
-**铁律：本地代码库中绝不保留任何进度追踪文件（如 backlog），GitHub Issue 是唯一的进度真理。**
+## 全局技术边界
 
-> 👉 **所有的工作流与技术规范，请前往查阅核心指南：[`docs/dev/AGENTS.md`](./docs/dev/AGENTS.md)**
+WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agent 大脑。
+
+- 只负责执行、侦察、调度与结构化回传
+- 不负责长链路任务规划、聊天 UI 或内容生成
+- 对高价值平台优先采用 L3 专用适配器
+- L2 通用层用于未知站点
+- L1 视觉 / 物理输入仅作兜底
+
+架构红线：
+
+- 浏览器内执行是唯一 HTTP 出口
+- 不引入外部异构爬虫作为核心执行基石
+- 核心实现必须保持自主代码资产
+
+技术细节以 `vision.md` 和 `docs/dev/architecture/` 为准。
+
+## 全局协作纪律
+
+1. 禁止直推主分支。所有开发和文档修改必须在独立分支完成，并通过 PR 合入。
+2. Commit Message 必须使用中文，并符合 Conventional Commits 规范。
+3. 合入主干必须使用 Squash Merge。
+4. 单元测试放在被测文件同级 `__tests__/`；端到端/集成测试统一放在仓库根目录 `tests/`。
+5. 本地代码库中不保留 backlog、sprint 等进度追踪文件；GitHub Issues / Projects 是唯一进度真理。
+
+推荐分支命名：
+
+- 设计 / 规约：`docs/FR-XXXX-*`
+- 功能开发：`feat/FR-XXXX-*`
+- 缺陷修复：`fix/<scope>-*`
+
+提交 PR 时，若对应 GitHub Issue 已存在，应显式带上 `Fixes #<issue-number>`。
+
+## Review 与合并底线
+
+任何合并前必须先 review，不能因为测试通过就跳过判断。
+
+Review 至少覆盖以下方面：
+
+- 需求是否正确
+- 设计与边界是否合理
+- 是否存在行为回归或兼容性风险
+- 是否有足够测试与验证证据
+- 是否引入安全或滥用面问题
+- 流程与元数据是否合规
+
+以下目录默认视为高风险改动：
+
+- `.github/workflows/`
+- `scripts/`
+- 执行引擎、账号、适配器协议、数据读写、安全与风控相关代码
+
+高风险改动必须升级审查强度，并明确检查副作用、回滚路径与验证证据。
+
+只要存在高概率错误、关键验证缺失、证据不足或流程违背，默认结论应为 `REQUEST_CHANGES`。
+
+合并前必须同时满足以下条件：
+
+- PR 非 Draft
+- review 已完成
+- 审查结论为 `APPROVE`
+- `safe_to_merge = true`
+- GitHub Required Checks 全绿
+- 目标分支允许按仓库策略合入
+
+本机按需 review / merge 入口：
+
+- `scripts/pr-guardian.sh`
+- 详细说明见 `docs/dev/local-pr-review.md`
+
+## AI 执行职责
+
+本项目采用“人类决策，AI 全托管执行”的协作方式。
+
+- 人类负责下达自然语言目标与审批关键节点
+- AI 负责使用 `git` 和 `gh` 完成分支、提交、推送、PR、review、merge 等底层操作
+- 涉及核心特性时，优先围绕对应 FR 的 `spec.md`、`plan.md`、`TODO.md` 推进
+
+## 目录可信度
+
+- `docs/dev/specs/`：特性契约与实现准入基线
+- `docs/dev/architecture/`：架构约束与设计依据
+- `docs/research/ref/`：参考研究，不是最终规范
+
+如果研究结论与正式架构 / spec 冲突，以 `vision.md`、`docs/dev/architecture/` 和对应 spec 为准。

@@ -1,15 +1,20 @@
 # AGENTS.md
-> 本文档是 WebEnvoy 仓库 docs 目录的命名空间路由。
 
+本文档只负责 `docs/` 目录导航，不重复根级规范。
 
 ```text
 docs/
- ├── AGENTS.md # AGENTS 架构文档
- ├── vision.md # 愿景与北极星指标
- ├── research/ # 调研文档
- │   └── ref/  # 原始调研报告
- └── dev/      # [核心开发区] 研发规则、业务需求与迭代方案（含专属规范）
- 
+ ├── AGENTS.md
+ ├── dev/                  # 研发规范、路线图、架构、FR 规约
+ ├── research/
+ │   └── ref/              # 外部项目调研与参考分析
+ └── archive/              # 历史文档与归档材料
 ```
 
-> 👉 **如果您正准备进行任何涉及编码或特性的操作，请立刻且唯一查阅：[`docs/dev/AGENTS.md`](./dev/AGENTS.md)**
+## 查阅规则
+
+- 要做实现、设计、评审或任何工程决策：读 [`docs/dev/AGENTS.md`](./dev/AGENTS.md)
+- 要补背景调研或比较竞品：按需读 [`docs/research/ref/AGENTS.md`](./research/ref/AGENTS.md)
+- 要看历史资料：进入 `docs/archive/`
+
+`docs/` 不是独立规范源头。全局纪律以仓库根级 `AGENTS.md` 为准，研发流程以 [`docs/dev/AGENTS.md`](./dev/AGENTS.md) 为准。
