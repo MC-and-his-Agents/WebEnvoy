@@ -35,13 +35,11 @@ jobs:
               exit 1
             fi
             
-            # 2. 校验是否包含中文 (要求主体部分使用中文)
-            if [[ ! "$msg" =~ [[:cntrl:]]*[[:alnum:]]*[\u4e00-\u9fa5]+ ]]; then
-              # 注意: 这里的正则可能在某些 shell 环境下表现不一，使用 perl 作为备份方案
-              if ! echo "$msg" | perl -Mutf8 -ne 'exit 0 if /[\x{4e00}-\x{9fa5}]/; exit 1'; then
-                echo "错误: 提交信息必须包含中文。"
-                exit 1
-              fi
+            # 2. 校验是否包含中文
+            # GitHub Actions 默认 bash 对 \u4e00-\u9fa5 的正则兼容性不稳定，统一改为 perl 判断。
+            if ! printf '%s\n' "$msg" | perl -Mutf8 -ne 'exit 0 if /[\x{4e00}-\x{9fff}]/; exit 1'; then
+              echo "错误: 提交信息必须包含中文。"
+              exit 1
             fi
             
           done <<< "$COMMITS"
