@@ -10,8 +10,8 @@
 
 ```text
 docs/dev/
- ├── vision.md               # [北极星] 产品愿景与不可逾越的底线要求（永远精简）
  ├── backlog.md              # [混沌期] 需求蓄水池与灵感草稿（拒绝同步 Github）
+ ├── roadmap.md              # [路线图] Phase 阶段划分与 FR 交付列表（按 Phase → Category 平铺）
  ├── architecture/           # [架构蓝图] 系统底层运转与抽象模型设计（按组件拆分）
  ├── sprints/                # [战役指挥所] 迭代战役目标。文件以 `sprint-[语义化战役名称].md` 命名（如 sprint-core-engine-init.md）。Sprint 结束即封档，绝对禁止再修改
  └── specs/                  # [法定契约] 正式特性的完整规约套件（按 FR 编号建子目录）
@@ -61,7 +61,8 @@ docs/dev/
 
 认知全景在前，AI Agent 在开始任何工作前，必须严格按以下顺序加载上下文，不得跳步，不得反序：
 
-1. **`docs/dev/vision.md`** — 产品底线与不可逾越的约束，优先级最高
-2. **当前 Sprint 文档**（`docs/dev/sprints/` 下最新文件）— 明确本期交付边界
-3. **对应 Feature 的 Spec 套件**（`docs/dev/specs/FR-XXXX-*/`）— 任务契约，执行基准
-4. **禁止加载 `backlog.md`** — 该文件是未经审核的草稿噪音区，不得作为任何决策依据
+1. **`vision.md`**（根目录）— 产品底线与不可逾越的约束，优先级最高
+2. **`docs/dev/roadmap.md`** — 全局阶段划分，明确当前所处 Phase 与优先级排序
+3. **当前 Sprint 文档**（`docs/dev/sprints/` 下最新文件）— 明确本期交付边界
+4. **对应 Feature 的 Spec 套件**（`docs/dev/specs/FR-XXXX-*/`）— 任务契约，执行基准
+5. **禁止加载 `backlog.md`** — 该文件是未经审核的草稿噪音区，不得作为任何决策依据
