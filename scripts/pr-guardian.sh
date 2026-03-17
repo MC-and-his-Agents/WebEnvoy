@@ -90,7 +90,7 @@ prepare_pr_workspace() {
   PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
 
   gh pr view "${pr_number}" --json \
-    number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus \
+    number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author \
     > "${META_FILE}"
 
   BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
@@ -98,6 +98,7 @@ prepare_pr_workspace() {
   PR_URL="$(jq -r '.url' "${META_FILE}")"
   PR_TITLE="$(jq -r '.title' "${META_FILE}")"
   PR_BODY="$(jq -r '.body // ""' "${META_FILE}")"
+  PR_AUTHOR="$(jq -r '.author.login // ""' "${META_FILE}")"
 
   git -C "${REPO_ROOT}" fetch origin "${BASE_REF}" >/dev/null
   git -C "${REPO_ROOT}" fetch origin "pull/${pr_number}/head:refs/remotes/origin/pr/${pr_number}" >/dev/null
@@ -137,8 +138,15 @@ run_codex_review() {
 post_review() {
   local pr_number="$1"
   local verdict
+  local current_user
 
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
+  current_user="$(gh api user --jq '.login')"
+
+  if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${current_user}" ]]; then
+    gh pr comment "${pr_number}" --body-file "${REVIEW_MD_FILE}" >/dev/null
+    return
+  fi
 
   if [[ "${verdict}" == "APPROVE" ]]; then
     gh pr review "${pr_number}" --approve --body-file "${REVIEW_MD_FILE}" >/dev/null

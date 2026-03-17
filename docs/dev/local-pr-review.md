@@ -77,6 +77,8 @@ scripts/pr-guardian.sh merge-if-safe 123 --post-review --delete-branch
 
 这样既方便人在 PR 页面快速阅读，也方便后续脚本继续解析结构化结论。
 
+如果当前登录用户正好是 PR 作者，脚本不会尝试提交 `APPROVE` review，而是自动降级为普通 PR 评论。这是为了兼容 GitHub “不能批准自己 PR” 的平台限制。
+
 ## 7. 当前限制
 
 - 这是一套“本机执行”的工作流，因此机器需要在线。
