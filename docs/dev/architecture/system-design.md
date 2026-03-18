@@ -65,7 +65,7 @@ WebEnvoy 由以下四个核心组件构成：
 │  Extension Background (Service Worker, MV3)             │
 │  · 维护 CLI ↔ Content Script 双向消息路由               │
 │  · 管理 webRequest 规则（declarativeNetRequest）        │
-│  · 持有配置空间元数据（账号状态、限流计数等）           │
+│  · 持有最小身份 / 会话元数据（登录态、指纹种子等）     │
 │  · 向多个 Content Script 实例分发指令                   │
 └────────────────────┬────────────────────────────────────┘
                      │ chrome.runtime.sendMessage / tabs.sendMessage
