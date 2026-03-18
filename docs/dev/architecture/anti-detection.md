@@ -281,7 +281,9 @@ interface BehaviorPersona {
 // 通过 seed 从有限的预设模板中随机选取，避免「人格」过于特殊
 ```
 
-### 4.3 操作前预热（Pre-operation Warmup）
+### 4.3 后层扩展：操作前预热（Pre-operation Warmup）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线，也不应写入当前 Phase 1-3 的实现承诺。
 
 在执行任何目标操作（搜索、发布、评论）之前，必须先在平台上进行自然浏览热身。预热时长和行为由任务类型决定：
 
@@ -388,7 +390,9 @@ read_content(count: 2)       →   findAxNode(role:'article') × 2 + scroll + pa
 | 首次使用平台 | 从搜索或朋友推荐进入 | 直接精准导航 |
 | 初始行为 | 浏览、探索、偶尔出错 | 直接高效操作 |
 
-### 5.2 Profile 播种流程（一次性，账号建立时执行）
+### 5.2 后层扩展：Profile 播种流程（一次性，账号建立时执行）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
 
 ```
 步骤 1：浏览器大环境建立（约 10-15 分钟）
@@ -420,7 +424,9 @@ read_content(count: 2)       →   findAxNode(role:'article') × 2 + scroll + pa
   写入 __webenvoy_meta.json 作为该账号的「行为基线参考」
 ```
 
-### 5.3 账号健康状态追踪
+### 5.3 后层扩展：账号健康状态追踪
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
 
 每个配置空间维护账号健康状态，基于平台响应信号自动更新：
 
@@ -587,20 +593,11 @@ src/
 │   └── fingerprint-seed.ts       # Profile 级指纹种子生成与加载
 │
 ├── behavior/
-│   ├── persona.ts                # BehaviorPersona 定义与加载
 │   ├── mouse.ts                  # ghost-cursor 封装 + 悬停/错过模拟
 │   ├── keyboard.ts               # TypingPersona 实现
-│   ├── scroll.ts                 # 人性化滚动
-│   ├── warmup.ts                 # 操作前预热引擎
-│   └── rhythm.ts                 # Session 级节律调度器
-│
-├── account/
-│   ├── health.ts                 # 账号健康状态机
-│   ├── signals.ts                # 健康信号检测与解析
-│   └── pace-controller.ts        # 基于健康评分的操作节奏控制器
+│   └── scroll.ts                 # 人性化滚动
 │
 └── profile/
-    ├── seeder.ts                 # Profile 播种流程
     └── meta.ts                   # __webenvoy_meta.json 读写
 ```
 
@@ -609,7 +606,7 @@ src/
 ```
 CLI 启动
   ↓
-加载 Profile 元数据（fingerprint_seed、behavior_persona、health_state）
+加载 Profile 元数据（fingerprint_seed、local_storage_snapshot、proxy）
   ↓
 Playwright launchPersistentContext
   ↓
@@ -617,19 +614,11 @@ Playwright launchPersistentContext
   ↓
 Extension Background 建立 Native Messaging 连接
   ↓
-账号健康检查（读取 __webenvoy_meta.json 中的上次健康记录）
-  ↓
 AI 发出第一条操作命令
-  ↓
-BehaviorEngine 计算操作前预热方案
-  ↓
-执行预热行为序列
   ↓
 执行目标操作
   ↓
-收集响应信号 → 更新账号健康状态
-  ↓
-执行操作后余韵
+收集最小执行信号与结构化错误
 ```
 
 ---
@@ -669,7 +658,7 @@ BehaviorEngine 计算操作前预热方案
 - 绘制时序直方图进行肉眼对比，确保分布形状无明显差异（有无「梳齿」状规律峰）
 - 成本低，足以发现明显的机械感问题
 
-**集成期（Phase 4-6）：真实平台 A/B 测试（最高可信度）**
+**集成期（Phase 4 及后续扩展）：真实平台 A/B 测试（最高可信度）**
 - 在真实平台上分别用「开启 Stealth」和「关闭 Stealth」的账号跑等量操作
 - 监控 7 日封号率和限流触发率差异
 - 这是最能反映平台实际判定的指标，任何统计模型都无法替代
