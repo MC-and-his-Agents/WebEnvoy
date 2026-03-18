@@ -17,6 +17,7 @@
 | 填写文字（富文本编辑器）| 合成事件链，自动识别 input/contenteditable → 见 [read-write.md §5.1](./read-write.md) |
 | 上传本地文件 | DataTransfer 注入，降级为 L3 直调上传 API → 见 [read-write.md §5.2](./read-write.md) |
 | 拟人化鼠标轨迹 | ghost-cursor 贝塞尔模型 + CDP Input.dispatchMouseEvent → 见 [read-write.md §5.3](./read-write.md) |
+| 下载网页文件 / 媒体结果 | 页面内获取 URL / Blob，CLI 统一落盘 → 见 [read-write.md §5.4](./read-write.md) |
 | 清除自动化指纹（8 维）| MAIN 世界 Stealth 补丁，`document_start` 注入 → 见 [read-write.md §6.3](./read-write.md) |
 | 指纹一致性（跨 Session）| 指纹种子固化到配置空间 `__webenvoy_meta.json` → 见 [anti-detection.md §2.3](../anti-detection.md) |
 | OS 级输入引擎（最高安全模式）| macOS CGEvent / Windows SendInput → 见 [execution.md](./execution.md) |
