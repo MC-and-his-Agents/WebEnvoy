@@ -149,7 +149,7 @@ line_range_reviewable() {
     [[ "${hunk_count}" != "0" ]] || continue
 
     hunk_end=$((hunk_start + hunk_count - 1))
-    if (( !(line_end < hunk_start || hunk_end < line_start) )); then
+    if (( line_start >= hunk_start && line_end <= hunk_end )); then
       return 0
     fi
   done < <(git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${path}")

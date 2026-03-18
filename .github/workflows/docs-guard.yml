@@ -5,12 +5,11 @@ on:
     branches:
       - main
     paths:
-      - 'AGENTS.md'
-      - 'code_review.md'
-      - 'docs/**'
+      - '**/*.md'
       - '.codex/pr-review-result.schema.json'
       - 'scripts/**'
       - '.github/workflows/**'
+      - '!docs/archive/**'
 
 jobs:
   docs-guard:

@@ -71,19 +71,19 @@ DOC_LIST="${TMP_DIR}/docs.txt"
 REFS="${TMP_DIR}/refs.tsv"
 > "${REFS}"
 
-{
-  printf '%s\n' "${REPO_ROOT}/AGENTS.md"
-  printf '%s\n' "${REPO_ROOT}/code_review.md"
-  find "${REPO_ROOT}/docs" -type f -name '*.md' ! -path "${REPO_ROOT}/docs/research/ref/*" | sort
-} > "${DOC_LIST}"
+git -C "${REPO_ROOT}" ls-files '*.md' ':!:docs/archive/**' \
+  | sed "s#^#${REPO_ROOT}/#" \
+  | sort > "${DOC_LIST}"
 
 while IFS= read -r file; do
   perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$1\n"; }' "${file}" >> "${REFS}"
-  perl -ne 'while (/(?<![A-Za-z0-9._\/-])((?:\.github\/workflows|scripts|\.codex)\/[A-Za-z0-9._\/-]+|vision\.md|AGENTS\.md|code_review\.md)(?![A-Za-z0-9._\/-])/g) { print "$ARGV\t$1\n"; }' "${file}" >> "${REFS}"
+  perl -ne 'while (/(?<![A-Za-z0-9._\/-])((?:docs\/[A-Za-z0-9._\/-]+(?:\.md|\/)|scripts\/[A-Za-z0-9._\/-]+\.sh|\.github\/workflows\/[A-Za-z0-9._\/-]+\.ya?ml|\.codex\/[A-Za-z0-9._\/-]+\.(?:json|md)|vision\.md|AGENTS\.md|code_review\.md))(?![A-Za-z0-9._\/-])/g) { print "$ARGV\t$1\n"; }' "${file}" >> "${REFS}"
 done < "${DOC_LIST}"
 
 if ! sort -u "${REFS}" | while IFS=$'\t' read -r file ref; do
   [[ -n "${ref}" ]] || continue
+  [[ "${ref}" == *'*'* ]] && continue
+  [[ "${ref}" == *'XXXX'* ]] && continue
   resolved="$(normalize_ref "${file}" "${ref}")"
   if [[ -n "${resolved}" ]] && ! ensure_in_repo "${resolved}"; then
     echo "[docs-guard] 越界引用: ${ref} (from ${file})" >&2
