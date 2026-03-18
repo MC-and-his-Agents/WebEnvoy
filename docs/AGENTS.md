@@ -14,7 +14,7 @@ docs/
 ## 查阅规则
 
 - 要做实现、设计、评审或任何工程决策：读 [`docs/dev/AGENTS.md`](./dev/AGENTS.md)
-- 要补背景调研或比较竞品：按需读 [`docs/research/ref/AGENTS.md`](./research/ref/AGENTS.md)
+- 要补背景调研或比较竞品：按需进入 `docs/research/ref/`
 - 要看历史资料：进入 `docs/archive/`
 
 `docs/` 不是独立规范源头。全局纪律以仓库根级 `AGENTS.md` 为准，研发流程以 [`docs/dev/AGENTS.md`](./dev/AGENTS.md) 为准。

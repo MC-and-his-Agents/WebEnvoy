@@ -9,6 +9,7 @@
 - 优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
 - 架构红线：浏览器内执行是唯一 HTTP 出口；不缝合外部异构爬虫为核心运行时
 - 禁止直推主分支；提交必须用中文 Conventional Commits；主干只用 Squash Merge
+- fresh clone 或新 worktree 首次进入仓库后，先执行 `bash scripts/setup-git-hooks.sh` 启用本地提交钩子
 - 单测放同级 `__tests__/`，E2E/集成放根目录 `tests/`
 - 本地不保留 backlog / sprint 进度文件，GitHub Issues / Projects 是唯一进度真理
 - 高风险改动包括 `.github/workflows/`、`scripts/`、执行引擎、账号、安全、数据读写
@@ -107,48 +108,19 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 ## Review 与合并底线
 
 任何合并前必须先 review，不能因为测试通过就跳过判断。
+在进行代码审查时，请始终遵循 [code_review.md](./code_review.md) 中的标准。
+高风险改动、审查结论判定、合并门禁与本机 review / merge 流程，统一以 [code_review.md](./code_review.md) 为准。
 
-本项目默认使用**本地 Codex 环境下的按需 PR review**，而不是依赖云端 LLM workflow 或定时 GitHub Actions review。PR 创建后，应由本机已登录的 Codex 账号在需要时执行 review；云端 workflow 可以做提醒或补充检查，但不应作为主审查机制。
+## Review guidelines
 
-Review 至少覆盖以下方面：
-
-- 需求是否正确
-- 设计与边界是否合理
-- 是否存在行为回归或兼容性风险
-- 是否有足够测试与验证证据
-- 是否引入安全或滥用面问题
-- 流程与元数据是否合规
-
-以下目录默认视为高风险改动：
-
-- `.github/workflows/`
-- `scripts/`
-- 执行引擎、账号、适配器协议、数据读写、安全与风控相关代码
-
-高风险改动必须升级审查强度，并明确检查副作用、回滚路径与验证证据。
-
-只要存在高概率错误、关键验证缺失、证据不足或流程违背，默认结论应为 `REQUEST_CHANGES`。
-
-合并前必须同时满足以下条件：
-
-- PR 非 Draft
-- review 已完成
-- 审查结论为 `APPROVE`
-- `safe_to_merge = true`
-- GitHub Required Checks 全绿
-- 目标分支允许按仓库策略合入
-
-FR 分支的推荐做法：
-
-- FR / 规约分支默认先开 Draft PR
-- 先在 Draft PR 中完成 spec review
-- spec review 通过后，再进入实现或解除 Draft
-- 不要把“等待定时 review”作为进入下一步的前提
-
-本机按需 review / merge 入口：
-
-- `scripts/pr-guardian.sh`
-- 详细说明见 `docs/dev/local-pr-review.md`
+- 优先识别阻止合并的问题，而不是给泛泛建议。
+- 审查时必须对照 `vision.md`、根级 `AGENTS.md`、`docs/dev/AGENTS.md`、相关架构文档、对应 spec / TODO 与当前 PR / Issue 描述。
+- 如果实现与产品边界、架构原则或正式 spec 冲突，应直接指出，而不是只看局部代码是否可运行。
+- 将以下目录或主题视为高风险：`.github/workflows/`、`scripts/`、执行引擎、账号体系、适配器协议、数据读写、schema、迁移、安全与风控链路。
+- 对高风险改动，重点检查副作用、回滚路径、验证证据与滥用面扩张风险。
+- 如果关键测试、验证证据或合并元数据不足，默认给出阻断性结论。
+- 如果对应 GitHub Issue 已存在，PR 描述应显式包含 `Fixes #<issue-number>`。
+- `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责
 

@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PROMPT_FILE="${REPO_ROOT}/.codex/pr-review.prompt.md"
+PROMPT_FILE="${REPO_ROOT}/code_review.md"
 SCHEMA_FILE="${REPO_ROOT}/.codex/pr-review-result.schema.json"
 
 usage() {
@@ -61,8 +61,17 @@ build_markdown_review() {
       else
         (.findings | to_entries | map(
           ((.key + 1) | tostring) + ". **[" + (.value.severity | severity_label) + "] " + .value.title + "**\n" +
-          "文件: `" + .value.file + "`\n" +
-          "说明: " + .value.details
+          "文件: `" + .value.code_location.absolute_file_path + "`" +
+          (if (.value.code_location.line_range.start? != null and .value.code_location.line_range.end? != null)
+            then " (L" + (.value.code_location.line_range.start|tostring) + "-" + (.value.code_location.line_range.end|tostring) + ")"
+            else "" end) + "\n" +
+          "说明: " + .value.details +
+          (if .value.confidence_score? != null
+            then "\n置信度: " + (.value.confidence_score|tostring)
+            else "" end) +
+          (if .value.priority? != null
+            then "\n优先级: P" + (.value.priority|tostring)
+            else "" end)
         ) | join("\n\n"))
       end;
     def actions:
@@ -107,11 +116,55 @@ prepare_pr_workspace() {
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
 }
 
+normalize_review_path() {
+  local raw_path="$1"
+
+  if [[ "${raw_path}" == "${WORKTREE_DIR}"/* ]]; then
+    printf '%s\n' "${raw_path#${WORKTREE_DIR}/}"
+    return
+  fi
+
+  if [[ "${raw_path}" == "${REPO_ROOT}"/* ]]; then
+    printf '%s\n' "${raw_path#${REPO_ROOT}/}"
+    return
+  fi
+
+  printf '%s\n' "${raw_path}"
+}
+
+line_range_reviewable() {
+  local path="$1"
+  local line_start="$2"
+  local line_end="$3"
+  local diff_line
+  local hunk_start
+  local hunk_count
+  local hunk_end
+
+  while IFS= read -r diff_line; do
+    [[ "${diff_line}" =~ ^@@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+)(,([0-9]+))?\ @@ ]] || continue
+
+    hunk_start="${BASH_REMATCH[2]}"
+    hunk_count="${BASH_REMATCH[4]:-1}"
+    [[ "${hunk_count}" != "0" ]] || continue
+
+    hunk_end=$((hunk_start + hunk_count - 1))
+    if (( line_start >= hunk_start && line_end <= hunk_end )); then
+      return 0
+    fi
+  done < <(git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${path}")
+
+  return 1
+}
+
 run_codex_review() {
   local pr_number="$1"
 
   {
-    cat "${PROMPT_FILE}"
+    awk '
+      found { print }
+      /^## Codex Review Prompt$/ { found=1; next }
+    ' "${PROMPT_FILE}"
     echo
     echo "PR 元数据："
     echo "- PR: #${pr_number}"
@@ -143,6 +196,8 @@ post_review() {
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   current_user="$(gh api user --jq '.login')"
 
+  post_inline_comments "${pr_number}"
+
   if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${current_user}" ]]; then
     gh pr comment "${pr_number}" --body-file "${REVIEW_MD_FILE}" >/dev/null
     return
@@ -153,6 +208,89 @@ post_review() {
   else
     gh pr review "${pr_number}" --request-changes --body-file "${REVIEW_MD_FILE}" >/dev/null
   fi
+}
+
+post_inline_comments() {
+  local pr_number="$1"
+  local payload_file="${TMP_DIR}/inline-comments.jsonl"
+  local inline_error_file="${TMP_DIR}/inline-comment.err"
+  local count
+
+  jq -c '
+    .findings[]
+    | select(.code_location.line_range.start? != null and .code_location.line_range.end? != null)
+    | {
+        body: (
+          .title + "\n\n" +
+          .details +
+          (if .confidence_score? != null then "\n\n置信度: " + (.confidence_score | tostring) else "" end) +
+          (if .priority? != null then "\n优先级: P" + (.priority | tostring) else "" end)
+        ),
+        path: .code_location.absolute_file_path,
+        line_start: .code_location.line_range.start,
+        line_end: .code_location.line_range.end
+      }
+  ' "${RESULT_FILE}" > "${payload_file}"
+
+  count="$(wc -l < "${payload_file}" | tr -d '[:space:]')"
+  [[ "${count}" != "0" ]] || return 0
+
+  while IFS= read -r row; do
+    [[ -n "${row}" ]] || continue
+
+    local body
+    local raw_path
+    local path
+    local line_start
+    local line_end
+
+    body="$(jq -r '.body' <<< "${row}")"
+    raw_path="$(jq -r '.path' <<< "${row}")"
+    path="$(normalize_review_path "${raw_path}")"
+    line_start="$(jq -r '.line_start' <<< "${row}")"
+    line_end="$(jq -r '.line_end' <<< "${row}")"
+
+    if [[ -z "${path}" || "${path}" == "null" ]]; then
+      continue
+    fi
+
+    if ! line_range_reviewable "${path}" "${line_start}" "${line_end}"; then
+      echo "警告: 跳过无法锚定到 PR diff 的行级评论: ${path} (L${line_start}-L${line_end})" >&2
+      continue
+    fi
+
+    if [[ "${line_start}" == "${line_end}" ]]; then
+      if ! gh api \
+        --method POST \
+        -H "Accept: application/vnd.github+json" \
+        "repos/:owner/:repo/pulls/${pr_number}/comments" \
+        -f body="${body}" \
+        -f commit_id="${HEAD_SHA}" \
+        -f path="${path}" \
+        -F line="${line_end}" \
+        -f side="RIGHT" >/dev/null 2>"${inline_error_file}"; then
+        echo "警告: 行级评论发布失败，已跳过: ${path} (L${line_start}-L${line_end})" >&2
+        sed 's/^/  /' "${inline_error_file}" >&2
+        continue
+      fi
+    else
+      if ! gh api \
+        --method POST \
+        -H "Accept: application/vnd.github+json" \
+        "repos/:owner/:repo/pulls/${pr_number}/comments" \
+        -f body="${body}" \
+        -f commit_id="${HEAD_SHA}" \
+        -f path="${path}" \
+        -F line="${line_end}" \
+        -f side="RIGHT" \
+        -F start_line="${line_start}" \
+        -f start_side="RIGHT" >/dev/null 2>"${inline_error_file}"; then
+        echo "警告: 行级评论发布失败，已跳过: ${path} (L${line_start}-L${line_end})" >&2
+        sed 's/^/  /' "${inline_error_file}" >&2
+        continue
+      fi
+    fi
+  done < "${payload_file}"
 }
 
 print_summary() {
