@@ -6,7 +6,7 @@
 - 当前仓库以文档、架构、脚本、CI 为主，业务代码骨架尚未完整建立
 - WebEnvoy 是 Web 执行工具，不是 Agent 大脑
 - 技术主线：TypeScript/Node CLI + Chrome Extension + Native Messaging + Playwright + SQLite
-- 当前主线优先级：执行内核与快速适配器化 > 能力交付与分享 > CLI-first 的可集成执行契约
+- 当前主线优先级：执行内核与快速适配器化 > CLI-first 的可集成执行契约 > 能力交付与分享
 - 执行层优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
 - 未知网站不是只做一次性漫游；L2 成功路径应尽快沉淀为可复用适配器
 - 当前集成策略：默认以 CLI 作为第一集成面；暂不把 SDK / API 作为当前主线交付
