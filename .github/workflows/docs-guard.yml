@@ -1,0 +1,26 @@
+name: Docs Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'AGENTS.md'
+      - 'docs/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+
+jobs:
+  docs-guard:
+    name: Validate Docs And Scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run docs guard
+        run: |
+          set -euo pipefail
+          bash scripts/docs-guard.sh

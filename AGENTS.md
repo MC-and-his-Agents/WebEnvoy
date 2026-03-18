@@ -73,6 +73,7 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 3. 合入主干必须使用 Squash Merge。
 4. 单元测试放在被测文件同级 `__tests__/`；端到端/集成测试统一放在仓库根目录 `tests/`。
 5. 本地代码库中不保留 backlog、sprint 等进度追踪文件；GitHub Issues / Projects 是唯一进度真理。
+6. 并行开发时，`main` 留在仓库主目录；其他活跃分支默认一分支一 worktree。具体操作口径见 `docs/dev/parallel-development.md`。
 
 ## 需求到交付的标准机制
 

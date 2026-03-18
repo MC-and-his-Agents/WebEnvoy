@@ -145,7 +145,7 @@ case "__ping__":
 ## Native Messaging Host 注册安装
 
 > 调研已完成（2026年03月17日）。参考实现：KeePassXC `NativeMessageInstaller.cpp`。
-> 调研报告：[keepassxc_analysis.md](../../../../research/ref/keepassxc_analysis.md)
+> 调研报告：[keepassxc_analysis.md](../../../research/ref/keepassxc_analysis.md)
 
 Native Messaging 通道的前提是 CLI 在操作系统中完成注册。WebEnvoy 通过 `webenvoy install` / `webenvoy uninstall` 命令管理注册状态，不在 Extension 启动时自动注册（需要系统写权限，应由用户主动触发）。
 

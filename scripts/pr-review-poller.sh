@@ -12,11 +12,12 @@ DEFAULT_STATE_FILE="${STATE_DIR}/webenvoy-pr-review.json"
 usage() {
   cat <<'EOF'
 用法:
-  scripts/pr-review-poller.sh [--dry-run] [--state-file <path>] [--no-post-review] [--base-branch <name>]
+  scripts/pr-review-poller.sh [--dry-run] [--state-file <path>] [--no-post-review] [--base-branch <name>] [--branch-prefix <prefix>] [--milestone <title>]
 
 说明:
   检查当前仓库开放 PR 的最新 head SHA。
   默认只检查目标分支为 main 的 PR。
+  可选按 head 分支前缀或 milestone 标题进一步过滤，只巡检当前 Sprint / FR 集合。
   只有当某个 PR 自上次审查后出现新提交时，才触发一次 review。
   如果没有开放 PR、目标分支不存在，或所有匹配 PR 都没有新提交，则直接结束。
 EOF
@@ -50,7 +51,7 @@ ensure_state_file() {
 }
 
 load_open_prs() {
-  gh pr list --state open --json number,title,headRefOid,author,isDraft,url,baseRefName
+  gh pr list --state open --json number,title,headRefOid,headRefName,author,isDraft,url,baseRefName,milestone
 }
 
 branch_exists() {
@@ -102,6 +103,8 @@ main() {
   local post_review=1
   local state_file="${DEFAULT_STATE_FILE}"
   local base_branch="${WEBENVOY_PR_BASE_BRANCH:-main}"
+  local branch_prefix="${WEBENVOY_PR_BRANCH_PREFIX:-}"
+  local milestone_filter="${WEBENVOY_PR_MILESTONE:-}"
   local repo_slug
   local prs_json
   local pr_count
@@ -131,6 +134,16 @@ main() {
         shift
         [[ $# -gt 0 ]] || die "--base-branch 需要一个分支名"
         base_branch="$1"
+        ;;
+      --branch-prefix)
+        shift
+        [[ $# -gt 0 ]] || die "--branch-prefix 需要一个前缀"
+        branch_prefix="$1"
+        ;;
+      --milestone)
+        shift
+        [[ $# -gt 0 ]] || die "--milestone 需要一个标题"
+        milestone_filter="$1"
         ;;
       -h|--help)
         usage
@@ -165,19 +178,35 @@ main() {
     local pr_number
     local pr_title
     local head_sha
+    local head_branch
     local is_draft
     local pr_base_ref
+    local pr_milestone
     local previous_sha
 
     pr_number="$(jq -r '.number' <<< "${pr_row}")"
     pr_title="$(jq -r '.title' <<< "${pr_row}")"
     head_sha="$(jq -r '.headRefOid' <<< "${pr_row}")"
+    head_branch="$(jq -r '.headRefName' <<< "${pr_row}")"
     is_draft="$(jq -r '.isDraft' <<< "${pr_row}")"
     pr_base_ref="$(jq -r '.baseRefName' <<< "${pr_row}")"
+    pr_milestone="$(jq -r '.milestone.title // ""' <<< "${pr_row}")"
     previous_sha="$(jq -r --arg pr "${pr_number}" '.prs[$pr].head_sha // ""' "${state_file}")"
 
     if [[ "${pr_base_ref}" != "${base_branch}" ]]; then
       echo "跳过目标分支不是 ${base_branch} 的 PR #${pr_number}: ${pr_title} (base=${pr_base_ref})"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+
+    if [[ -n "${branch_prefix}" && "${head_branch}" != "${branch_prefix}"* ]]; then
+      echo "跳过 head 分支不匹配 ${branch_prefix} 的 PR #${pr_number}: ${pr_title} (head=${head_branch})"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+
+    if [[ -n "${milestone_filter}" && "${pr_milestone}" != "${milestone_filter}" ]]; then
+      echo "跳过里程碑不是 ${milestone_filter} 的 PR #${pr_number}: ${pr_title} (milestone=${pr_milestone:-none})"
       skipped_count=$((skipped_count + 1))
       continue
     fi

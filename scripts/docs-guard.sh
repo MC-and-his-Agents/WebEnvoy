@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+die() {
+  echo "错误: $*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
+}
+
+normalize_ref() {
+  local base_file="$1"
+  local raw_ref="$2"
+  local base_dir
+
+  raw_ref="${raw_ref%%#*}"
+  raw_ref="${raw_ref%/}"
+
+  [[ -n "${raw_ref}" ]] || return 0
+  [[ "${raw_ref}" =~ ^https?:// ]] && return 0
+  [[ "${raw_ref}" =~ ^mailto: ]] && return 0
+  [[ "${raw_ref}" =~ ^/Users/ ]] && return 0
+
+  base_dir="$(cd "$(dirname "${base_file}")" && pwd)"
+
+  if [[ "${raw_ref}" == ./* || "${raw_ref}" == ../* ]]; then
+    printf '%s/%s\n' "${base_dir}" "${raw_ref}"
+  else
+    printf '%s/%s\n' "${REPO_ROOT}" "${raw_ref}"
+  fi
+}
+
+require_cmd bash
+require_cmd perl
+require_cmd rg
+
+echo "[docs-guard] 校验 shell 语法"
+while IFS= read -r file; do
+  bash -n "${file}"
+done < <(find "${REPO_ROOT}/scripts" -maxdepth 1 -type f -name '*.sh' | sort)
+
+echo "[docs-guard] 校验文档链接和路径引用"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-docs-guard.XXXXXX")"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+DOC_LIST="${TMP_DIR}/docs.txt"
+REFS="${TMP_DIR}/refs.tsv"
+> "${REFS}"
+
+{
+  printf '%s\n' "${REPO_ROOT}/AGENTS.md"
+  find "${REPO_ROOT}/docs" -type f -name '*.md' ! -path "${REPO_ROOT}/docs/research/ref/*" | sort
+} > "${DOC_LIST}"
+
+while IFS= read -r file; do
+  perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$1\n"; }' "${file}" >> "${REFS}"
+  perl -ne 'while (/(?<![A-Za-z0-9._\/-])((?:\.github\/workflows|scripts)\/[A-Za-z0-9._\/-]+|vision\.md|AGENTS\.md)(?![A-Za-z0-9._\/-])/g) { print "$ARGV\t$1\n"; }' "${file}" >> "${REFS}"
+done < "${DOC_LIST}"
+
+if ! sort -u "${REFS}" | while IFS=$'\t' read -r file ref; do
+  [[ -n "${ref}" ]] || continue
+  resolved="$(normalize_ref "${file}" "${ref}")"
+  if [[ -n "${resolved}" && ! -e "${resolved}" ]]; then
+    echo "[docs-guard] 缺失引用: ${ref} (from ${file})" >&2
+    exit 1
+  fi
+done; then
+  die "存在失效文档引用"
+fi
+
+echo "[docs-guard] 校验并行开发文档未引用本地 backlog / sprint 文件"
+if rg -n '(^|[^A-Za-z0-9_])(backlog\.md|sprint\.md|sprints/|backlog/)' "${REPO_ROOT}/docs/dev/parallel-development.md" >/dev/null; then
+  die "parallel-development.md 不应引用本地 backlog / sprint 文件"
+fi
+
+echo "[docs-guard] 完成"
