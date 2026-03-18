@@ -9,6 +9,7 @@
 - 优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
 - 架构红线：浏览器内执行是唯一 HTTP 出口；不缝合外部异构爬虫为核心运行时
 - 禁止直推主分支；提交必须用中文 Conventional Commits；主干只用 Squash Merge
+- fresh clone 或新 worktree 首次进入仓库后，先执行 `bash scripts/setup-git-hooks.sh` 启用本地提交钩子
 - 单测放同级 `__tests__/`，E2E/集成放根目录 `tests/`
 - 本地不保留 backlog / sprint 进度文件，GitHub Issues / Projects 是唯一进度真理
 - 高风险改动包括 `.github/workflows/`、`scripts/`、执行引擎、账号、安全、数据读写

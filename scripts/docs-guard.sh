@@ -37,6 +37,18 @@ normalize_ref() {
   fi
 }
 
+canonicalize_path() {
+  local raw_path="$1"
+  local parent_dir
+  local leaf_name
+
+  parent_dir="$(dirname "${raw_path}")"
+  leaf_name="$(basename "${raw_path}")"
+  parent_dir="$(cd "${parent_dir}" 2>/dev/null && pwd -P)" || return 1
+
+  printf '%s/%s\n' "${parent_dir}" "${leaf_name}"
+}
+
 ensure_in_repo() {
   local resolved="$1"
 
@@ -84,6 +96,11 @@ if ! sort -u "${REFS}" | while IFS=$'\t' read -r file ref; do
   [[ "${ref}" == *'*'* ]] && continue
   [[ "${ref}" == *'XXXX'* ]] && continue
   resolved="$(normalize_ref "${file}" "${ref}")"
+  [[ -n "${resolved}" ]] || continue
+  resolved="$(canonicalize_path "${resolved}")" || {
+    echo "[docs-guard] 无法解析引用路径: ${ref} (from ${file})" >&2
+    exit 1
+  }
   if [[ -n "${resolved}" ]] && ! ensure_in_repo "${resolved}"; then
     echo "[docs-guard] 越界引用: ${ref} (from ${file})" >&2
     exit 1
