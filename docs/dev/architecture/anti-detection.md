@@ -194,15 +194,15 @@ async function humanScroll(
   page: Page,
   direction: 'down' | 'up',
   totalDistance: number,
-  persona: BehaviorPersona
+  rhythm: { lookbackProbability: number }
 ): Promise<void> {
-  const segments = splitScrollIntoSegments(totalDistance, persona)
+  const segments = splitScrollIntoSegments(totalDistance, rhythm)
   for (const seg of segments) {
     await page.mouse.wheel(0, seg.deltaY)
     // 每段之间有不均匀停顿
     await sleep(seg.pauseAfter)
     // 概率性触发回头翻看
-    if (Math.random() < persona.lookbackProbability) {
+    if (Math.random() < rhythm.lookbackProbability) {
       await page.mouse.wheel(0, -seg.deltaY * 0.3)
       await sleep(200 + Math.random() * 400)
     }
@@ -429,6 +429,7 @@ read_content(count: 2)       →   findAxNode(role:'article') × 2 + scroll + pa
 ### 5.3 后层扩展：账号健康状态追踪
 
 > 本节描述的是后层扩展能力，不属于当前主线基线。
+> 下述状态、分数与冷却字段是未来扩展草案，不构成当前 `__webenvoy_meta.json` 或 Phase 1-3 的正式契约。
 
 每个配置空间维护账号健康状态，基于平台响应信号自动更新：
 
