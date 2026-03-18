@@ -194,15 +194,15 @@ async function humanScroll(
   page: Page,
   direction: 'down' | 'up',
   totalDistance: number,
-  persona: BehaviorPersona
+  rhythm: { lookbackProbability: number }
 ): Promise<void> {
-  const segments = splitScrollIntoSegments(totalDistance, persona)
+  const segments = splitScrollIntoSegments(totalDistance, rhythm)
   for (const seg of segments) {
     await page.mouse.wheel(0, seg.deltaY)
     // 每段之间有不均匀停顿
     await sleep(seg.pauseAfter)
     // 概率性触发回头翻看
-    if (Math.random() < persona.lookbackProbability) {
+    if (Math.random() < rhythm.lookbackProbability) {
       await page.mouse.wheel(0, -seg.deltaY * 0.3)
       await sleep(200 + Math.random() * 400)
     }
@@ -241,7 +241,7 @@ async function humanScroll(
 **长尾分布的实现**：真实用户会被通知打断、短暂思考、或离开片刻再回来，导致操作间隔偶发性拉长：
 
 ```typescript
-// 生成长尾分布的操作间隔（参数来自 BehaviorPersona seed）
+// 生成长尾分布的操作间隔
 function operationDelay(rand: () => number): number {
   const base = 1000 + rand() * 2000  // 1-3s 基础区间
   // 10% 概率触发「思考停顿」（5-10s）
@@ -252,9 +252,11 @@ function operationDelay(rand: () => number): number {
 }
 ```
 
-> 长尾分布参数（基础区间、停顿概率）来自 `BehaviorPersona` 的固定种子，确保同一账号的「操作节奏风格」在跨 Session 时保持一致，而非每次重新随机。
+> 如果未来启用行为人格层，长尾分布参数可以进一步由固定种子驱动；当前主线阶段只要求节奏分布不要呈现明显机械规律。
 
-### 4.2 行为人格（Behavior Persona）
+### 4.2 后层扩展：行为人格（Behavior Persona）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
 
 每个配置空间绑定一个固化的「行为人格」，跨所有 session 保持一致（真实用户的行为习惯是稳定的）：
 
@@ -281,7 +283,9 @@ interface BehaviorPersona {
 // 通过 seed 从有限的预设模板中随机选取，避免「人格」过于特殊
 ```
 
-### 4.3 操作前预热（Pre-operation Warmup）
+### 4.3 后层扩展：操作前预热（Pre-operation Warmup）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线，也不应写入当前 Phase 1-3 的实现承诺。
 
 在执行任何目标操作（搜索、发布、评论）之前，必须先在平台上进行自然浏览热身。预热时长和行为由任务类型决定：
 
@@ -305,6 +309,8 @@ interface BehaviorPersona {
 ```
 
 ### 4.4 操作后余韵（Post-operation Cooldown）
+
+> 本节描述的是后续扩展能力，不作为当前 Phase 1-3 的实现承诺。
 
 操作完成后不立即退出，而是进行短暂的「余韵浏览」：
 
@@ -388,7 +394,9 @@ read_content(count: 2)       →   findAxNode(role:'article') × 2 + scroll + pa
 | 首次使用平台 | 从搜索或朋友推荐进入 | 直接精准导航 |
 | 初始行为 | 浏览、探索、偶尔出错 | 直接高效操作 |
 
-### 5.2 Profile 播种流程（一次性，账号建立时执行）
+### 5.2 后层扩展：Profile 播种流程（一次性，账号建立时执行）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
 
 ```
 步骤 1：浏览器大环境建立（约 10-15 分钟）
@@ -420,7 +428,10 @@ read_content(count: 2)       →   findAxNode(role:'article') × 2 + scroll + pa
   写入 __webenvoy_meta.json 作为该账号的「行为基线参考」
 ```
 
-### 5.3 账号健康状态追踪
+### 5.3 后层扩展：账号健康状态追踪
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
+> 下述状态、分数与冷却字段是未来扩展草案，不构成当前 `__webenvoy_meta.json` 或 Phase 1-3 的正式契约。
 
 每个配置空间维护账号健康状态，基于平台响应信号自动更新：
 
@@ -555,13 +566,13 @@ CanvasRenderingContext2D.prototype.getImageData = function(...args) {
 | 悬停确认 + 轻微错过模拟 | ⏳ 待实现 | P1 | CLI 层 |
 | **键盘输入节奏（TypingPersona）**| ⏳ 待实现 | P1 | CLI 层 |
 | **滚动行为模拟（变速 + 停顿）** | ⏳ 待实现 | P1 | CLI 层 |
-| **操作前预热（Warmup）** | ⏳ 待实现 | P1 | CLI 层，BehaviorEngine |
-| **行为人格（BehaviorPersona）** | ⏳ 待实现 | P1 | Profile 元数据 + BehaviorEngine |
+| **操作前预热（Warmup）** | 🔜 后层扩展 | 后层 | 上层运行系统 / BehaviorEngine |
+| **行为人格（BehaviorPersona）** | 🔜 后层扩展 | 后层 | 上层运行系统 + Profile 元数据 |
 | **操作序列多样化** | ⏳ 待实现 | P1 | 平台适配器层 |
-| **操作后余韵** | ⏳ 待实现 | P2 | CLI 层，BehaviorEngine |
-| **Profile 播种流程** | ⏳ 待实现 | P1 | CLI `webenvoy seed` 命令 |
-| **账号健康状态追踪** | ⏳ 待实现 | P1 | Extension Background + SQLite |
-| **操作节奏自动调整** | ⏳ 待实现 | P1 | CLI 层，基于健康评分 |
+| **操作后余韵** | 🔜 后续扩展 | 后层 | CLI 层 / 后续行为引擎 |
+| **Profile 播种流程** | 🔜 后层扩展 | 后层 | 上层运行系统 |
+| **账号健康状态追踪** | 🔜 后层扩展 | 后层 | 上层运行系统 |
+| **操作节奏自动调整** | 🔜 后层扩展 | 后层 | 上层运行系统，基于健康评分 |
 | Camoufox 一次性侦察集成 | ⏳ 待实现 | P2 | 独立侦察命令 |
 | OS 级输入引擎（最高安全模式）| ⏳ 待实现 | P2 | CLI 层，nut.js |
 
@@ -587,20 +598,11 @@ src/
 │   └── fingerprint-seed.ts       # Profile 级指纹种子生成与加载
 │
 ├── behavior/
-│   ├── persona.ts                # BehaviorPersona 定义与加载
 │   ├── mouse.ts                  # ghost-cursor 封装 + 悬停/错过模拟
 │   ├── keyboard.ts               # TypingPersona 实现
-│   ├── scroll.ts                 # 人性化滚动
-│   ├── warmup.ts                 # 操作前预热引擎
-│   └── rhythm.ts                 # Session 级节律调度器
-│
-├── account/
-│   ├── health.ts                 # 账号健康状态机
-│   ├── signals.ts                # 健康信号检测与解析
-│   └── pace-controller.ts        # 基于健康评分的操作节奏控制器
+│   └── scroll.ts                 # 人性化滚动
 │
 └── profile/
-    ├── seeder.ts                 # Profile 播种流程
     └── meta.ts                   # __webenvoy_meta.json 读写
 ```
 
@@ -609,7 +611,7 @@ src/
 ```
 CLI 启动
   ↓
-加载 Profile 元数据（fingerprint_seed、behavior_persona、health_state）
+加载 Profile 元数据（fingerprint_seed、local_storage_snapshot、proxy）
   ↓
 Playwright launchPersistentContext
   ↓
@@ -617,19 +619,11 @@ Playwright launchPersistentContext
   ↓
 Extension Background 建立 Native Messaging 连接
   ↓
-账号健康检查（读取 __webenvoy_meta.json 中的上次健康记录）
-  ↓
 AI 发出第一条操作命令
-  ↓
-BehaviorEngine 计算操作前预热方案
-  ↓
-执行预热行为序列
   ↓
 执行目标操作
   ↓
-收集响应信号 → 更新账号健康状态
-  ↓
-执行操作后余韵
+收集最小执行信号与结构化错误
 ```
 
 ---
@@ -669,7 +663,7 @@ BehaviorEngine 计算操作前预热方案
 - 绘制时序直方图进行肉眼对比，确保分布形状无明显差异（有无「梳齿」状规律峰）
 - 成本低，足以发现明显的机械感问题
 
-**集成期（Phase 4-6）：真实平台 A/B 测试（最高可信度）**
+**集成期（后续扩展 / 安全成熟期）：真实平台 A/B 测试（最高可信度）**
 - 在真实平台上分别用「开启 Stealth」和「关闭 Stealth」的账号跑等量操作
 - 监控 7 日封号率和限流触发率差异
 - 这是最能反映平台实际判定的指标，任何统计模型都无法替代

@@ -17,6 +17,7 @@
 | 填写文字（富文本编辑器）| 合成事件链，自动识别 input/contenteditable → 见 [read-write.md §5.1](./read-write.md) |
 | 上传本地文件 | DataTransfer 注入，降级为 L3 直调上传 API → 见 [read-write.md §5.2](./read-write.md) |
 | 拟人化鼠标轨迹 | ghost-cursor 贝塞尔模型 + CDP Input.dispatchMouseEvent → 见 [read-write.md §5.3](./read-write.md) |
+| 下载网页文件 / 媒体结果 | 页面内获取 URL / Blob，CLI 统一落盘 → 见 [read-write.md §5.4](./read-write.md) |
 | 清除自动化指纹（8 维）| MAIN 世界 Stealth 补丁，`document_start` 注入 → 见 [read-write.md §6.3](./read-write.md) |
 | 指纹一致性（跨 Session）| 指纹种子固化到配置空间 `__webenvoy_meta.json` → 见 [anti-detection.md §2.3](../anti-detection.md) |
 | OS 级输入引擎（最高安全模式）| macOS CGEvent / Windows SendInput → 见 [execution.md](./execution.md) |
@@ -33,17 +34,20 @@
 
 ## 十四、待确认的知识盲区（Spike 任务）
 
-以下问题在 Phase 1 开发前必须通过真实观察确认：
+以下问题需要在各自对应阶段启动前，通过真实观察确认：
 
-### Spike A：小红书平台 API 端点确认（前置必做）
+### Spike A：小红书核心读链路确认（Phase 1 前置）
 
 - [ ] 搜索、详情、用户主页等核心 API 的 URL 端点与请求体结构
 - [ ] `a1` / `webId` / `gid` 等追踪字段的生命周期（Content Script 内如何稳定获取）
 - [ ] `window._webmsxyw` 的调用签名（参数格式、返回格式）
+
+### Spike A-Write：小红书最小写链路与上传路径确认（Phase 1 后段验证 / Phase 2 前置）
+
 - [ ] 富文本发布编辑器的 DOM 结构与 Composition 事件响应机制
 - [ ] 图片上传流程（DataTransfer 还是独立上传接口）
 
-### Spike B：抖音平台 API 端点确认
+### Spike B：抖音平台 API 端点确认（Phase 3 第二平台验证前置）
 
 - [ ] 视频流、用户信息、搜索等核心 API 端点
 - [ ] `window.bdms.init._v[2].p[42]` 签名函数的准确调用方式
@@ -55,13 +59,13 @@
 - [ ] 是否需要分片传输或 `chrome.storage` 中转
 - [ ] webRequest / declarativeNetRequest 读取响应体的可行方案
 
-### Spike D：agent-browser AX Tree 压缩算法研究（Phase 5 前置）
+### Spike D：agent-browser AX Tree 压缩算法研究（Phase 2 前置）
 
 - [ ] `processAriaTree` + `compactTree` 算法的代码级实现细节
 - [ ] RefMap 短引用系统的数据结构与序列化格式
 - [ ] 压缩后 AX Tree 的 Token 消耗对比测试
 
-### Spike E：Steel Browser 请求拦截在 Extension 架构中的可行性（Phase 5 前置）
+### Spike E：Steel Browser 请求拦截在 Extension 架构中的可行性（Phase 2 前置）
 
 - [ ] 在 Extension `declarativeNetRequest` 中实现图片/广告屏蔽的规则集
 - [ ] 拦截规则对页面功能的影响边界（是否会误拦截 API 请求）
@@ -69,11 +73,11 @@
 
 ---
 
-## 十五、Phase 5 L2 通用读取层（待设计）
+## 十五、Phase 2 L2 首次可用能力（待设计）
 
 > **状态**：占位章节，设计工作在 Phase 1 交付后启动。
 
-本节描述 Phase 5 计划构建的 L2 通用读取层。该层的目标是使 WebEnvoy 能够对任意未知网站（无预建适配器）提供可靠的内容提取与交互能力，与前序阶段建设的 L3 专用平台适配器互补。
+本节描述 Phase 2 计划构建的 L2 通用读取层。该层的目标是使 WebEnvoy 能够对任意未知网站（无预建适配器）提供首次可用的内容提取与基础交互能力，并与前序阶段建设的 L3 专用平台适配器互补。
 
 ### 核心组成（待设计）
 
@@ -90,8 +94,8 @@
 
 L2 通用读取层**复用** Phase 1 建立的以下基础设施：
 
-- **四组件模型**（CLI / Extension Background / Content Script / SQLite）完全复用
-- **账号生命周期管理**（Named Profile / 配置空间状态机）完全复用
+- **执行主链路**（CLI / Extension Background / Content Script / Native Messaging）完全复用
+- **最小运行记录与配置空间模型**完全复用
 - **AX Tree 基础感知**（[read-write.md §4.3](./read-write.md) 中已有基本调用）— 在此基础上扩展压缩算法
 - **错误处理框架**（[error-handling.md](./error-handling.md)）— 需补充 L2→L1 降级条件（见下）
 

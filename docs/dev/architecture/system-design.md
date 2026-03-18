@@ -14,7 +14,7 @@
 | 模块 | 文件 | 覆盖内容 |
 |---|---|---|
 | 执行策略层 | [execution.md](./system-design/execution.md) | 三级执行模型（L1/L2/L3）、三档安全执行策略、Playwright 职责边界 |
-| 读写机制与上下文 | [read-write.md](./system-design/read-write.md) | 主动发包、被动拦截、AX Tree 感知、富文本/媒体/鼠标写操作、Content Script 两个执行世界 |
+| 读写机制与上下文 | [read-write.md](./system-design/read-write.md) | 主动发包、被动拦截、AX Tree 感知、富文本/媒体/鼠标写操作、网页文件下载、Content Script 两个执行世界 |
 | 账号与运行时 | [account.md](./system-design/account.md) | Named Profile 模型、配置空间状态机、浏览器生命周期状态机 |
 | 平台适配器规范 | [adapter.md](./system-design/adapter.md) | `rules.yaml` 结构、适配器代码职责、热更新、改版快速维护路径 |
 | 通信协议 | [communication.md](./system-design/communication.md) | JSON-RPC 消息格式、信息披露管控、Native Messaging 分片 |
@@ -65,7 +65,7 @@ WebEnvoy 由以下四个核心组件构成：
 │  Extension Background (Service Worker, MV3)             │
 │  · 维护 CLI ↔ Content Script 双向消息路由               │
 │  · 管理 webRequest 规则（declarativeNetRequest）        │
-│  · 持有配置空间元数据（账号状态、限流计数等）           │
+│  · 持有最小身份 / 会话元数据（登录态、指纹种子等）     │
 │  · 向多个 Content Script 实例分发指令                   │
 └────────────────────┬────────────────────────────────────┘
                      │ chrome.runtime.sendMessage / tabs.sendMessage
@@ -92,6 +92,6 @@ WebEnvoy 由以下四个核心组件构成：
 | 组件 | 职责范围 | 不做什么 |
 |---|---|---|
 | **CLI** | 指令解析、进程管理、数据库读写、信息披露控制 | 不直接发 HTTP 请求，不操作页面 DOM |
-| **Extension Background** | 消息路由、webRequest 规则管理、账号元数据 | 不执行页面交互，不存储业务数据 |
+| **Extension Background** | 消息路由、webRequest 规则管理、最小身份 / 会话元数据 | 不承担账号矩阵、限流运营或长期调度职责；不执行页面交互，不存储业务数据 |
 | **Content Script** | 页面操作、API 发包、AX Tree 感知 | 不做持久化，不做复杂业务逻辑编排 |
 | **SQLite** | 结构化数据持久化、查询 | 不存储媒体 Blob，只存文件路径引用 |
