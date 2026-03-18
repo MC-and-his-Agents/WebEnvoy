@@ -241,7 +241,7 @@ async function humanScroll(
 **长尾分布的实现**：真实用户会被通知打断、短暂思考、或离开片刻再回来，导致操作间隔偶发性拉长：
 
 ```typescript
-// 生成长尾分布的操作间隔（参数来自 BehaviorPersona seed）
+// 生成长尾分布的操作间隔
 function operationDelay(rand: () => number): number {
   const base = 1000 + rand() * 2000  // 1-3s 基础区间
   // 10% 概率触发「思考停顿」（5-10s）
@@ -252,9 +252,11 @@ function operationDelay(rand: () => number): number {
 }
 ```
 
-> 长尾分布参数（基础区间、停顿概率）来自 `BehaviorPersona` 的固定种子，确保同一账号的「操作节奏风格」在跨 Session 时保持一致，而非每次重新随机。
+> 如果未来启用行为人格层，长尾分布参数可以进一步由固定种子驱动；当前主线阶段只要求节奏分布不要呈现明显机械规律。
 
-### 4.2 行为人格（Behavior Persona）
+### 4.2 后层扩展：行为人格（Behavior Persona）
+
+> 本节描述的是后层扩展能力，不属于当前主线基线。
 
 每个配置空间绑定一个固化的「行为人格」，跨所有 session 保持一致（真实用户的行为习惯是稳定的）：
 
