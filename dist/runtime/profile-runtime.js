@@ -1,7 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
-import { BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
+import { BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
 import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
@@ -183,6 +183,7 @@ export class ProfileRuntimeService {
         const lockPath = this.#getLockPath(profileDir);
         const lockAcquireResult = await this.#acquireProfileLockAtomically({
             profileName: input.profile,
+            profileDir,
             lockPath,
             runId: input.runId,
             nowIso
@@ -272,6 +273,7 @@ export class ProfileRuntimeService {
         const confirmLogin = shouldConfirmLogin(input.params);
         const lockAcquireResult = await this.#acquireProfileLockAtomically({
             profileName: input.profile,
+            profileDir,
             lockPath,
             runId: input.runId,
             nowIso,
@@ -300,7 +302,7 @@ export class ProfileRuntimeService {
                 (lockAcquireResult.acquisition !== "same-owner" ||
                     lockAcquireResult.lock.ownerRunId !== input.runId ||
                     lockAcquireResult.lock.ownerPid === process.pid ||
-                    !this.#isProcessAlive(lockAcquireResult.lock.ownerPid))) {
+                    !(await this.#isProfileLockHealthy(lockAcquireResult.lock, profileDir)))) {
                 if (isRuntimeActiveProfileState(recoveredMeta.profileState) ||
                     recoveredMeta.profileState === "disconnected") {
                     await store.writeMeta(input.profile, this.#patchMeta(recoveredMeta, {
@@ -399,7 +401,7 @@ export class ProfileRuntimeService {
         const lock = await this.#readLock(lockPath);
         const storedProfileState = meta?.profileState ?? "uninitialized";
         const activeState = isRuntimeActiveProfileState(storedProfileState);
-        const healthyLock = lock !== null && this.#isProcessAlive(lock.ownerPid);
+        const healthyLock = lock !== null && (await this.#isProfileLockHealthy(lock, profileDir));
         const profileState = activeState && !healthyLock ? "disconnected" : storedProfileState;
         const lockHeld = activeState && healthyLock;
         return {
@@ -619,11 +621,11 @@ export class ProfileRuntimeService {
                 continue;
             }
             if (existingLock.ownerRunId === input.runId) {
-                const ownerAlive = this.#isProcessAlive(existingLock.ownerPid);
-                if (!ownerAlive && input.allowDeadOwnerRecoveryForSameRun === false) {
+                const ownerHealthy = await this.#isProfileLockHealthy(existingLock, input.profileDir);
+                if (!ownerHealthy && input.allowDeadOwnerRecoveryForSameRun === false) {
                     return { lock: existingLock, acquisition: "same-owner-dead" };
                 }
-                const ownerPid = ownerAlive ? existingLock.ownerPid : process.pid;
+                const ownerPid = ownerHealthy ? existingLock.ownerPid : process.pid;
                 const updatedLock = {
                     ...existingLock,
                     ownerPid,
@@ -632,7 +634,7 @@ export class ProfileRuntimeService {
                 await this.#writeLock(input.lockPath, updatedLock);
                 return { lock: updatedLock, acquisition: "same-owner" };
             }
-            if (this.#isProcessAlive(existingLock.ownerPid)) {
+            if (await this.#isProfileLockHealthy(existingLock, input.profileDir)) {
                 throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
                     retryable: true
                 });
@@ -679,6 +681,54 @@ export class ProfileRuntimeService {
             }
         }
         throw lastError;
+    }
+    async #readBrowserInstanceState(profileDir) {
+        const statePath = join(profileDir, BROWSER_STATE_FILENAME);
+        try {
+            const raw = await this.#lockFileAdapter.readFile(statePath, "utf8");
+            const parsed = JSON.parse(raw);
+            if (typeof parsed.runId !== "string" ||
+                !Number.isInteger(parsed.controllerPid) ||
+                !Number.isInteger(parsed.browserPid)) {
+                return null;
+            }
+            const controllerPid = parsed.controllerPid;
+            const browserPid = parsed.browserPid;
+            if (controllerPid <= 0 || browserPid <= 0) {
+                return null;
+            }
+            return {
+                runId: parsed.runId,
+                controllerPid,
+                browserPid
+            };
+        }
+        catch (error) {
+            const nodeError = error;
+            if (nodeError.code === "ENOENT") {
+                return null;
+            }
+            return null;
+        }
+    }
+    async #isProfileLockHealthy(lock, profileDir) {
+        if (this.#isProcessAlive(lock.ownerPid)) {
+            return true;
+        }
+        const state = await this.#readBrowserInstanceState(profileDir);
+        if (!state) {
+            return false;
+        }
+        if (this.#isProcessAlive(state.browserPid)) {
+            return true;
+        }
+        if (state.controllerPid === lock.ownerPid && this.#isProcessAlive(state.controllerPid)) {
+            return true;
+        }
+        if (state.runId === lock.ownerRunId && this.#isProcessAlive(state.controllerPid)) {
+            return true;
+        }
+        return false;
     }
     #patchMeta(current, patch) {
         return {

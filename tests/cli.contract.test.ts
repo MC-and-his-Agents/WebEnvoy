@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
+const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
 
@@ -491,11 +492,13 @@ describe("webenvoy cli contract", () => {
     const profileDir = String(loginSummary.profileDir);
 
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, browserStateFilename);
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    await rm(browserStatePath, { force: true });
 
     const confirm = runCli(
       [
@@ -710,12 +713,14 @@ describe("webenvoy cli contract", () => {
     const summary = startBody.summary as Record<string, unknown>;
     const profileDir = String(summary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, browserStateFilename);
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    await rm(browserStatePath, { force: true });
     const beforeStatusMeta = await readFile(path.join(profileDir, "__webenvoy_meta.json"), "utf8");
     const beforeStatusLock = await readFile(lockPath, "utf8");
 
@@ -825,12 +830,14 @@ describe("webenvoy cli contract", () => {
     const firstSummary = firstBody.summary as Record<string, unknown>;
     const profileDir = String(firstSummary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, browserStateFilename);
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    await rm(browserStatePath, { force: true });
 
     const secondStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
@@ -865,11 +872,13 @@ describe("webenvoy cli contract", () => {
     const summary = startBody.summary as Record<string, unknown>;
     const profileDir = String(summary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, browserStateFilename);
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    await rm(browserStatePath, { force: true });
 
     const login = runCli(
       ["runtime.login", "--profile", "reclaim_login_profile", "--run-id", "run-contract-612"],

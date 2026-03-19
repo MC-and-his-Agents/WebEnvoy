@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
+import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
@@ -547,6 +548,94 @@ describe("profile-runtime stale lock reclaim", () => {
         cwd: baseDir,
         profile: "reclaim_alive_profile",
         runId: "run-runtime-test-502",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
+  it("keeps lock held when controller is dead but browser pid in state file is still alive", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-controller-dead-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "reclaim_controller_dead_profile",
+      runId: "run-runtime-test-601",
+      params: {}
+    });
+
+    const profileDir = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "reclaim_controller_dead_profile"
+    );
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.ownerRunId = "run-runtime-test-legacy-controller";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223344;
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "state-token-601",
+          profileDir,
+          runId: "run-runtime-test-legacy-controller",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "reclaim_controller_dead_profile",
+      runId: "run-runtime-test-602",
+      params: {}
+    });
+    expect(status).toMatchObject({
+      profile: "reclaim_controller_dead_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "reclaim_controller_dead_profile",
+        runId: "run-runtime-test-603",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "reclaim_controller_dead_profile",
+        runId: "run-runtime-test-604",
         params: {}
       })
     ).rejects.toMatchObject({

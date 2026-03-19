@@ -202,6 +202,32 @@ describe("browser-launcher", () => {
     } satisfies Partial<BrowserLaunchError>);
   });
 
+  it("does not false-fail ready markers on reused profile when fresh markers are written quickly", async () => {
+    const { scriptPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-fast-markers-"));
+    tempDirs.push(profileDir);
+    await mkdir(join(profileDir, "Default"), { recursive: true });
+    await writeFile(join(profileDir, "Local State"), "{\"stale\":true}", "utf8");
+    await writeFile(join(profileDir, "Default", "Preferences"), "{\"stale\":true}", "utf8");
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-006",
+      params: {}
+    });
+
+    expect(launched.controllerPid).toBeGreaterThan(0);
+    expect(launched.browserPid).toBeGreaterThan(0);
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-006"
+    });
+  });
+
   it("rejects launch when existing profile markers are stale and browser exits quickly", async () => {
     const scriptPath = await createCrashBrowserExecutable();
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-stale-profile-"));

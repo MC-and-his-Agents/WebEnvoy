@@ -386,6 +386,8 @@ const launchProcess = async (
     runId: string;
   }
 ): Promise<{ pid: number; launchedAt: string; launchedAtMs: number }> => {
+  const launchedAtMs = Date.now();
+  const launchedAt = new Date(launchedAtMs).toISOString();
   const launchArgsBase64 = Buffer.from(JSON.stringify(args), "utf8").toString("base64");
   const child = spawn(
     process.execPath,
@@ -411,8 +413,6 @@ const launchProcess = async (
       stdio: "ignore"
     }
   );
-  const launchedAtMs = Date.now();
-  const launchedAt = new Date(launchedAtMs).toISOString();
   child.unref();
 
   const launched = await new Promise<boolean>((resolve, reject) => {

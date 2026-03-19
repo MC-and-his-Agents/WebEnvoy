@@ -276,6 +276,8 @@ const waitForSupervisorState = async (input) => {
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
 };
 const launchProcess = async (supervisorScriptPath, executablePath, args, input) => {
+    const launchedAtMs = Date.now();
+    const launchedAt = new Date(launchedAtMs).toISOString();
     const launchArgsBase64 = Buffer.from(JSON.stringify(args), "utf8").toString("base64");
     const child = spawn(process.execPath, [
         supervisorScriptPath,
@@ -297,8 +299,6 @@ const launchProcess = async (supervisorScriptPath, executablePath, args, input) 
         detached: true,
         stdio: "ignore"
     });
-    const launchedAtMs = Date.now();
-    const launchedAt = new Date(launchedAtMs).toISOString();
     child.unref();
     const launched = await new Promise((resolve, reject) => {
         let settled = false;
