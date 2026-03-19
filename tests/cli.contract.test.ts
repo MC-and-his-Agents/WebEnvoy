@@ -342,6 +342,48 @@ describe("webenvoy cli contract", () => {
     expect(result.stderr).not.toContain("\"type\":\"runtime_store_warning\"");
   });
 
+  itWithSqlite("returns structured runtime unavailable when runtime store write conflicts", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const bootstrap = runCli(
+      ["runtime.ping", "--run-id", "run-contract-005c-bootstrap"],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      }
+    );
+    expect(bootstrap.status).toBe(0);
+
+    const dbPath = path.join(runtimeCwd, ".webenvoy", "runtime", "store.sqlite");
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(dbPath);
+    db.prepare("BEGIN IMMEDIATE").run();
+
+    try {
+      const result = runCli(
+        ["runtime.ping", "--run-id", "run-contract-005c"],
+        runtimeCwd,
+        {
+          WEBENVOY_NATIVE_TRANSPORT: "loopback"
+        }
+      );
+      expect(result.status).toBe(5);
+      const body = parseSingleJsonLine(result.stdout);
+      expect(body).toMatchObject({
+        run_id: "run-contract-005c",
+        command: "runtime.ping",
+        status: "error",
+        error: { code: "ERR_RUNTIME_UNAVAILABLE", retryable: true }
+      });
+      expect(String((body.error as Record<string, unknown>).message)).toContain(
+        "ERR_RUNTIME_STORE_CONFLICT"
+      );
+      expect(result.stderr).not.toContain("\"type\":\"runtime_store_warning\"");
+    } finally {
+      db.prepare("ROLLBACK").run();
+      db.close();
+    }
+  });
+
   it("returns execution failed error with code 6", () => {
     const result = runCli(["runtime.ping", "--params", '{"force_fail":true}']);
     expect(result.status).toBe(6);

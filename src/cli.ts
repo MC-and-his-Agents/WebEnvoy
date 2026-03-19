@@ -65,11 +65,15 @@ export const runCli = async (
     }
     return successExitCode();
   } catch (error) {
-    const commandError = normalizeCliError(error);
+    let finalError: unknown = error;
     if (runtimeContext && recorder && !isRuntimeStoreError(error)) {
-      await recorder.recordFailure(runtimeContext, commandError);
+      try {
+        await recorder.recordFailure(runtimeContext, normalizeCliError(error));
+      } catch (recordError) {
+        finalError = recordError;
+      }
     }
-    const cliError = commandError;
+    const cliError = normalizeCliError(finalError);
     const runId =
       runtimeContext?.run_id ??
       (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
