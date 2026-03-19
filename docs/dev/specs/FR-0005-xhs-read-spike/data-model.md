@@ -14,7 +14,7 @@ FR-0005 不引入新的持久化实体，也不修改现有共享数据模型。
 2. `signature_path`
 3. `field_lifecycle_matrix`
 
-这些对象的边界定义见 [xhs-read-spike.md](/Users/mc/Desktop/同步空间/coding/WebEnvoy-FR-0005/docs/dev/specs/FR-0005-xhs-read-spike/contracts/xhs-read-spike.md)。
+这些对象的边界定义见 [contracts/xhs-read-spike.md](./contracts/xhs-read-spike.md)。
 
 ## 为什么这里不创建持久化实体
 
