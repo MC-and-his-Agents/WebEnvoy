@@ -252,10 +252,10 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         profile: "default",
-        profileState: "ready",
-        browserState: "ready",
+        profileState: "disconnected",
+        browserState: "disconnected",
         proxyUrl: "http://127.0.0.1:8080/",
-        lockHeld: true
+        lockHeld: false
       }
     });
   });
@@ -288,9 +288,9 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         profile: "login_profile",
-        profileState: "logging_in",
-        browserState: "logging_in",
-        lockHeld: true
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: false
       }
     });
 
@@ -336,6 +336,13 @@ describe("webenvoy cli contract", () => {
       runtimeCwd
     );
     expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const lockPath = path.join(String(startSummary.profileDir), "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.ownerPid = process.pid;
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
     const login = runCli(
       ["runtime.login", "--profile", "login_locked_profile", "--run-id", "run-contract-162"],
@@ -357,6 +364,13 @@ describe("webenvoy cli contract", () => {
       runtimeCwd
     );
     expect(firstStart.status).toBe(0);
+    const firstBody = parseSingleJsonLine(firstStart.stdout);
+    const firstSummary = firstBody.summary as Record<string, unknown>;
+    const lockPath = path.join(String(firstSummary.profileDir), "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.ownerPid = process.pid;
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
     const secondStart = runCli(
       ["runtime.start", "--profile", "locked_profile", "--run-id", "run-contract-202"],
@@ -458,7 +472,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("marks disconnected in runtime.status when active meta is paired with stale lock from dead owner", async () => {
+  it("marks disconnected in runtime.status when active meta has dead-owner lock with fresh heartbeat", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
       ["runtime.start", "--profile", "stale_profile", "--run-id", "run-contract-501"],
@@ -473,7 +487,7 @@ describe("webenvoy cli contract", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
-    lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
+    lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     const beforeStatusMeta = await readFile(path.join(profileDir, "__webenvoy_meta.json"), "utf8");
     const beforeStatusLock = await readFile(lockPath, "utf8");
@@ -530,7 +544,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("reclaims stale lock when previous owner process is no longer alive", async () => {
+  it("allows runtime.start immediate recovery when owner is dead even with fresh heartbeat", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
@@ -544,7 +558,7 @@ describe("webenvoy cli contract", () => {
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
-    lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
+    lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
     const secondStart = runCli(
@@ -567,6 +581,41 @@ describe("webenvoy cli contract", () => {
     const updatedLockRaw = await readFile(lockPath, "utf8");
     const updatedLock = JSON.parse(updatedLockRaw) as Record<string, unknown>;
     expect(updatedLock.ownerRunId).toBe("run-contract-602");
+  });
+
+  it("allows runtime.login immediate recovery when owner is dead even with fresh heartbeat", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "reclaim_login_profile", "--run-id", "run-contract-611"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.lastHeartbeatAt = new Date().toISOString();
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const login = runCli(
+      ["runtime.login", "--profile", "reclaim_login_profile", "--run-id", "run-contract-612"],
+      runtimeCwd
+    );
+    expect(login.status).toBe(0);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "success",
+      summary: {
+        profile: "reclaim_login_profile",
+        profileState: "logging_in",
+        browserState: "logging_in",
+        lockHeld: true,
+        confirmationRequired: true
+      }
+    });
   });
 
   it("marks disconnected in runtime.status when runtime meta is active but lock is missing", async () => {

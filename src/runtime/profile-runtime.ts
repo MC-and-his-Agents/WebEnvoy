@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import {
-  acquireProfileLock,
   createProfileLock,
-  DEFAULT_LOCK_STALE_MS,
   type ProfileLock
 } from "./profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "./profile-store.js";
@@ -118,21 +116,6 @@ const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
 const shouldRecoverAsDisconnected = (acquisition: LockAcquisition, state: ProfileState): boolean =>
   acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
-const parseIsoTimestamp = (value: string): number | null => {
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) {
-    return null;
-  }
-  return timestamp;
-};
-const isLockStale = (lock: ProfileLock, nowIso: string): boolean => {
-  const now = parseIsoTimestamp(nowIso);
-  const heartbeat = parseIsoTimestamp(lock.lastHeartbeatAt);
-  if (now === null || heartbeat === null) {
-    return true;
-  }
-  return now - heartbeat > DEFAULT_LOCK_STALE_MS;
-};
 
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
@@ -376,7 +359,6 @@ export class ProfileRuntimeService {
   }
 
   async status(input: RuntimeActionInput): Promise<JsonObject> {
-    const nowIso = isoNow();
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     const lockPath = this.#getLockPath(profileDir);
@@ -385,9 +367,7 @@ export class ProfileRuntimeService {
 
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
     const activeState = isRuntimeActiveProfileState(storedProfileState);
-    const healthyLock =
-      lock !== null &&
-      (this.#isProcessAlive(lock.ownerPid) || !isLockStale(lock, nowIso));
+    const healthyLock = lock !== null && this.#isProcessAlive(lock.ownerPid);
     const profileState: ProfileState =
       activeState && !healthyLock ? "disconnected" : storedProfileState;
     const lockHeld = activeState && healthyLock;
@@ -585,21 +565,6 @@ export class ProfileRuntimeService {
         return { lock: updatedLock, acquisition: "same-owner" };
       }
 
-      let acquireResult;
-      try {
-        acquireResult = acquireProfileLock(existingLock, nextRequest, {
-          staleAfterMs: DEFAULT_LOCK_STALE_MS
-        });
-      } catch {
-        throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
-      }
-
-      if (acquireResult.status === "conflict") {
-        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
-          retryable: true
-        });
-      }
-
       if (this.#isProcessAlive(existingLock.ownerPid)) {
         throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
           retryable: true
@@ -610,13 +575,13 @@ export class ProfileRuntimeService {
       try {
         await this.#lockFileAdapter.writeFile(
           input.lockPath,
-          `${JSON.stringify(acquireResult.lock, null, 2)}\n`,
+          `${JSON.stringify(nextLock, null, 2)}\n`,
           {
             encoding: "utf8",
             flag: "wx"
           }
         );
-        return { lock: acquireResult.lock, acquisition: "reclaimed" };
+        return { lock: nextLock, acquisition: "reclaimed" };
       } catch (error) {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code !== "EEXIST") {

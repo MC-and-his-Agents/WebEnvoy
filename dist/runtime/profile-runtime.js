@@ -1,7 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
-import { acquireProfileLock, createProfileLock, DEFAULT_LOCK_STALE_MS } from "./profile-lock.js";
+import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
@@ -63,21 +63,6 @@ const isLoginableProfileState = (state) => state === "uninitialized" ||
 const isRuntimeActiveProfileState = (state) => state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
 const shouldRecoverAsDisconnected = (acquisition, state) => acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params) => params.confirm === true;
-const parseIsoTimestamp = (value) => {
-    const timestamp = Date.parse(value);
-    if (Number.isNaN(timestamp)) {
-        return null;
-    }
-    return timestamp;
-};
-const isLockStale = (lock, nowIso) => {
-    const now = parseIsoTimestamp(nowIso);
-    const heartbeat = parseIsoTimestamp(lock.lastHeartbeatAt);
-    if (now === null || heartbeat === null) {
-        return true;
-    }
-    return now - heartbeat > DEFAULT_LOCK_STALE_MS;
-};
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
@@ -286,7 +271,6 @@ export class ProfileRuntimeService {
         }
     }
     async status(input) {
-        const nowIso = isoNow();
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
@@ -294,8 +278,7 @@ export class ProfileRuntimeService {
         const lock = await this.#readLock(lockPath);
         const storedProfileState = meta?.profileState ?? "uninitialized";
         const activeState = isRuntimeActiveProfileState(storedProfileState);
-        const healthyLock = lock !== null &&
-            (this.#isProcessAlive(lock.ownerPid) || !isLockStale(lock, nowIso));
+        const healthyLock = lock !== null && this.#isProcessAlive(lock.ownerPid);
         const profileState = activeState && !healthyLock ? "disconnected" : storedProfileState;
         const lockHeld = activeState && healthyLock;
         return {
@@ -461,20 +444,6 @@ export class ProfileRuntimeService {
                 await this.#writeLock(input.lockPath, updatedLock);
                 return { lock: updatedLock, acquisition: "same-owner" };
             }
-            let acquireResult;
-            try {
-                acquireResult = acquireProfileLock(existingLock, nextRequest, {
-                    staleAfterMs: DEFAULT_LOCK_STALE_MS
-                });
-            }
-            catch {
-                throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
-            }
-            if (acquireResult.status === "conflict") {
-                throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
-                    retryable: true
-                });
-            }
             if (this.#isProcessAlive(existingLock.ownerPid)) {
                 throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
                     retryable: true
@@ -482,11 +451,11 @@ export class ProfileRuntimeService {
             }
             await this.#deleteLock(input.lockPath);
             try {
-                await this.#lockFileAdapter.writeFile(input.lockPath, `${JSON.stringify(acquireResult.lock, null, 2)}\n`, {
+                await this.#lockFileAdapter.writeFile(input.lockPath, `${JSON.stringify(nextLock, null, 2)}\n`, {
                     encoding: "utf8",
                     flag: "wx"
                 });
-                return { lock: acquireResult.lock, acquisition: "reclaimed" };
+                return { lock: nextLock, acquisition: "reclaimed" };
             }
             catch (error) {
                 const nodeError = error;
