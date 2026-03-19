@@ -19,11 +19,23 @@ const createMockBrowserExecutable = async (): Promise<{ scriptPath: string; logP
   await writeFile(
     scriptPath,
     `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 const logPath = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+let profileDir = "";
+for (const arg of process.argv.slice(2)) {
+  if (arg.startsWith("--user-data-dir=")) {
+    profileDir = arg.slice("--user-data-dir=".length);
+  }
+}
+if (profileDir) {
+  mkdirSync(profileDir + "/Default", { recursive: true });
+  writeFileSync(profileDir + "/Local State", "{}");
+  writeFileSync(profileDir + "/Default/Preferences", "{}");
+}
 if (logPath) {
   appendFileSync(logPath, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
 }
+setInterval(() => {}, 1000);
 `,
     "utf8"
   );
@@ -72,6 +84,7 @@ describe("browser-launcher", () => {
     process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
 
     const launched = await launchBrowser({
+      command: "runtime.start",
       profileDir,
       proxyUrl: "http://127.0.0.1:8080",
       params: {}
@@ -91,6 +104,7 @@ describe("browser-launcher", () => {
 
     await expect(
       launchBrowser({
+        command: "runtime.start",
         profileDir: join(tmpdir(), "webenvoy-browser-launcher-profile-invalid"),
         proxyUrl: null,
         params: {
@@ -101,5 +115,23 @@ describe("browser-launcher", () => {
       name: "BrowserLaunchError",
       code: "BROWSER_INVALID_ARGUMENT"
     } satisfies Partial<BrowserLaunchError>);
+  });
+
+  it("keeps runtime.login visible by default", async () => {
+    const { scriptPath, logPath } = await createMockBrowserExecutable();
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+
+    await launchBrowser({
+      command: "runtime.login",
+      profileDir: join(tmpdir(), "webenvoy-browser-launcher-login-visible"),
+      proxyUrl: null,
+      params: {
+        headless: true
+      }
+    });
+
+    const launchLog = await waitForLaunchLog(logPath);
+    expect(launchLog).not.toContain("--headless=new");
   });
 });

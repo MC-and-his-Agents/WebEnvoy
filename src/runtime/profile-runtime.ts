@@ -62,6 +62,7 @@ interface LockFileAdapter {
 
 interface BrowserLauncherLike {
   launch(input: {
+    command: "runtime.start" | "runtime.login";
     profileDir: string;
     proxyUrl: string | null;
     params: JsonObject;
@@ -69,7 +70,7 @@ interface BrowserLauncherLike {
 }
 
 const isoNow = (): string => new Date().toISOString();
-type LockAcquisition = "new" | "same-owner" | "reclaimed";
+type LockAcquisition = "new" | "same-owner" | "same-owner-dead" | "reclaimed";
 const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
   readFile: async (path, encoding) => readFile(path, encoding),
   writeFile: async (path, data, options) => {
@@ -314,6 +315,7 @@ export class ProfileRuntimeService {
         nowIso
       });
       const browserLaunch = await this.#browserLauncher.launch({
+        command: "runtime.start",
         profileDir,
         proxyUrl: session.proxyBinding?.url ?? null,
         params: input.params
@@ -364,13 +366,14 @@ export class ProfileRuntimeService {
     const profileDir = this.#resolveProfileDir(store, input.profile);
     await store.ensureProfileDir(input.profile);
     const lockPath = this.#getLockPath(profileDir);
+    const confirmLogin = shouldConfirmLogin(input.params);
     const lockAcquireResult = await this.#acquireProfileLockAtomically({
       profileName: input.profile,
       lockPath,
       runId: input.runId,
-      nowIso
+      nowIso,
+      allowDeadOwnerRecoveryForSameRun: !confirmLogin
     });
-    const confirmLogin = shouldConfirmLogin(input.params);
     let loginSucceeded = false;
     let keepLockOnFailure = false;
     let launchedBrowserPid: number | null = null;
@@ -399,6 +402,36 @@ export class ProfileRuntimeService {
         );
       }
 
+      if (
+        confirmLogin &&
+        (lockAcquireResult.acquisition !== "same-owner" ||
+          lockAcquireResult.lock.ownerRunId !== input.runId ||
+          !this.#isProcessAlive(lockAcquireResult.lock.ownerPid))
+      ) {
+        if (
+          isRuntimeActiveProfileState(recoveredMeta.profileState) ||
+          recoveredMeta.profileState === "disconnected"
+        ) {
+          await store.writeMeta(
+            input.profile,
+            this.#patchMeta(recoveredMeta, {
+              profileName: input.profile,
+              profileDir,
+              profileState: "disconnected",
+              proxyBinding: recoveredMeta.proxyBinding,
+              updatedAt: nowIso,
+              lastDisconnectedAt: nowIso
+            })
+          );
+        }
+
+        throw new CliError(
+          "ERR_PROFILE_STATE_CONFLICT",
+          "runtime.login --confirm 前检测到登录浏览器已断开，请重新执行 runtime.login",
+          { retryable: true }
+        );
+      }
+
       let session = buildRuntimeSession(input.profile, recoveredMeta);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
@@ -412,6 +445,7 @@ export class ProfileRuntimeService {
 
       if (!confirmLogin) {
         const browserLaunch = await this.#browserLauncher.launch({
+          command: "runtime.login",
           profileDir,
           proxyUrl: session.proxyBinding?.url ?? null,
           params: input.params
@@ -720,6 +754,7 @@ export class ProfileRuntimeService {
     lockPath: string;
     runId: string;
     nowIso: string;
+    allowDeadOwnerRecoveryForSameRun?: boolean;
   }): Promise<{ lock: ProfileLock; acquisition: LockAcquisition }> {
 
     for (let attempt = 0; attempt < LOCK_ACQUIRE_MAX_RETRIES; attempt += 1) {
@@ -751,9 +786,11 @@ export class ProfileRuntimeService {
       }
 
       if (existingLock.ownerRunId === input.runId) {
-        const ownerPid = this.#isProcessAlive(existingLock.ownerPid)
-          ? existingLock.ownerPid
-          : process.pid;
+        const ownerAlive = this.#isProcessAlive(existingLock.ownerPid);
+        if (!ownerAlive && input.allowDeadOwnerRecoveryForSameRun === false) {
+          return { lock: existingLock, acquisition: "same-owner-dead" };
+        }
+        const ownerPid = ownerAlive ? existingLock.ownerPid : process.pid;
         const updatedLock: ProfileLock = {
           ...existingLock,
           ownerPid,

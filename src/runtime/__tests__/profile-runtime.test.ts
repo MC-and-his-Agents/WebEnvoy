@@ -24,6 +24,22 @@ const createTestService = (
 ): ProfileRuntimeService =>
   new ProfileRuntimeService({
     ...options,
+    isProcessAlive:
+      options?.isProcessAlive ??
+      ((pid: number) => {
+        if (pid === 999999) {
+          return true;
+        }
+        if (!Number.isInteger(pid) || pid <= 0) {
+          return false;
+        }
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
     browserLauncher: options?.browserLauncher ?? createMockBrowserLauncher()
   });
 
@@ -373,8 +389,9 @@ describe("profile-runtime stale lock reclaim", () => {
   it("auto-recovers stale lock for runtime.login after crash residue", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-login-"));
     tempDirs.push(baseDir);
+    let alive = false;
     const service = createTestService({
-      isProcessAlive: () => false
+      isProcessAlive: () => alive
     });
 
     await service.start({
@@ -402,17 +419,18 @@ describe("profile-runtime stale lock reclaim", () => {
       cwd: baseDir,
       profile: "reclaim_login_profile",
       runId: "run-runtime-test-402",
-      params: { confirm: true }
+      params: {}
     });
     expect(recovered).toMatchObject({
       profile: "reclaim_login_profile",
-      profileState: "ready",
+      profileState: "logging_in",
       lockHeld: true
     });
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     expect(lock.ownerRunId).toBe("run-runtime-test-402");
+    expect(lock.ownerPid).toBe(999999);
 
     const metaPath = join(
       baseDir,
@@ -424,6 +442,20 @@ describe("profile-runtime stale lock reclaim", () => {
     const metaRaw = await readFile(metaPath, "utf8");
     const meta = JSON.parse(metaRaw) as ProfileMeta;
     expect(meta.lastDisconnectedAt).toBeTruthy();
+    expect(meta.profileState).toBe("logging_in");
+
+    alive = true;
+    const confirmed = await service.login({
+      cwd: baseDir,
+      profile: "reclaim_login_profile",
+      runId: "run-runtime-test-402",
+      params: { confirm: true }
+    });
+    expect(confirmed).toMatchObject({
+      profile: "reclaim_login_profile",
+      profileState: "ready",
+      lockHeld: true
+    });
   });
 
   it("does not reclaim stale-looking lock when owner process is still alive", async () => {
@@ -471,7 +503,9 @@ describe("profile-runtime login", () => {
   it("keeps logging_in before confirmation and writes lastLoginAt after confirmation", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-"));
     tempDirs.push(baseDir);
-    const service = createTestService();
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
 
     const beforeConfirm = await service.login({
       cwd: baseDir,
@@ -535,5 +569,44 @@ describe("profile-runtime login", () => {
         entries: [{ key: "session", value: "token-1" }]
       }
     ]);
+  });
+
+  it("marks disconnected when confirm arrives after login browser already closed", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-disconnect-"));
+    tempDirs.push(baseDir);
+    let alive = true;
+    const service = createTestService({
+      isProcessAlive: () => alive
+    });
+
+    const beforeConfirm = await service.login({
+      cwd: baseDir,
+      profile: "disconnect_login_profile",
+      runId: "run-runtime-test-301",
+      params: {}
+    });
+    expect(beforeConfirm).toMatchObject({
+      profileState: "logging_in",
+      lockHeld: true
+    });
+
+    alive = false;
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "disconnect_login_profile",
+        runId: "run-runtime-test-301",
+        params: { confirm: true }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_STATE_CONFLICT"
+    });
+
+    const metaPath = join(baseDir, ".webenvoy", "profiles", "disconnect_login_profile", "__webenvoy_meta.json");
+    const rawMeta = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(rawMeta) as ProfileMeta;
+    expect(meta.profileState).toBe("disconnected");
+    expect(typeof meta.lastDisconnectedAt).toBe("string");
   });
 });

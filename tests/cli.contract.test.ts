@@ -142,6 +142,8 @@ const runHeadlessDomProbe = (
     }
   );
 
+const realBrowserContractsEnabled = process.env.WEBENVOY_RUN_REAL_BROWSER === "1";
+
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-contract-001"], {
@@ -404,6 +406,14 @@ describe("webenvoy cli contract", () => {
         confirmationRequired: true
       }
     });
+    const launchLogRaw = await readFile(path.join(runtimeCwd, ".browser-launch.log"), "utf8");
+    const launchLogLines = launchLogRaw
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0);
+    expect(launchLogLines.length).toBeGreaterThan(0);
+    const lastLaunch = JSON.parse(launchLogLines[launchLogLines.length - 1]) as { args: string };
+    expect(lastLaunch.args).not.toContain("--headless=new");
 
     const statusBeforeConfirm = runCli(["runtime.status", "--profile", "login_profile"], runtimeCwd);
     expect(statusBeforeConfirm.status).toBe(0);
@@ -452,6 +462,65 @@ describe("webenvoy cli contract", () => {
     const meta = JSON.parse(rawMeta) as Record<string, unknown>;
     expect(meta.profileState).toBe("ready");
     expect(meta.lastLoginAt).toBe(loginSummary.lastLoginAt);
+  });
+
+  it("rejects runtime.login --confirm when login browser is disconnected and converges to disconnected", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const login = runCli(
+      ["runtime.login", "--profile", "login_disconnect_profile", "--run-id", "run-contract-156"],
+      runtimeCwd
+    );
+    expect(login.status).toBe(0);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    const loginSummary = loginBody.summary as Record<string, unknown>;
+    const profileDir = String(loginSummary.profileDir);
+
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.ownerPid = 999999;
+    lock.lastHeartbeatAt = new Date().toISOString();
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const confirm = runCli(
+      [
+        "runtime.login",
+        "--profile",
+        "login_disconnect_profile",
+        "--run-id",
+        "run-contract-156",
+        "--params",
+        "{\"confirm\":true}"
+      ],
+      runtimeCwd
+    );
+    expect(confirm.status).toBe(5);
+    const confirmBody = parseSingleJsonLine(confirm.stdout);
+    expect(confirmBody).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_STATE_CONFLICT", retryable: true }
+    });
+
+    const status = runCli(["runtime.status", "--profile", "login_disconnect_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "login_disconnect_profile",
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: false
+      }
+    });
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const rawMeta = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(rawMeta) as Record<string, unknown>;
+    expect(meta.profileState).toBe("disconnected");
+    expect(typeof meta.lastDisconnectedAt).toBe("string");
   });
 
   it("rejects runtime.login when profile lock is held by another run", async () => {
@@ -820,17 +889,15 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("persists cookie/localStorage across second start on same profile via local fixture page", async () => {
+  const realBrowserContract = realBrowserContractsEnabled ? it : it.skip;
+
+  realBrowserContract("persists cookie/localStorage across second start on same profile via local fixture page", async () => {
     const realBrowserPath = detectSystemChromePath();
-    if (realBrowserPath === null) {
-      return;
-    }
+    expect(realBrowserPath).not.toBeNull();
 
     const runtimeCwd = await createRuntimeCwd();
-    const probeSupportCheck = runHeadlessDomProbe(realBrowserPath, runtimeCwd, "about:blank");
-    if (probeSupportCheck.status !== 0) {
-      return;
-    }
+    const probeSupportCheck = runHeadlessDomProbe(String(realBrowserPath), runtimeCwd, "about:blank");
+    expect(probeSupportCheck.status).toBe(0);
 
     const token = "persist_token_v1";
     const server = createServer((req, res) => {
@@ -877,7 +944,7 @@ document.body.textContent = JSON.stringify(state);
       throw new Error("failed to resolve fixture server address");
     }
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    const env = { WEBENVOY_BROWSER_PATH: realBrowserPath };
+    const env = { WEBENVOY_BROWSER_PATH: String(realBrowserPath) };
 
     try {
       const firstStart = runCli(

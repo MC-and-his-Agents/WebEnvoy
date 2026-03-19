@@ -55,6 +55,7 @@ export class BrowserLaunchError extends Error {
 }
 
 export interface BrowserLaunchInput {
+  command: "runtime.start" | "runtime.login";
   profileDir: string;
   proxyUrl: string | null;
   params: JsonObject;
@@ -183,6 +184,34 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
 
 const shouldLaunchHeadless = (params: JsonObject): boolean => params.headless !== false;
 
+const waitForBrowserReady = async (profileDir: string, pid: number): Promise<void> => {
+  const readyMarkers = [join(profileDir, "Local State"), join(profileDir, "Default", "Preferences")];
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ESRCH") {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动后立即退出");
+      }
+      throw error;
+    }
+
+    for (const marker of readyMarkers) {
+      if (await pathExists(marker)) {
+        return;
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 150);
+    });
+  }
+
+  throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
+};
+
 const launchProcess = async (
   executablePath: string,
   args: string[]
@@ -241,13 +270,16 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
   if (input.proxyUrl !== null) {
     launchArgs.push(`--proxy-server=${input.proxyUrl}`);
   }
-  if (shouldLaunchHeadless(input.params)) {
+  const shouldHeadless =
+    input.command === "runtime.login" ? false : shouldLaunchHeadless(input.params);
+  if (shouldHeadless) {
     launchArgs.push("--headless=new");
   }
   launchArgs.push(parseStartUrl(input.params));
 
   try {
     const launched = await launchProcess(executablePath, launchArgs);
+    await waitForBrowserReady(input.profileDir, launched.pid);
     return {
       browserPath: executablePath,
       browserPid: launched.pid,

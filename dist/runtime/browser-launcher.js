@@ -140,6 +140,30 @@ const resolveExecutablePath = async (params) => {
     throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过 WEBENVOY_BROWSER_PATH 或 params.browserPath 显式指定");
 };
 const shouldLaunchHeadless = (params) => params.headless !== false;
+const waitForBrowserReady = async (profileDir, pid) => {
+    const readyMarkers = [join(profileDir, "Local State"), join(profileDir, "Default", "Preferences")];
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        try {
+            process.kill(pid, 0);
+        }
+        catch (error) {
+            const nodeError = error;
+            if (nodeError.code === "ESRCH") {
+                throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动后立即退出");
+            }
+            throw error;
+        }
+        for (const marker of readyMarkers) {
+            if (await pathExists(marker)) {
+                return;
+            }
+        }
+        await new Promise((resolve) => {
+            setTimeout(resolve, 150);
+        });
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
+};
 const launchProcess = async (executablePath, args) => {
     const child = spawn(executablePath, args, {
         detached: true,
@@ -191,12 +215,14 @@ export const launchBrowser = async (input) => {
     if (input.proxyUrl !== null) {
         launchArgs.push(`--proxy-server=${input.proxyUrl}`);
     }
-    if (shouldLaunchHeadless(input.params)) {
+    const shouldHeadless = input.command === "runtime.login" ? false : shouldLaunchHeadless(input.params);
+    if (shouldHeadless) {
         launchArgs.push("--headless=new");
     }
     launchArgs.push(parseStartUrl(input.params));
     try {
         const launched = await launchProcess(executablePath, launchArgs);
+        await waitForBrowserReady(input.profileDir, launched.pid);
         return {
             browserPath: executablePath,
             browserPid: launched.pid,
