@@ -555,7 +555,7 @@ describe("profile-runtime stale lock reclaim", () => {
     });
   });
 
-  it("keeps lock held when controller is dead but browser pid in state file is still alive", async () => {
+  it("marks disconnected while still blocking reuse when controller is dead but browser pid in state file is still alive", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-controller-dead-"));
     tempDirs.push(baseDir);
     const alivePids = new Set<number>([999998, 999999]);
@@ -615,8 +615,8 @@ describe("profile-runtime stale lock reclaim", () => {
     });
     expect(status).toMatchObject({
       profile: "reclaim_controller_dead_profile",
-      profileState: "ready",
-      browserState: "ready",
+      profileState: "disconnected",
+      browserState: "disconnected",
       lockHeld: true
     });
 
@@ -641,6 +641,96 @@ describe("profile-runtime stale lock reclaim", () => {
     ).rejects.toMatchObject({
       code: "ERR_PROFILE_LOCKED"
     });
+  });
+
+  it("marks disconnected and allows stop recovery when controller is dead but browser pid is still alive", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-controller-dead-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999]);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0) {
+        return alivePids.has(pid);
+      }
+      alivePids.delete(pid);
+      return true;
+    }) as typeof process.kill);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-701",
+        params: {}
+      });
+
+      const profileDir = join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "stop_controller_dead_profile"
+      );
+      const lockPath = join(profileDir, "__webenvoy_lock.json");
+      const lockRaw = await readFile(lockPath, "utf8");
+      const lock = JSON.parse(lockRaw) as ProfileLock;
+      lock.ownerPid = 12345;
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+      const browserPid = 223355;
+      const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+      await writeFile(
+        browserStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            launchToken: "state-token-701",
+            profileDir,
+            runId: "run-runtime-test-701",
+            browserPath: "/mock/chrome",
+            controllerPid: 12345,
+            browserPid,
+            launchedAt: new Date().toISOString()
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+      alivePids.delete(999998);
+      alivePids.delete(999999);
+      alivePids.add(browserPid);
+
+      const status = await service.status({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-702",
+        params: {}
+      });
+      expect(status).toMatchObject({
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: true
+      });
+
+      const stopped = await service.stop({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-701",
+        params: {}
+      });
+      expect(stopped).toMatchObject({
+        profileState: "stopped",
+        lockHeld: false
+      });
+      expect(alivePids.has(browserPid)).toBe(false);
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
 

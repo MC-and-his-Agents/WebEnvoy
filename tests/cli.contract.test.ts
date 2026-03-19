@@ -744,6 +744,63 @@ describe("webenvoy cli contract", () => {
     expect(afterStatusLock).toBe(beforeStatusLock);
   });
 
+  it("allows runtime.stop recovery when controller pid is dead but browser pid is still alive", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.ownerPid = 999999;
+    lock.lastHeartbeatAt = new Date().toISOString();
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const status = runCli(["runtime.status", "--profile", "recover_stop_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "recover_stop_profile",
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: true
+      }
+    });
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+    const stopBody = parseSingleJsonLine(stop.stdout);
+    expect(stopBody).toMatchObject({
+      command: "runtime.stop",
+      status: "success",
+      summary: {
+        profile: "recover_stop_profile",
+        profileState: "stopped",
+        lockHeld: false
+      }
+    });
+
+    await assertLockMissing(profileDir);
+    await expect(readFile(path.join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(path.join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   it("keeps active state in runtime.status when lock owner process is alive", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(

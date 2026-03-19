@@ -138,6 +138,49 @@ const deleteFileQuietly = async (path) => {
         }
     }
 };
+const waitForProcessExit = async (pid, deadlineMs) => {
+    while (Date.now() < deadlineMs) {
+        if (!isProcessAlive(pid)) {
+            return true;
+        }
+        await sleep(100);
+    }
+    return !isProcessAlive(pid);
+};
+const cleanupSupervisorArtifacts = async (profileDir) => {
+    await deleteFileQuietly(getStateFilePath(profileDir));
+    await deleteFileQuietly(getControlFilePath(profileDir));
+};
+const terminateBrowserPid = async (browserPid, timeoutMs) => {
+    if (!isProcessAlive(browserPid)) {
+        return true;
+    }
+    try {
+        process.kill(browserPid, "SIGTERM");
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code !== "ESRCH") {
+            throw error;
+        }
+        return true;
+    }
+    const gracefulDeadline = Date.now() + timeoutMs;
+    if (await waitForProcessExit(browserPid, gracefulDeadline)) {
+        return true;
+    }
+    try {
+        process.kill(browserPid, "SIGKILL");
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code !== "ESRCH") {
+            throw error;
+        }
+        return true;
+    }
+    return waitForProcessExit(browserPid, Date.now() + 1_000);
+};
 const getStateFilePath = (profileDir) => join(profileDir, BROWSER_STATE_FILENAME);
 const getControlFilePath = (profileDir) => join(profileDir, BROWSER_CONTROL_FILENAME);
 const parseInstanceState = (raw) => {
@@ -413,7 +456,11 @@ export const shutdownBrowserSession = async (input) => {
         throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器实例 run_id 与 stop 请求不一致");
     }
     if (!isProcessAlive(input.controllerPid)) {
-        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程已断开，无法安全停止");
+        if (await terminateBrowserPid(state.browserPid, timeoutMs)) {
+            await cleanupSupervisorArtifacts(input.profileDir);
+            return;
+        }
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程已断开，且孤儿浏览器关闭超时");
     }
     const command = {
         action: "shutdown",
@@ -446,6 +493,10 @@ export const shutdownBrowserSession = async (input) => {
             return;
         }
         await sleep(100);
+    }
+    if (await terminateBrowserPid(state.browserPid, 1_000)) {
+        await cleanupSupervisorArtifacts(input.profileDir);
+        return;
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程关闭超时");
 };

@@ -86,6 +86,24 @@ const waitForLaunchLog = async (logPath: string): Promise<string> => {
   throw lastError ?? new Error("mock browser launch log not written in time");
 };
 
+const waitForExit = async (pid: number): Promise<void> => {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ESRCH") {
+        return;
+      }
+      throw error;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+  throw new Error(`process ${pid} did not exit in time`);
+};
+
 afterEach(async () => {
   process.env.WEBENVOY_BROWSER_PATH = originalBrowserPath;
   process.env.WEBENVOY_BROWSER_MOCK_LOG = originalBrowserMockLog;
@@ -225,6 +243,38 @@ describe("browser-launcher", () => {
       profileDir,
       controllerPid: launched.controllerPid,
       runId: "run-launcher-test-006"
+    });
+  });
+
+  it("stops orphan browser directly when supervisor has already died", async () => {
+    const { scriptPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-orphan-stop-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-007",
+      params: {}
+    });
+
+    process.kill(launched.controllerPid, "SIGKILL");
+    await waitForExit(launched.controllerPid);
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-007"
+    });
+
+    await waitForExit(launched.browserPid);
+    await expect(readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
     });
   });
 
