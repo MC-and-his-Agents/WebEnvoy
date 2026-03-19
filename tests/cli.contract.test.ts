@@ -25,11 +25,23 @@ const createRuntimeCwd = async (): Promise<string> => {
   return dir;
 };
 
-const runCli = (args: string[], cwd: string = repoRoot) =>
-  spawnSync(process.execPath, [binPath, ...args], {
+const runCli = (
+  args: string[],
+  cwdOrEnv: string | Record<string, string> = repoRoot,
+  env?: Record<string, string>
+) => {
+  const cwd = typeof cwdOrEnv === "string" ? cwdOrEnv : repoRoot;
+  const mergedEnv =
+    typeof cwdOrEnv === "string"
+      ? { ...process.env, ...env }
+      : { ...process.env, ...cwdOrEnv, ...env };
+
+  return spawnSync(process.execPath, [binPath, ...args], {
     cwd,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: mergedEnv
   });
+};
 
 const runCliAsync = (
   args: string[],
@@ -73,7 +85,9 @@ const assertLockMissing = async (profileDir: string): Promise<void> => {
 
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
-    const result = runCli(["runtime.ping", "--run-id", "run-contract-001"]);
+    const result = runCli(["runtime.ping", "--run-id", "run-contract-001"], {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
