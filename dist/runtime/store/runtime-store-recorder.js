@@ -1,4 +1,4 @@
-import { SQLiteRuntimeStore, resolveRuntimeStorePath } from "./sqlite-runtime-store.js";
+import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "./sqlite-runtime-store.js";
 const resolveSessionId = (summary) => {
     const directSession = summary.sessionId;
     if (typeof directSession === "string" && directSession.length > 0) {
@@ -112,4 +112,8 @@ export class RuntimeStoreRecorder {
         }
     }
 }
-export const createRuntimeStoreRecorder = (cwd) => new RuntimeStoreRecorder(cwd);
+export const createRuntimeStoreRecorder = (cwd) => process.env.WEBENVOY_RUNTIME_STORE_FORCE_UNAVAILABLE === "1"
+    ? (() => {
+        throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable (forced)");
+    })()
+    : new RuntimeStoreRecorder(cwd);

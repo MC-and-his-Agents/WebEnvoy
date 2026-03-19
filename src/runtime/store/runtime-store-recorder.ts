@@ -1,6 +1,7 @@
 import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
 import {
+  RuntimeStoreError,
   SQLiteRuntimeStore,
   type AppendRunEventInput,
   type UpsertRunInput,
@@ -147,4 +148,11 @@ export class RuntimeStoreRecorder {
 }
 
 export const createRuntimeStoreRecorder = (cwd: string): RuntimeStoreRecorder =>
-  new RuntimeStoreRecorder(cwd);
+  process.env.WEBENVOY_RUNTIME_STORE_FORCE_UNAVAILABLE === "1"
+    ? (() => {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_UNAVAILABLE",
+          "runtime store unavailable (forced)"
+        );
+      })()
+    : new RuntimeStoreRecorder(cwd);

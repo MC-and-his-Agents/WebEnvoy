@@ -80,6 +80,39 @@ describe("native messaging contract", () => {
     );
   });
 
+  it("does not override transport error when runtime store is unavailable", () => {
+    const result = runCli(
+      [
+        "runtime.ping",
+        "--run-id",
+        "run-nm-store-warning-001",
+        "--params",
+        '{"timeout_ms":100}'
+      ],
+      {
+        ...withNativeHost("drop-forward"),
+        WEBENVOY_RUNTIME_STORE_FORCE_UNAVAILABLE: "1"
+      }
+    );
+    expect(result.status).toBe(5);
+
+    const body = parseJson(result.stdout);
+    expect(body).toMatchObject({
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE"
+      }
+    });
+    expect(String((body.error as Record<string, unknown>).message)).toContain(
+      "ERR_TRANSPORT_TIMEOUT"
+    );
+    expect(String((body.error as Record<string, unknown>).message)).not.toContain(
+      "ERR_RUNTIME_STORE_UNAVAILABLE"
+    );
+    expect(result.stderr).toContain("\"type\":\"runtime_store_warning\"");
+    expect(result.stderr).toContain("\"code\":\"ERR_RUNTIME_STORE_UNAVAILABLE\"");
+  });
+
   it("maps transport disconnect to runtime unavailable exit code without loopback", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-nm-003"], withNativeHost("disconnect-on-forward"));
     expect(result.status).toBe(5);

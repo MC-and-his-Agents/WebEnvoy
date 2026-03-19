@@ -34,6 +34,25 @@ const normalizeCliError = (error: unknown): CliError => {
   return normalizeExecutionError(error);
 };
 
+const buildRuntimeStoreWarning = (
+  context: RuntimeContext,
+  error: RuntimeStoreError,
+  stage: "init" | "start" | "success" | "failure"
+): string =>
+  JSON.stringify({
+    type: "runtime_store_warning",
+    run_id: context.run_id,
+    command: context.command,
+    stage,
+    store_error: {
+      code: error.code,
+      message: error.message
+    }
+  });
+
+const shouldDowngradeRuntimeStoreError = (error: RuntimeStoreError): boolean =>
+  error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH";
+
 export const runCli = async (
   argv: string[],
   options?: {
@@ -49,32 +68,59 @@ export const runCli = async (
   const runIdHint = getRunIdHint(argv);
   let runtimeContext: RuntimeContext | null = null;
   let recorder: ReturnType<typeof createRuntimeStoreRecorder> | null = null;
+  let runtimeStoreWarning: string | null = null;
 
   try {
     const parsed = parseArgv(argv);
     const context = buildRuntimeContext(parsed, cwd);
     runtimeContext = context;
-    recorder = createRuntimeStoreRecorder(cwd);
-    await recorder.recordStart(context);
+    try {
+      recorder = createRuntimeStoreRecorder(cwd);
+      await recorder.recordStart(context);
+    } catch (storeError) {
+      if (isRuntimeStoreError(storeError) && shouldDowngradeRuntimeStoreError(storeError)) {
+        runtimeStoreWarning = buildRuntimeStoreWarning(context, storeError, "start");
+        recorder = null;
+      } else {
+        throw storeError;
+      }
+    }
     const summary = await executeCommand(context, createCommandRegistry());
-    await recorder.recordSuccess(context, summary);
+    if (recorder) {
+      try {
+        await recorder.recordSuccess(context, summary);
+      } catch (storeError) {
+        if (isRuntimeStoreError(storeError) && shouldDowngradeRuntimeStoreError(storeError)) {
+          runtimeStoreWarning = runtimeStoreWarning ?? buildRuntimeStoreWarning(context, storeError, "success");
+        } else {
+          throw storeError;
+        }
+      }
+    }
 
     writeJsonLine(stdout, buildSuccessResponse(context, summary));
     if (context.command === "runtime.help") {
       stderr.write("Use --params to pass structured JSON object parameters.\n");
     }
+    if (runtimeStoreWarning) {
+      stderr.write(`${runtimeStoreWarning}\n`);
+    }
     return successExitCode();
   } catch (error) {
-    let finalError: unknown = error;
+    const commandError = normalizeCliError(error);
     if (runtimeContext && recorder && !isRuntimeStoreError(error)) {
-      const commandError = normalizeCliError(error);
       try {
         await recorder.recordFailure(runtimeContext, commandError);
-      } catch (recordError) {
-        finalError = recordError;
+      } catch (storeError) {
+        if (isRuntimeStoreError(storeError) && shouldDowngradeRuntimeStoreError(storeError)) {
+          runtimeStoreWarning =
+            runtimeStoreWarning ?? buildRuntimeStoreWarning(runtimeContext, storeError, "failure");
+        } else {
+          throw storeError;
+        }
       }
     }
-    const cliError = normalizeCliError(finalError);
+    const cliError = commandError;
     const runId =
       runtimeContext?.run_id ??
       (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
@@ -84,9 +130,16 @@ export const runCli = async (
     if (cliError.code === "ERR_CLI_INVALID_ARGS") {
       stderr.write(`${cliError.message}\n`);
     }
+    if (runtimeStoreWarning) {
+      stderr.write(`${runtimeStoreWarning}\n`);
+    }
     return exitCodeForError(cliError.code);
   } finally {
-    recorder?.close();
+    try {
+      recorder?.close();
+    } catch {
+      // Close errors are non-blocking for CLI contract.
+    }
   }
 };
 
