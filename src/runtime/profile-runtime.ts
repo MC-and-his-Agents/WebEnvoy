@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import {
+  acquireProfileLock,
   createProfileLock,
+  DEFAULT_LOCK_STALE_MS,
   type ProfileLock
 } from "./profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "./profile-store.js";
@@ -22,6 +24,7 @@ import {
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
+const STOP_LOCK_DELETE_MAX_RETRIES = 3;
 
 type BrowserState = "absent" | "starting" | "ready" | "logging_in" | "stopping" | "disconnected";
 
@@ -40,8 +43,29 @@ interface ProfileStoreLike {
   writeMeta(profileName: string, meta: ProfileMeta): Promise<void>;
 }
 
+interface LockFileAdapter {
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  writeFile(
+    path: string,
+    data: string,
+    options?: { encoding?: "utf8"; flag?: string } | "utf8"
+  ): Promise<void>;
+  unlink(path: string): Promise<void>;
+}
+
 const isoNow = (): string => new Date().toISOString();
 type LockAcquisition = "new" | "same-owner" | "reclaimed";
+const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
+  readFile: async (path, encoding) => readFile(path, encoding),
+  writeFile: async (path, data, options) => {
+    if (typeof options === "string") {
+      await writeFile(path, data, options);
+      return;
+    }
+    await writeFile(path, data, options);
+  },
+  unlink: async (path) => unlink(path)
+};
 
 const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
   if (!lockHeld) {
@@ -120,12 +144,32 @@ const mapRuntimeError = (error: unknown): CliError => {
 
 export class ProfileRuntimeService {
   readonly #storeFactory: (cwd: string) => ProfileStoreLike;
+  readonly #lockFileAdapter: LockFileAdapter;
+  readonly #isProcessAlive: (pid: number) => boolean;
 
-  constructor(options?: { storeFactory?: (cwd: string) => ProfileStoreLike }) {
+  constructor(options?: {
+    storeFactory?: (cwd: string) => ProfileStoreLike;
+    lockFileAdapter?: LockFileAdapter;
+    isProcessAlive?: (pid: number) => boolean;
+  }) {
     this.#storeFactory =
       options?.storeFactory ??
       ((cwd: string) => {
         return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+      });
+    this.#lockFileAdapter = options?.lockFileAdapter ?? DEFAULT_LOCK_FILE_ADAPTER;
+    this.#isProcessAlive =
+      options?.isProcessAlive ??
+      ((pid: number) => {
+        if (!Number.isInteger(pid) || pid <= 0) {
+          return false;
+        }
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
       });
   }
 
@@ -370,6 +414,7 @@ export class ProfileRuntimeService {
       throw mapRuntimeError(error);
     }
 
+    const previousMeta = existingMeta;
     try {
       await store.writeMeta(
         input.profile,
@@ -382,8 +427,16 @@ export class ProfileRuntimeService {
           lastStoppedAt: nowIso
         })
       );
-      await this.#deleteLock(lockPath);
+      await this.#deleteLockWithRetry(lockPath);
     } catch (error) {
+      try {
+        await store.writeMeta(input.profile, previousMeta);
+      } catch (rollbackError) {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "runtime.stop 回滚失败，profile 状态可能不一致", {
+          retryable: true,
+          cause: rollbackError
+        });
+      }
       throw mapRuntimeError(error);
     }
 
@@ -436,7 +489,7 @@ export class ProfileRuntimeService {
 
   async #readLock(lockPath: string): Promise<ProfileLock | null> {
     try {
-      const raw = await readFile(lockPath, "utf8");
+      const raw = await this.#lockFileAdapter.readFile(lockPath, "utf8");
       return JSON.parse(raw) as ProfileLock;
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
@@ -448,7 +501,7 @@ export class ProfileRuntimeService {
   }
 
   async #writeLock(lockPath: string, lock: ProfileLock): Promise<void> {
-    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    await this.#lockFileAdapter.writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
   }
 
   async #rollbackLockOnStartFailure(lockPath: string, runId: string): Promise<void> {
@@ -480,7 +533,7 @@ export class ProfileRuntimeService {
       const nextLock = createProfileLock(nextRequest);
 
       try {
-        await writeFile(input.lockPath, `${JSON.stringify(nextLock, null, 2)}\n`, {
+        await this.#lockFileAdapter.writeFile(input.lockPath, `${JSON.stringify(nextLock, null, 2)}\n`, {
           encoding: "utf8",
           flag: "wx"
         });
@@ -507,9 +560,44 @@ export class ProfileRuntimeService {
         return { lock: updatedLock, acquisition: "same-owner" };
       }
 
-      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
-        retryable: true
-      });
+      let acquireResult;
+      try {
+        acquireResult = acquireProfileLock(existingLock, nextRequest, {
+          staleAfterMs: DEFAULT_LOCK_STALE_MS
+        });
+      } catch {
+        throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
+      }
+
+      if (acquireResult.status === "conflict") {
+        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
+          retryable: true
+        });
+      }
+
+      if (this.#isProcessAlive(existingLock.ownerPid)) {
+        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
+          retryable: true
+        });
+      }
+
+      await this.#deleteLock(input.lockPath);
+      try {
+        await this.#lockFileAdapter.writeFile(
+          input.lockPath,
+          `${JSON.stringify(acquireResult.lock, null, 2)}\n`,
+          {
+            encoding: "utf8",
+            flag: "wx"
+          }
+        );
+        return { lock: acquireResult.lock, acquisition: "reclaimed" };
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code !== "EEXIST") {
+          throw error;
+        }
+      }
     }
 
     throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁获取失败，请重试", {
@@ -519,13 +607,26 @@ export class ProfileRuntimeService {
 
   async #deleteLock(lockPath: string): Promise<void> {
     try {
-      await unlink(lockPath);
+      await this.#lockFileAdapter.unlink(lockPath);
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
       if (nodeError.code !== "ENOENT") {
         throw error;
       }
     }
+  }
+
+  async #deleteLockWithRetry(lockPath: string): Promise<void> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < STOP_LOCK_DELETE_MAX_RETRIES; attempt += 1) {
+      try {
+        await this.#deleteLock(lockPath);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   #patchMeta(

@@ -491,7 +491,7 @@ describe("webenvoy cli contract", () => {
     expect(afterStatusLock).toBe(beforeStatusLock);
   });
 
-  it("does not reclaim stale-looking lock without lease renewal mechanism", async () => {
+  it("reclaims stale lock when previous owner process is no longer alive", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
@@ -512,13 +512,22 @@ describe("webenvoy cli contract", () => {
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
       runtimeCwd
     );
-    expect(secondStart.status).toBe(5);
+    expect(secondStart.status).toBe(0);
     const secondBody = parseSingleJsonLine(secondStart.stdout);
     expect(secondBody).toMatchObject({
       command: "runtime.start",
-      status: "error",
-      error: { code: "ERR_PROFILE_LOCKED" }
+      status: "success",
+      summary: {
+        profile: "reclaim_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
+      }
     });
+
+    const updatedLockRaw = await readFile(lockPath, "utf8");
+    const updatedLock = JSON.parse(updatedLockRaw) as Record<string, unknown>;
+    expect(updatedLock.ownerRunId).toBe("run-contract-602");
   });
 
   it("marks disconnected in runtime.status when runtime meta is active but lock is missing", async () => {
