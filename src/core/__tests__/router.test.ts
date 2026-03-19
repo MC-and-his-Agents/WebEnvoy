@@ -16,7 +16,13 @@ describe("executeCommand", () => {
   it("returns summary when command is implemented", async () => {
     const summary = await executeCommand(baseContext, createCommandRegistry());
 
-    expect(summary).toMatchObject({ message: "ok" });
+    expect(summary).toMatchObject({
+      message: "pong",
+      transport: {
+        protocol: "webenvoy.native-bridge.v1",
+        state: "ready"
+      }
+    });
   });
 
   it("returns unknown command error for unregistered command", async () => {
