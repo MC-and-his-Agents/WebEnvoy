@@ -6,7 +6,6 @@ import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
-const PROFILE_LOCK_STALE_MS = 30_000;
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const isoNow = () => new Date().toISOString();
 const browserStateFromProfileState = (profileState, lockHeld) => {
@@ -66,7 +65,6 @@ const mapRuntimeError = (error) => {
 export class ProfileRuntimeService {
     async start(input) {
         const nowIso = isoNow();
-        const nowMs = Date.parse(nowIso);
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         await store.ensureProfileDir(input.profile);
@@ -75,26 +73,12 @@ export class ProfileRuntimeService {
             profileName: input.profile,
             lockPath,
             runId: input.runId,
-            nowIso,
-            nowMs
+            nowIso
         });
         let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
         const profileState = existingMeta.profileState;
         if (!isStartableProfileState(profileState)) {
-            if (lockAcquireResult.reclaimed) {
-                existingMeta = this.#patchMeta(existingMeta, {
-                    profileName: input.profile,
-                    profileDir,
-                    profileState: "disconnected",
-                    proxyBinding: existingMeta.proxyBinding,
-                    updatedAt: nowIso,
-                    lastDisconnectedAt: nowIso
-                });
-                await store.writeMeta(input.profile, existingMeta);
-            }
-            else {
-                throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
-            }
+            throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
         }
         let session = buildRuntimeSession(input.profile, existingMeta);
         try {
@@ -132,28 +116,11 @@ export class ProfileRuntimeService {
         };
     }
     async status(input) {
-        const nowIso = isoNow();
-        const nowMs = Date.parse(nowIso);
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
-        let meta = await this.#readMeta(store, input.profile);
-        let lock = await this.#readLock(lockPath);
-        if (lock && this.#shouldMarkDisconnected(lock, nowMs)) {
-            const baseMeta = meta ?? (await this.#readOrInitializeMeta(store, input.profile, nowIso));
-            const disconnectedMeta = this.#patchMeta(baseMeta, {
-                profileName: input.profile,
-                profileDir,
-                profileState: "disconnected",
-                proxyBinding: baseMeta.proxyBinding,
-                updatedAt: nowIso,
-                lastDisconnectedAt: nowIso
-            });
-            await store.writeMeta(input.profile, disconnectedMeta);
-            await this.#deleteLock(lockPath);
-            meta = disconnectedMeta;
-            lock = null;
-        }
+        const meta = await this.#readMeta(store, input.profile);
+        const lock = await this.#readLock(lockPath);
         const lockHeld = lock !== null;
         const profileState = meta?.profileState ?? "uninitialized";
         return {
@@ -259,7 +226,6 @@ export class ProfileRuntimeService {
         await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     }
     async #acquireProfileLockAtomically(input) {
-        let reclaimed = false;
         for (let attempt = 0; attempt < LOCK_ACQUIRE_MAX_RETRIES; attempt += 1) {
             const nextLock = createProfileLock({
                 profileName: input.profileName,
@@ -273,7 +239,7 @@ export class ProfileRuntimeService {
                     encoding: "utf8",
                     flag: "wx"
                 });
-                return { lock: nextLock, reclaimed };
+                return { lock: nextLock };
             }
             catch (error) {
                 const nodeError = error;
@@ -291,21 +257,7 @@ export class ProfileRuntimeService {
                     lastHeartbeatAt: input.nowIso
                 };
                 await this.#writeLock(input.lockPath, updated);
-                return { lock: updated, reclaimed };
-            }
-            if (this.#isLockStale(existingLock, input.nowMs)) {
-                try {
-                    await unlink(input.lockPath);
-                    reclaimed = true;
-                    continue;
-                }
-                catch (error) {
-                    const nodeError = error;
-                    if (nodeError.code === "ENOENT") {
-                        continue;
-                    }
-                    throw error;
-                }
+                return { lock: updated };
             }
             throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
                 retryable: true
@@ -325,16 +277,6 @@ export class ProfileRuntimeService {
                 throw error;
             }
         }
-    }
-    #shouldMarkDisconnected(lock, nowMs) {
-        return this.#isLockStale(lock, nowMs);
-    }
-    #isLockStale(lock, nowMs) {
-        const heartbeatMs = Date.parse(lock.lastHeartbeatAt);
-        if (Number.isNaN(heartbeatMs)) {
-            return true;
-        }
-        return nowMs - heartbeatMs > PROFILE_LOCK_STALE_MS;
     }
     #patchMeta(current, patch) {
         return {

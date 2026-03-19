@@ -292,7 +292,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("writes back disconnected state when lock heartbeat is stale", async () => {
+  it("keeps runtime.status as pure read even when lock heartbeat is stale", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
       ["runtime.start", "--profile", "stale_profile", "--run-id", "run-contract-501"],
@@ -308,6 +308,8 @@ describe("webenvoy cli contract", () => {
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    const beforeStatusMeta = await readFile(path.join(profileDir, "__webenvoy_meta.json"), "utf8");
+    const beforeStatusLock = await readFile(lockPath, "utf8");
 
     const status = runCli(["runtime.status", "--profile", "stale_profile"], runtimeCwd);
     expect(status.status).toBe(0);
@@ -317,14 +319,19 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         profile: "stale_profile",
-        profileState: "disconnected",
-        browserState: "disconnected",
-        lockHeld: false
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
       }
     });
+
+    const afterStatusMeta = await readFile(path.join(profileDir, "__webenvoy_meta.json"), "utf8");
+    const afterStatusLock = await readFile(lockPath, "utf8");
+    expect(afterStatusMeta).toBe(beforeStatusMeta);
+    expect(afterStatusLock).toBe(beforeStatusLock);
   });
 
-  it("converges stale-locked ready profile before next runtime.start", async () => {
+  it("does not auto-reclaim stale lock on runtime.start without heartbeat mechanism", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
@@ -345,16 +352,13 @@ describe("webenvoy cli contract", () => {
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
       runtimeCwd
     );
-    expect(secondStart.status).toBe(0);
+    expect(secondStart.status).toBe(5);
     const secondBody = parseSingleJsonLine(secondStart.stdout);
     expect(secondBody).toMatchObject({
       command: "runtime.start",
-      status: "success",
-      summary: {
-        profile: "reclaim_profile",
-        profileState: "ready",
-        browserState: "ready",
-        lockHeld: true
+      status: "error",
+      error: {
+        code: "ERR_PROFILE_LOCKED"
       }
     });
   });
