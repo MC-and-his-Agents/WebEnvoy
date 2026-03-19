@@ -248,6 +248,10 @@ export class NativeMessagingBridge {
             if (error instanceof NativeMessagingTransportError) {
                 throw error;
             }
+            const coded = transportCodeOf(error);
+            if (coded === "ERR_TRANSPORT_TIMEOUT") {
+                throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", asError(error).message);
+            }
             throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", asError(error).message);
         }
     }

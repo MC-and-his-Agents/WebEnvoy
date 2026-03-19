@@ -64,6 +64,9 @@ if (runtime?.onMessage?.addListener && runtime.sendMessage) {
             runId: typeof request.runId === "string" ? request.runId : request.id,
             profile: typeof request.profile === "string" ? request.profile : null,
             cwd: typeof request.cwd === "string" ? request.cwd : "",
+            timeoutMs: typeof request.timeoutMs === "number" && Number.isFinite(request.timeoutMs) && request.timeoutMs > 0
+                ? Math.floor(request.timeoutMs)
+                : 30_000,
             command: typeof request.command === "string" ? request.command : "",
             params: typeof request.params === "object" && request.params !== null
                 ? request.params

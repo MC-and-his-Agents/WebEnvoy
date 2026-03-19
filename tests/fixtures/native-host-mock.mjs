@@ -32,6 +32,10 @@ const success = (request, extra = {}) => ({
 
 const onRequest = (request) => {
   if (request.method === "bridge.open") {
+    if (mode === "drop-open") {
+      setTimeout(() => process.exit(0), 300);
+      return;
+    }
     if (mode === "fail-open") {
       writeMessage({
         id: request.id,

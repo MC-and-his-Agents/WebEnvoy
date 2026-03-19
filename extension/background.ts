@@ -9,6 +9,7 @@ type BridgeRequest = {
   method: "bridge.open" | "bridge.forward" | "__ping__";
   profile: string | null;
   params: Record<string, unknown>;
+  timeout_ms?: number;
 };
 
 type BridgeResponse = {
@@ -28,6 +29,15 @@ interface PendingForward {
 
 const defaultForwardTimeoutMs = 3_000;
 const defaultNativeHostName = "com.webenvoy.host";
+const readTimeoutMs = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 1) {
+    return null;
+  }
+  return Math.floor(value);
+};
 
 type RuntimeMessageSender = {
   tab?: {
@@ -125,12 +135,13 @@ export class BackgroundRelay {
       return;
     }
 
+    const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.#forwardTimeoutMs;
     const timeout = setTimeout(() => {
       this.#failPending(request.id, {
         code: "ERR_TRANSPORT_TIMEOUT",
         message: "content script forward timed out"
       });
-    }, this.#forwardTimeoutMs);
+    }, timeoutMs);
     this.#pending.set(request.id, { request, timeout });
     const forward: BackgroundToContentMessage = {
       kind: "forward",
@@ -138,6 +149,7 @@ export class BackgroundRelay {
       runId: String(request.params.run_id ?? request.id),
       profile: typeof request.profile === "string" ? request.profile : null,
       cwd: String(request.params.cwd ?? ""),
+      timeoutMs,
       command: String(request.params.command ?? ""),
       params:
         typeof request.params === "object" && request.params !== null
@@ -324,7 +336,7 @@ class ChromeBackgroundBridge {
       return;
     }
 
-    const timeoutMs = this.options?.forwardTimeoutMs ?? defaultForwardTimeoutMs;
+    const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.options?.forwardTimeoutMs ?? defaultForwardTimeoutMs;
     const timeout = setTimeout(() => {
       this.#failPending(request.id, {
         code: "ERR_TRANSPORT_TIMEOUT",
@@ -339,6 +351,7 @@ class ChromeBackgroundBridge {
       runId: String(request.params.run_id ?? request.id),
       profile: typeof request.profile === "string" ? request.profile : null,
       cwd: String(request.params.cwd ?? ""),
+      timeoutMs,
       command: String(request.params.command ?? ""),
       params:
         typeof request.params === "object" && request.params !== null

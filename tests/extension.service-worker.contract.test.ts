@@ -70,7 +70,8 @@ describe("extension service worker entry contract", () => {
           foo: "bar"
         },
         cwd: "/workspace/WebEnvoy"
-      }
+      },
+      timeout_ms: 123
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -81,6 +82,7 @@ describe("extension service worker entry contract", () => {
         runId: "run-001",
         profile: "profile-a",
         cwd: "/workspace/WebEnvoy",
+        timeoutMs: 123,
         command: "runtime.ping"
       })
     );

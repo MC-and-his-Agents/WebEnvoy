@@ -78,7 +78,7 @@ describe("extension background relay contract", () => {
 
   it("returns ERR_TRANSPORT_TIMEOUT when content script does not respond", async () => {
     const contentScript = new ContentScriptHandler();
-    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 10 });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 3_000 });
 
     const responsePromise = waitForResponse(relay);
     relay.onNativeRequest({
@@ -93,7 +93,8 @@ describe("extension background relay contract", () => {
         },
         cwd: "/workspace/WebEnvoy"
       },
-      profile: "profile-a"
+      profile: "profile-a",
+      timeout_ms: 10
     });
 
     const response = await responsePromise;

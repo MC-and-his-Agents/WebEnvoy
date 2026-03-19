@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -41,5 +43,35 @@ describe("native host bridge transport classification", () => {
     ).rejects.toMatchObject({
       transportCode: "ERR_TRANSPORT_DISCONNECTED"
     });
+  });
+
+  it("classifies open response timeout as timeout error", async () => {
+    const mockNativeHostPath = path.resolve(
+      path.join(import.meta.dirname, "../../../../tests/fixtures/native-host-mock.mjs")
+    );
+    const hostCommand = `"${process.execPath}" "${mockNativeHostPath}"`;
+    const previousMode = process.env.WEBENVOY_NATIVE_HOST_MODE;
+    process.env.WEBENVOY_NATIVE_HOST_MODE = "drop-open";
+
+    try {
+      const transport = new NativeHostBridgeTransport(hostCommand);
+      await expect(
+        transport.open(
+          createBridgeOpenRequest({
+            id: "open-timeout-001",
+            profile: "profile-a",
+            timeoutMs: 50
+          })
+        )
+      ).rejects.toMatchObject({
+        transportCode: "ERR_TRANSPORT_TIMEOUT"
+      });
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.WEBENVOY_NATIVE_HOST_MODE;
+      } else {
+        process.env.WEBENVOY_NATIVE_HOST_MODE = previousMode;
+      }
+    }
   });
 });

@@ -101,7 +101,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
           return;
         }
         this.#pending.delete(request.id);
-        const code = phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_TIMEOUT";
+        const code = "ERR_TRANSPORT_TIMEOUT";
         pending.reject(withTransportCode(new Error("native host response timeout"), code));
       }, timeoutMs);
 
