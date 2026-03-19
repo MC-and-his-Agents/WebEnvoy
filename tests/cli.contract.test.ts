@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -29,6 +29,29 @@ const runCli = (args: string[], cwd: string = repoRoot) =>
   spawnSync(process.execPath, [binPath, ...args], {
     cwd,
     encoding: "utf8"
+  });
+
+const runCliAsync = (
+  args: string[],
+  cwd: string = repoRoot
+): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [binPath, ...args], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr });
+    });
   });
 
 const parseSingleJsonLine = (stdout: string) => {
@@ -182,6 +205,32 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("allows only one successful runtime.start under concurrent race", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+
+    const [first, second] = await Promise.all([
+      runCliAsync(
+        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-211"],
+        runtimeCwd
+      ),
+      runCliAsync(
+        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-212"],
+        runtimeCwd
+      )
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([0, 5]);
+
+    const failed = first.status === 5 ? first : second;
+    const failedBody = parseSingleJsonLine(failed.stdout);
+    expect(failedBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_LOCKED" }
+    });
+  });
+
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
@@ -271,6 +320,41 @@ describe("webenvoy cli contract", () => {
         profileState: "disconnected",
         browserState: "disconnected",
         lockHeld: false
+      }
+    });
+  });
+
+  it("converges stale-locked ready profile before next runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const firstStart = runCli(
+      ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
+      runtimeCwd
+    );
+    expect(firstStart.status).toBe(0);
+    const firstBody = parseSingleJsonLine(firstStart.stdout);
+    const firstSummary = firstBody.summary as Record<string, unknown>;
+    const profileDir = String(firstSummary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const secondStart = runCli(
+      ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
+      runtimeCwd
+    );
+    expect(secondStart.status).toBe(0);
+    const secondBody = parseSingleJsonLine(secondStart.stdout);
+    expect(secondBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile: "reclaim_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
       }
     });
   });
