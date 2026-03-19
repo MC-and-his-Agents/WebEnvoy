@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -191,7 +191,7 @@ describe("webenvoy cli contract", () => {
     expect(start.status).toBe(0);
 
     const stop = runCli(
-      ["runtime.stop", "--profile", "stop_profile", "--run-id", "run-contract-302"],
+      ["runtime.stop", "--profile", "stop_profile", "--run-id", "run-contract-301"],
       runtimeCwd
     );
     expect(stop.status).toBe(0);
@@ -217,6 +217,59 @@ describe("webenvoy cli contract", () => {
         profile: "stop_profile",
         profileState: "stopped",
         browserState: "absent",
+        lockHeld: false
+      }
+    });
+  });
+
+  it("rejects runtime.stop when run_id does not own profile lock", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "owned_profile", "--run-id", "run-contract-401"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "owned_profile", "--run-id", "run-contract-402"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(5);
+    const body = parseSingleJsonLine(stop.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.stop",
+      status: "error",
+      error: { code: "ERR_PROFILE_OWNER_CONFLICT" }
+    });
+  });
+
+  it("writes back disconnected state when lock heartbeat is stale", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "stale_profile", "--run-id", "run-contract-501"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const status = runCli(["runtime.status", "--profile", "stale_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "stale_profile",
+        profileState: "disconnected",
+        browserState: "disconnected",
         lockHeld: false
       }
     });

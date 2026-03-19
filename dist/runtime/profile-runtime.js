@@ -6,6 +6,7 @@ import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
+const PROFILE_LOCK_STALE_MS = 30_000;
 const isoNow = () => new Date().toISOString();
 const browserStateFromProfileState = (profileState, lockHeld) => {
     if (!lockHeld) {
@@ -116,11 +117,28 @@ export class ProfileRuntimeService {
         };
     }
     async status(input) {
+        const nowIso = isoNow();
+        const nowMs = Date.parse(nowIso);
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
-        const meta = await this.#readMeta(store, input.profile);
-        const lock = await this.#readLock(lockPath);
+        let meta = await this.#readMeta(store, input.profile);
+        let lock = await this.#readLock(lockPath);
+        if (lock && this.#shouldMarkDisconnected(lock, nowMs)) {
+            const baseMeta = meta ?? (await this.#readOrInitializeMeta(store, input.profile, nowIso));
+            const disconnectedMeta = this.#patchMeta(baseMeta, {
+                profileName: input.profile,
+                profileDir,
+                profileState: "disconnected",
+                proxyBinding: baseMeta.proxyBinding,
+                updatedAt: nowIso,
+                lastDisconnectedAt: nowIso
+            });
+            await store.writeMeta(input.profile, disconnectedMeta);
+            await this.#deleteLock(lockPath);
+            meta = disconnectedMeta;
+            lock = null;
+        }
         const lockHeld = lock !== null;
         const profileState = meta?.profileState ?? "uninitialized";
         return {
@@ -143,6 +161,9 @@ export class ProfileRuntimeService {
         if (!existingMeta || !lock) {
             throw new CliError("ERR_PROFILE_STATE_CONFLICT", "profile 当前未持锁或未启动");
         }
+        if (lock.ownerRunId !== input.runId) {
+            throw new CliError("ERR_PROFILE_OWNER_CONFLICT", "runtime.stop run_id 与 profile 锁所有者不一致", { retryable: false });
+        }
         let session = buildRuntimeSession(input.profile, existingMeta);
         session = {
             ...session,
@@ -150,7 +171,7 @@ export class ProfileRuntimeService {
         };
         try {
             const stopping = beginStopSession(session, {
-                runId: lock.ownerRunId,
+                runId: input.runId,
                 nowIso
             });
             session = markSessionStopped(stopping);
@@ -233,6 +254,13 @@ export class ProfileRuntimeService {
             }
         }
     }
+    #shouldMarkDisconnected(lock, nowMs) {
+        const heartbeatMs = Date.parse(lock.lastHeartbeatAt);
+        if (Number.isNaN(heartbeatMs)) {
+            return true;
+        }
+        return nowMs - heartbeatMs > PROFILE_LOCK_STALE_MS;
+    }
     #patchMeta(current, patch) {
         return {
             ...current,
@@ -242,7 +270,8 @@ export class ProfileRuntimeService {
             proxyBinding: patch.proxyBinding,
             updatedAt: patch.updatedAt,
             lastStartedAt: patch.lastStartedAt ?? current.lastStartedAt,
-            lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt
+            lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt,
+            lastDisconnectedAt: patch.lastDisconnectedAt ?? current.lastDisconnectedAt
         };
     }
 }
