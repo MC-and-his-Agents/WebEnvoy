@@ -3,6 +3,7 @@ const DEFAULT_MAX_TITLE_LENGTH = 120;
 const DEFAULT_MAX_FAILURE_SUMMARY_LENGTH = 160;
 const DEFAULT_MAX_REQUEST_REASON_LENGTH = 120;
 const DEFAULT_MAX_FAILURE_TARGET_LENGTH = 160;
+const REDACTED = "[REDACTED]";
 
 export type ObservabilityCoverage = "complete" | "partial" | "unavailable";
 export type RequestEvidenceState = "available" | "none";
@@ -169,6 +170,23 @@ const sanitizeFailureTarget = (value: string): string => {
   return normalized;
 };
 
+const sanitizeFreeText = (value: string): string =>
+  value
+    .replace(/\bauthorization\s*:\s*[^\n\r]+/gi, `authorization: ${REDACTED}`)
+    .replace(/\bcookie\s*:\s*[^\n\r]+/gi, `cookie: ${REDACTED}`)
+    .replace(
+      /([?&])(token|access_token|id_token|refresh_token|signature|sig|auth|code)=([^&#\s]+)/gi,
+      (_match, prefix: string, key: string) => `${prefix}${key}=${REDACTED}`
+    )
+    .replace(
+      /\b(token|access_token|id_token|refresh_token|signature|sig|auth|code)\s*=\s*([^&\s,;]+)/gi,
+      (_match, key: string) => `${key}=${REDACTED}`
+    )
+    .replace(
+      /\b(token|access_token|id_token|refresh_token|signature|sig|auth|code)\s*:\s*([^\s,;]+)/gi,
+      (_match, key: string) => `${key}: ${REDACTED}`
+    );
+
 export const normalizePageState = (
   input: PageStateInput | null | undefined,
   options?: ObservabilityOptions
@@ -224,7 +242,7 @@ const normalizeKeyRequest = (
 
   const failureReason = nonEmpty(input.failure_reason, "");
   if (failureReason.length > 0) {
-    const truncated = truncate(failureReason, maxReasonLength);
+    const truncated = truncate(sanitizeFreeText(failureReason), maxReasonLength);
     output.failure_reason = truncated.value;
     if (truncated.truncated) {
       output.failure_reason_truncated = true;
@@ -245,7 +263,10 @@ export const normalizeKeyRequests = (
 ): KeyRequest[] => {
   const maxRequests = options?.maxRequests ?? DEFAULT_MAX_REQUESTS;
   const list = Array.isArray(input) ? input : [];
-  return list.slice(0, Math.max(0, maxRequests)).map((item) => normalizeKeyRequest(item, options));
+  const normalized = list
+    .filter((item): item is KeyRequestInput => item !== null && typeof item === "object" && !Array.isArray(item))
+    .slice(0, Math.max(0, maxRequests));
+  return normalized.map((item) => normalizeKeyRequest(item, options));
 };
 
 export const normalizeFailureSite = (
@@ -262,7 +283,7 @@ export const normalizeFailureSite = (
     nonEmpty(sanitizeFailureTarget(nonEmpty(input.target, "unknown")), "unknown"),
     maxTargetLength
   );
-  const summary = truncate(nonEmpty(input.summary, "unknown"), maxSummaryLength);
+  const summary = truncate(sanitizeFreeText(nonEmpty(input.summary, "unknown")), maxSummaryLength);
   return {
     stage: nonEmpty(input.stage, "unknown"),
     component: nonEmpty(input.component, "unknown"),

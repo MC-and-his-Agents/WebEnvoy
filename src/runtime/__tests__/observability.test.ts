@@ -56,6 +56,26 @@ describe("observability", () => {
     });
   });
 
+  it("filters invalid key request items instead of throwing", () => {
+    const keyRequests = normalizeKeyRequests(
+      [
+        null as unknown as never,
+        "bad-item" as unknown as never,
+        {
+          request_id: "req-1",
+          stage: "request",
+          method: "GET",
+          url: "/api/feed?token=abc",
+          outcome: "completed"
+        }
+      ],
+      { maxRequests: 10 }
+    );
+
+    expect(keyRequests).toHaveLength(1);
+    expect(keyRequests[0]?.request_id).toBe("req-1");
+  });
+
   it("builds bounded observability payload", () => {
     const payload = buildObservabilityPayload(
       {
@@ -118,6 +138,45 @@ describe("observability", () => {
         "failure_site.summary"
       ]
     });
+  });
+
+  it("redacts sensitive data in request failure reason and failure summary", () => {
+    const payload = buildObservabilityPayload(
+      {
+        page_state: null,
+        key_requests: [
+          {
+            request_id: "req-1",
+            stage: "request",
+            method: "GET",
+            url: "https://example.com/api/feed?token=abc",
+            outcome: "failed",
+            failure_reason:
+              "authorization: Bearer SECRET cookie: sid=xyz token=abc123 signature=deadbeef code=oauth123"
+          }
+        ],
+        failure_site: {
+          stage: "request",
+          component: "network",
+          target: "/api/feed",
+          summary: "cookie: sid=xyz token=abc123 signature=deadbeef"
+        }
+      },
+      {
+        maxRequestReasonLength: 240,
+        maxFailureSummaryLength: 240
+      }
+    );
+
+    expect(payload.key_requests[0]?.failure_reason).toContain("[REDACTED]");
+    expect(payload.key_requests[0]?.failure_reason).not.toContain("SECRET");
+    expect(payload.key_requests[0]?.failure_reason).not.toContain("abc123");
+    expect(payload.key_requests[0]?.failure_reason).not.toContain("deadbeef");
+
+    expect(payload.failure_site?.summary).toContain("[REDACTED]");
+    expect(payload.failure_site?.summary).not.toContain("sid=xyz");
+    expect(payload.failure_site?.summary).not.toContain("abc123");
+    expect(payload.failure_site?.summary).not.toContain("deadbeef");
   });
 
   it("does not fabricate page state when no observability source exists", () => {
