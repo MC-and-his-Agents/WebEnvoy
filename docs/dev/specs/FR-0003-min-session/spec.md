@@ -139,13 +139,6 @@ When 调用 `runtime.login --profile <name>` 并完成手动登录确认
 Then Profile 状态会从 `ready` 进入 `logging_in` 再回到 `ready`  
 And 登录态相关的最小持久化摘要会被保存到该 Profile 元数据
 
-### 场景 8：`localStorageSnapshots` 在 FR-0003 中不要求自动回写浏览器会话
-
-Given 一个 Profile 的 `__webenvoy_meta.json` 已保存 `localStorageSnapshots`  
-When 后续再次执行 `runtime.start --profile <name>`  
-Then 命令返回与状态回读可以暴露最小会话摘要 / 恢复输入  
-And 本 FR 不要求自动把该快照回写到浏览器会话
-
 ### 场景 5：同一 Profile 的并发启动会被拒绝
 
 Given 一个 Profile 已被某个 CLI 进程持有  
@@ -168,6 +161,13 @@ When 浏览器进程崩溃或连接断开
 Then Profile 状态必须进入 `disconnected`  
 And `runtime.status` 必须能读回该状态  
 And 后续重新 `runtime.start` 可以重新进入 `starting`
+
+### 场景 8：`localStorageSnapshots` 在 FR-0003 中不要求自动回写浏览器会话
+
+Given 一个 Profile 的 `__webenvoy_meta.json` 已保存 `localStorageSnapshots`  
+When 后续再次执行 `runtime.start --profile <name>`  
+Then 命令返回与状态回读可以暴露最小会话摘要 / 恢复输入  
+And 本 FR 不要求自动把该快照回写到浏览器会话
 
 ## 异常与边界场景
 
