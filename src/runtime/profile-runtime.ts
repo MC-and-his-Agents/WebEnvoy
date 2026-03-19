@@ -3,7 +3,12 @@ import { join } from "node:path";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
-import { createProfileLock, type ProfileLock } from "./profile-lock.js";
+import {
+  acquireProfileLock,
+  createProfileLock,
+  DEFAULT_LOCK_STALE_MS,
+  type ProfileLock
+} from "./profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "./profile-store.js";
 import type { ProfileState } from "./profile-state.js";
 import {
@@ -37,6 +42,7 @@ interface ProfileStoreLike {
 }
 
 const isoNow = (): string => new Date().toISOString();
+type LockAcquisition = "new" | "same-owner" | "reclaimed";
 
 const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
   if (!lockHeld) {
@@ -74,6 +80,17 @@ const parseProxyUrl = (params: JsonObject): string | null | undefined => {
 
 const isStartableProfileState = (state: ProfileState): boolean =>
   state === "uninitialized" || state === "stopped" || state === "disconnected";
+const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
+  state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
+
+const isLockHeartbeatStale = (lock: ProfileLock, nowIso: string): boolean => {
+  const now = Date.parse(nowIso);
+  const lastHeartbeat = Date.parse(lock.lastHeartbeatAt);
+  if (Number.isNaN(now) || Number.isNaN(lastHeartbeat)) {
+    return true;
+  }
+  return now - lastHeartbeat > DEFAULT_LOCK_STALE_MS;
+};
 
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
@@ -125,7 +142,22 @@ export class ProfileRuntimeService {
 
     try {
       let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
-      const profileState = existingMeta.profileState;
+      const recoveredMeta =
+        lockAcquireResult.acquisition !== "same-owner" &&
+        (existingMeta.profileState === "ready" ||
+          existingMeta.profileState === "logging_in" ||
+          existingMeta.profileState === "starting" ||
+          existingMeta.profileState === "stopping")
+          ? this.#patchMeta(existingMeta, {
+              profileName: input.profile,
+              profileDir,
+              profileState: "disconnected",
+              proxyBinding: existingMeta.proxyBinding,
+              updatedAt: nowIso,
+              lastDisconnectedAt: nowIso
+            })
+          : existingMeta;
+      const profileState = recoveredMeta.profileState;
       if (!isStartableProfileState(profileState)) {
         throw new CliError(
           "ERR_PROFILE_STATE_CONFLICT",
@@ -133,7 +165,7 @@ export class ProfileRuntimeService {
         );
       }
 
-      let session = buildRuntimeSession(input.profile, existingMeta);
+      let session = buildRuntimeSession(input.profile, recoveredMeta);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -147,7 +179,7 @@ export class ProfileRuntimeService {
 
       await store.writeMeta(
         input.profile,
-        this.#patchMeta(existingMeta, {
+        this.#patchMeta(recoveredMeta, {
           profileName: input.profile,
           profileDir,
           profileState: session.profileState,
@@ -156,7 +188,6 @@ export class ProfileRuntimeService {
           lastStartedAt: nowIso
         })
       );
-      await this.#writeLock(lockPath, lockAcquireResult.lock);
 
       startSucceeded = true;
       return {
@@ -178,14 +209,20 @@ export class ProfileRuntimeService {
   }
 
   async status(input: RuntimeActionInput): Promise<JsonObject> {
+    const nowIso = isoNow();
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     const lockPath = this.#getLockPath(profileDir);
     const meta = await this.#readMeta(store, input.profile);
     const lock = await this.#readLock(lockPath);
 
-    const lockHeld = lock !== null;
-    const profileState: ProfileState = meta?.profileState ?? "uninitialized";
+    const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
+    const activeState = isRuntimeActiveProfileState(storedProfileState);
+    const healthyLock = lock !== null && !isLockHeartbeatStale(lock, nowIso);
+    const profileState: ProfileState =
+      activeState && !healthyLock ? "disconnected" : storedProfileState;
+    const lockHeld = activeState && healthyLock;
+
     return {
       profile: input.profile,
       profileState,
@@ -233,18 +270,28 @@ export class ProfileRuntimeService {
       throw mapRuntimeError(error);
     }
 
-    await store.writeMeta(
-      input.profile,
-      this.#patchMeta(existingMeta, {
-        profileName: input.profile,
-        profileDir,
-        profileState: session.profileState,
-        proxyBinding: session.proxyBinding,
-        updatedAt: nowIso,
-        lastStoppedAt: nowIso
-      })
-    );
-    await this.#deleteLock(lockPath);
+    let lockReleased = false;
+    try {
+      await this.#deleteLock(lockPath);
+      lockReleased = true;
+
+      await store.writeMeta(
+        input.profile,
+        this.#patchMeta(existingMeta, {
+          profileName: input.profile,
+          profileDir,
+          profileState: session.profileState,
+          proxyBinding: session.proxyBinding,
+          updatedAt: nowIso,
+          lastStoppedAt: nowIso
+        })
+      );
+    } catch (error) {
+      if (lockReleased) {
+        await this.#restoreLockOnStopFailure(lockPath, lock);
+      }
+      throw mapRuntimeError(error);
+    }
 
     return {
       profile: input.profile,
@@ -326,23 +373,24 @@ export class ProfileRuntimeService {
     lockPath: string;
     runId: string;
     nowIso: string;
-  }): Promise<{ lock: ProfileLock }> {
+  }): Promise<{ lock: ProfileLock; acquisition: LockAcquisition }> {
 
     for (let attempt = 0; attempt < LOCK_ACQUIRE_MAX_RETRIES; attempt += 1) {
-      const nextLock = createProfileLock({
+      const nextRequest = {
         profileName: input.profileName,
         lockPath: input.lockPath,
         ownerPid: process.pid,
         ownerRunId: input.runId,
         nowIso: input.nowIso
-      });
+      };
+      const nextLock = createProfileLock(nextRequest);
 
       try {
         await writeFile(input.lockPath, `${JSON.stringify(nextLock, null, 2)}\n`, {
           encoding: "utf8",
           flag: "wx"
         });
-        return { lock: nextLock };
+        return { lock: nextLock, acquisition: "new" };
       } catch (error) {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code !== "EEXIST") {
@@ -355,18 +403,39 @@ export class ProfileRuntimeService {
         continue;
       }
 
-      if (existingLock.ownerPid === process.pid && existingLock.ownerRunId === input.runId) {
-        const updated = {
-          ...existingLock,
-          lastHeartbeatAt: input.nowIso
-        };
-        await this.#writeLock(input.lockPath, updated);
-        return { lock: updated };
+      let acquireResult;
+      try {
+        acquireResult = acquireProfileLock(existingLock, nextRequest, {
+          staleAfterMs: DEFAULT_LOCK_STALE_MS
+        });
+      } catch {
+        throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
       }
 
-      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
-        retryable: true
-      });
+      if (acquireResult.status === "conflict") {
+        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
+          retryable: true
+        });
+      }
+
+      if (acquireResult.status === "acquired") {
+        await this.#writeLock(input.lockPath, acquireResult.lock);
+        return { lock: acquireResult.lock, acquisition: "same-owner" };
+      }
+
+      await this.#deleteLock(input.lockPath);
+      try {
+        await writeFile(input.lockPath, `${JSON.stringify(acquireResult.lock, null, 2)}\n`, {
+          encoding: "utf8",
+          flag: "wx"
+        });
+        return { lock: acquireResult.lock, acquisition: "reclaimed" };
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code !== "EEXIST") {
+          throw error;
+        }
+      }
     }
 
     throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁获取失败，请重试", {
@@ -382,6 +451,17 @@ export class ProfileRuntimeService {
       if (nodeError.code !== "ENOENT") {
         throw error;
       }
+    }
+  }
+
+  async #restoreLockOnStopFailure(lockPath: string, lock: ProfileLock): Promise<void> {
+    try {
+      await this.#writeLock(lockPath, lock);
+    } catch (cause) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", "runtime.stop 回滚失败，profile 锁状态可能不一致", {
+        retryable: true,
+        cause
+      });
     }
   }
 

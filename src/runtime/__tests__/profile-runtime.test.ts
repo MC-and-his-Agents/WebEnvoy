@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
-import type { ProfileMeta } from "../profile-store.js";
+import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
 const tempDirs: string[] = [];
 
@@ -61,6 +61,37 @@ class FailingWriteProfileStore {
   }
 }
 
+class StopMetaWriteFailProfileStore {
+  readonly #delegate: ProfileStore;
+
+  constructor(rootDir: string) {
+    this.#delegate = new ProfileStore(rootDir);
+  }
+
+  ensureProfileDir(profileName: string): Promise<string> {
+    return this.#delegate.ensureProfileDir(profileName);
+  }
+
+  getProfileDir(profileName: string): string {
+    return this.#delegate.getProfileDir(profileName);
+  }
+
+  readMeta(profileName: string): Promise<ProfileMeta | null> {
+    return this.#delegate.readMeta(profileName);
+  }
+
+  initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta> {
+    return this.#delegate.initializeMeta(profileName, nowIso);
+  }
+
+  async writeMeta(profileName: string, meta: ProfileMeta): Promise<void> {
+    if (meta.profileState === "stopped") {
+      throw new Error("simulated stop meta write failure");
+    }
+    await this.#delegate.writeMeta(profileName, meta);
+  }
+}
+
 describe("profile-runtime start rollback", () => {
   it("rolls back lock file when meta write fails", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-"));
@@ -85,5 +116,48 @@ describe("profile-runtime start rollback", () => {
     await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+});
+
+describe("profile-runtime stop rollback", () => {
+  it("restores lock when stop fails after lock release", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-"));
+    tempDirs.push(baseDir);
+    const profileRootDir = join(baseDir, ".webenvoy", "profiles");
+    const service = new ProfileRuntimeService({
+      storeFactory: () => new StopMetaWriteFailProfileStore(profileRootDir)
+    });
+
+    const start = await service.start({
+      cwd: baseDir,
+      profile: "rollback_stop_profile",
+      runId: "run-runtime-test-101",
+      params: {}
+    });
+    expect(start).toMatchObject({
+      profile: "rollback_stop_profile",
+      profileState: "ready",
+      lockHeld: true
+    });
+
+    await expect(
+      service.stop({
+        cwd: baseDir,
+        profile: "rollback_stop_profile",
+        runId: "run-runtime-test-101",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_UNAVAILABLE"
+    });
+
+    const lockPath = join(profileRootDir, "rollback_stop_profile", "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    expect(lockRaw).toContain("\"ownerRunId\": \"run-runtime-test-101\"");
+
+    const metaPath = join(profileRootDir, "rollback_stop_profile", "__webenvoy_meta.json");
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as ProfileMeta;
+    expect(meta.profileState).toBe("ready");
   });
 });

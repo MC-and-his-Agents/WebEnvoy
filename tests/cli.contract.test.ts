@@ -324,7 +324,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("keeps runtime.status as pure read even when lock heartbeat is stale", async () => {
+  it("marks disconnected in runtime.status when lock heartbeat is stale", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
       ["runtime.start", "--profile", "stale_profile", "--run-id", "run-contract-501"],
@@ -351,9 +351,9 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         profile: "stale_profile",
-        profileState: "ready",
-        browserState: "ready",
-        lockHeld: true
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: false
       }
     });
 
@@ -363,7 +363,7 @@ describe("webenvoy cli contract", () => {
     expect(afterStatusLock).toBe(beforeStatusLock);
   });
 
-  it("does not auto-reclaim stale lock on runtime.start without heartbeat mechanism", async () => {
+  it("auto-reclaims stale lock on runtime.start", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
@@ -384,18 +384,59 @@ describe("webenvoy cli contract", () => {
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
       runtimeCwd
     );
-    expect(secondStart.status).toBe(5);
+    expect(secondStart.status).toBe(0);
     const secondBody = parseSingleJsonLine(secondStart.stdout);
     expect(secondBody).toMatchObject({
       command: "runtime.start",
-      status: "error",
-      error: {
-        code: "ERR_PROFILE_LOCKED"
+      status: "success",
+      summary: {
+        profile: "reclaim_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
       }
     });
+
+    const updatedLockRaw = await readFile(lockPath, "utf8");
+    const updatedLock = JSON.parse(updatedLockRaw) as Record<string, unknown>;
+    expect(updatedLock.ownerRunId).toBe("run-contract-602");
   });
 
-  it("cleans lock when runtime.start fails by profile state conflict", async () => {
+  it("marks disconnected in runtime.status when runtime meta is active but lock is missing", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "missing_lock_profile", "--run-id", "run-contract-651"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const beforeStatusMeta = await readFile(metaPath, "utf8");
+
+    await rm(lockPath, { force: true });
+
+    const status = runCli(["runtime.status", "--profile", "missing_lock_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "missing_lock_profile",
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: false
+      }
+    });
+
+    const afterStatusMeta = await readFile(metaPath, "utf8");
+    expect(afterStatusMeta).toBe(beforeStatusMeta);
+  });
+
+  it("allows runtime.start recovery when profile state is active but lock is missing", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
       ["runtime.start", "--profile", "state_conflict_profile", "--run-id", "run-contract-701"],
@@ -422,13 +463,17 @@ describe("webenvoy cli contract", () => {
       ["runtime.start", "--profile", "state_conflict_profile", "--run-id", "run-contract-702"],
       runtimeCwd
     );
-    expect(conflictStart.status).toBe(5);
+    expect(conflictStart.status).toBe(0);
     const conflictBody = parseSingleJsonLine(conflictStart.stdout);
     expect(conflictBody).toMatchObject({
       command: "runtime.start",
-      status: "error",
-      error: { code: "ERR_PROFILE_STATE_CONFLICT" }
+      status: "success",
+      summary: {
+        profile: "state_conflict_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
+      }
     });
-    await assertLockMissing(profileDir);
   });
 });
