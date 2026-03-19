@@ -53,6 +53,53 @@ CLI 在进入处理器前，必须把输入标准化为：
   - 字符串
   - 记录调用时工作目录
 
+## 最小调用语法
+
+冻结的最小 argv 形式：
+
+```text
+webenvoy <command> [--params '<json>'] [--profile <profile>] [--run-id <run_id>]
+```
+
+规则：
+
+- `<command>`
+  - 必填位置参数
+  - 必须位于 `webenvoy` 之后的第一个参数位置
+- `--params`
+  - 结构化参数的唯一正式入口
+  - 值必须是 JSON 对象字符串
+  - 未传入时，标准化上下文中的 `params` 为 `{}`
+- `--profile`
+  - 可选
+  - 仅在命令声明依赖身份 / 会话时才必填
+- `--run-id`
+  - 可选
+  - 未传入时由 CLI 自动生成
+
+本 FR 不冻结：
+
+- 短参数别名
+- 其他等价写法
+- 自由文本位置参数
+
+后续 FR 不得绕开这套最小调用语法，自行引入另一套外层 argv 契约。
+
+## 最小帮助 / 诊断调用
+
+Phase 1 只冻结最小帮助 / 诊断调用，不扩张成完整命令面：
+
+- `webenvoy runtime.help`
+- `webenvoy runtime.ping`
+
+它们仍然复用同一套调用语法，例如：
+
+```text
+webenvoy runtime.help
+webenvoy runtime.ping --run-id run-20260319-0001
+webenvoy runtime.help --params '{}'
+```
+
 ## 成功响应
 
 成功路径只允许向 `stdout` 输出单个 JSON 对象：
@@ -144,4 +191,22 @@ $ webenvoy runtime.unknown
 stdout: {"run_id":"run-20260319-0002","command":"runtime.unknown","status":"error","error":{"code":"ERR_CLI_UNKNOWN_COMMAND","message":"未知命令","retryable":false},"timestamp":"2026-03-19T12:00:01.000Z"}
 stderr: <optional human hint>
 exit: 3
+```
+
+### 示例 3：参数错误
+
+```text
+$ webenvoy runtime.ping --params 'not-json'
+stdout: {"run_id":"run-20260319-0003","command":"runtime.ping","status":"error","error":{"code":"ERR_CLI_INVALID_ARGS","message":"--params 必须是 JSON 对象字符串","retryable":false},"timestamp":"2026-03-19T12:00:02.000Z"}
+stderr: <optional human hint>
+exit: 2
+```
+
+### 示例 4：执行失败
+
+```text
+$ webenvoy runtime.ping --params '{"force_fail":true}'
+stdout: {"run_id":"run-20260319-0004","command":"runtime.ping","status":"error","error":{"code":"ERR_EXECUTION_FAILED","message":"命令执行失败","retryable":false},"timestamp":"2026-03-19T12:00:03.000Z"}
+stderr: <optional human hint>
+exit: 6
 ```

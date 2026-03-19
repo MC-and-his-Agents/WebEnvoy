@@ -4,6 +4,8 @@
 
 - [x] 补齐 `spec.md` 的 GWT 验收场景
 - [x] 补齐 `spec.md` 的异常 / 边界场景
+- [x] 冻结最小 CLI argv 调用约定
+- [x] 补齐 `ERR_EXECUTION_FAILED` 的 GWT 与验证口径
 - [x] 升级 `plan.md` 到最新 7 节结构
 - [x] 补齐最小 CLI 契约文档 `contracts/cli-entry.md`
 - [x] 补齐共享契约基座风险文档 `risks.md`
