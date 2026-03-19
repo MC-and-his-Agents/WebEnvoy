@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 interface SupervisorArgs {
   browserPath: string;
@@ -106,6 +107,8 @@ const readShutdownCommand = async (path: string): Promise<ShutdownCommand | null
 
 const run = async (): Promise<void> => {
   const args = parseSupervisorArgs(process.argv.slice(2));
+  await mkdir(dirname(args.stateFilePath), { recursive: true });
+  await mkdir(dirname(args.controlFilePath), { recursive: true });
   await deleteFileQuietly(args.stateFilePath);
   await deleteFileQuietly(args.controlFilePath);
 

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -476,6 +476,7 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
   const controlFilePath = getControlFilePath(input.profileDir);
   let controllerPid: number | null = null;
   try {
+    await mkdir(input.profileDir, { recursive: true });
     await deleteFileQuietly(stateFilePath);
     await deleteFileQuietly(controlFilePath);
     const launched = await launchProcess(supervisorScriptPath, executablePath, launchArgs, {

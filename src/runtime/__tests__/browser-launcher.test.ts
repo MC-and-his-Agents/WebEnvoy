@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,7 +100,9 @@ afterEach(async () => {
 describe("browser-launcher", () => {
   it("launches browser executable with profile user-data-dir args", async () => {
     const { scriptPath, logPath } = await createMockBrowserExecutable();
-    const profileDir = join(tmpdir(), "webenvoy-browser-launcher-profile");
+    const profileBaseDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-profile-"));
+    tempDirs.push(profileBaseDir);
+    const profileDir = join(profileBaseDir, "nested", "profile");
     process.env.WEBENVOY_BROWSER_PATH = scriptPath;
     process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
 
@@ -114,6 +116,8 @@ describe("browser-launcher", () => {
     expect(launched.browserPath).toBe(scriptPath);
     expect(launched.browserPid).toBeGreaterThan(0);
     expect(launched.controllerPid).toBeGreaterThan(0);
+    const profileStat = await stat(profileDir);
+    expect(profileStat.isDirectory()).toBe(true);
 
     const launchLog = await waitForLaunchLog(logPath);
     expect(launchLog).toContain(`--user-data-dir=${profileDir}`);
