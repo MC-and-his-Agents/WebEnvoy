@@ -60,6 +60,7 @@
 产出：
 
 - `__webenvoy_meta.json` 的写入、读取与恢复语义
+- 首次登录从 `uninitialized` 直接进入 `runtime.login` 的最小语义
 - 断连后 Profile 状态回读
 - 手动登录结果持久化回 Profile
 
@@ -108,6 +109,7 @@
 
 - 指定 `profile` 启动浏览器的完整链路
 - `runtime.status` 能读回状态与代理绑定
+- `runtime.login` 首次登录流程可以从未初始化 Profile 直接创建并回写最小元数据
 - `runtime.login` 的手动登录确认流程
 - 并发启动同一 Profile 的冲突断言
 - 浏览器崩溃后状态回落到 `disconnected`
@@ -133,6 +135,7 @@
 - Profile 状态机
 - Profile 锁
 - 元数据读写
+- 首次登录状态流转
 - 代理绑定与冲突判定
 - 状态查询与错误分流
 

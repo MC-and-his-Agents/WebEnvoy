@@ -24,6 +24,9 @@
 
 ```text
 uninitialized -> starting -> ready -> logging_in -> ready
+uninitialized -> logging_in -> ready
+stopped -> logging_in -> ready
+disconnected -> logging_in -> ready
 ready -> stopping -> stopped
 ready -> disconnected
 logging_in -> disconnected
@@ -41,6 +44,26 @@ disconnected -> starting
 - `stopping` 表示正在主动关闭当前浏览器实例。
 - `stopped` 表示浏览器已关闭，Profile 仍保留。
 
+### Browser 状态
+
+`runtime.status` 还要返回当前浏览器实例态，取值冻结为：
+
+- `absent`
+- `starting`
+- `ready`
+- `logging_in`
+- `stopping`
+- `disconnected`
+
+说明：
+
+- `absent` 表示当前没有活动浏览器实例
+- `starting` 表示浏览器正在拉起
+- `ready` 表示浏览器可用并可接收后续命令
+- `logging_in` 表示可见浏览器正处于手动登录流程
+- `stopping` 表示浏览器正在主动关闭
+- `disconnected` 表示活动浏览器曾存在，但当前已断连或异常退出
+
 ### 运行时视图
 
 `runtime.status` 至少要返回以下两类状态：
@@ -52,6 +75,12 @@ disconnected -> starting
 
 - `profileState` 描述持久化 Profile 的最后已知状态
 - `browserState` 描述当前运行时是否仍有活动浏览器实例
+
+其中 `profileState` 与 `browserState` 的对应关系不是一一相等关系：
+
+- `profileState` 反映可恢复的 Profile 语义
+- `browserState` 反映当前是否存在活动浏览器实例
+- `runtime.status` 必须同时返回二者，不能只回其中一个
 
 ## 命令语义
 
@@ -66,7 +95,7 @@ disconnected -> starting
 
 - 解析并定位 Profile 目录
 - 获取 Profile 独占锁
-- 以该 Named Profile 启动浏览器
+- 以该 Named Profile 启动浏览器；若 Profile 尚未初始化，也可以由 `runtime.login` 先行创建最小目录后再进入登录流程
 - 若 Profile 已绑定代理，则复用既有绑定
 - 若显式传入的代理与既有绑定冲突，则失败
 
@@ -90,6 +119,7 @@ disconnected -> starting
 
 - 打开或保持可见浏览器
 - 将 Profile 置入 `logging_in`
+- 若 Profile 尚未初始化，则先创建最小目录与最小元数据
 - 等待用户手动完成登录
 - 确认后回写最小持久化内容并回到 `ready`
 
@@ -171,6 +201,8 @@ disconnected -> starting
 - `profileDir`
 - `profileState`
 - `proxyBinding`
+- `fingerprintSeeds`
+- `localStorageSnapshots`
 - `createdAt`
 - `updatedAt`
 - `lastStartedAt`
@@ -182,6 +214,13 @@ disconnected -> starting
 
 - `url`
 - `boundAt`
+
+其中 `fingerprintSeeds` 至少可以包含：
+
+- `audioNoiseSeed`
+- `canvasNoiseSeed`
+
+其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节，但必须能支持后续恢复所需的关键键值。
 
 ## 兼容策略
 

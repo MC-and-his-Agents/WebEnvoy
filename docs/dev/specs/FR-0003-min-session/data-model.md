@@ -45,6 +45,21 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
     "url": "http://user:pass@proxy-host:8080",
     "boundAt": "2026-03-19T12:00:00.000Z"
   },
+  "fingerprintSeeds": {
+    "audioNoiseSeed": "seed-audio-001",
+    "canvasNoiseSeed": "seed-canvas-001"
+  },
+  "localStorageSnapshots": [
+    {
+      "origin": "https://www.example.com",
+      "entries": [
+        {
+          "key": "session_token",
+          "value": "..."
+        }
+      ]
+    }
+  ],
   "createdAt": "2026-03-19T11:58:00.000Z",
   "updatedAt": "2026-03-19T12:00:00.000Z",
   "lastStartedAt": "2026-03-19T12:00:00.000Z",
@@ -60,11 +75,15 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 - `profileState` 必须来自 FR-0003 冻结的状态枚举。
 - `proxyBinding.url` 为空表示直连，不代表缺失或待定。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
+- `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话恢复所需信息，不得膨胀为账号资产总表。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
 
 ### 状态流转
 
 - `uninitialized` -> `starting` -> `ready`
+- `uninitialized` -> `logging_in` -> `ready`
+- `stopped` -> `logging_in` -> `ready`
+- `disconnected` -> `logging_in` -> `ready`
 - `ready` -> `logging_in` -> `ready`
 - `ready` / `logging_in` -> `disconnected`
 - `ready` -> `stopping` -> `stopped`
