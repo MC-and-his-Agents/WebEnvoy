@@ -122,19 +122,6 @@ export const createFakeNativeBridgeTransport = (options) => {
 };
 const defaultRecoveryPollIntervalMs = 100;
 const defaultHeartbeatTimeoutMs = 3_000;
-const createTimeoutBudget = (timeoutMs, now) => {
-    const deadlineMs = now() + timeoutMs;
-    return {
-        deadlineMs,
-        remainingMs() {
-            const remaining = deadlineMs - now();
-            if (remaining <= 0) {
-                throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "transport timeout");
-            }
-            return Math.max(1, Math.floor(remaining));
-        }
-    };
-};
 export class NativeMessagingBridge {
     #session = new NativeMessagingSession();
     #transport;
@@ -151,13 +138,12 @@ export class NativeMessagingBridge {
     }
     async runtimePing(input) {
         const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
-        const budget = createTimeoutBudget(timeoutMs, this.#now);
         if (asBoolean(input.params.simulate_transport_handshake_fail)) {
             throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", "handshake failed by simulation");
         }
-        await this.#recoverIfDisconnected(input.profile, budget);
-        await this.#ensureReady(input.profile, budget);
-        await this.#pulseHeartbeat(budget);
+        await this.#recoverIfDisconnected(input.profile, timeoutMs);
+        await this.#ensureReady(input.profile);
+        await this.#pulseHeartbeat();
         if (asBoolean(input.params.simulate_transport_disconnect)) {
             this.#session.observeDisconnect("simulated_disconnect", this.#now());
             throw new NativeMessagingTransportError("ERR_TRANSPORT_DISCONNECTED", "simulated transport disconnect");
@@ -165,7 +151,6 @@ export class NativeMessagingBridge {
         if (asBoolean(input.params.simulate_transport_timeout)) {
             throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "simulated transport timeout");
         }
-        const forwardTimeoutMs = budget.remainingMs();
         const request = createBridgeForwardRequest({
             id: this.#nextId("run"),
             profile: input.profile,
@@ -174,11 +159,11 @@ export class NativeMessagingBridge {
             command: "runtime.ping",
             commandParams: input.params,
             cwd: input.cwd,
-            timeoutMs: forwardTimeoutMs
+            timeoutMs
         });
         try {
             this.#session.beginForward();
-            const response = await runWithTimeout(this.#transport.forward(request), forwardTimeoutMs);
+            const response = await runWithTimeout(this.#transport.forward(request), timeoutMs);
             const success = ensureBridgeSuccess(response, "forward failed");
             const payload = success.payload ?? {};
             const message = typeof payload.message === "string" ? payload.message : "pong";
@@ -236,19 +221,17 @@ export class NativeMessagingBridge {
         }
         return new NativeMessagingTransportError(code, raw.message);
     }
-    async #ensureReady(profile, budget) {
+    async #ensureReady(profile) {
         if (this.#session.snapshot().state === "ready") {
             return;
         }
-        const openTimeoutMs = budget.remainingMs();
         this.#session.beginHandshake();
         const request = createBridgeOpenRequest({
             id: this.#nextId("bridge-open"),
-            profile,
-            timeoutMs: openTimeoutMs
+            profile
         });
         try {
-            const response = await runWithTimeout(this.#transport.open(request), openTimeoutMs);
+            const response = await runWithTimeout(this.#transport.open(request), request.timeout_ms ?? DEFAULT_TRANSPORT_TIMEOUT_MS);
             const success = ensureBridgeSuccess(response, "handshake failed");
             const sessionId = String(success.summary.session_id ?? "");
             const protocol = String(success.summary.protocol ?? "");
@@ -272,17 +255,13 @@ export class NativeMessagingBridge {
             throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", asError(error).message);
         }
     }
-    async #pulseHeartbeat(budget) {
-        const heartbeatTimeoutMs = Math.min(this.#heartbeatTimeoutMs, budget.remainingMs());
-        const request = {
-            ...createHeartbeatRequest({
-                id: this.#nextId("hb"),
-                sessionId: this.#session.sessionIdOrThrow()
-            }),
-            timeout_ms: heartbeatTimeoutMs
-        };
+    async #pulseHeartbeat() {
+        const request = createHeartbeatRequest({
+            id: this.#nextId("hb"),
+            sessionId: this.#session.sessionIdOrThrow()
+        });
         try {
-            const response = await runWithTimeout(this.#transport.heartbeat(request), heartbeatTimeoutMs);
+            const response = await runWithTimeout(this.#transport.heartbeat(request), this.#heartbeatTimeoutMs);
             ensureBridgeSuccess(response, "heartbeat failed");
         }
         catch (error) {
@@ -291,7 +270,7 @@ export class NativeMessagingBridge {
             throw new NativeMessagingTransportError("ERR_TRANSPORT_DISCONNECTED", `heartbeat failed: ${reason}`);
         }
     }
-    async #recoverIfDisconnected(profile, budget) {
+    async #recoverIfDisconnected(profile, timeoutMs) {
         const now = this.#now();
         const snapshot = this.#session.snapshot();
         if (snapshot.state !== "disconnected") {
@@ -302,10 +281,11 @@ export class NativeMessagingBridge {
         }
         try {
             const recoveryDeadline = this.#session.recoveryDeadlineMs() ?? now + RECOVERY_WINDOW_MS;
-            const stopAt = Math.min(recoveryDeadline, budget.deadlineMs);
+            const requestDeadline = now + timeoutMs;
+            const stopAt = Math.min(recoveryDeadline, requestDeadline);
             while (this.#now() < stopAt) {
                 try {
-                    await this.#ensureReady(profile, budget);
+                    await this.#ensureReady(profile);
                     return;
                 }
                 catch (error) {
@@ -316,18 +296,10 @@ export class NativeMessagingBridge {
                         if (!recoverable) {
                             throw error;
                         }
-                        const remaining = stopAt - this.#now();
-                        if (remaining <= 0) {
-                            break;
-                        }
-                        await delay(Math.min(this.#recoveryPollIntervalMs, remaining));
+                        await delay(this.#recoveryPollIntervalMs);
                         continue;
                     }
-                    const remaining = stopAt - this.#now();
-                    if (remaining <= 0) {
-                        break;
-                    }
-                    await delay(Math.min(this.#recoveryPollIntervalMs, remaining));
+                    await delay(this.#recoveryPollIntervalMs);
                     continue;
                 }
             }
