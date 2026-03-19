@@ -9,7 +9,11 @@ import {
 import type { NativeBridgeTransport } from "./transport.js";
 
 type TransportCodedError = Error & {
-  transportCode?: "ERR_TRANSPORT_TIMEOUT" | "ERR_TRANSPORT_DISCONNECTED" | "ERR_TRANSPORT_FORWARD_FAILED";
+  transportCode?:
+    | "ERR_TRANSPORT_HANDSHAKE_FAILED"
+    | "ERR_TRANSPORT_TIMEOUT"
+    | "ERR_TRANSPORT_DISCONNECTED"
+    | "ERR_TRANSPORT_FORWARD_FAILED";
 };
 
 const withTransportCode = (
@@ -30,14 +34,18 @@ const parseResponse = (line: string): BridgeResponseEnvelope => {
   return parsed;
 };
 
+type TransportPhase = "open" | "forward" | "heartbeat";
+
 const sendEnvelope = (
   socketPath: string,
-  request: BridgeRequestEnvelope
+  request: BridgeRequestEnvelope,
+  phase: TransportPhase
 ): Promise<BridgeResponseEnvelope> =>
   new Promise((resolve, reject) => {
     const timeoutMs = request.timeout_ms ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
     const socket = net.createConnection({ path: socketPath });
     let settled = false;
+    let connected = false;
     let buffer = "";
 
     const done = (fn: () => void): void => {
@@ -51,16 +59,22 @@ const sendEnvelope = (
     };
 
     socket.setTimeout(timeoutMs, () => {
-      done(() =>
-        reject(withTransportCode(new Error("native bridge socket timeout"), "ERR_TRANSPORT_TIMEOUT"))
-      );
+      const timeoutCode =
+        !connected && phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_TIMEOUT";
+      done(() => reject(withTransportCode(new Error("native bridge socket timeout"), timeoutCode)));
     });
 
     socket.on("error", (error) => {
-      done(() => reject(withTransportCode(error, "ERR_TRANSPORT_FORWARD_FAILED")));
+      const connectStage = !connected;
+      const code =
+        connectStage && phase === "open"
+          ? "ERR_TRANSPORT_HANDSHAKE_FAILED"
+          : "ERR_TRANSPORT_DISCONNECTED";
+      done(() => reject(withTransportCode(error, code)));
     });
 
     socket.on("connect", () => {
+      connected = true;
       socket.write(`${JSON.stringify(request)}\n`);
     });
 
@@ -95,7 +109,7 @@ const sendEnvelope = (
         reject(
           withTransportCode(
             new Error("native bridge socket closed before response"),
-            "ERR_TRANSPORT_DISCONNECTED"
+            connected ? "ERR_TRANSPORT_DISCONNECTED" : "ERR_TRANSPORT_HANDSHAKE_FAILED"
           )
         )
       );
@@ -110,23 +124,23 @@ export class SocketNativeBridgeTransport implements NativeBridgeTransport {
   }
 
   open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
-    return this.#request(request);
+    return this.#request("open", request);
   }
 
   forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
-    return this.#request(request);
+    return this.#request("forward", request);
   }
 
   heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
-    return this.#request(request);
+    return this.#request("heartbeat", request);
   }
 
-  #request(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+  #request(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     ensureBridgeRequestEnvelope(request);
     if (!this.#socketPath) {
       return Promise.reject(new Error("native bridge socket is not configured"));
     }
 
-    return sendEnvelope(this.#socketPath, request);
+    return sendEnvelope(this.#socketPath, request, phase);
   }
 }

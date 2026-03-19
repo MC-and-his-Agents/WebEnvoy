@@ -21,7 +21,8 @@ const transportCodeOf = (error) => {
         return null;
     }
     const code = error.transportCode;
-    if (code === "ERR_TRANSPORT_TIMEOUT" ||
+    if (code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
+        code === "ERR_TRANSPORT_TIMEOUT" ||
         code === "ERR_TRANSPORT_DISCONNECTED" ||
         code === "ERR_TRANSPORT_FORWARD_FAILED") {
         return code;
@@ -55,10 +56,15 @@ const runWithTimeout = async (promise, timeoutMs) => {
 };
 export const createFakeNativeBridgeTransport = (options) => {
     let openCount = 0;
+    const openFailureSequence = [...(options?.openFailureSequence ?? [])];
     return {
         async open(request) {
             ensureBridgeRequestEnvelope(request);
             openCount += 1;
+            const forcedFailure = openFailureSequence.shift();
+            if (forcedFailure) {
+                throw new NativeMessagingTransportError(forcedFailure, `forced open failure: ${forcedFailure}`);
+            }
             if (options?.failHandshake || (options?.failHandshakeAfterFirstOpen && openCount > 1)) {
                 throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", "native host unavailable");
             }
@@ -190,6 +196,9 @@ export class NativeMessagingBridge {
             return error;
         }
         const coded = transportCodeOf(error);
+        if (coded === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
+            return new NativeMessagingTransportError(coded, asError(error).message);
+        }
         if (coded === "ERR_TRANSPORT_DISCONNECTED") {
             this.#session.observeDisconnect("forward_disconnect", this.#now());
             return new NativeMessagingTransportError(coded, asError(error).message);
@@ -277,12 +286,18 @@ export class NativeMessagingBridge {
                 }
                 catch (error) {
                     if (error instanceof NativeMessagingTransportError) {
-                        if (error.code !== "ERR_TRANSPORT_HANDSHAKE_FAILED") {
+                        const recoverable = error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
+                            error.code === "ERR_TRANSPORT_DISCONNECTED" ||
+                            error.code === "ERR_TRANSPORT_TIMEOUT";
+                        if (!recoverable) {
                             throw error;
                         }
+                        await delay(this.#recoveryPollIntervalMs);
+                        continue;
                     }
+                    await delay(this.#recoveryPollIntervalMs);
+                    continue;
                 }
-                await delay(this.#recoveryPollIntervalMs);
             }
             throw new NativeMessagingTransportError("ERR_TRANSPORT_DISCONNECTED", "recovery window exhausted before reconnect", { retryable: true });
         }

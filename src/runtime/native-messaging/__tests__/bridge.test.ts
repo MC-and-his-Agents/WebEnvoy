@@ -5,6 +5,7 @@ import {
   NativeMessagingTransportError,
   createFakeNativeBridgeTransport
 } from "../bridge.js";
+import type { BridgeRequestEnvelope, BridgeResponseEnvelope } from "../protocol.js";
 
 describe("native messaging bridge", () => {
   it("returns pong via forward round trip", async () => {
@@ -229,5 +230,98 @@ describe("native messaging bridge", () => {
     ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
       code: "ERR_TRANSPORT_DISCONNECTED"
     });
+  });
+
+  it("keeps retrying recoverable failures within recovery window", async () => {
+    let openCall = 0;
+    let forwardCall = 0;
+
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        openCall += 1;
+        if (openCall === 2) {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "open timeout");
+        }
+        if (openCall === 3) {
+          throw new NativeMessagingTransportError(
+            "ERR_TRANSPORT_DISCONNECTED",
+            "open disconnected"
+          );
+        }
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        if (forwardCall === 1) {
+          throw new NativeMessagingTransportError(
+            "ERR_TRANSPORT_DISCONNECTED",
+            "forward disconnected"
+          );
+        }
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001",
+            run_id: String(request.params.run_id ?? request.id),
+            command: "runtime.ping",
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            message: "pong"
+          },
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport,
+      recoveryPollIntervalMs: 1
+    });
+
+    await expect(
+      bridge.runtimePing({
+        runId: "run-retry-phase-1",
+        profile: "profile-a",
+        cwd: "/tmp",
+        params: {
+          timeout_ms: 80
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+
+    const result = await bridge.runtimePing({
+      runId: "run-retry-phase-2",
+      profile: "profile-a",
+      cwd: "/tmp",
+      params: {
+        timeout_ms: 80
+      }
+    });
+    expect(result.message).toBe("pong");
+    expect(result.transport.state).toBe("ready");
+    expect(openCall).toBeGreaterThanOrEqual(4);
   });
 });
