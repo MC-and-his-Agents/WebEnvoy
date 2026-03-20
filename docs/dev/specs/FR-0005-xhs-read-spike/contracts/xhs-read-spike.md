@@ -31,8 +31,8 @@ Spike 输出必须包含以下三个对象：
   "scenario": "search|detail|user_home",
   "route_role": "primary|fallback",
   "path_kind": "api|page",
-  "method": "GET|POST",
-  "path": "/api/...|/explore/<noteId>?xsec_token=...|/user/profile/<userId>?xsec_token=...",
+  "method": "GET|POST|null",
+  "path": "/api/...|null",
   "evidence_tier": "browser_first_hand|repo_baseline",
   "evidence_status": "success|failed|candidate",
   "evidence_maturity": "observed_once|reproduced_multi_round|admission_ready",
@@ -78,8 +78,10 @@ Spike 输出必须包含以下三个对象：
 3. `evidence_maturity` 用于表达证据成熟度：
    - `observed_once`：单次样本或单轮观测，不能直接支撑实现准入
    - `reproduced_multi_round`：已满足多轮复现，但仍可能缺少实现前置（如 headers/cookie 实验矩阵）
-   - `admission_ready`：满足本 FR 约定的证据门槛，可作为实现 FR 的直接准入输入
-4. `path_kind=page` 时，`page_state_fallback` 必填，且必须至少包含：
+   - `admission_ready`：仅允许用于 `route_role=primary` 且 `path_kind=api` 的成功证据，并且必须满足 `plan.md`「进入实现前条件」与本 FR「fallback 非准入」约束，方可作为实现 FR 的直接准入输入
+   - `route_role=fallback` 或 `path_kind=page` 的记录不得标注为 `admission_ready`
+4. `path_kind=page` 时，`endpoint_catalog` 仅用于冻结 page fallback 最小内容；不得把 fallback 重新建模为完整 API 端点。该场景下字段约束如下：
+   - `page_state_fallback` 必填，并且必须至少包含：
    - `freeze_scope=minimal_only`
    - 1 个路径模板（`path_template`，仅允许路径模板与方法）
    - 1 个 URL 关键参数（`url_params_observed`）
@@ -87,7 +89,8 @@ Spike 输出必须包含以下三个对象：
    - 1 个已观测键路径（`state_probe.key_paths_observed`）
    - 2 个以上可执行复现动作（`replay_actions`，每步必须含 `step/target/expect`）
    - `url_params_observed`、`state_probe.root_status`、`state_probe.key_paths_observed[*].status`、`replay_actions[*].result_status` 仅允许 `success|failed|candidate`
-5. `path_kind=api` 时，`page_state_fallback` 必须为 `null`，不得混入页面探针字段。
+   - `method`、`path`、`required_headers_observed`、`required_headers_candidate`、`required_params` 必须为 `null`、空数组、可省略或明确标注 `N/A`，不得填写 API 端点语义内容
+5. `path_kind=api` 时，`page_state_fallback` 必须为 `null`，且 `method/path/required_headers_*/required_params` 必须按 API 语义填写，不得混入页面探针字段。
 
 ## signature_path
 

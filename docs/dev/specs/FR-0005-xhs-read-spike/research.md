@@ -310,42 +310,23 @@
 `signature_path` 正式输出（对齐 `contracts/xhs-read-spike.md` 最小结构，按当前证据保守填写）：
 
 ```json
-[
-  {
-    "entry": "window._webmsxyw(uri, data)",
-    "entry_status": "candidate",
-    "entry_scope": ["explore", "detail_page"],
-    "input_shape": {
-      "path": "string (uri, observed_once)",
-      "payload": "object|string (data, observed_once)",
-      "timestamp": "number|string (not_observed_in_this_round)"
-    },
-    "output_shape": {
-      "X-s": "string (observed_once)",
-      "X-t": "string|number (observed_once)"
-    },
-    "request_headers_observed": ["X-S-Common"],
-    "preconditions": ["logged_in", "page_context_ready", "signature_entry_present"],
-    "failure_signals": ["signature_entry_missing", "gateway_invoker_failed", "browser_env_abnormal", "account_abnormal", "invalid_sign"]
+{
+  "entry": "window._webmsxyw(uri, data)",
+  "entry_status": "variant",
+  "entry_scope": ["explore", "detail_page", "profile_page", "search_result_variant"],
+  "input_shape": {
+    "path": "string (uri, observed_once)",
+    "payload": "object|string (data, observed_once)",
+    "timestamp": "number|string (not_observed_in_this_round)"
   },
-  {
-    "entry": "window._webmsxyw(uri, data)",
-    "entry_status": "variant",
-    "entry_scope": ["search_result_variant", "profile_page"],
-    "input_shape": {
-      "path": "string (candidate)",
-      "payload": "object|string (candidate)",
-      "timestamp": "number|string (not_observed_in_this_round)"
-    },
-    "output_shape": {
-      "X-s": "string (candidate)",
-      "X-t": "string|number (candidate)"
-    },
-    "request_headers_observed": ["X-S-Common"],
-    "preconditions": ["logged_in", "page_context_ready"],
-    "failure_signals": ["signature_entry_missing"]
-  }
-]
+  "output_shape": {
+    "X-s": "string (observed_once)",
+    "X-t": "string|number (observed_once)"
+  },
+  "request_headers_observed": ["X-S-Common"],
+  "preconditions": ["logged_in", "page_context_ready", "signature_entry_present_on_current_page_variant"],
+  "failure_signals": ["signature_entry_missing", "runtime_throw", "invalid_output", "gateway_invoker_failed", "browser_env_abnormal", "account_abnormal", "invalid_sign"]
+}
 ```
 
 ### 3.2 生命周期矩阵（已确认 vs 候选）
