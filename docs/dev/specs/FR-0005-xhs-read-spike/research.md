@@ -126,9 +126,9 @@
 
 ### 2.1 search
 
-主路径冻结：
+当前最强候选主路径（candidate main path）：
 
-- 当前冻结为后续实现应优先消费的 `primary` API：
+- 当前收敛为后续实现应优先消费的候选主路径 API（非已冻结 `primary`）：
   - 方法：`POST`
   - 路径：`/api/sns/web/v1/search/notes`
   - 关键 body 字段（仓库内基线 + 本轮主世界签名调用样例共同支持）：
@@ -138,9 +138,10 @@
     - `search_id`
     - `sort`
     - `note_type`
-- 冻结理由：
+- 收敛理由：
   - 当前架构文档主读路径、仓库内调研基线与本轮 `window._webmsxyw('/api/sns/web/v1/search/notes', payload)` 调用样例一致收敛到 `search/notes`
   - 本轮真实搜索交互里，`search/notes` 也实际出现成功 `HTTP 200`
+  - 但当前仍缺少“最小必要请求上下文（headers/cookie/origin/referer 等）”实验矩阵，不能把该路径写成冻结事实
 
 第一手成功证据：
 
@@ -148,7 +149,7 @@
 
 候选或失败证据：
 
-- 可见但不冻结为 `primary` 的辅助端点：
+- 可见但不作为正式 `primary` 的辅助端点：
   - `GET /api/sns/web/v1/search/recommend?keyword=...`
   - `GET /api/sns/web/v1/search/filter?keyword=...&search_id=...`
   - `POST /api/sns/web/v1/search/onebox`
@@ -173,7 +174,7 @@
 
 第一手成功证据：
 
-- 已验证页面端点：
+- 已观测到的页面级 fallback 候选路径：
   - 方法：`GET`
   - 路径：`/explore/<noteId>?xsec_token=...&xsec_source=...`
   - 关键字段：`noteId`、`xsec_token`、`xsec_source`
@@ -182,7 +183,7 @@
     - `window.__INITIAL_STATE__ === object`
     - `window.__INITIAL_STATE__.note.noteDetailMap` 中可直接提取当前 `noteId`
 - 当前 detail 页 `window.__INITIAL_STATE__` 为 `object`，且 `note.noteDetailMap` 中可直接提取当前 `noteId`。
-- 因此“详情页 HTML / `__INITIAL_STATE__` 读取”这条备用读路径已得到第一手页面级证据。
+- 因此“详情页 HTML / `__INITIAL_STATE__` 读取”可作为已观测到的页面级 fallback 候选读路径（证据成立，但结论未冻结）。
 
 候选或失败证据：
 
@@ -212,7 +213,7 @@
 
 第一手成功证据：
 
-- 已验证页面端点：
+- 已观测到的页面级 fallback 候选路径：
   - 方法：`GET`
   - 路径：`/user/profile/<userId>?xsec_token=...&xsec_source=pc_search`
   - 关键字段：`userId`、`xsec_token`、`xsec_source`
@@ -223,7 +224,7 @@
 - 在搜索交互同批次里观察到 `GET /api/sns/web/v1/board/user?...` 成功 `HTTP 200`。
 - 直接打开 `user/profile/<userId>?xsec_token=...&xsec_source=pc_search` 可稳定进入用户主页。
 - 该 profile 页 `window.__INITIAL_STATE__` 为 `object`，顶层包含 `user`、`board`、`note` 等 store。
-- 因此当前可以冻结“用户主页页面端点 + `__INITIAL_STATE__` 页面级读取”作为已验证读路径。
+- 因此当前可将“用户主页页面端点 + `__INITIAL_STATE__` 页面级读取”作为已观测到的页面级 fallback 候选读路径（保留成功信号，不上升为冻结结论）。
 
 候选或失败证据：
 
