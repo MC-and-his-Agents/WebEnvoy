@@ -202,4 +202,4 @@ Sprint 结束前，除业务与文档收口外，增加环境治理清单：
 - `docs/dev/roadmap.md`：Phase 约束、阶段门与“状态以 GitHub 为准”
 - `docs/dev/AGENTS.md`：研发漏斗、规约/实现分离、spec 套件要求
 - `spec_review.md`：正式准入标准、必查维度、阻断条件
-- Sprint 1 本地 handoff 记录：用于恢复执行停点、阻断收口、合并判定与收尾状态；该类记录属于本地恢复介质，不是仓库正式真相源
+- 本地 Sprint 1 handoff 记录：Sprint 1 实际执行轨迹、阻断收口、合并判定与收尾状态
