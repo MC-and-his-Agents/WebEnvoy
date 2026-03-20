@@ -132,11 +132,35 @@
 
 ### 2.1 search
 
-| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `search-primary-01` | `primary` | `api` | `success` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
-| `search-primary-02` | `primary` | `api` | `failed` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
-| `search-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | 辅助 API 证据，不替代 `primary` |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `search-primary-01` | `primary` | `api` | `success` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
+| `search-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
+| `search-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `browser_first_hand` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | 辅助 API 证据，不替代 `primary` |
+
+`search` 端点补充字段：
+
+- `search-primary-01`
+  - `required_headers_observed`: `Accept`, `Content-Type`, `x-b3-traceid`, `x-xray-traceid`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`, `UA-CH`
+  - `required_params`: `keyword`, `page`, `page_size`, `search_id`, `sort`, `note_type`
+  - `success_signal`: `HTTP 200 + 搜索结果正常返回`
+  - `failure_signals`: `browser_env_abnormal`, `account_abnormal`, `gateway_invoker_failed`, `invalid_sign`
+  - `page_state_fallback`: `null`
+- `search-primary-02`
+  - `required_headers_observed`: `X-s`, `X-t`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`, `X-S-Common`
+  - `required_params`: `keyword`, `page`, `page_size`, `search_id`, `sort`, `note_type`
+  - `success_signal`: `n/a`
+  - `failure_signals`: `gateway_invoker_failed`
+  - `page_state_fallback`: `null`
+- `search-supporting-01`
+  - `required_headers_observed`: `Accept`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
+  - `required_params`: `keyword`, `search_id`
+  - `success_signal`: `请求可见但未证明可替代主读链路`
+  - `failure_signals`: `candidate_only`
+  - `page_state_fallback`: `null`
 
 当前结论：
 
@@ -146,11 +170,28 @@
 
 ### 2.2 detail
 
-| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `detail-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `GET` | `/explore/<noteId>?xsec_token=...&xsec_source=...` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId` | `fallback-only`（不构成实现准入） |
-| `detail-primary-01` | `primary` | `api` | `candidate` | `observed_once` | `POST` | `/api/sns/web/v1/feed` | 存在端点与参数形态（`source_note_id`）证据，但无成功闭环 | 主路径候选，未准入 |
-| `detail-primary-02` | `primary` | `api` | `failed` | `observed_once` | `POST` | `/api/sns/web/v1/feed` | 手动请求返回 `HTTP 461` + `code=300011`（账号异常） | 风控阻断证据 |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `detail-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `GET` | `/explore/<noteId>?xsec_token=...&xsec_source=...` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId` | `fallback-only`（不构成实现准入） |
+| `detail-primary-01` | `primary` | `api` | `candidate` | `observed_once` | `repo_baseline` | `POST` | `/api/sns/web/v1/feed` | 存在端点与参数形态（`source_note_id`）证据，但无成功闭环 | 主路径候选，未准入 |
+| `detail-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/feed` | 手动请求返回 `HTTP 461` + `code=300011`（账号异常） | 风控阻断证据 |
+
+`detail` 端点补充字段：
+
+- `detail-primary-01`
+  - `required_headers_observed`: `none`
+  - `required_headers_candidate`: `Accept`, `Content-Type`, `Cookie`, `Origin`, `Referer`, `X-s`, `X-t`, `X-S-Common`
+  - `required_params`: `source_note_id`
+  - `success_signal`: `HTTP 200 + 详情内容正常返回`
+  - `failure_signals`: `candidate_only`
+  - `page_state_fallback`: `null`
+- `detail-primary-02`
+  - `required_headers_observed`: `Accept`, `Content-Type`, `x-b3-traceid`, `x-xray-traceid`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
+  - `required_params`: `source_note_id`
+  - `success_signal`: `n/a`
+  - `failure_signals`: `account_abnormal`
+  - `page_state_fallback`: `null`
 
 `detail-fallback-01` 对应 `page_state_fallback` 冻结快照：
 
@@ -187,12 +228,36 @@
 
 ### 2.3 user_home
 
-| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
-| `user-home-supporting-01` | `fallback` | `api` | `candidate` | `observed_once` | `GET` | `/api/sns/web/v1/board/user?user_id=...&num=15&page=1` | 搜索交互同批次观测到 `HTTP 200`，但仍是单点样本且未完成端点选择 | 辅助 API 证据，不冻结 `primary` |
-| `user-home-primary-02` | `primary` | `api` | `failed` | `observed_once` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
-| `user-home-primary-03` | `primary` | `api` | `candidate` | `observed_once` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
+| `user-home-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `browser_first_hand` | `GET` | `/api/sns/web/v1/board/user?user_id=...&num=15&page=1` | 搜索交互同批次观测到 `HTTP 200`，但仍是单点样本且未完成端点选择 | 辅助 API 证据，不冻结 `primary` |
+| `user-home-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
+| `user-home-primary-03` | `primary` | `api` | `candidate` | `observed_once` | `repo_baseline` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
+
+`user_home` 端点补充字段：
+
+- `user-home-supporting-01`
+  - `required_headers_observed`: `Accept`, `x-b3-traceid`, `x-xray-traceid`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
+  - `required_params`: `user_id`, `num`, `page`
+  - `success_signal`: `HTTP 200`
+  - `failure_signals`: `candidate_only`
+  - `page_state_fallback`: `null`
+- `user-home-primary-02`
+  - `required_headers_observed`: `X-s`, `X-t`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`, `X-S-Common`
+  - `required_params`: `user_id`
+  - `success_signal`: `n/a`
+  - `failure_signals`: `browser_env_abnormal`
+  - `page_state_fallback`: `null`
+- `user-home-primary-03`
+  - `required_headers_observed`: `none`
+  - `required_headers_candidate`: `Accept`, `Cookie`, `Origin`, `Referer`, `X-s`, `X-t`, `X-S-Common`
+  - `required_params`: `user_id`
+  - `success_signal`: `HTTP 200 + 用户主页核心字段稳定返回`
+  - `failure_signals`: `candidate_only`
+  - `page_state_fallback`: `null`
 
 `user-home-fallback-01` 对应 `page_state_fallback` 冻结快照：
 
