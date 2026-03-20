@@ -202,7 +202,8 @@ main() {
   risk_reason="${risk_info#*|}"
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-body.XXXXXX")"
-  trap 'rm -f "${tmp_body}"' EXIT
+  # Capture the resolved temp path now; EXIT runs after local variables go out of scope.
+  trap "rm -f '${tmp_body}'" EXIT
 
   build_body "${DEFAULT_TEMPLATE}" "${issue_number}" "${base_branch}" "${risk_level}" "${risk_reason}" "${tmp_body}"
 
