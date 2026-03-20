@@ -157,19 +157,23 @@
 ```json
 {
   "url_params_observed": [
-    { "name": "noteId", "source": "path_segment", "required": true },
-    { "name": "xsec_token", "source": "query", "required": true },
-    { "name": "xsec_source", "source": "query", "required": false }
+    { "name": "noteId", "source": "path_segment", "required": true, "status": "success" },
+    { "name": "xsec_token", "source": "query", "required": true, "status": "success" },
+    { "name": "xsec_source", "source": "query", "required": false, "status": "candidate" }
   ],
   "state_probe": {
     "root_path": "window.__INITIAL_STATE__",
     "root_expect": "object",
-    "key_paths_observed": ["note.noteDetailMap", "note.noteDetailMap.<noteId>"]
+    "root_status": "success",
+    "key_paths_observed": [
+      { "path": "note.noteDetailMap", "status": "success" },
+      { "path": "note.noteDetailMap.<noteId>", "status": "success" }
+    ]
   },
   "replay_actions": [
-    { "step": "open_url", "target": "/explore/<noteId>?xsec_token=...&xsec_source=...", "expect": "page_loaded" },
-    { "step": "eval_js", "target": "typeof window.__INITIAL_STATE__", "expect": "object" },
-    { "step": "eval_js", "target": "window.__INITIAL_STATE__.note.noteDetailMap", "expect": "contains current noteId" }
+    { "step": "open_url", "target": "/explore/<noteId>?xsec_token=...&xsec_source=...", "expect": "page_loaded", "result_status": "success" },
+    { "step": "eval_js", "target": "typeof window.__INITIAL_STATE__", "expect": "object", "result_status": "success" },
+    { "step": "eval_js", "target": "window.__INITIAL_STATE__.note.noteDetailMap", "expect": "contains current noteId", "result_status": "success" }
   ]
 }
 ```
@@ -193,19 +197,24 @@
 ```json
 {
   "url_params_observed": [
-    { "name": "userId", "source": "path_segment", "required": true },
-    { "name": "xsec_token", "source": "query", "required": true },
-    { "name": "xsec_source", "source": "query", "required": false }
+    { "name": "userId", "source": "path_segment", "required": true, "status": "success" },
+    { "name": "xsec_token", "source": "query", "required": true, "status": "success" },
+    { "name": "xsec_source", "source": "query", "required": false, "status": "candidate" }
   ],
   "state_probe": {
     "root_path": "window.__INITIAL_STATE__",
     "root_expect": "object",
-    "key_paths_observed": ["user", "board", "note"]
+    "root_status": "success",
+    "key_paths_observed": [
+      { "path": "user", "status": "success" },
+      { "path": "board", "status": "success" },
+      { "path": "note", "status": "success" }
+    ]
   },
   "replay_actions": [
-    { "step": "open_url", "target": "/user/profile/<userId>?xsec_token=...&xsec_source=pc_search", "expect": "page_loaded" },
-    { "step": "eval_js", "target": "typeof window.__INITIAL_STATE__", "expect": "object" },
-    { "step": "eval_js", "target": "window.__INITIAL_STATE__.user", "expect": "object" }
+    { "step": "open_url", "target": "/user/profile/<userId>?xsec_token=...&xsec_source=pc_search", "expect": "page_loaded", "result_status": "success" },
+    { "step": "eval_js", "target": "typeof window.__INITIAL_STATE__", "expect": "object", "result_status": "success" },
+    { "step": "eval_js", "target": "window.__INITIAL_STATE__.user", "expect": "object", "result_status": "success" }
   ]
 }
 ```
