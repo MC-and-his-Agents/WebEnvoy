@@ -8,23 +8,19 @@
 
 ## 当前证据基线
 
-本轮 Spike 先基于以下已落盘证据收敛正式输入，不把零散调研留在口头层：
+本轮 Spike 先基于仓库内已落盘、可在干净 clone 中复核的材料收敛正式输入，不把零散调研留在口头层：
 
 1. 仓库内调研：
    - `docs/research/ref/MediaCrawlerPro_analysis.md`
    - `docs/archive/tech-selection-preresearch.md`
    - `docs/dev/architecture/system-design/reference.md`
-2. 参考实现源码：
-   - `reference/MediaCrawlerPro/Python-main/media_platform/xhs/client.py`
-   - `reference/MediaCrawlerPro/Python-main/media_platform/xhs/handlers/search_handler.py`
-   - `reference/MediaCrawlerPro/Python-main/media_platform/xhs/help.py`
-   - `reference/MediaCrawlerPro/Python-main/media_platform/xhs/extractor.py`
-   - `reference/MediaCrawlerPro/Python-main/media_platform/xhs/exception.py`
-   - `reference/MediaCrawlerPro/Python-main/pkg/rpc/sign_srv_client/sign_model.py`
+2. 归档说明：
+   - 上述仓库内调研已经吸收了外部参考项目的观察结果。
+   - 未被仓库内文档直接承接的外部源码观察，不在本文件中当作正式证据基线引用。
 
 > 结论口径：
-> - 本文件已经足够作为后续 L3 读适配 FR 的输入基线。
-> - 但其中“字段生命周期”仍分为 `已确认` 与 `待浏览器内复核` 两级，不把参考实现观察误写成已在 WebEnvoy 运行时内实锤。
+> - 本文件可作为后续浏览器内复核与下一 FR 起草的候选输入。
+> - 但其中“字段生命周期”“用户主页读链路端点”“风控映射”仍存在待浏览器内复核项，不得单独当作后续实现基线。
 
 ## 1. 端点结论
 
@@ -78,24 +74,22 @@
 ### 1.3 用户主页
 
 - 场景：`user_home`
-- 当前最小候选端点：`GET /api/sns/web/v1/user_posted`
+- 当前仓库内可复核的最小候选端点：`GET /api/sns/web/v1/user/otherinfo`
 - 关联会话探针：`GET /api/sns/web/v1/user/selfinfo`
 - 最小请求字段：
-  - `user_id`
-  - `cursor`
-  - `num`
+  - `target_user_id`
 - 最小成功信号：
   - `HTTP 200`
-  - 返回用户作品列表或用户自身信息
+  - 返回用户信息结构
 - 已知失败信号：
   - `-100`：登录过期
   - `300015`：签名失败
-  - 无作品用户返回空列表
+  - 目标用户不存在或无可见信息时返回空结构/异常
 - 说明：
-  - 现阶段把 `user_posted` 作为“用户主页读链路”的最小 API 候选，后续若页面自然流量显示存在更贴近主页聚合接口，再进入后续 FR 调整，不在本 Spike 内过度扩张。
+  - 作品列表类“主页聚合端点”在本轮仓库内证据里仍未达到可冻结程度。
+  - 若后续浏览器内复核确认 `user_posted` 或其他聚合端点稳定存在，应在下一 FR 中单独补冻结，不在本 Spike 内越权确认。
 - 证据来源：
-  - `media_platform/xhs/client.py`
-  - `MediaCrawlerPro_analysis.md` §4.1
+  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.4
 
 ## 2. 签名结论
 
@@ -146,17 +140,17 @@
 | `X-t` | `page_state` | `request_scoped` | `hard` | 与本次签名调用绑定 |
 | `X-B3-Traceid` | `runtime_generated/page_state` | `request_scoped` | `required_optional` | 链路追踪字段，后续需在浏览器内复核来源 |
 
-### 3.2 已确认：会话级稳定或偏稳定
+### 3.2 已确认：会话级稳定
 
 | 字段 | 来源 | 生命周期 | 依赖等级 | 说明 |
 |---|---|---|---|---|
 | Cookie | `page_state` | `session_scoped` | `hard` | 真实登录态强依赖 |
-| `x-s-common` | `page_state` | `session_scoped` 候选 | `hard` | 含设备/环境相关信息，具体粒度待浏览器内复核 |
 
 ### 3.3 待浏览器内复核：页面刷新级或会话级
 
 | 字段 | 当前候选 | 生命周期候选 | 依赖等级 | 说明 |
 |---|---|---|---|---|
+| `x-s-common` | `page_state` | `session_scoped` 或 `page_refresh_scoped` | `required_optional` | 含设备/环境相关信息，当前仅能确认参与签名链路，具体稳定性待浏览器内复核 |
 | `a1` | `page_state` | `session_scoped` | `hard` | 参考架构文档与调研，需在 WebEnvoy 链路内确认 |
 | `webId` | `page_state` | `page_refresh_scoped` 或 `session_scoped` | `required_optional` | 需通过浏览器内多次对比确认 |
 | `gid` | `page_state/runtime_generated` | `page_refresh_scoped` 候选 | `required_optional` | 当前仅有调研结论，未在 WebEnvoy 内实锤 |
@@ -177,12 +171,12 @@
 | `window._webmsxyw` 缺失 | 页面脚本漂移 | `signature_entry_missing` |
 | `chrome.runtime` / content-script 不可达 | 运行时链路失败 | `runtime_chain_unavailable` |
 
-## 5. 当前可直接进入后续 FR 的结论
+## 5. 当前可直接进入后续 FR 起草 / 复核的结论
 
-1. 搜索、详情、用户主页三类场景的最小候选端点已经足够明确。
-2. 签名链路可以直接以“浏览器内调用平台自有函数”作为后续实现基线，不需要引入外置 SignSrv。
-3. 最小错误分类已经足够指导后续适配器实现和 `#154` 诊断对齐。
-4. 字段生命周期矩阵已经能支撑后续 TDD 拆分：哪些字段要作为 `hard dependency`，哪些先按候选字段处理。
+1. 搜索与详情场景的最小候选端点已经足够明确，可直接进入下一轮浏览器内复核设计。
+2. 签名链路可继续以“浏览器内调用平台自有函数”作为侦察方向，不需要转向外置 SignSrv。
+3. 最小错误分类已经足够指导后续适配器实现与 `#154` 诊断壳对齐。
+4. 字段生命周期矩阵已经能支撑下一轮 TDD/复核拆分：哪些字段继续保留为候选，哪些需要优先实锤。
 
 ## 未决项
 
