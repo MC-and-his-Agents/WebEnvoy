@@ -174,7 +174,7 @@
 
 | evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `detail-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `GET` | `/explore/<noteId>?xsec_token=...&xsec_source=...` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId` | `fallback-only`（不构成实现准入） |
+| `detail-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `N/A` | `N/A` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId`；具体页面模板见 `page_state_fallback.path_template` | `fallback-only`（不构成实现准入） |
 | `detail-primary-01` | `primary` | `api` | `candidate` | `observed_once` | `repo_baseline` | `POST` | `/api/sns/web/v1/feed` | 存在端点与参数形态（`source_note_id`）证据，但无成功闭环 | 主路径候选，未准入 |
 | `detail-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/feed` | 手动请求返回 `HTTP 461` + `code=300011`（账号异常） | 风控阻断证据 |
 
@@ -232,7 +232,7 @@
 
 | evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
+| `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `N/A` | `N/A` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note`；具体页面模板见 `page_state_fallback.path_template` | `fallback-only`（不构成实现准入） |
 | `user-home-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
 | `user-home-primary-03` | `primary` | `api` | `candidate` | `observed_once` | `repo_baseline` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
 
