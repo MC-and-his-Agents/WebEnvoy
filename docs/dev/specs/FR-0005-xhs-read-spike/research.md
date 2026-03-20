@@ -204,15 +204,15 @@
 | --- | --- | --- | --- | --- | --- |
 | `X-s` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
 | `X-t` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
-| `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 仅确认出现在请求头，稳定性未实锤 |
-| `x-b3-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
-| `x-xray-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
+| `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 候选 | `required_optional` | 仅确认出现在请求头，仍需复核是否会退化为 `page_refresh_scoped` |
+| `x-b3-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
+| `x-xray-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
 | `a1` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读到，未做跨刷新对比，尚未证明是最小必要条件 |
-| `webId` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
-| `gid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
+| `webId` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
+| `gid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
 | `xsecappid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读 |
 | `xsec_token` | `page_state` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
-| `xsec_source` | `static/page_state` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
+| `xsec_source` | `static` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得，仍需复核是否受页面状态改写 |
 
 
 ## 4. 错误分类更新（含本轮新增）
