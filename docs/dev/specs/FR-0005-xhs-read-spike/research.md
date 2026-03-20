@@ -46,7 +46,38 @@
 - 页面：`search_result` 的一个页面变体
   - 曾出现 `window._webmsxyw` 为 `undefined`。
 
-结论（受限于本轮样本）：签名入口至少存在页面、加载时机或版本分流，不能写成全局稳定入口。
+最小可冻结输入/输出边界：
+
+- 当前可冻结的主调用样例：
+  - `uri`: `/api/sns/web/v1/search/notes`
+  - `payload`: 至少可按搜索请求体形状传入对象，当前仓库内可复核的最小字段集为：
+    - `keyword`
+    - `page`
+    - `page_size`
+    - `search_id`
+    - `sort`
+    - `note_type`
+- 当前已观测输出：
+  - `X-s`
+  - `X-t`
+- 当前前置条件：
+  - 已登录浏览器会话
+  - 页面已进入可执行平台脚本的主世界上下文
+  - `window._webmsxyw` 已挂载为 `function`
+
+失败分流（本轮可冻结）：
+
+- `signature_entry_missing`
+  - 现象：`window._webmsxyw === undefined` 或不是 `function`
+  - 已见页面：`search_result` 某变体、profile 页早期样本
+- `runtime_throw`
+  - 现象：调用 `window._webmsxyw(uri, data)` 时抛异常
+  - 本轮未主动放大实验，保留为正式失败分流
+- `invalid_output`
+  - 现象：返回值缺少 `X-s` 或 `X-t`
+  - 本轮未见该样本，但作为输出校验失败分支冻结
+
+结论（受限于本轮样本）：签名入口至少存在页面、加载时机或版本分流，不能写成全局稳定入口；当前只冻结“搜索主路径可用的最小调用样例”，detail/user_home 仍保留为同入口的候选复用场景。
 
 ### 1.3 Cookie 与存储观测
 
@@ -95,12 +126,33 @@
 
 ### 2.1 search
 
+主路径冻结：
+
+- 当前冻结为后续实现应优先消费的 `primary` API：
+  - 方法：`POST`
+  - 路径：`/api/sns/web/v1/search/notes`
+  - 关键 body 字段（仓库内基线 + 本轮主世界签名调用样例共同支持）：
+    - `keyword`
+    - `page`
+    - `page_size`
+    - `search_id`
+    - `sort`
+    - `note_type`
+- 冻结理由：
+  - 当前架构文档主读路径、仓库内调研基线与本轮 `window._webmsxyw('/api/sns/web/v1/search/notes', payload)` 调用样例一致收敛到 `search/notes`
+  - 本轮真实搜索交互里，`search/notes` 也实际出现成功 `HTTP 200`
+
 第一手成功证据：
 
-- 在真实搜索交互中，`search/recommend`、`search/filter`、`search/onebox`、`search/notes` 出现成功 `HTTP 200`。
+- 在真实搜索交互中，`search/notes` 出现成功 `HTTP 200`
 
 候选或失败证据：
 
+- 可见但不冻结为 `primary` 的辅助端点：
+  - `GET /api/sns/web/v1/search/recommend?keyword=...`
+  - `GET /api/sns/web/v1/search/filter?keyword=...&search_id=...`
+  - `POST /api/sns/web/v1/search/onebox`
+  - 这些端点当前保留为辅助/候选证据，不替代 `search/notes` 主路径
 - 手动直调 `search/notes` 且仅补 `X-s/X-t`，得到 `HTTP 500`（`create invoker failed`），说明“仅两字段签名”不足以稳定复现。
 
 `required_headers` 已观测（基于成功/失败样本抓到的头族）：
