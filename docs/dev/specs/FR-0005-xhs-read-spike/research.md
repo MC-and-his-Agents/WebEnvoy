@@ -202,8 +202,8 @@
 
 | 字段 | 来源 | 本轮状态 | 生命周期判断 | 依赖等级 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `X-s` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
-| `X-t` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
+| `X-s` | `runtime_generated` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
+| `X-t` | `runtime_generated` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
 | `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 候选 | `required_optional` | 仅确认出现在请求头，仍需复核是否会退化为 `page_refresh_scoped` |
 | `x-b3-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
 | `x-xray-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
