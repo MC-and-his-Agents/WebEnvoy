@@ -59,8 +59,9 @@ Spike 输出必须包含以下三个对象：
     "timestamp": "number|string"
   },
   "output_shape": {
-    "sign": "string",
-    "extra": "object|null"
+    "X-s": "string",
+    "X-t": "string|number",
+    "X-S-Common": "string|null"
   },
   "preconditions": ["logged_in", "page_context_ready"],
   "failure_signals": ["entry_missing", "runtime_throw", "invalid_output"]

@@ -121,12 +121,23 @@
 
 第一手成功证据：
 
-- 直接打开笔记页 `https://www.xiaohongshu.com/explore/<noteId>?xsec_token=...&xsec_source=...` 可稳定进入详情页。
+- 已验证页面端点：
+  - 方法：`GET`
+  - 路径：`/explore/<noteId>?xsec_token=...&xsec_source=...`
+  - 关键字段：`noteId`、`xsec_token`、`xsec_source`
+  - 成功信号：
+    - 页面标题形如 `<noteTitle> - 小红书`
+    - `window.__INITIAL_STATE__ === object`
+    - `window.__INITIAL_STATE__.note.noteDetailMap` 中可直接提取当前 `noteId`
 - 当前 detail 页 `window.__INITIAL_STATE__` 为 `object`，且 `note.noteDetailMap` 中可直接提取当前 `noteId`。
 - 因此“详情页 HTML / `__INITIAL_STATE__` 读取”这条备用读路径已得到第一手页面级证据。
 
 候选或失败证据：
 
+- 候选 API 端点：
+  - 方法：`POST`
+  - 路径：`/api/sns/web/v1/feed`
+  - 关键字段：`source_note_id`
 - `POST /api/sns/web/v1/feed` 手动构造请求后得到 `HTTP 461` + `code=300011`（账号异常）。
 - 现阶段仍没有 `feed` 端点的成功 `HTTP 200 + 业务成功` 样本，不能把 API 详情读路径冻结为已确认。
 
@@ -149,13 +160,24 @@
 
 第一手成功证据：
 
+- 已验证页面端点：
+  - 方法：`GET`
+  - 路径：`/user/profile/<userId>?xsec_token=...&xsec_source=pc_search`
+  - 关键字段：`userId`、`xsec_token`、`xsec_source`
+  - 成功信号：
+    - 页面标题形如 `<userName> - 小红书`
+    - `window.__INITIAL_STATE__ === object`
+    - 顶层包含 `user`、`board`、`note` 等 store
 - 在搜索交互同批次里观察到 `GET /api/sns/web/v1/board/user?...` 成功 `HTTP 200`。
 - 直接打开 `user/profile/<userId>?xsec_token=...&xsec_source=pc_search` 可稳定进入用户主页。
 - 该 profile 页 `window.__INITIAL_STATE__` 为 `object`，顶层包含 `user`、`board`、`note` 等 store。
-- 该证据当前仅能标记为“用户域相关成功请求”，尚不能直接冻结为 `user_home` 主端点契约。
+- 因此当前可以冻结“用户主页页面端点 + `__INITIAL_STATE__` 页面级读取”作为已验证读路径。
 
 候选或失败证据：
 
+- 候选 API 端点：
+  - `GET /api/sns/web/v1/board/user?...`
+  - `GET /api/sns/web/v1/user/otherinfo?...`
 - `GET /api/sns/web/v1/user/otherinfo?...` 手动请求（仅 `X-s/X-t`）返回 `HTTP 200 + code=300015`（浏览器环境异常）。
 - 因账号异常，未完成“可稳定读取用户主页核心字段”的闭环复核。
 
@@ -178,19 +200,19 @@
 ### 3.2 生命周期矩阵（已确认 vs 候选）
 
 
-| 字段               | 本轮状态            | 生命周期判断                                      | 依赖等级                | 说明                              |
-| ---------------- | --------------- | ------------------------------------------- | ------------------- | ------------------------------- |
-| `X-s`            | 第一手已观测          | `request_scoped` 候选                         | `hard`              | 签名调用返回键                         |
-| `X-t`            | 第一手已观测          | `request_scoped` 候选                         | `hard`              | 签名调用返回键                         |
-| `X-S-Common`     | 第一手已观测（请求头）     | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 仅确认出现在请求头，稳定性未实锤                |
-| `x-b3-traceid`   | 第一手已观测（请求头）     | `request_scoped` 候选                         | `required_optional` | 来源/生成机制未复核                      |
-| `x-xray-traceid` | 第一手已观测（请求头）     | `request_scoped` 候选                         | `required_optional` | 来源/生成机制未复核                      |
-| `a1`             | 第一手已观测（Cookie）  | `session_scoped` 候选                         | `hard`              | 仅确认可读到，未做跨刷新对比                  |
-| `webId`          | 第一手已观测（Cookie）  | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
-| `gid`            | 第一手已观测（Cookie）  | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
-| `xsecappid`      | 第一手已观测（Cookie）  | `session_scoped` 候选                         | `required_optional` | 仅确认可读                           |
-| `xsec_token`     | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选                    | `required_optional` | 由 URL 抽样获得                      |
-| `xsec_source`    | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选                    | `required_optional` | 由 URL 抽样获得                      |
+| 字段 | 来源 | 本轮状态 | 生命周期判断 | 依赖等级 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| `X-s` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
+| `X-t` | `page_state` | 第一手已观测 | `request_scoped` 候选 | `hard` | 签名调用返回键 |
+| `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 仅确认出现在请求头，稳定性未实锤 |
+| `x-b3-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
+| `x-xray-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
+| `a1` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `hard` | 仅确认可读到，未做跨刷新对比 |
+| `webId` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
+| `gid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
+| `xsecappid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读 |
+| `xsec_token` | `page_state` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
+| `xsec_source` | `static/page_state` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
 
 
 ## 4. 错误分类更新（含本轮新增）
