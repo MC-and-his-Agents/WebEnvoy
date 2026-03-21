@@ -120,6 +120,7 @@ export class BackgroundRelay {
                 summary: {
                     relay_path: "host>background>content-script>background>host"
                 },
+                payload: message.payload ?? {},
                 error: message.error ?? {
                     code: "ERR_TRANSPORT_FORWARD_FAILED",
                     message: "content script failed"
