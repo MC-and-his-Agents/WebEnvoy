@@ -76,7 +76,7 @@
 ## 进入实现前条件
 
 1. FR-0008 规约 PR 完成 spec review，并得到“仅作为侦察输入”或“可进入后续实现 FR 输入”结论。
-2. `contracts/xhs-write-spike.md` 中三类核心对象的字段语义无歧义。
+2. `contracts/xhs-write-spike.md` 中四类核心对象（`editor_path`、`upload_path_catalog`、`minimal_action_candidates`、`gate_status`）的字段语义无歧义。
 3. `#208` 若要消费本 FR，必须显式指出所选候选动作与未消费的剩余写链路范围。
 4. `risks.md` 中账号、上传、不可逆提交风险均已有缓解与回滚路径。
 5. 若当前只有 fallback-only 或 `candidate` 证据，后续实现 FR 必须继续补主路径复核，不得据此直接开发。

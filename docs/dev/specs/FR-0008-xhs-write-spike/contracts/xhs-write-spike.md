@@ -66,6 +66,33 @@ Spike 输出必须包含以下四个对象：
 
 记录图片上传路径，并区分页面主路径与 API 降级路径。
 
+### 外层容器
+
+`upload_path_catalog` 必须是数组容器，元素类型为 `UploadPathEvidence`。
+
+```json
+{
+  "upload_path_catalog": [
+    {
+      "scenario": "image_upload",
+      "route_role": "primary",
+      "path_kind": "page"
+    },
+    {
+      "scenario": "image_upload",
+      "route_role": "fallback",
+      "path_kind": "api"
+    }
+  ]
+}
+```
+
+容器约束：
+
+1. 允许同时存在多条记录，且至少保留一条失败样本或候选样本，不得只保留成功路径。
+2. 唯一键为 `(scenario, route_role, path_kind, entry_type)`；同键重复时必须合并为最新一条并把差异写入 `notes`。
+3. 排序规则固定为：`route_role=primary` 在前，`route_role=fallback` 在后；同一 `route_role` 下按 `entry_type` 字典序。
+
 ### 最小结构
 
 ```json
@@ -95,6 +122,31 @@ Spike 输出必须包含以下四个对象：
 ### 语义
 
 向 `#208` 输出“可供正式验证选择的最小页面交互动作候选”，但不直接替代 `#208` 的正式结论。
+
+### 外层容器
+
+`minimal_action_candidates` 必须是数组容器，元素类型为 `MinimalActionCandidate`。
+
+```json
+{
+  "minimal_action_candidates": [
+    {
+      "action_id": "editor_input",
+      "handoff_status": "recommended_input"
+    },
+    {
+      "action_id": "image_attach",
+      "handoff_status": "candidate_input"
+    }
+  ]
+}
+```
+
+容器约束：
+
+1. `action_id` 在数组内必须唯一，不允许重复候选。
+2. 排序规则固定为 `handoff_status` 优先级：`recommended_input` > `candidate_input` > `blocked`；同状态按 `action_id` 字典序。
+3. 若全部为 `blocked`，仍必须保留完整候选数组，并在 `notes` 给出阻断理由，不得返回空数组掩盖失败。
 
 ### 最小结构
 
