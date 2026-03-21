@@ -46,10 +46,11 @@
 
 ## Gate Status
 
-- Fallback viability: PASS
+- Fallback viability: BLOCKED
   - Trigger defined: 是。页面主路径失败、账号风险放大、上传入口不稳定时，允许保留 `api fallback` 或 `candidate` 证据作为连续性输入。
-  - Safe degraded behavior validated: 部分。当前只在规约层面明确了降级表达，还未完成 live 页面验证。
+  - Safe degraded behavior validated: 否。当前只在规约层面明确了降级表达，还未完成 live 页面验证。
   - Rollback/recovery validated: 部分。已明确“停止 live 侦察并冻结证据”是优先回滚动作。
+  - Blocking reason: 缺少浏览器内第一手证据，当前只能证明“fallback 应如何表达”，不能证明“fallback 已经可安全使用”。
 - Implementation readiness: BLOCKED
   - Critical unknowns at required maturity: 否。富文本输入、上传入口类型、最小交互动作都缺第一手多轮复核。
   - Scope/interfaces stable: 是。FR 边界、handoff 对象与双门禁结构已稳定。
