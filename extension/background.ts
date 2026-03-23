@@ -25,6 +25,7 @@ type NativeMessageListener = (message: BridgeResponse) => void;
 interface PendingForward {
   request: BridgeRequest;
   timeout: ReturnType<typeof setTimeout>;
+  consumerGateResult?: XhsTargetGateResult["consumerGateResult"];
 }
 
 interface QueuedForwardRequest {
@@ -847,8 +848,10 @@ class ChromeBackgroundBridge {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const command = String(request.params.command ?? "");
     let tabId: number | null;
+    let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     if (command === "xhs.search") {
       const gateResult = await this.#evaluateXhsTargetGate(request);
+      consumerGateResult = gateResult.consumerGateResult;
       if (!gateResult.allowed || !gateResult.targetTabId) {
         this.#emit({
           id: request.id,
@@ -908,7 +911,7 @@ class ChromeBackgroundBridge {
         message: "content script forward timed out"
       });
     }, forwardTimeoutMs);
-    this.#pending.set(request.id, { request, timeout });
+    this.#pending.set(request.id, { request, timeout, consumerGateResult });
 
     const forward: BackgroundToContentMessage = {
       kind: "forward",
@@ -1060,6 +1063,13 @@ class ChromeBackgroundBridge {
     clearTimeout(pending.timeout);
     this.#pending.delete(result.id);
     const request = pending.request;
+    const payload =
+      typeof result.payload === "object" && result.payload !== null
+        ? { ...(result.payload as Record<string, unknown>) }
+        : {};
+    if (pending.consumerGateResult) {
+      payload.consumer_gate_result = pending.consumerGateResult;
+    }
 
     if (result.ok !== true) {
       this.#emit({
@@ -1068,10 +1078,7 @@ class ChromeBackgroundBridge {
         summary: {
           relay_path: "host>background>content-script>background>host"
         },
-        payload:
-          typeof result.payload === "object" && result.payload !== null
-            ? (result.payload as Record<string, unknown>)
-            : {},
+        payload,
         error:
           result.error ?? {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -1093,10 +1100,7 @@ class ChromeBackgroundBridge {
         tab_id: sender.tab?.id ?? null,
         relay_path: "host>background>content-script>background>host"
       },
-      payload:
-        typeof result.payload === "object" && result.payload !== null
-          ? (result.payload as Record<string, unknown>)
-          : {},
+      payload,
       error: null
     });
   }

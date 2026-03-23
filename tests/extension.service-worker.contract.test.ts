@@ -245,6 +245,13 @@ describe("extension service worker recovery contract", () => {
         id: "run-xhs-error-payload-001",
         status: "error",
         payload: {
+          consumer_gate_result: expect.objectContaining({
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            requested_execution_mode: "dry_run",
+            effective_execution_mode: "dry_run"
+          }),
           details: {
             reason: "SESSION_EXPIRED"
           },
@@ -317,6 +324,24 @@ describe("extension service worker recovery contract", () => {
           id: 32
         }
       }
+    );
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-xhs-tab-pin-001",
+        status: "success",
+        payload: expect.objectContaining({
+          consumer_gate_result: expect.objectContaining({
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            requested_execution_mode: "dry_run",
+            effective_execution_mode: "dry_run",
+            gate_decision: "allowed"
+          })
+        })
+      })
     );
   });
 
