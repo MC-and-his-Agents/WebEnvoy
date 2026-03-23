@@ -24,6 +24,7 @@
 
 约束：
 - `default_mode` 在 FR-0011 生效阶段不得为高风险 live。
+- `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
 
 ## 实体 3：WriteInteractionTier
@@ -71,6 +72,7 @@
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
 - `issue_208` 在 `limited` 下不得出现不可逆写动作。
 - `blocked_actions` 不得为空，必须与 `allowed_actions` 一起定义完整边界。
+- `issue_209` 在 `limited` 下允许出现 `live_read_limited`，但该动作仍受审批证据与审计要求约束。
 
 ## 实体 7：RiskTransitionAuditRecord
 
@@ -89,6 +91,17 @@
 - 缺失 `run_id/session_id/prev_state/next_state/decision/reason` 任一字段时，状态变更无效。
 - 当 `trigger` 依赖人工批准恢复，或 `next_state=allowed` 会扩大 live 放行范围时，缺失 `approver/approved_at` 不得判定为有效。
 - 状态变更无效时，执行层必须回退到 `paused` 并阻断 live。
+
+## 实体 8：GateOutcomeSemantic
+
+- `requested_execution_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`）
+- `effective_execution_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`）
+- `gate_decision` ENUM NOT NULL（`allowed` | `blocked`）
+
+约束：
+- `gate_decision=allowed` 时，`effective_execution_mode` 才允许表达真实继续执行的 `live_*` 模式。
+- `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式，当前只允许 `dry_run` 或 `recon`。
+- 若 `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk`，则审批证据字段必须完整。
 
 ## 生命周期
 

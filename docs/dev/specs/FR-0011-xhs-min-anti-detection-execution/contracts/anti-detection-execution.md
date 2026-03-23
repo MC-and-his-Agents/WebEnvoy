@@ -54,6 +54,11 @@
 }
 ```
 
+约束：
+- `live_read_limited` 是正式公开的受控 live 读模式，可由外部请求方显式请求。
+- `live_read_limited` 与 `live_read_high_risk` 进入 live 前都必须满足 `live_entry_requirements`，且审批证据要求不可分叉。
+- 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
+
 ## write_interaction_tier
 
 ```json
@@ -227,3 +232,9 @@
 3. `hard_block_when_paused` 缩减必须经过独立 spec review 说明。
 4. `issue_action_matrix` 不允许为 `#208` 和 `#209` 定义不同状态集合。
 5. `risk_transition_audit.required_fields` 缺失任一字段时，live 放行判定无效。
+
+## 公开模式与阻断语义补充
+
+1. `live_read_limited` 作为 Sprint 3 的正式公开模式，只适用于受控读 live，不得外溢为写路径或不可逆动作的隐式降级口径。
+2. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，`approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
+3. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级结果（当前为 `dry_run` 或 `recon`）；不得返回未实际执行的 `live_read_limited`。
