@@ -6,10 +6,12 @@ const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const LOOPBACK_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
+    "live_read_limited",
     "live_read_high_risk",
     "live_write"
 ]);
 const LOOPBACK_RISK_STATES = new Set(["paused", "limited", "allowed"]);
+const LOOPBACK_ISSUE_SCOPES = new Set(["issue_208", "issue_209"]);
 const LOOPBACK_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const LOOPBACK_REQUIRED_APPROVAL_CHECKS = [
     "target_domain_confirmed",
@@ -24,6 +26,98 @@ const LOOPBACK_SCOPE_CONTEXT = {
     write_domain: XHS_WRITE_DOMAIN,
     domain_mixing_forbidden: true
 };
+const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
+    background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
+    content_script_gate: ["page_context_check", "action_tier_check"],
+    main_world_gate: ["signed_call_scope_check"],
+    cli_role: "request_and_result_shell_only"
+};
+const LOOPBACK_RISK_STATE_MACHINE = {
+    states: ["paused", "limited", "allowed"],
+    transitions: [
+        { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
+        { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
+        {
+            from: "paused",
+            to: "limited",
+            trigger: "cooldown_backoff_window_passed_and_manual_approve"
+        },
+        {
+            from: "limited",
+            to: "allowed",
+            trigger: "stability_window_passed_and_manual_approve"
+        }
+    ],
+    hard_block_when_paused: ["live_write", "live_read_high_risk"]
+};
+const LOOPBACK_ISSUE_ACTION_MATRIX = [
+    {
+        issue_scope: "issue_208",
+        state: "paused",
+        allowed_actions: ["dry_run", "recon"],
+        blocked_actions: [
+            "live_read_limited",
+            "live_read_high_risk",
+            "reversible_interaction_with_approval",
+            "live_write",
+            "irreversible_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    {
+        issue_scope: "issue_208",
+        state: "limited",
+        allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
+        blocked_actions: [
+            "live_read_limited",
+            "live_read_high_risk",
+            "irreversible_write",
+            "live_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    {
+        issue_scope: "issue_208",
+        state: "allowed",
+        allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
+        blocked_actions: [
+            "live_read_limited",
+            "live_read_high_risk",
+            "irreversible_write",
+            "live_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    {
+        issue_scope: "issue_209",
+        state: "paused",
+        allowed_actions: ["dry_run", "recon"],
+        blocked_actions: [
+            "live_read_limited",
+            "live_read_high_risk",
+            "live_write",
+            "irreversible_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    {
+        issue_scope: "issue_209",
+        state: "limited",
+        allowed_actions: ["dry_run", "recon", "live_read_limited"],
+        blocked_actions: [
+            "live_read_high_risk",
+            "live_write",
+            "irreversible_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    {
+        issue_scope: "issue_209",
+        state: "allowed",
+        allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+        blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
+    }
+];
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -43,15 +137,60 @@ const resolveLoopbackExecutionMode = (value) => typeof value === "string" && LOO
 const resolveLoopbackRiskState = (value) => typeof value === "string" && LOOPBACK_RISK_STATES.has(value)
     ? value
     : "paused";
+const resolveLoopbackIssueScope = (value) => typeof value === "string" && LOOPBACK_ISSUE_SCOPES.has(value)
+    ? value
+    : "issue_209";
+const resolveLoopbackIssueActionMatrixEntry = (issueScope, riskState) => {
+    const matched = LOOPBACK_ISSUE_ACTION_MATRIX.find((entry) => entry.issue_scope === issueScope && entry.state === riskState);
+    if (!matched) {
+        return {
+            issue_scope: issueScope,
+            state: riskState,
+            allowed_actions: ["dry_run", "recon"],
+            blocked_actions: ["expand_new_live_surface_without_gate"]
+        };
+    }
+    return {
+        issue_scope: matched.issue_scope,
+        state: matched.state,
+        allowed_actions: [...matched.allowed_actions],
+        blocked_actions: [...matched.blocked_actions]
+    };
+};
 const resolveLoopbackFallbackMode = (requestedExecutionMode, riskState) => {
+    if (requestedExecutionMode === "live_read_high_risk" && riskState === "limited") {
+        return "live_read_limited";
+    }
     if (requestedExecutionMode === "live_write") {
         return "dry_run";
     }
     return riskState === "limited" ? "recon" : "dry_run";
 };
+const resolveLoopbackRecoveryRequirements = (state) => {
+    switch (state) {
+        case "paused":
+            return [
+                "cooldown_backoff_window_passed_and_manual_approve",
+                "risk_state_checked",
+                "audit_record_present"
+            ];
+        case "limited":
+            return [
+                "stability_window_passed_and_manual_approve",
+                "risk_state_checked",
+                "audit_record_present"
+            ];
+        case "allowed":
+            return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
+        default:
+            return ["audit_record_present"];
+    }
+};
 const buildLoopbackGate = (options, abilityAction) => {
     const requestedExecutionMode = resolveLoopbackExecutionMode(options.requested_execution_mode);
     const riskState = resolveLoopbackRiskState(options.risk_state);
+    const issueScope = resolveLoopbackIssueScope(options.issue_scope);
+    const issueActionMatrix = resolveLoopbackIssueActionMatrixEntry(issueScope, riskState);
     const actionType = resolveLoopbackActionType(options);
     const targetDomain = asString(options.target_domain);
     const targetTabId = asInteger(options.target_tab_id);
@@ -99,7 +238,9 @@ const buildLoopbackGate = (options, abilityAction) => {
     }
     if (gateReasons.length > 0) {
         gateDecision = "blocked";
-        if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+        if (requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk" ||
+            requestedExecutionMode === "live_write") {
             effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
         }
     }
@@ -112,30 +253,46 @@ const buildLoopbackGate = (options, abilityAction) => {
         if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
+        if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
         if (requestedExecutionMode === "live_write" && actionType === "read") {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
-        if (riskState !== "allowed") {
+        if (requestedExecutionMode &&
+            issueActionMatrix.blocked_actions.includes(requestedExecutionMode) &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk")) {
             gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+            gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
         }
-        if (approvalRecord.approved !== true ||
-            !asString(approvalRecord.approver) ||
-            !asString(approvalRecord.approved_at)) {
-            gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-        }
-        const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter((key) => !asBoolean(approvalChecks[key]));
-        if (missingChecks.length > 0) {
-            gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-        }
-        if (gateReasons.length === 0) {
-            gateDecision = "allowed";
-            effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
-            gateReasons.push("LIVE_MODE_APPROVED");
+        const liveModeCanEnter = requestedExecutionMode !== null &&
+            issueActionMatrix.allowed_actions.includes(requestedExecutionMode) &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk");
+        if (liveModeCanEnter) {
+            if (approvalRecord.approved !== true ||
+                !asString(approvalRecord.approver) ||
+                !asString(approvalRecord.approved_at)) {
+                gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+            }
+            const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter((key) => !asBoolean(approvalChecks[key]));
+            if (missingChecks.length > 0) {
+                gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+            }
+            if (gateReasons.length === 0) {
+                gateDecision = "allowed";
+                effectiveExecutionMode = requestedExecutionMode;
+                gateReasons.push("LIVE_MODE_APPROVED");
+            }
         }
     }
     return {
         scopeContext: { ...LOOPBACK_SCOPE_CONTEXT },
+        issueScope,
+        issueActionMatrix,
         gateInput: {
+            issue_scope: issueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
@@ -147,10 +304,13 @@ const buildLoopbackGate = (options, abilityAction) => {
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: gateReasons,
-            requires_manual_confirmation: requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+            requires_manual_confirmation: requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk" ||
+                requestedExecutionMode === "live_write"
         },
         consumerGateResult: {
             risk_state: riskState,
+            issue_scope: issueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
@@ -185,6 +345,48 @@ const buildLoopbackAuditRecord = (input) => ({
     approver: input.gate.approvalRecord.approver,
     approved_at: input.gate.approvalRecord.approved_at,
     recorded_at: "2026-03-23T10:00:00.000Z"
+});
+const buildLoopbackGatePayload = (input) => ({
+    plugin_gate_ownership: LOOPBACK_PLUGIN_GATE_OWNERSHIP,
+    scope_context: input.gate.scopeContext,
+    gate_input: {
+        run_id: input.runId,
+        session_id: input.sessionId,
+        profile: input.profile,
+        ...input.gate.gateInput
+    },
+    gate_outcome: input.gate.gateOutcome,
+    consumer_gate_result: input.gate.consumerGateResult,
+    approval_record: input.gate.approvalRecord,
+    issue_action_matrix: input.gate.issueActionMatrix,
+    risk_state_output: {
+        current_state: resolveLoopbackRiskState(input.gate.gateInput.risk_state),
+        risk_state_machine: {
+            states: [...LOOPBACK_RISK_STATE_MACHINE.states],
+            transitions: LOOPBACK_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
+            hard_block_when_paused: [...LOOPBACK_RISK_STATE_MACHINE.hard_block_when_paused]
+        },
+        issue_action_matrix: [
+            resolveLoopbackIssueActionMatrixEntry("issue_208", resolveLoopbackRiskState(input.gate.gateInput.risk_state)),
+            resolveLoopbackIssueActionMatrixEntry("issue_209", resolveLoopbackRiskState(input.gate.gateInput.risk_state))
+        ],
+        recovery_requirements: resolveLoopbackRecoveryRequirements(resolveLoopbackRiskState(input.gate.gateInput.risk_state))
+    },
+    audit_record: input.auditRecord,
+    risk_transition_audit: {
+        run_id: input.runId,
+        session_id: input.sessionId,
+        issue_scope: String(input.gate.gateInput.issue_scope ?? "issue_209"),
+        prev_state: String(input.gate.gateInput.risk_state ?? "paused"),
+        next_state: String(input.gate.gateInput.risk_state ?? "paused"),
+        trigger: "gate_evaluation",
+        decision: String(input.gate.consumerGateResult.gate_decision ?? "blocked"),
+        reason: Array.isArray(input.gate.consumerGateResult.gate_reasons) &&
+            input.gate.consumerGateResult.gate_reasons.length > 0
+            ? String(input.gate.consumerGateResult.gate_reasons[0])
+            : "GATE_DECISION_RECORDED",
+        approver: input.gate.approvalRecord.approver ?? null
+    }
 });
 class InMemoryPort {
     #listeners = new Set();
@@ -260,19 +462,13 @@ class InMemoryContentScriptRuntime {
                 profile: "loopback_profile",
                 gate
             });
-            const gateBundle = {
-                scope_context: gate.scopeContext,
-                gate_input: {
-                    run_id: message.runId,
-                    session_id: message.sessionId,
-                    profile: "loopback_profile",
-                    ...gate.gateInput
-                },
-                gate_outcome: gate.gateOutcome,
-                consumer_gate_result: consumerGateResult,
-                approval_record: gate.approvalRecord,
-                audit_record: auditRecord
-            };
+            const gateBundle = buildLoopbackGatePayload({
+                runId: message.runId,
+                sessionId: message.sessionId,
+                profile: "loopback_profile",
+                gate,
+                auditRecord
+            });
             if (consumerGateResult.gate_decision === "blocked") {
                 return {
                     kind: "result",
@@ -527,7 +723,56 @@ class InMemoryBackgroundRelay {
                 : {};
             const runId = String(request.params.run_id ?? request.id);
             const sessionId = String(request.params.session_id ?? this.#sessionId);
-            this.#pendingForward.set(request.id, { request });
+            let gatePayload;
+            if (command === "xhs.search") {
+                const ability = typeof commandParams.ability === "object" && commandParams.ability !== null
+                    ? commandParams.ability
+                    : {};
+                const options = typeof commandParams.options === "object" && commandParams.options !== null
+                    ? commandParams.options
+                    : {};
+                const gate = buildLoopbackGate(options, asString(ability.action));
+                const auditRecord = buildLoopbackAuditRecord({
+                    runId,
+                    sessionId,
+                    profile: "loopback_profile",
+                    gate
+                });
+                gatePayload = buildLoopbackGatePayload({
+                    runId,
+                    sessionId,
+                    profile: "loopback_profile",
+                    gate,
+                    auditRecord
+                });
+                const consumerGateResult = asRecord(gatePayload.consumer_gate_result);
+                if (consumerGateResult?.gate_decision === "blocked") {
+                    this.hostPort.postMessage({
+                        kind: "response",
+                        envelope: {
+                            id: request.id,
+                            status: "error",
+                            summary: {
+                                relay_path: RELAY_PATH
+                            },
+                            payload: {
+                                details: {
+                                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                                    stage: "execution",
+                                    reason: "EXECUTION_MODE_GATE_BLOCKED"
+                                },
+                                ...gatePayload
+                            },
+                            error: {
+                                code: "ERR_EXECUTION_FAILED",
+                                message: "执行模式门禁阻断了当前 xhs.search 请求"
+                            }
+                        }
+                    });
+                    return;
+                }
+            }
+            this.#pendingForward.set(request.id, { request, gatePayload });
             this.contentPort.postMessage({
                 kind: "forward",
                 id: request.id,
@@ -558,6 +803,26 @@ class InMemoryBackgroundRelay {
         }
         this.#pendingForward.delete(result.id);
         const request = pending.request;
+        const payload = typeof result.payload === "object" && result.payload !== null
+            ? { ...result.payload }
+            : {};
+        const summary = typeof payload.summary === "object" && payload.summary !== null
+            ? payload.summary
+            : null;
+        if (pending.gatePayload) {
+            for (const [key, value] of Object.entries(pending.gatePayload)) {
+                const hasInPayload = Object.prototype.hasOwnProperty.call(payload, key);
+                const hasInSummary = summary !== null && Object.prototype.hasOwnProperty.call(summary, key);
+                if (!hasInPayload && !hasInSummary) {
+                    if (summary !== null) {
+                        summary[key] = value;
+                    }
+                    else {
+                        payload[key] = value;
+                    }
+                }
+            }
+        }
         if (!result.ok) {
             this.hostPort.postMessage({
                 kind: "response",
@@ -567,7 +832,7 @@ class InMemoryBackgroundRelay {
                     summary: {
                         relay_path: RELAY_PATH
                     },
-                    payload: result.payload ?? {},
+                    payload,
                     error: result.error ?? {
                         code: "ERR_TRANSPORT_FORWARD_FAILED",
                         message: "content script failed"
@@ -587,7 +852,7 @@ class InMemoryBackgroundRelay {
                     command: String(request.params.command ?? "runtime.ping"),
                     relay_path: RELAY_PATH
                 },
-                payload: result.payload ?? {},
+                payload,
                 error: null
             }
         });

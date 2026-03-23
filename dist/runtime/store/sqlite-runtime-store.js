@@ -18,6 +18,7 @@ const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const GATE_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
+    "live_read_limited",
     "live_read_high_risk",
     "live_write"
 ]);
