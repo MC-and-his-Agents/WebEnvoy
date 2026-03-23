@@ -19,6 +19,7 @@
 3. `gate_decision`
 4. `approval_record`
 5. `audit_record`
+6. `consumer_gate_result`
 
 ## scope_context
 
@@ -47,9 +48,9 @@
     "session_id": "nm-session-001",
     "profile": "xhs_account_001",
     "target_domain": "www.xiaohongshu.com",
-    "target_tab_id": 32,
+    "target_page": "search_result_tab",
     "action_type": "read",
-    "requested_mode": "live_read_high_risk",
+    "execution_mode": "live_read_high_risk",
     "risk_state": "paused"
   }
 }
@@ -58,7 +59,7 @@
 枚举：
 
 - `action_type`: `read | write | irreversible_write`
-- `requested_mode`: `dry_run | recon | live_read_high_risk | live_write`
+- `execution_mode`: `dry_run | recon | live_read_high_risk | live_write`
 - `risk_state`: `paused | limited | allowed`
 
 ## gate_decision
@@ -81,7 +82,7 @@
 约束：
 
 1. 默认 `effective_mode` 必须是 `dry_run` 或 `recon`。
-2. `requested_mode` 为 `live_*` 时，如任一前置缺失必须 `decision=blocked`。
+2. `execution_mode` 为 `live_*` 时，如任一前置缺失必须 `decision=blocked`。
 3. `reasons` 不得为空，必须可用于审计复盘。
 
 ## approval_record
@@ -94,7 +95,7 @@
     "approved_at": null,
     "checks": {
       "target_domain_confirmed": true,
-      "target_page_confirmed": false,
+      "target_page_confirmed": true,
       "risk_state_checked": true,
       "action_type_confirmed": true
     }
@@ -116,8 +117,9 @@
     "run_id": "run_001",
     "session_id": "nm-session-001",
     "target_domain": "www.xiaohongshu.com",
+    "target_page": "search_result_tab",
     "action_type": "read",
-    "requested_mode": "live_read_high_risk",
+    "execution_mode": "live_read_high_risk",
     "effective_mode": "dry_run",
     "decision": "blocked",
     "recorded_at": "2026-03-22T08:00:00Z"
@@ -129,6 +131,30 @@
 
 1. 每次门禁判定都必须生成审计记录。
 2. 记录必须可被 `run_id/session_id` 检索。
+
+## consumer_gate_result
+
+`#208` 与 `#209` 必须消费同一个标准化对象，不允许定义私有判定字段绕过门禁：
+
+```json
+{
+  "consumer_gate_result": {
+    "target_domain": "www.xiaohongshu.com",
+    "target_page": "search_result_tab",
+    "action_type": "read",
+    "execution_mode": "dry_run",
+    "gate_decision": "blocked",
+    "gate_reasons": [
+      "RISK_STATE_PAUSED"
+    ]
+  }
+}
+```
+
+约束：
+
+1. `target_domain`、`target_page`、`action_type`、`execution_mode`、`gate_decision` 为冻结字段。
+2. `#208` 与 `#209` 只允许追加附加字段，不允许重定义冻结字段语义。
 
 ## 兼容性
 

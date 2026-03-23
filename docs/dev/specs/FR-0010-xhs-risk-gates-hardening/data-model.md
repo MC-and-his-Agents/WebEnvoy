@@ -10,15 +10,15 @@
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
 - `target_domain` string NOT NULL
-- `target_tab_id` integer NULL
+- `target_page` string NOT NULL
 - `action_type` ENUM NOT NULL (`read` | `write` | `irreversible_write`)
-- `requested_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_high_risk` | `live_write`)
+- `execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_high_risk` | `live_write`)
 - `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
 - `created_at` datetime NOT NULL
 
 约束：
 
-1. `requested_mode` 为 `live_*` 时，`target_tab_id` 不得为空。
+1. `execution_mode` 为 `live_*` 时，`target_page` 不得为空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 
 ## 实体 2：GateDecision
@@ -26,14 +26,14 @@
 - `decision_id` string PK
 - `run_id` string NOT NULL
 - `effective_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_high_risk` | `live_write`)
-- `decision` ENUM NOT NULL (`allowed` | `blocked`)
+- `gate_decision` ENUM NOT NULL (`allowed` | `blocked`)
 - `reasons` JSON array NOT NULL
 - `requires_manual_confirmation` boolean NOT NULL
 - `recorded_at` datetime NOT NULL
 
 约束：
 
-1. `decision=blocked` 时，`reasons` 必须至少包含 1 项。
+1. `gate_decision=blocked` 时，`reasons` 必须至少包含 1 项。
 2. 默认情况下 `effective_mode` 不得为 `live_*`。
 
 ## 实体 3：ApprovalRecord
@@ -61,10 +61,11 @@
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
 - `target_domain` string NOT NULL
+- `target_page` string NOT NULL
 - `action_type` ENUM NOT NULL
-- `requested_mode` ENUM NOT NULL
+- `execution_mode` ENUM NOT NULL
 - `effective_mode` ENUM NOT NULL
-- `decision` ENUM NOT NULL
+- `gate_decision` ENUM NOT NULL
 - `recorded_at` datetime NOT NULL
 
 约束：
@@ -83,3 +84,4 @@
 
 - 与 `FR-0009`：继承门禁对象语义，不改变字段含义。
 - 与 `FR-0004`：复用运行标识与最小可观测信息，不重建外层错误壳。
+- 与 Sprint 2 issue 分解：`#218/#219/#221` 与 `#208/#209` 共享同一冻结字段（`target_domain`、`target_page`、`action_type`、`execution_mode`、`gate_decision`）。
