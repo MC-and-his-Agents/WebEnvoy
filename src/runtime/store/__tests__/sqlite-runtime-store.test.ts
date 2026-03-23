@@ -276,6 +276,53 @@ describeWithSqlite("sqlite-runtime-store", () => {
     });
   });
 
+  it("accepts live_read_limited in persisted gate audit records", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-limited-001",
+      sessionId: "session-gate-limited-1",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:01.000Z",
+      errorCode: null
+    });
+
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-limited-001_1",
+      runId: "run-gate-limited-001",
+      sessionId: "session-gate-limited-1",
+      profile: "profile-a",
+      riskState: "limited",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 32,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_limited",
+      effectiveExecutionMode: "live_read_limited",
+      gateDecision: "allowed",
+      gateReasons: ["LIVE_MODE_APPROVED"],
+      approver: "qa-reviewer",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      recordedAt: "2026-03-23T10:00:11.000Z"
+    });
+
+    const trail = await store.getAuditTrailByRunId("run-gate-limited-001");
+    store.close();
+
+    expect(trail.audit_records).toHaveLength(1);
+    expect(trail.audit_records[0]).toMatchObject({
+      run_id: "run-gate-limited-001",
+      risk_state: "limited",
+      requested_execution_mode: "live_read_limited",
+      effective_execution_mode: "live_read_limited",
+      gate_decision: "allowed",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+  });
+
   it("lists audit records by session_id/profile filters", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
@@ -380,6 +427,45 @@ describeWithSqlite("sqlite-runtime-store", () => {
         approver: null,
         approvedAt: null,
         recordedAt: "2026-03-23T11:00:02.000Z"
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
+  it("rejects allowed live_read_limited audit record without approver/approved_at", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-limited-invalid-001",
+      sessionId: "session-gate-limited-invalid",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T11:05:00.000Z",
+      endedAt: "2026-03-23T11:05:01.000Z",
+      errorCode: null
+    });
+
+    await expect(
+      store.appendAuditRecord({
+        eventId: "gate_evt_run-gate-limited-invalid-001",
+        runId: "run-gate-limited-invalid-001",
+        sessionId: "session-gate-limited-invalid",
+        profile: "profile-a",
+        riskState: "limited",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 33,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_limited",
+        effectiveExecutionMode: "live_read_limited",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: null,
+        approvedAt: null,
+        recordedAt: "2026-03-23T11:05:02.000Z"
       })
     ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
       code: "ERR_RUNTIME_STORE_INVALID_INPUT"

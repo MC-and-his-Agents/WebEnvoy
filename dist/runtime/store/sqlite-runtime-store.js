@@ -18,6 +18,7 @@ const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const GATE_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
+    "live_read_limited",
     "live_read_high_risk",
     "live_write"
 ]);
@@ -664,8 +665,10 @@ export class SQLiteRuntimeStore {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid recorded_at");
         }
         const requiresApprovalEvidence = input.gateDecision === "allowed" &&
-            (input.requestedExecutionMode === "live_read_high_risk" ||
+            (input.requestedExecutionMode === "live_read_limited" ||
+                input.requestedExecutionMode === "live_read_high_risk" ||
                 input.requestedExecutionMode === "live_write" ||
+                input.effectiveExecutionMode === "live_read_limited" ||
                 input.effectiveExecutionMode === "live_read_high_risk" ||
                 input.effectiveExecutionMode === "live_write");
         if (requiresApprovalEvidence &&

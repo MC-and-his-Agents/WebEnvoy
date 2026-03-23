@@ -914,6 +914,78 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("accepts live_read_limited as approved live mode in limited risk state", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "success",
+      summary: {
+        gate_input: {
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited"
+        },
+        gate_outcome: {
+          effective_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"],
+          requires_manual_confirmation: true
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        },
+        risk_state_output: {
+          current_state: "limited",
+          recovery_requirements: [
+            "stability_window_passed_and_manual_approve",
+            "risk_state_checked",
+            "audit_record_present"
+          ]
+        }
+      }
+    });
+  });
+
   itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-allowed-001";

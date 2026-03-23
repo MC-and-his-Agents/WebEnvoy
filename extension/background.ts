@@ -108,7 +108,12 @@ interface NativeHeartbeatMessage {
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
 type XhsActionType = "read" | "write" | "irreversible_write";
-type XhsExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type XhsExecutionMode =
+  | "dry_run"
+  | "recon"
+  | "live_read_limited"
+  | "live_read_high_risk"
+  | "live_write";
 type XhsRiskState = "paused" | "limited" | "allowed";
 type XhsIssueScope = "issue_208" | "issue_209";
 
@@ -151,6 +156,7 @@ const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "dry_run",
   "recon",
+  "live_read_limited",
   "live_read_high_risk",
   "live_write"
 ]);
@@ -332,6 +338,7 @@ const xhsGateReasonMessage = (reason: string): string => {
     LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE:
       "live execution mode is blocked by background target gate",
     ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX: "requested action is blocked by issue/state matrix",
+    ISSUE_ACTION_MATRIX_BLOCKED: "requested action is blocked by issue/state matrix",
     TARGET_DOMAIN_NOT_EXPLICIT: "target domain must be explicit",
     TARGET_DOMAIN_OUT_OF_SCOPE: "target domain is out of xhs read/write scope",
     TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
@@ -407,9 +414,32 @@ const resolveBlockedFallbackMode = (
 ): XhsExecutionMode =>
   requestedExecutionMode === "recon"
     ? "recon"
-    : requestedExecutionMode === "live_read_high_risk" && riskState === "limited"
-      ? "recon"
-      : "dry_run";
+    : requestedExecutionMode === "live_write"
+      ? "dry_run"
+      : riskState === "limited"
+        ? "recon"
+        : "dry_run";
+
+const getRiskRecoveryRequirements = (state: XhsRiskState): string[] => {
+  switch (state) {
+    case "paused":
+      return [
+        "cooldown_backoff_window_passed_and_manual_approve",
+        "risk_state_checked",
+        "audit_record_present"
+      ];
+    case "limited":
+      return [
+        "stability_window_passed_and_manual_approve",
+        "risk_state_checked",
+        "audit_record_present"
+      ];
+    case "allowed":
+      return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
+    default:
+      return ["audit_record_present"];
+  }
+};
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -1215,16 +1245,21 @@ class ChromeBackgroundBridge {
     if (requestedExecutionMode === "live_write") {
       pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
     }
-    if (
-      requestedExecutionMode &&
-      issueActionMatrixEntry.blocked_actions.includes(requestedExecutionMode)
-    ) {
-      pushReason("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
-    }
-    if (requestedExecutionMode === "live_read_high_risk") {
-      if (riskState !== "allowed") {
+    const isLiveReadMode =
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk";
+    const isBlockedByStateMatrix =
+      requestedExecutionMode !== null &&
+      issueActionMatrixEntry.blocked_actions.includes(requestedExecutionMode);
+    if (isBlockedByStateMatrix) {
+      if (isLiveReadMode) {
         pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
+        pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
+      } else {
+        pushReason("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
       }
+    }
+    if (isLiveReadMode && !isBlockedByStateMatrix) {
       if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
         pushReason("MANUAL_CONFIRMATION_MISSING");
       }
@@ -1263,7 +1298,9 @@ class ChromeBackgroundBridge {
     const allowed = gateReasons.length === 0;
     const gateDecision: "allowed" | "blocked" = allowed ? "allowed" : "blocked";
     const requiresManualConfirmation =
-      requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write";
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk" ||
+      requestedExecutionMode === "live_write";
     const effectiveExecutionMode = allowed
       ? requestedExecutionMode ?? "dry_run"
       : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
@@ -1273,7 +1310,11 @@ class ChromeBackgroundBridge {
     if (allowed && requestedExecutionMode === "recon") {
       gateReasons.push("DEFAULT_MODE_RECON");
     }
-    if (allowed && requestedExecutionMode === "live_read_high_risk") {
+    if (
+      allowed &&
+      (requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk")
+    ) {
       gateReasons.push("LIVE_MODE_APPROVED");
     }
     const consumerGateResult = {
@@ -1355,7 +1396,8 @@ class ChromeBackgroundBridge {
         issue_action_matrix: [
           resolveIssueActionMatrixEntry("issue_208", riskState),
           resolveIssueActionMatrixEntry("issue_209", riskState)
-        ]
+        ],
+        recovery_requirements: getRiskRecoveryRequirements(riskState)
       },
       audit_record: auditRecord,
       risk_transition_audit: riskTransitionAudit

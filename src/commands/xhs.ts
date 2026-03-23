@@ -9,7 +9,12 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 
 type AbilityLayer = "L3" | "L2" | "L1";
 type AbilityAction = "read" | "write" | "download";
-type XhsExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type XhsExecutionMode =
+  | "dry_run"
+  | "recon"
+  | "live_read_limited"
+  | "live_read_high_risk"
+  | "live_write";
 
 interface AbilityRef {
   id: string;
@@ -28,6 +33,7 @@ const ABILITY_ACTIONS = new Set<AbilityAction>(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "dry_run",
   "recon",
+  "live_read_limited",
   "live_read_high_risk",
   "live_write"
 ]);

@@ -753,6 +753,81 @@ describe("extension service worker recovery contract", () => {
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
           gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+        },
+        risk_state_output: {
+          current_state: "allowed",
+          recovery_requirements: [
+            "manual_confirmation_recorded",
+            "target_scope_confirmed",
+            "audit_record_present"
+          ]
+        }
+      }
+    });
+  });
+
+  it("blocks live_read_limited in background gate when approval is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-limited-blocked-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-blocked-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          gate_outcome?: {
+            effective_execution_mode?: string;
+            requires_manual_confirmation?: boolean;
+          };
+          consumer_gate_result?: {
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-limited-blocked-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-limited-blocked-001",
+      status: "error",
+      payload: {
+        gate_outcome: {
+          effective_execution_mode: "recon",
+          requires_manual_confirmation: true
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "recon",
+          gate_decision: "blocked",
+          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
         }
       }
     });
@@ -816,7 +891,113 @@ describe("extension service worker recovery contract", () => {
       status: "error",
       payload: {
         consumer_gate_result: {
-          gate_reasons: ["ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX", "RISK_STATE_PAUSED"]
+          gate_reasons: ["RISK_STATE_PAUSED", "ISSUE_ACTION_MATRIX_BLOCKED"]
+        }
+      }
+    });
+  });
+
+  it("forwards approved live_read_limited through the real background bridge", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-limited-approved-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-approved-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-limited-approved-001",
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-limited-approved-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "read"
+            },
+            consumer_gate_result: {
+              risk_state: "limited",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              effective_execution_mode: "live_read_limited",
+              gate_decision: "allowed",
+              gate_reasons: ["LIVE_MODE_APPROVED"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const approved = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-live-limited-approved-001");
+    expect(approved).toMatchObject({
+      id: "run-xhs-live-limited-approved-001",
+      status: "success",
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            action: "read"
+          },
+          consumer_gate_result: {
+            risk_state: "limited",
+            requested_execution_mode: "live_read_limited",
+            effective_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          }
         }
       }
     });

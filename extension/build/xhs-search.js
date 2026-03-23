@@ -6,10 +6,52 @@ const ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const REQUESTED_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
+    "live_read_limited",
     "live_read_high_risk",
     "live_write"
 ]);
 const RISK_STATES = new Set(["paused", "limited", "allowed"]);
+const READ_EXECUTION_POLICY = {
+    default_mode: "dry_run",
+    allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    blocked_actions: ["expand_new_live_surface_without_gate"],
+    live_entry_requirements: [
+        "risk_state_not_paused",
+        "target_domain_confirmed",
+        "manual_confirmation_recorded"
+    ]
+};
+const ISSUE_209_ACTION_MATRIX = {
+    paused: {
+        issue_scope: "issue_209",
+        state: "paused",
+        allowed_actions: ["dry_run", "recon"],
+        blocked_actions: [
+            "live_read_limited",
+            "live_read_high_risk",
+            "live_write",
+            "irreversible_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    limited: {
+        issue_scope: "issue_209",
+        state: "limited",
+        allowed_actions: ["dry_run", "recon", "live_read_limited"],
+        blocked_actions: [
+            "live_read_high_risk",
+            "live_write",
+            "irreversible_write",
+            "expand_new_live_surface_without_gate"
+        ]
+    },
+    allowed: {
+        issue_scope: "issue_209",
+        state: "allowed",
+        allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+        blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
+    }
+};
 const REQUIRED_APPROVAL_CHECKS = [
     "target_domain_confirmed",
     "target_tab_confirmed",
@@ -33,6 +75,21 @@ const resolveRequestedExecutionMode = (value) => typeof value === "string" && RE
 const resolveRiskState = (value) => typeof value === "string" && RISK_STATES.has(value)
     ? value
     : "paused";
+const resolveIssue209Matrix = (state) => {
+    const entry = ISSUE_209_ACTION_MATRIX[state];
+    return {
+        issue_scope: entry.issue_scope,
+        state: entry.state,
+        allowed_actions: [...entry.allowed_actions],
+        blocked_actions: [...entry.blocked_actions]
+    };
+};
+const resolveReadExecutionPolicy = () => ({
+    default_mode: READ_EXECUTION_POLICY.default_mode,
+    allowed_modes: [...READ_EXECUTION_POLICY.allowed_modes],
+    blocked_actions: [...READ_EXECUTION_POLICY.blocked_actions],
+    live_entry_requirements: [...READ_EXECUTION_POLICY.live_entry_requirements]
+});
 const resolveFallbackMode = (requestedExecutionMode, riskState) => {
     if (requestedExecutionMode === "live_write") {
         return "dry_run";
@@ -54,6 +111,9 @@ const resolveGate = (options) => {
     const actionType = resolveActionType(options.action_type);
     const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
     const riskState = resolveRiskState(options.risk_state);
+    const readExecutionPolicy = resolveReadExecutionPolicy();
+    const issueActionMatrix = resolveIssue209Matrix(riskState);
+    const issueAllowedModes = new Set(issueActionMatrix.allowed_actions);
     const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
     const targetDomain = asNonEmptyString(options.target_domain);
     const targetTabId = asInteger(options.target_tab_id);
@@ -116,7 +176,9 @@ const resolveGate = (options) => {
     }
     if (gateReasons.length > 0) {
         gateDecision = "blocked";
-        if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+        if (requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk" ||
+            requestedExecutionMode === "live_write") {
             effectiveExecutionMode = fallbackMode;
         }
     }
@@ -129,23 +191,36 @@ const resolveGate = (options) => {
         if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
+        if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
         if (requestedExecutionMode === "live_write" && actionType === "read") {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
-        if (riskState !== "allowed") {
+        if (requestedExecutionMode &&
+            !issueAllowedModes.has(requestedExecutionMode) &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk")) {
             gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+            gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
         }
-        const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
-        if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-            gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-        }
-        if (missingChecks.length > 0) {
-            gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-        }
-        if (gateReasons.length === 0) {
-            gateDecision = "allowed";
-            effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
-            gateReasons.push("LIVE_MODE_APPROVED");
+        const liveModeCanEnter = requestedExecutionMode !== null &&
+            issueAllowedModes.has(requestedExecutionMode) &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk");
+        if (liveModeCanEnter) {
+            const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+            if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+                gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+            }
+            if (missingChecks.length > 0) {
+                gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+            }
+            if (gateReasons.length === 0) {
+                gateDecision = "allowed";
+                effectiveExecutionMode = requestedExecutionMode;
+                gateReasons.push("LIVE_MODE_APPROVED");
+            }
         }
     }
     return {
@@ -155,6 +230,8 @@ const resolveGate = (options) => {
             write_domain: XHS_WRITE_DOMAIN,
             domain_mixing_forbidden: true
         },
+        read_execution_policy: readExecutionPolicy,
+        issue_action_matrix: issueActionMatrix,
         gate_input: {
             target_domain: targetDomain,
             target_tab_id: targetTabId,
@@ -167,7 +244,9 @@ const resolveGate = (options) => {
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: gateReasons,
-            requires_manual_confirmation: requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+            requires_manual_confirmation: requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk" ||
+                requestedExecutionMode === "live_write"
         },
         consumer_gate_result: {
             risk_state: riskState,
@@ -207,6 +286,8 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
                 ...gate.gate_input
             },
             gate_outcome: gate.gate_outcome,
+            read_execution_policy: gate.read_execution_policy,
+            issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
             approval_record: gate.approval_record,
             audit_record: auditRecord
@@ -298,6 +379,8 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
                     ...gate.gate_input
                 },
                 gate_outcome: gate.gate_outcome,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
                 ...(auditRecord ? { audit_record: auditRecord } : {})
@@ -548,6 +631,8 @@ export const executeXhsSearch = async (input, env) => {
                             ...gate.gate_input
                         },
                         gate_outcome: gate.gate_outcome,
+                        read_execution_policy: gate.read_execution_policy,
+                        issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
                         approval_record: gate.approval_record,
                         audit_record: auditRecord
@@ -563,6 +648,8 @@ export const executeXhsSearch = async (input, env) => {
                     ability_id: input.abilityId,
                     ...(asRecord(simulated.payload.details) ?? {})
                 },
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
                 audit_record: auditRecord
@@ -713,6 +800,8 @@ export const executeXhsSearch = async (input, env) => {
                     ...gate.gate_input
                 },
                 gate_outcome: gate.gate_outcome,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
                 audit_record: auditRecord

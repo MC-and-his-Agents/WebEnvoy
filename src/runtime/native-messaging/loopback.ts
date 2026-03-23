@@ -27,7 +27,12 @@ const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 type LoopbackActionType = "read" | "write" | "irreversible_write";
-type LoopbackExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type LoopbackExecutionMode =
+  | "dry_run"
+  | "recon"
+  | "live_read_limited"
+  | "live_read_high_risk"
+  | "live_write";
 type LoopbackEffectiveExecutionMode = LoopbackExecutionMode | null;
 type LoopbackRiskState = "paused" | "limited" | "allowed";
 type LoopbackIssueScope = "issue_208" | "issue_209";
@@ -42,6 +47,7 @@ interface LoopbackIssueActionMatrixEntry {
 const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>([
   "dry_run",
   "recon",
+  "live_read_limited",
   "live_read_high_risk",
   "live_write"
 ]);
@@ -224,6 +230,27 @@ const resolveLoopbackFallbackMode = (
   return riskState === "limited" ? "recon" : "dry_run";
 };
 
+const resolveLoopbackRecoveryRequirements = (state: LoopbackRiskState): string[] => {
+  switch (state) {
+    case "paused":
+      return [
+        "cooldown_backoff_window_passed_and_manual_approve",
+        "risk_state_checked",
+        "audit_record_present"
+      ];
+    case "limited":
+      return [
+        "stability_window_passed_and_manual_approve",
+        "risk_state_checked",
+        "audit_record_present"
+      ];
+    case "allowed":
+      return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
+    default:
+      return ["audit_record_present"];
+  }
+};
+
 const buildLoopbackGate = (
   options: Record<string, unknown>,
   abilityAction: string | null
@@ -278,12 +305,6 @@ const buildLoopbackGate = (
   if (requestedExecutionMode === "live_write") {
     gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
   }
-  if (
-    requestedExecutionMode &&
-    issueActionMatrix.blocked_actions.includes(requestedExecutionMode)
-  ) {
-    gateReasons.push("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
-  }
   if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
     gateReasons.push("ACTION_DOMAIN_MISMATCH");
   }
@@ -293,7 +314,11 @@ const buildLoopbackGate = (
 
   if (gateReasons.length > 0) {
     gateDecision = "blocked";
-    if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+    if (
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk" ||
+      requestedExecutionMode === "live_write"
+    ) {
       effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
     }
   } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
@@ -307,31 +332,49 @@ const buildLoopbackGate = (
     if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
       gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
     }
+    if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
+      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+    }
     if (requestedExecutionMode === "live_write" && actionType === "read") {
       gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
     }
-    if (riskState !== "allowed") {
-      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-    }
     if (
-      approvalRecord.approved !== true ||
-      !asString(approvalRecord.approver) ||
-      !asString(approvalRecord.approved_at)
+      requestedExecutionMode &&
+      issueActionMatrix.blocked_actions.includes(requestedExecutionMode) &&
+      (requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk")
     ) {
-      gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
     }
 
-    const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter(
-      (key) => !asBoolean(approvalChecks[key])
-    );
-    if (missingChecks.length > 0) {
-      gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-    }
+    const liveModeCanEnter =
+      requestedExecutionMode !== null &&
+      issueActionMatrix.allowed_actions.includes(requestedExecutionMode) &&
+      (requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk");
 
-    if (gateReasons.length === 0) {
-      gateDecision = "allowed";
-      effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
-      gateReasons.push("LIVE_MODE_APPROVED");
+    if (liveModeCanEnter) {
+      if (
+        approvalRecord.approved !== true ||
+        !asString(approvalRecord.approver) ||
+        !asString(approvalRecord.approved_at)
+      ) {
+        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+      }
+
+      const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter(
+        (key) => !asBoolean(approvalChecks[key])
+      );
+      if (missingChecks.length > 0) {
+        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+      }
+
+      if (gateReasons.length === 0) {
+        gateDecision = "allowed";
+        effectiveExecutionMode = requestedExecutionMode;
+        gateReasons.push("LIVE_MODE_APPROVED");
+      }
     }
   }
 
@@ -353,7 +396,9 @@ const buildLoopbackGate = (
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
       requires_manual_confirmation:
-        requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+        requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk" ||
+        requestedExecutionMode === "live_write"
     },
     consumerGateResult: {
       risk_state: riskState,
@@ -422,7 +467,7 @@ const buildLoopbackGatePayload = (input: {
   approval_record: input.gate.approvalRecord,
   issue_action_matrix: input.gate.issueActionMatrix,
   risk_state_output: {
-    current_state: String(input.gate.gateInput.risk_state ?? "paused"),
+    current_state: resolveLoopbackRiskState(input.gate.gateInput.risk_state),
     risk_state_machine: {
       states: [...LOOPBACK_RISK_STATE_MACHINE.states],
       transitions: LOOPBACK_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
@@ -431,7 +476,10 @@ const buildLoopbackGatePayload = (input: {
     issue_action_matrix: [
       resolveLoopbackIssueActionMatrixEntry("issue_208", resolveLoopbackRiskState(input.gate.gateInput.risk_state)),
       resolveLoopbackIssueActionMatrixEntry("issue_209", resolveLoopbackRiskState(input.gate.gateInput.risk_state))
-    ]
+    ],
+    recovery_requirements: resolveLoopbackRecoveryRequirements(
+      resolveLoopbackRiskState(input.gate.gateInput.risk_state)
+    )
   },
   audit_record: input.auditRecord,
   risk_transition_audit: {

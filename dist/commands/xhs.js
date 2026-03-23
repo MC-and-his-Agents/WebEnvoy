@@ -7,6 +7,7 @@ const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
+    "live_read_limited",
     "live_read_high_risk",
     "live_write"
 ]);

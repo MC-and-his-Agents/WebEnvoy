@@ -21,4 +21,12 @@ describe("extension build contract", () => {
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);
   });
+
+  it("keeps background build artifact aligned with xhs gate contract markers", () => {
+    const backgroundBuild = fs.readFileSync(backgroundBuildPath, "utf8");
+    expect(backgroundBuild).toContain("live_read_limited");
+    expect(backgroundBuild).toContain("plugin_gate_ownership");
+    expect(backgroundBuild).toContain("risk_state_output");
+    expect(backgroundBuild).toContain("recovery_requirements");
+  });
 });
