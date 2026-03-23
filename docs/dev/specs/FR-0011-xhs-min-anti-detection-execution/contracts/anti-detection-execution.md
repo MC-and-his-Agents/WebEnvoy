@@ -2,7 +2,7 @@
 
 ## 边界与适用范围
 
-本契约定义 Sprint 3 的最小反风控执行能力输出对象，供 `#208` 与 `#209` 在进入 live 扩展前统一消费。
+本契约定义 Sprint 3 的最小反风控执行能力输出对象，供 `#208` 与 `#209` 在进入 live 扩展前统一消费，并作为 `#223` 的统一状态机/阻断策略接口基线。
 
 本契约不定义：
 - 平台规避策略细节
@@ -17,6 +17,8 @@
 3. `write_interaction_tier`
 4. `session_rhythm_policy`
 5. `risk_state_machine`
+6. `issue_action_matrix`
+7. `risk_transition_audit`
 
 ## plugin_gate_ownership
 
@@ -98,8 +100,55 @@
 }
 ```
 
+## issue_action_matrix
+
+```json
+{
+  "issue_action_matrix": {
+    "issue_208": {
+      "paused": ["dry_run", "recon"],
+      "limited": ["recon", "reversible_interaction_with_approval"],
+      "allowed": ["approved_scope_actions"]
+    },
+    "issue_209": {
+      "paused": ["dry_run", "recon"],
+      "limited": ["recon", "live_read_limited_with_approval"],
+      "allowed": ["approved_scope_actions"]
+    }
+  }
+}
+```
+
+约束：
+- `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
+- `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
+- `limited` 下 `issue_208` 不得包含不可逆写动作。
+
+## risk_transition_audit
+
+```json
+{
+  "risk_transition_audit": {
+    "required_fields": [
+      "run_id",
+      "session_id",
+      "issue_scope",
+      "prev_state",
+      "next_state",
+      "trigger",
+      "decision",
+      "reason"
+    ],
+    "on_missing_record": "force_pause_and_block_live",
+    "rollback_entrypoint": "risk_state_reset_to_paused"
+  }
+}
+```
+
 ## 兼容性约束
 
 1. 新字段可追加，不允许改变既有字段语义。
 2. `states` 不允许删除 `paused/limited/allowed` 任一状态。
 3. `hard_block_when_paused` 缩减必须经过独立 spec review 说明。
+4. `issue_action_matrix` 不允许为 `#208` 和 `#209` 定义不同状态集合。
+5. `risk_transition_audit.required_fields` 缺失任一字段时，live 放行判定无效。
