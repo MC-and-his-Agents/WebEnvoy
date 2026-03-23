@@ -252,4 +252,4 @@
 1. `live_read_limited` 作为 Sprint 3 的正式公开模式，只适用于受控读 live，不得外溢为写路径或不可逆动作的隐式降级口径。
 2. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，必须复用 `FR-0010.approval_record` 与 `FR-0010.audit_record` 作为审批证据载体；其中 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
 3. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级结果（当前为 `dry_run` 或 `recon`）；不得返回未实际执行的 `live_read_limited`。
-4. `consumer_gate_result` 在 Sprint 3 中继续沿用 `FR-0010` 冻结字段，并允许 `requested_execution_mode|effective_execution_mode` 扩展为 `live_read_limited`；`#208/#209/#255` 不得自行定义私有审批证据字段绕过 `approval_record` / `audit_record`。
+4. `consumer_gate_result` 在 Sprint 3 中继续沿用 `FR-0010` 冻结字段，并允许 `requested_execution_mode|effective_execution_mode` 扩展为 `live_read_limited`；`#208/#209` 与后续实现事项不得自行定义私有审批证据字段绕过 `approval_record` / `audit_record`。
