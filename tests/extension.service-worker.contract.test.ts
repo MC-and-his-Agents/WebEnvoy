@@ -91,6 +91,7 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
   target_page: "search_result_tab",
+  requested_execution_mode: "dry_run",
   ...overrides
 });
 
@@ -570,6 +571,120 @@ describe("extension service worker recovery contract", () => {
           requested_execution_mode: "dry_run",
           effective_execution_mode: "dry_run",
           gate_reasons: ["TARGET_TAB_NOT_EXPLICIT"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks xhs.search when requested_execution_mode is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-missing-requested-mode-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-missing-requested-mode-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-missing-requested-mode-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-missing-requested-mode-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          requested_execution_mode: null,
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          gate_reasons: ["REQUESTED_EXECUTION_MODE_NOT_EXPLICIT"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks live_* mode by default and keeps auditable consumer_gate_result fields", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-blocked-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-blocked-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            target_domain?: string | null;
+            target_tab_id?: number | null;
+            target_page?: string | null;
+            action_type?: string;
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-mode-blocked-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-mode-blocked-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          gate_reasons: ["LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE"]
         }
       }
     });

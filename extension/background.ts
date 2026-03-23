@@ -117,7 +117,7 @@ interface XhsTargetGateResult {
     target_tab_id: number | null;
     target_page: string | null;
     action_type: XhsActionType;
-    requested_execution_mode: XhsExecutionMode;
+    requested_execution_mode: XhsExecutionMode | null;
     effective_execution_mode: XhsExecutionMode;
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];
@@ -178,6 +178,9 @@ const classifyXhsPage = (url: string, domain: string): string => {
 
 const xhsGateReasonMessage = (reason: string): string => {
   const mapping: Record<string, string> = {
+    REQUESTED_EXECUTION_MODE_NOT_EXPLICIT: "requested_execution_mode must be explicit",
+    LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE:
+      "live execution mode is blocked by background target gate",
     TARGET_DOMAIN_NOT_EXPLICIT: "target domain must be explicit",
     TARGET_DOMAIN_OUT_OF_SCOPE: "target domain is out of xhs read/write scope",
     TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
@@ -191,10 +194,10 @@ const xhsGateReasonMessage = (reason: string): string => {
   return mapping[reason] ?? "xhs target gate blocked";
 };
 
-const resolveRequestedExecutionMode = (value: unknown): XhsExecutionMode =>
+const parseRequestedExecutionMode = (value: unknown): XhsExecutionMode | null =>
   typeof value === "string" && XHS_EXECUTION_MODES.has(value as XhsExecutionMode)
     ? (value as XhsExecutionMode)
-    : "dry_run";
+    : null;
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -961,11 +964,19 @@ class ChromeBackgroundBridge {
         ? rawTargetPage.trim()
         : null;
     const actionType: XhsActionType = "read";
-    const requestedExecutionMode = resolveRequestedExecutionMode(rawRequestedExecutionMode);
-    // #218 only handles target gate; keep execution mode unchanged here.
-    const effectiveExecutionMode: XhsExecutionMode = requestedExecutionMode;
+    const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
+    const effectiveExecutionMode: XhsExecutionMode =
+      requestedExecutionMode === "recon" ? "recon" : "dry_run";
 
     const gateReasons: string[] = [];
+    if (!requestedExecutionMode) {
+      gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+    } else if (
+      requestedExecutionMode === "live_read_high_risk" ||
+      requestedExecutionMode === "live_write"
+    ) {
+      gateReasons.push("LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE");
+    }
     if (!targetDomain) {
       gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
     } else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {

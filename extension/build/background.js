@@ -60,6 +60,8 @@ const classifyXhsPage = (url, domain) => {
 };
 const xhsGateReasonMessage = (reason) => {
     const mapping = {
+        REQUESTED_EXECUTION_MODE_NOT_EXPLICIT: "requested_execution_mode must be explicit",
+        LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE: "live execution mode is blocked by background target gate",
         TARGET_DOMAIN_NOT_EXPLICIT: "target domain must be explicit",
         TARGET_DOMAIN_OUT_OF_SCOPE: "target domain is out of xhs read/write scope",
         TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
@@ -72,9 +74,9 @@ const xhsGateReasonMessage = (reason) => {
     };
     return mapping[reason] ?? "xhs target gate blocked";
 };
-const resolveRequestedExecutionMode = (value) => typeof value === "string" && XHS_EXECUTION_MODES.has(value)
+const parseRequestedExecutionMode = (value) => typeof value === "string" && XHS_EXECUTION_MODES.has(value)
     ? value
-    : "dry_run";
+    : null;
 export class BackgroundRelay {
     contentScript;
     #listeners = new Set();
@@ -768,10 +770,16 @@ class ChromeBackgroundBridge {
             ? rawTargetPage.trim()
             : null;
         const actionType = "read";
-        const requestedExecutionMode = resolveRequestedExecutionMode(rawRequestedExecutionMode);
-        // #218 only handles target gate; keep execution mode unchanged here.
-        const effectiveExecutionMode = requestedExecutionMode;
+        const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
+        const effectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         const gateReasons = [];
+        if (!requestedExecutionMode) {
+            gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+        }
+        else if (requestedExecutionMode === "live_read_high_risk" ||
+            requestedExecutionMode === "live_write") {
+            gateReasons.push("LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE");
+        }
         if (!targetDomain) {
             gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
         }
