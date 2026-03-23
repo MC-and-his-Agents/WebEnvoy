@@ -53,6 +53,17 @@
   - 将当前会话状态回退到 `paused`。
   - 禁止 live 放行，直至补齐审计链路并复审。
 
+## 风险 6：公开模式与阻断语义不一致导致上层误判
+
+- 触发条件：`live_read_limited` 被公开为正式模式，但审批证据、审计约束或 `effective_execution_mode` 语义未冻结一致。
+- 影响：CLI、background、loopback 与 runtime.audit 对同一请求返回不一致口径，上层会把未实际执行的模式误判为已执行模式。
+- 缓解：
+  - 在 FR-0011 中冻结 `live_read_limited` 的公开模式语义、审批前置与审计字段。
+  - 明确 `gate_decision=blocked` 时 `effective_execution_mode` 只能表示真实未继续 live 的降级模式。
+- 回滚：
+  - 撤回公开枚举扩张，恢复到 `dry_run|recon` + 已冻结 live 模式口径。
+  - 重新进入 spec review，禁止实现分支继续扩写。
+
 ## Stop-Ship 条件
 
 - FR-0011 spec review 未通过却启动实现 PR。
@@ -60,3 +71,4 @@
 - `#208` 在未接入 FR-0011 前置前恢复 live 正式验证。
 - 未完成统一矩阵接入却放行 `#208/#209` live 扩展。
 - 状态迁移审计缺失但系统仍允许 live 放行。
+- `live_read_limited` 已公开到正式入口，但审批证据或 `effective_execution_mode` 语义仍存在分叉。

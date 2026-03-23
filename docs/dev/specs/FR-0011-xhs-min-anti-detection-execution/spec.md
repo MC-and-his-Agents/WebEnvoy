@@ -33,7 +33,11 @@
 ### 2. 读路径执行模式收敛
 
 - 必须定义读路径默认模式（`dry_run|recon`）与受控 live 触发条件。
+- 必须明确 `live_read_limited` 是 Sprint 3 范围内对外可请求的正式受控 live 模式，而不是仅供内部 fallback 使用的私有枚举。
+- 必须明确 `live_read_limited` 与 `live_read_high_risk` 在进入 live 前都要求人工确认、审批检查项与审计证据，不允许只对高风险模式单独要求审批。
+- 必须把上述审批与审计要求落入结构化 `live_entry_requirements`，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许只在 prose 里更严格、对象契约里更宽松。
 - 必须定义读路径禁止动作清单（例如风险状态不满足时禁止扩新 live 面）。
+- 必须明确 `effective_execution_mode` 只表示“真实继续执行的模式”；若门禁结果为 `blocked`，则该字段只能回落到 `dry_run` 或 `recon` 一类未继续 live 的模式，不得对外宣称未实际执行的 `live_*` 降级模式。
 - 必须定义读路径执行的最小审计字段，确保后续可追踪。
 
 ### 3. 写路径交互分级
@@ -81,6 +85,7 @@ And CLI 侧不承担门禁核心判定逻辑
 Given 当前已有 `xhs.search` 执行链
 When 检查读路径模式规则
 Then 能明确区分默认模式、受控 live 条件与禁止动作
+And `live_read_limited` 被定义为正式受控 live 模式
 And `#209` 后续 live 扩展有统一前置
 
 ### 场景 3：写路径交互分级可执行
@@ -104,13 +109,22 @@ When 评审者检查 FR-0011 输出对象
 Then 两条链路使用同一三态状态机与恢复条件
 And 不存在“`#208` 与 `#209` 使用不同阻断矩阵”的口径分叉
 
+### 场景 6：阻断时的生效模式语义不失真
+
+Given 请求方提交 `live_read_high_risk`
+And 当前风险状态只允许受控 live 或更低模式
+When 插件层门禁决定阻断该请求
+Then `effective_execution_mode` 只能表达真实未继续 live 的降级结果
+And 不得在 `gate_decision=blocked` 时对外暴露未实际执行的 `live_read_limited`
+
 ## 异常与边界场景
 
 1. 账号已预警：必须进入 `paused` 或保持 `limited`，不得默认恢复 `allowed`。
 2. 域名/目标页不匹配：判定失败并阻断，不得自动降级放行。
 3. 证据不足：未满足恢复证据时，只允许 `dry_run|recon`。
-4. 契约漂移：若实现绕过状态机直接执行 live，视为阻断性违规。
-5. 状态审计缺失：若状态变更缺少审计记录，则该变更视为无效并回退到 `paused`。
+4. 阻断语义失真：若 `gate_decision=blocked` 仍返回未实际执行的 `live_*` 生效模式，视为阻断性违规。
+5. 契约漂移：若实现绕过状态机直接执行 live，视为阻断性违规。
+6. 状态审计缺失：若状态变更缺少审计记录，则该变更视为无效并回退到 `paused`。
 
 ## 验收标准
 
@@ -118,12 +132,15 @@ And 不存在“`#208` 与 `#209` 使用不同阻断矩阵”的口径分叉
 2. 插件层门禁主落点、读路径收敛、写路径分级三项均有可实现契约边界。
 3. 最小 session 节律/冷却/恢复规则和三态状态机均有结构化输出定义。
 4. `#208/#209` 可直接引用 FR-0011 输出作为进入 live 的前置。
-5. 本 FR 不混入实现代码，保持在规约审查路径。
+5. `live_read_limited` 的公开模式语义、审批前置与审计要求已被正式冻结。
+6. `effective_execution_mode` 在 `blocked` 场景下的语义已冻结为“真实未继续 live 的降级模式”，不会对外暴露未实际执行的 `live_*`。
+7. 本 FR 不混入实现代码，保持在规约审查路径。
 
 ## 依赖与前置条件
 
 - 治理前置：`#216`
 - 风险门禁基线：`#213` / `FR-0009`
+- 门禁结果与审批证据载体：`#223` / `FR-0010`
 - 关联事项：`#208`、`#209`
 - 架构依据：
   - `docs/dev/architecture/system-design/read-write.md`

@@ -10,6 +10,8 @@
 - [x] 新增 `data-model.md` 并定义共享实体字段
 - [x] 明确 `#208/#209` 三态差异化阻断矩阵
 - [x] 明确状态变更审计字段与“审计缺失即回退 `paused`”规则
+- [x] 明确 `live_read_limited` 的正式公开模式语义、审批前置与审计要求
+- [x] 明确 `gate_decision=blocked` 时 `effective_execution_mode` 只表示真实未继续 live 的降级模式，不对外暴露未实际执行的 `live_*`
 
 ## 进入实现前必须完成
 
@@ -31,6 +33,7 @@
 ## 关联
 
 - Issue: `#217`
+- Spec review closure: 待本 PR review 收口
 - Governance: `#216`
 - Upstream: `#213` / `FR-0009`
 - Downstream: `#208` / `#209`

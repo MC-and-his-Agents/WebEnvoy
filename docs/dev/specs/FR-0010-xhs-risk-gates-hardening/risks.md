@@ -47,12 +47,12 @@
 ## Stop-Ship 条件
 
 - 未通过 FR-0010 spec review 即恢复 `#208` live 正式验证。
-- 在无审批记录情况下放行 `live_read_high_risk` 或 `live_write`。
+- 在无审批记录情况下放行 `live_read_limited`、`live_read_high_risk` 或 `live_write`。
 - `#208/#209` 不消费统一门禁对象而采用私有判定字段。
 
 ## 回滚策略
 
-1. 立即停止高风险 live。
+1. 立即停止所有受控 live（含 `live_read_limited`、`live_read_high_risk`、`live_write`）。
 2. 门禁状态统一回退为 `paused`。
 3. 清点最近放行记录并标记为待复核。
 4. 重新进入 FR-0010 评审链路后再评估恢复。
