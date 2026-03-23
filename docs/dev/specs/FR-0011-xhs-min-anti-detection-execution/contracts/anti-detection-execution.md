@@ -110,7 +110,14 @@
         "issue_scope": "issue_208",
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
-        "blocked_actions": ["live_read_high_risk", "live_write", "irreversible_write"]
+        "blocked_actions": [
+          "live_read_high_risk",
+          "live_read_limited_with_approval",
+          "reversible_interaction_with_approval",
+          "approved_scope_actions",
+          "live_write",
+          "irreversible_write"
+        ]
       },
       {
         "issue_scope": "issue_208",
@@ -128,7 +135,13 @@
         "issue_scope": "issue_209",
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
-        "blocked_actions": ["live_read_high_risk", "live_write", "expand_new_live_surface_without_gate"]
+        "blocked_actions": [
+          "live_read_high_risk",
+          "live_read_limited_with_approval",
+          "approved_scope_actions",
+          "live_write",
+          "expand_new_live_surface_without_gate"
+        ]
       },
       {
         "issue_scope": "issue_209",
@@ -166,9 +179,11 @@
       "next_state",
       "trigger",
       "decision",
-      "reason",
-      "approver",
-      "approved_at"
+      "reason"
+    ],
+    "approval_fields_required_when": [
+      "cooldown_passed_and_manual_approve",
+      "approved_scope_actions"
     ],
     "on_missing_record": "force_pause_and_block_live",
     "rollback_entrypoint": "risk_state_reset_to_paused"
