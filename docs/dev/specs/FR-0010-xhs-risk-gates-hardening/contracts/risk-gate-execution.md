@@ -68,8 +68,8 @@
 {
   "gate_decision": {
     "effective_mode": "dry_run",
-    "decision": "blocked",
-    "reasons": [
+    "gate_decision": "blocked",
+    "gate_reason": [
       "TARGET_TAB_NOT_EXPLICIT",
       "RISK_STATE_PAUSED",
       "MANUAL_CONFIRMATION_MISSING"
@@ -82,8 +82,8 @@
 约束：
 
 1. 默认 `effective_mode` 必须是 `dry_run` 或 `recon`。
-2. `execution_mode` 为 `live_*` 时，如任一前置缺失必须 `decision=blocked`。
-3. `reasons` 不得为空，必须可用于审计复盘。
+2. `execution_mode` 为 `live_*` 时，如任一前置缺失必须 `gate_decision=blocked`。
+3. `gate_reason` 不得为空，必须可用于审计复盘。
 
 ## approval_record
 
@@ -153,7 +153,7 @@
     "action_type": "read",
     "execution_mode": "dry_run",
     "gate_decision": "blocked",
-    "gate_reasons": [
+    "gate_reason": [
       "RISK_STATE_PAUSED"
     ]
   }
