@@ -655,9 +655,12 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("blocks live_* mode by default and keeps auditable consumer_gate_result fields", async () => {
+  it("forwards live_read_high_risk to content script and returns blocked gate result when approval is missing", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
@@ -678,12 +681,57 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-mode-blocked-001",
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-mode-blocked-001",
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "执行模式门禁阻断了当前 xhs.search 请求"
+        },
+        payload: {
+          details: {
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+          },
+          consumer_gate_result: {
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "dry_run",
+            gate_decision: "blocked",
+            gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
 
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as {
         id?: string;
         status?: string;
         payload?: {
+          details?: {
+            reason?: string;
+          };
           consumer_gate_result?: {
             target_domain?: string | null;
             target_tab_id?: number | null;
@@ -701,6 +749,9 @@ describe("extension service worker recovery contract", () => {
       id: "run-xhs-live-mode-blocked-001",
       status: "error",
       payload: {
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED"
+        },
         consumer_gate_result: {
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
@@ -709,11 +760,101 @@ describe("extension service worker recovery contract", () => {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: ["LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE"]
+          gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
         }
       }
     });
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("forwards approved live_read_high_risk through the real background bridge", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-approved-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-approved-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-mode-approved-001",
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-mode-approved-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "read"
+            },
+            consumer_gate_result: {
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              effective_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              gate_reasons: ["LIVE_MODE_APPROVED"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const approved = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-live-mode-approved-001");
+    expect(approved).toMatchObject({
+      id: "run-xhs-live-mode-approved-001",
+      status: "success",
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            action: "read"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          }
+        }
+      }
+    });
   });
 
   it("blocks xhs.search when target_domain is outside xhs read/write scope", async () => {

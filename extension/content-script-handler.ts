@@ -4,6 +4,7 @@ export type BackgroundToContentMessage = {
   kind: "forward";
   id: string;
   runId: string;
+  tabId: number | null;
   profile: string | null;
   cwd: string;
   timeoutMs: number;
@@ -171,6 +172,29 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   }
 });
 
+const resolveTargetDomainFromHref = (href: string): string | null => {
+  try {
+    return new URL(href).hostname || null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveTargetPageFromHref = (href: string): string | null => {
+  try {
+    const url = new URL(href);
+    if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
+      return "search_result_tab";
+    }
+    if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
+      return "creator_publish_tab";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export class ContentScriptHandler {
   #listeners = new Set<ContentMessageListener>();
   #reachable = true;
@@ -240,6 +264,9 @@ export class ContentScriptHandler {
     const ability = asRecord(message.commandParams.ability);
     const input = asRecord(message.commandParams.input);
     const options = asRecord(message.commandParams.options) ?? {};
+    const locationHref = this.#xhsEnv.getLocationHref();
+    const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
+    const actualTargetPage = resolveTargetPageFromHref(locationHref);
 
     if (!ability || !input) {
       this.#emit({
@@ -281,7 +308,36 @@ export class ContentScriptHandler {
             ...(typeof options.simulate_result === "string"
               ? { simulate_result: options.simulate_result }
               : {}),
-            ...(typeof options.x_s_common === "string" ? { x_s_common: options.x_s_common } : {})
+            ...(typeof options.x_s_common === "string" ? { x_s_common: options.x_s_common } : {}),
+            ...(typeof options.target_domain === "string"
+              ? { target_domain: options.target_domain }
+              : {}),
+            ...(typeof options.target_tab_id === "number"
+              ? { target_tab_id: options.target_tab_id }
+              : {}),
+            ...(typeof options.target_page === "string"
+              ? { target_page: options.target_page }
+              : {}),
+            ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
+            ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
+            ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
+            ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
+            ...(typeof options.action_type === "string"
+              ? { action_type: options.action_type }
+              : {}),
+            ...(typeof options.requested_execution_mode === "string"
+              ? { requested_execution_mode: options.requested_execution_mode }
+              : {}),
+            ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+            ...(asRecord(options.approval_record)
+              ? { approval_record: asRecord(options.approval_record) ?? {} }
+              : {}),
+            ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
+          },
+          executionContext: {
+            runId: message.runId,
+            sessionId: String(message.params.session_id ?? "nm-session-001"),
+            profile: message.profile ?? "unknown"
           }
         },
         this.#xhsEnv

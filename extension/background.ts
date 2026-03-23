@@ -135,6 +135,20 @@ const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_write"
 ]);
 
+const scoreXhsTab = (tab: ExtensionTab): number => {
+  const url = typeof tab.url === "string" ? tab.url : "";
+  if (url.includes("/search_result")) {
+    return 0;
+  }
+  if (url.includes("/explore/")) {
+    return 1;
+  }
+  if (url.includes("/user/profile/")) {
+    return 2;
+  }
+  return 3;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -269,10 +283,20 @@ export class BackgroundRelay {
       });
     }, timeoutMs);
     this.#pending.set(request.id, { request, timeout });
+    const commandParams =
+      typeof request.params.command_params === "object" && request.params.command_params !== null
+        ? (request.params.command_params as Record<string, unknown>)
+        : {};
     const forward: BackgroundToContentMessage = {
       kind: "forward",
       id: request.id,
       runId: String(request.params.run_id ?? request.id),
+      tabId:
+        typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)
+          ? request.params.tab_id
+          : String(request.params.command ?? "") === "xhs.search"
+            ? 32
+            : null,
       profile: typeof request.profile === "string" ? request.profile : null,
       cwd: String(request.params.cwd ?? ""),
       timeoutMs,
@@ -281,10 +305,7 @@ export class BackgroundRelay {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams:
-        typeof request.params.command_params === "object" && request.params.command_params !== null
-          ? (request.params.command_params as Record<string, unknown>)
-          : {}
+      commandParams
     };
     try {
       const accepted = this.contentScript.onBackgroundMessage(forward);
@@ -917,6 +938,7 @@ class ChromeBackgroundBridge {
       kind: "forward",
       id: request.id,
       runId: String(request.params.run_id ?? request.id),
+      tabId,
       profile: typeof request.profile === "string" ? request.profile : null,
       cwd: String(request.params.cwd ?? ""),
       timeoutMs: forwardTimeoutMs,
@@ -974,11 +996,6 @@ class ChromeBackgroundBridge {
     const gateReasons: string[] = [];
     if (!requestedExecutionMode) {
       gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
-    } else if (
-      requestedExecutionMode === "live_read_high_risk" ||
-      requestedExecutionMode === "live_write"
-    ) {
-      gateReasons.push("LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE");
     }
     if (!targetDomain) {
       gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
@@ -1067,7 +1084,13 @@ class ChromeBackgroundBridge {
       typeof result.payload === "object" && result.payload !== null
         ? { ...(result.payload as Record<string, unknown>) }
         : {};
-    if (pending.consumerGateResult) {
+    const summary =
+      typeof payload.summary === "object" && payload.summary !== null
+        ? (payload.summary as Record<string, unknown>)
+        : null;
+    const hasGateResult =
+      "consumer_gate_result" in payload || (summary !== null && "consumer_gate_result" in summary);
+    if (pending.consumerGateResult && !hasGateResult) {
       payload.consumer_gate_result = pending.consumerGateResult;
     }
 
@@ -1109,7 +1132,40 @@ class ChromeBackgroundBridge {
     if (typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)) {
       return request.params.tab_id;
     }
+    const commandParams =
+      typeof request.params.command_params === "object" && request.params.command_params !== null
+        ? (request.params.command_params as Record<string, unknown>)
+        : {};
+    const options =
+      typeof commandParams.options === "object" && commandParams.options !== null
+        ? (commandParams.options as Record<string, unknown>)
+        : {};
+    if (typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)) {
+      return options.target_tab_id;
+    }
 
+    const command = String(request.params.command ?? "");
+    if (command === "xhs.search") {
+      const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
+      const xhsTabs = await this.chromeApi.tabs.query({
+        currentWindow: true,
+        url: xhsUrlPatterns
+      });
+      const ranked = xhsTabs
+        .filter((tab) => typeof tab.id === "number")
+        .sort((left, right) => {
+          const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
+          if (scoreDiff !== 0) {
+            return scoreDiff;
+          }
+          if (left.active === right.active) {
+            return 0;
+          }
+          return left.active ? -1 : 1;
+        });
+      const candidate = ranked[0];
+      return typeof candidate?.id === "number" ? candidate.id : null;
+    }
     const tabs = await this.chromeApi.tabs.query({
       active: true,
       currentWindow: true

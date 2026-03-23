@@ -4,6 +4,7 @@ const normalizeForwardMessage = (request) => ({
     kind: "forward",
     id: request.id,
     runId: typeof request.runId === "string" ? request.runId : request.id,
+    tabId: typeof request.tabId === "number" && Number.isInteger(request.tabId) ? request.tabId : null,
     profile: typeof request.profile === "string" ? request.profile : null,
     cwd: typeof request.cwd === "string" ? request.cwd : "",
     timeoutMs: typeof request.timeoutMs === "number" && Number.isFinite(request.timeoutMs) && request.timeoutMs > 0

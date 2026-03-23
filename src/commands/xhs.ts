@@ -217,6 +217,33 @@ const asDiagnosisInput = (value: unknown): CliError["diagnosis"] => {
   return object ?? undefined;
 };
 
+const pickGateErrorDetails = (
+  payload: Record<string, unknown>,
+  details?: JsonObject | null
+): JsonObject => {
+  const detailKeys = [
+    "scope_context",
+    "gate_input",
+    "gate_outcome",
+    "consumer_gate_result",
+    "approval_record",
+    "audit_record"
+  ] as const;
+  const picked: JsonObject = {};
+  for (const key of detailKeys) {
+    const value = payload[key] ?? details?.[key];
+    if (value === null) {
+      picked[key] = null;
+      continue;
+    }
+    const object = asObject(value);
+    if (object) {
+      picked[key] = object;
+    }
+  }
+  return picked;
+};
+
 const toCliExecutionError = (
   ability: AbilityRef,
   payload: Record<string, unknown>,
@@ -240,7 +267,8 @@ const toCliExecutionError = (
           ? details.stage
           : "execution",
       reason,
-      ...(consumerGateResult ?? {})
+      ...(consumerGateResult ?? {}),
+      ...pickGateErrorDetails(payload, details)
     },
     observability: asObservabilityInput(payload.observability),
     diagnosis: asDiagnosisInput(payload.diagnosis)
