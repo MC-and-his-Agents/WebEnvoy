@@ -54,9 +54,11 @@
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
       "risk_state_not_paused",
+      "risk_state_checked",
       "target_domain_confirmed",
       "target_tab_confirmed",
       "target_page_confirmed",
+      "action_type_confirmed",
       "manual_confirmation_recorded",
       "approval_record_completed",
       "audit_record_ready"
@@ -68,7 +70,7 @@
 约束：
 - `live_read_limited` 是正式公开的受控 live 读模式，可由外部请求方显式请求。
 - `live_read_limited` 与 `live_read_high_risk` 进入 live 前都必须满足 `live_entry_requirements`，且审批证据要求不可分叉。
-- `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，不允许保留更宽松的只读前置。
+- `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
 - 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
 
 ## write_interaction_tier
