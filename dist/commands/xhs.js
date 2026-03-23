@@ -150,6 +150,29 @@ const asDiagnosisInput = (value) => {
     const object = asObject(value);
     return object ?? undefined;
 };
+const pickGateErrorDetails = (payload, details) => {
+    const detailKeys = [
+        "scope_context",
+        "gate_input",
+        "gate_outcome",
+        "consumer_gate_result",
+        "approval_record",
+        "audit_record"
+    ];
+    const picked = {};
+    for (const key of detailKeys) {
+        const value = payload[key] ?? details?.[key];
+        if (value === null) {
+            picked[key] = null;
+            continue;
+        }
+        const object = asObject(value);
+        if (object) {
+            picked[key] = object;
+        }
+    }
+    return picked;
+};
 const toCliExecutionError = (ability, payload, fallbackMessage) => {
     const details = asObject(payload.details);
     const reason = typeof details?.reason === "string" && details.reason.trim().length > 0
@@ -166,7 +189,8 @@ const toCliExecutionError = (ability, payload, fallbackMessage) => {
                 ? details.stage
                 : "execution",
             reason,
-            ...(consumerGateResult ?? {})
+            ...(consumerGateResult ?? {}),
+            ...pickGateErrorDetails(payload, details)
         },
         observability: asObservabilityInput(payload.observability),
         diagnosis: asDiagnosisInput(payload.diagnosis)

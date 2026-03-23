@@ -1,8 +1,227 @@
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
+const REQUESTED_EXECUTION_MODES = new Set([
+    "dry_run",
+    "recon",
+    "live_read_high_risk",
+    "live_write"
+]);
+const RISK_STATES = new Set(["paused", "limited", "allowed"]);
+const REQUIRED_APPROVAL_CHECKS = [
+    "target_domain_confirmed",
+    "target_tab_confirmed",
+    "target_page_confirmed",
+    "risk_state_checked",
+    "action_type_confirmed"
+];
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asBoolean = (value) => value === true;
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const resolveActionType = (value) => typeof value === "string" && ACTION_TYPES.has(value)
+    ? value
+    : null;
+const resolveRequestedExecutionMode = (value) => typeof value === "string" && REQUESTED_EXECUTION_MODES.has(value)
+    ? value
+    : null;
+const resolveRiskState = (value) => typeof value === "string" && RISK_STATES.has(value)
+    ? value
+    : "paused";
+const resolveFallbackMode = (requestedExecutionMode, riskState) => {
+    if (requestedExecutionMode === "live_write") {
+        return "dry_run";
+    }
+    return riskState === "limited" ? "recon" : "dry_run";
+};
+const normalizeApprovalRecord = (value) => {
+    const record = asRecord(value);
+    const checksRecord = asRecord(record?.checks);
+    const checks = Object.fromEntries(REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(checksRecord?.[key])]));
+    return {
+        approved: asBoolean(record?.approved),
+        approver: asNonEmptyString(record?.approver),
+        approved_at: asNonEmptyString(record?.approved_at),
+        checks
+    };
+};
+const resolveGate = (options) => {
+    const actionType = resolveActionType(options.action_type);
+    const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
+    const riskState = resolveRiskState(options.risk_state);
+    const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
+    const targetDomain = asNonEmptyString(options.target_domain);
+    const targetTabId = asInteger(options.target_tab_id);
+    const targetPage = asNonEmptyString(options.target_page);
+    const actualTargetDomain = asNonEmptyString(options.actual_target_domain);
+    const actualTargetTabId = asInteger(options.actual_target_tab_id);
+    const actualTargetPage = asNonEmptyString(options.actual_target_page);
+    const abilityAction = asNonEmptyString(options.ability_action);
+    const approvalRecord = normalizeApprovalRecord(options.approval_record ?? options.approval);
+    const gateReasons = [];
+    let gateDecision = "allowed";
+    let effectiveExecutionMode = requestedExecutionMode;
+    if (!targetDomain) {
+        gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
+    }
+    else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
+        gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
+    }
+    if (targetTabId === null || targetTabId <= 0) {
+        gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
+    }
+    if (!targetPage) {
+        gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
+    }
+    if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
+        gateReasons.push("TARGET_DOMAIN_CONTEXT_MISMATCH");
+    }
+    if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
+        gateReasons.push("TARGET_TAB_CONTEXT_MISMATCH");
+    }
+    if (targetPage && !actualTargetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_UNRESOLVED");
+    }
+    if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_MISMATCH");
+    }
+    if (!actionType) {
+        gateReasons.push("ACTION_TYPE_NOT_EXPLICIT");
+    }
+    if (!requestedExecutionMode) {
+        gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+    }
+    if (abilityAction && actionType && abilityAction !== actionType) {
+        gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
+    }
+    else if (actionType && actionType !== "read") {
+        gateReasons.push("ACTION_TYPE_UNSUPPORTED_FOR_COMMAND");
+    }
+    if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
+        gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
+    }
+    if (requestedExecutionMode === "live_write") {
+        gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+    }
+    if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
+        gateReasons.push("ACTION_DOMAIN_MISMATCH");
+    }
+    if (targetDomain === XHS_READ_DOMAIN && actionType !== "read") {
+        gateReasons.push("ACTION_DOMAIN_MISMATCH");
+    }
+    if (gateReasons.length > 0) {
+        gateDecision = "blocked";
+        if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+            effectiveExecutionMode = fallbackMode;
+        }
+    }
+    else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
+        gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN");
+    }
+    else {
+        effectiveExecutionMode = fallbackMode;
+        gateDecision = "blocked";
+        if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
+        if (requestedExecutionMode === "live_write" && actionType === "read") {
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
+        if (riskState !== "allowed") {
+            gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+        }
+        const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+        if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+            gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+        }
+        if (missingChecks.length > 0) {
+            gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+        }
+        if (gateReasons.length === 0) {
+            gateDecision = "allowed";
+            effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
+            gateReasons.push("LIVE_MODE_APPROVED");
+        }
+    }
+    return {
+        scope_context: {
+            platform: "xhs",
+            read_domain: XHS_READ_DOMAIN,
+            write_domain: XHS_WRITE_DOMAIN,
+            domain_mixing_forbidden: true
+        },
+        gate_input: {
+            target_domain: targetDomain,
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            action_type: actionType,
+            requested_execution_mode: requestedExecutionMode,
+            risk_state: riskState
+        },
+        gate_outcome: {
+            effective_execution_mode: effectiveExecutionMode,
+            gate_decision: gateDecision,
+            gate_reasons: gateReasons,
+            requires_manual_confirmation: requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+        },
+        consumer_gate_result: {
+            target_domain: targetDomain,
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            action_type: actionType,
+            requested_execution_mode: requestedExecutionMode,
+            effective_execution_mode: effectiveExecutionMode,
+            gate_decision: gateDecision,
+            gate_reasons: gateReasons
+        },
+        approval_record: approvalRecord
+    };
+};
+const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
+    ok: true,
+    payload: {
+        summary: {
+            capability_result: {
+                ability_id: input.abilityId,
+                layer: input.abilityLayer,
+                action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                outcome: "partial",
+                data_ref: {
+                    query: input.params.query
+                },
+                metrics: {
+                    count: 0
+                }
+            },
+            scope_context: gate.scope_context,
+            gate_input: {
+                run_id: auditRecord.run_id,
+                session_id: auditRecord.session_id,
+                profile: auditRecord.profile,
+                ...gate.gate_input
+            },
+            gate_outcome: gate.gate_outcome,
+            consumer_gate_result: gate.consumer_gate_result,
+            approval_record: gate.approval_record,
+            audit_record: auditRecord
+        },
+        observability: {
+            page_state: {
+                page_kind: classifyPageKind(env.getLocationHref()),
+                url: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                ready_state: env.getReadyState()
+            },
+            key_requests: [],
+            failure_site: null
+        }
+    }
+});
 const containsCookie = (cookie, key) => cookie
     .split(";")
     .map((item) => item.trim())
@@ -58,7 +277,7 @@ const createDiagnosis = (input) => ({
     },
     evidence: [input.reason, input.summary]
 });
-const createFailure = (code, message, details, observability, diagnosis) => ({
+const createFailure = (code, message, details, observability, diagnosis, gate, auditRecord) => ({
     ok: false,
     error: {
         code,
@@ -67,8 +286,40 @@ const createFailure = (code, message, details, observability, diagnosis) => ({
     payload: {
         details,
         observability,
-        diagnosis
+        diagnosis,
+        ...(gate
+            ? {
+                scope_context: gate.scope_context,
+                gate_input: {
+                    run_id: auditRecord?.run_id ?? "unknown",
+                    session_id: auditRecord?.session_id ?? "unknown",
+                    profile: auditRecord?.profile ?? "unknown",
+                    ...gate.gate_input
+                },
+                gate_outcome: gate.gate_outcome,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                ...(auditRecord ? { audit_record: auditRecord } : {})
+            }
+            : {})
     }
+});
+const createAuditRecord = (context, gate, env) => ({
+    event_id: `gate_evt_${env.randomId()}`,
+    run_id: context.runId,
+    session_id: context.sessionId,
+    profile: context.profile,
+    target_domain: gate.consumer_gate_result.target_domain,
+    target_tab_id: gate.consumer_gate_result.target_tab_id,
+    target_page: gate.consumer_gate_result.target_page,
+    action_type: gate.consumer_gate_result.action_type,
+    requested_execution_mode: gate.consumer_gate_result.requested_execution_mode,
+    effective_execution_mode: gate.consumer_gate_result.effective_execution_mode,
+    gate_decision: gate.consumer_gate_result.gate_decision,
+    gate_reasons: [...gate.consumer_gate_result.gate_reasons],
+    approver: gate.approval_record.approver,
+    approved_at: gate.approval_record.approved_at,
+    recorded_at: new Date(env.now()).toISOString()
 });
 const resolveSimulatedResult = (simulated, params, options, env) => {
     if (!simulated) {
@@ -235,6 +486,44 @@ const resolveXsCommon = (value) => {
     return "{}";
 };
 export const executeXhsSearch = async (input, env) => {
+    const gate = resolveGate(input.options);
+    const auditRecord = createAuditRecord(input.executionContext, gate, env);
+    if (gate.consumer_gate_result.gate_decision === "blocked") {
+        return createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+        }, {
+            page_state: {
+                page_kind: classifyPageKind(env.getLocationHref()),
+                url: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                ready_state: env.getReadyState()
+            },
+            key_requests: [],
+            failure_site: {
+                stage: "execution",
+                component: "gate",
+                target: "requested_execution_mode",
+                summary: "执行模式门禁阻断"
+            }
+        }, {
+            category: "request_failed",
+            stage: "execution",
+            component: "gate",
+            failure_site: {
+                stage: "execution",
+                component: "gate",
+                target: "requested_execution_mode",
+                summary: "执行模式门禁阻断"
+            },
+            evidence: gate.consumer_gate_result.gate_reasons
+        }, gate, auditRecord);
+    }
+    if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
+        gate.consumer_gate_result.effective_execution_mode === "recon") {
+        return createGateOnlySuccess(input, gate, auditRecord, env);
+    }
     const simulated = resolveSimulatedResult(input.options.simulate_result, input.params, input.options, env);
     if (simulated) {
         if (simulated.ok) {
@@ -242,13 +531,24 @@ export const executeXhsSearch = async (input, env) => {
             const capability = asRecord(summary.capability_result) ?? {};
             capability.ability_id = input.abilityId;
             capability.layer = input.abilityLayer;
-            capability.action = input.abilityAction;
+            capability.action = gate.consumer_gate_result.action_type ?? input.abilityAction;
             return {
                 ok: true,
                 payload: {
                     ...simulated.payload,
                     summary: {
-                        capability_result: capability
+                        capability_result: capability,
+                        scope_context: gate.scope_context,
+                        gate_input: {
+                            run_id: auditRecord.run_id,
+                            session_id: auditRecord.session_id,
+                            profile: auditRecord.profile,
+                            ...gate.gate_input
+                        },
+                        gate_outcome: gate.gate_outcome,
+                        consumer_gate_result: gate.consumer_gate_result,
+                        approval_record: gate.approval_record,
+                        audit_record: auditRecord
                     }
                 }
             };
@@ -260,7 +560,10 @@ export const executeXhsSearch = async (input, env) => {
                 details: {
                     ability_id: input.abilityId,
                     ...(asRecord(simulated.payload.details) ?? {})
-                }
+                },
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                audit_record: auditRecord
             }
         };
     }
@@ -288,7 +591,7 @@ export const executeXhsSearch = async (input, env) => {
             category: "request_failed",
             reason: "SESSION_EXPIRED",
             summary: "登录态缺失，无法执行 xhs.search"
-        }));
+        }), gate, auditRecord);
     }
     const payload = {
         keyword: input.params.query,
@@ -319,7 +622,7 @@ export const executeXhsSearch = async (input, env) => {
             category: "page_changed",
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用"
-        }));
+        }), gate, auditRecord);
     }
     const headers = {
         Accept: "application/json, text/plain, */*",
@@ -357,7 +660,7 @@ export const executeXhsSearch = async (input, env) => {
             category: "request_failed",
             reason: failure.reason,
             summary: failure.message
-        }));
+        }), gate, auditRecord);
     }
     const responseRecord = asRecord(response.body);
     const businessCode = responseRecord?.code;
@@ -379,7 +682,7 @@ export const executeXhsSearch = async (input, env) => {
             category: "request_failed",
             reason: failure.reason,
             summary: failure.message
-        }));
+        }), gate, auditRecord);
     }
     const count = parseCount(response.body);
     return {
@@ -389,7 +692,7 @@ export const executeXhsSearch = async (input, env) => {
                 capability_result: {
                     ability_id: input.abilityId,
                     layer: input.abilityLayer,
-                    action: input.abilityAction,
+                    action: gate.consumer_gate_result.action_type ?? input.abilityAction,
                     outcome: "success",
                     data_ref: {
                         query: input.params.query,
@@ -399,7 +702,18 @@ export const executeXhsSearch = async (input, env) => {
                         count,
                         duration_ms: Math.max(0, env.now() - startedAt)
                     }
-                }
+                },
+                scope_context: gate.scope_context,
+                gate_input: {
+                    run_id: auditRecord.run_id,
+                    session_id: auditRecord.session_id,
+                    profile: auditRecord.profile,
+                    ...gate.gate_input
+                },
+                gate_outcome: gate.gate_outcome,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                audit_record: auditRecord
             },
             observability: createObservability({
                 href,

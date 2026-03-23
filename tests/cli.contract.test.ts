@@ -186,6 +186,13 @@ const isPidAlive = (pid: number): boolean => {
   }
 };
 
+const scopedReadGateOptions = {
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  action_type: "read"
+} as const;
+
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-contract-001"], {
@@ -331,7 +338,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("returns structured capability success and observability for xhs.search runtime path", () => {
+  it("returns dry_run summary by default for xhs.search runtime path", () => {
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -348,12 +355,14 @@ describe("webenvoy cli contract", () => {
         },
         options: {
           ...scopedXhsGateOptions,
+          action_type: "read",
           simulate_result: "success"
         }
       })
     ], repoRoot, {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
     });
+
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
@@ -364,21 +373,543 @@ describe("webenvoy cli contract", () => {
           ability_id: "xhs.note.search.v1",
           layer: "L3",
           action: "read",
-          outcome: "success"
-        }
-      },
-      observability: {
-        page_state: {
-          page_kind: "search"
+          outcome: "partial"
         },
-        key_requests: [
-          {
-            url: "/api/sns/web/v1/search/notes",
-            outcome: "completed",
-            status_code: 200
+        consumer_gate_result: {
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          gate_decision: "allowed"
+        }
+      }
+    });
+    expect(
+      (
+        ((body.summary as Record<string, unknown>).consumer_gate_result as Record<string, unknown>)
+          .gate_reasons as string[]
+      )
+    ).toEqual(["DEFAULT_MODE_DRY_RUN"]);
+  });
+
+  it("blocks live_read_high_risk when approval is missing", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          scope_context: {
+            platform: "xhs",
+            read_domain: "www.xiaohongshu.com",
+            write_domain: "creator.xiaohongshu.com",
+            domain_mixing_forbidden: true
+          },
+          gate_input: {
+            run_id: expect.any(String),
+            session_id: expect.any(String),
+            profile: "loopback_profile",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            risk_state: "allowed"
+          },
+          gate_outcome: {
+            effective_execution_mode: "dry_run",
+            gate_decision: "blocked",
+            requires_manual_confirmation: true
+          },
+          consumer_gate_result: {
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "dry_run",
+            gate_decision: "blocked"
+          },
+          approval_record: {
+            approved: false,
+            approver: null,
+            approved_at: null,
+            checks: {
+              target_domain_confirmed: false,
+              target_tab_confirmed: false,
+              target_page_confirmed: false,
+              risk_state_checked: false,
+              action_type_confirmed: false
+            }
+          },
+          audit_record: {
+            run_id: expect.any(String),
+            session_id: expect.any(String),
+            profile: "loopback_profile",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "dry_run",
+            gate_decision: "blocked",
+            approver: null,
+            approved_at: null,
+            recorded_at: expect.any(String)
           }
-        ],
-        failure_site: null
+        }
+      }
+    });
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"]));
+  });
+
+  it("returns invalid args when dry_run target scope is missing", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_DOMAIN_INVALID"
+        }
+      }
+    });
+  });
+
+  it("blocks live_write when risk state is paused", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "paused",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
+          requested_execution_mode: "live_write",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked"
+        }
+      }
+    });
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(
+      expect.arrayContaining([
+        "ABILITY_ACTION_CONTEXT_MISMATCH",
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
+      ])
+    );
+  });
+
+  it("blocks live_write when action_type is omitted even if ability.action is write", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
+          requested_execution_mode: "live_write",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked"
+        }
+      }
+    });
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "ACTION_DOMAIN_MISMATCH"]));
+  });
+
+  it("blocks live_write because xhs.search is a read-only command", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(
+      expect.arrayContaining([
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
+        "ACTION_TYPE_UNSUPPORTED_FOR_COMMAND"
+      ])
+    );
+  });
+
+  it("blocks when ability.action diverges from the approved gate action", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(expect.arrayContaining(["ABILITY_ACTION_CONTEXT_MISMATCH"]));
+  });
+
+  it("blocks live_write when action_type is irreversible_write even with approval", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          action_type: "irreversible_write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
+          requested_execution_mode: "live_write",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked"
+        }
+      }
+    });
+    expect(
+      (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
+    ).toEqual(
+      expect.arrayContaining([
+        "ABILITY_ACTION_CONTEXT_MISMATCH",
+        "IRREVERSIBLE_WRITE_NOT_ALLOWED",
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+      ])
+    );
+  });
+
+  it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "success",
+      summary: {
+        scope_context: {
+          platform: "xhs",
+          read_domain: "www.xiaohongshu.com",
+          write_domain: "creator.xiaohongshu.com",
+          domain_mixing_forbidden: true
+        },
+        gate_input: {
+          run_id: expect.any(String),
+          session_id: expect.any(String),
+          profile: "loopback_profile",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        },
+        gate_outcome: {
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"],
+          requires_manual_confirmation: true
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        },
+        approval_record: {
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z"
+        },
+        audit_record: {
+          run_id: expect.any(String),
+          session_id: expect.any(String),
+          profile: "loopback_profile",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"],
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z",
+          recorded_at: expect.any(String)
+        }
       }
     });
   });
@@ -437,8 +968,22 @@ describe("webenvoy cli contract", () => {
           query: "露营装备"
         },
         options: {
-          ...scopedXhsGateOptions,
-          simulate_result: "login_required"
+          ...scopedReadGateOptions,
+          simulate_result: "login_required",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
         }
       })
     ], repoRoot, {
@@ -487,7 +1032,23 @@ describe("webenvoy cli contract", () => {
           query: "露营装备",
           force_bad_output: true
         },
-        options: scopedXhsGateOptions
+        options: {
+          ...scopedReadGateOptions,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
       })
     ]);
     expect(result.status).toBe(6);

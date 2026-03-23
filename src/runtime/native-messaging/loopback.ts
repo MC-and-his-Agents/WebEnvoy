@@ -23,6 +23,239 @@ type ContentMessage =
     };
 
 const RELAY_PATH = "host>background>content-script>background>host";
+const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+type LoopbackActionType = "read" | "write" | "irreversible_write";
+type LoopbackExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type LoopbackEffectiveExecutionMode = LoopbackExecutionMode | null;
+type LoopbackRiskState = "paused" | "limited" | "allowed";
+
+const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>([
+  "dry_run",
+  "recon",
+  "live_read_high_risk",
+  "live_write"
+]);
+const LOOPBACK_RISK_STATES = new Set<LoopbackRiskState>(["paused", "limited", "allowed"]);
+const LOOPBACK_ACTION_TYPES = new Set<LoopbackActionType>(["read", "write", "irreversible_write"]);
+const LOOPBACK_REQUIRED_APPROVAL_CHECKS = [
+  "target_domain_confirmed",
+  "target_tab_confirmed",
+  "target_page_confirmed",
+  "risk_state_checked",
+  "action_type_confirmed"
+] as const;
+
+const LOOPBACK_SCOPE_CONTEXT = {
+  platform: "xhs",
+  read_domain: XHS_READ_DOMAIN,
+  write_domain: XHS_WRITE_DOMAIN,
+  domain_mixing_forbidden: true
+} as const;
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
+const asBoolean = (value: unknown): boolean => value === true;
+
+const resolveLoopbackActionType = (options: Record<string, unknown>): LoopbackActionType | null => {
+  const explicit = asString(options.action_type);
+  if (explicit && LOOPBACK_ACTION_TYPES.has(explicit as LoopbackActionType)) {
+    return explicit as LoopbackActionType;
+  }
+  return null;
+};
+
+const resolveLoopbackExecutionMode = (value: unknown): LoopbackExecutionMode | null =>
+  typeof value === "string" && LOOPBACK_EXECUTION_MODES.has(value as LoopbackExecutionMode)
+    ? (value as LoopbackExecutionMode)
+    : null;
+
+const resolveLoopbackRiskState = (value: unknown): LoopbackRiskState =>
+  typeof value === "string" && LOOPBACK_RISK_STATES.has(value as LoopbackRiskState)
+    ? (value as LoopbackRiskState)
+    : "paused";
+
+const resolveLoopbackFallbackMode = (
+  requestedExecutionMode: LoopbackExecutionMode,
+  riskState: LoopbackRiskState
+): LoopbackExecutionMode => {
+  if (requestedExecutionMode === "live_write") {
+    return "dry_run";
+  }
+  return riskState === "limited" ? "recon" : "dry_run";
+};
+
+const buildLoopbackGate = (
+  options: Record<string, unknown>,
+  abilityAction: string | null
+): {
+  scopeContext: Record<string, unknown>;
+  gateInput: Record<string, unknown>;
+  gateOutcome: Record<string, unknown>;
+  consumerGateResult: Record<string, unknown>;
+  approvalRecord: Record<string, unknown>;
+} => {
+  const requestedExecutionMode = resolveLoopbackExecutionMode(options.requested_execution_mode);
+  const riskState = resolveLoopbackRiskState(options.risk_state);
+  const actionType = resolveLoopbackActionType(options);
+  const targetDomain = asString(options.target_domain);
+  const targetTabId = asInteger(options.target_tab_id);
+  const targetPage = asString(options.target_page);
+  const approvalRecord = asRecord(options.approval_record) ?? asRecord(options.approval) ?? {};
+  const approvalChecks = asRecord(approvalRecord.checks) ?? {};
+  const gateReasons: string[] = [];
+  let effectiveExecutionMode: LoopbackEffectiveExecutionMode = requestedExecutionMode;
+  let gateDecision: "allowed" | "blocked" = "allowed";
+
+  if (!targetDomain) {
+    gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
+  } else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
+    gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
+  }
+  if (targetTabId === null || targetTabId <= 0) {
+    gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
+  }
+  if (!targetPage) {
+    gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
+  }
+  if (!actionType) {
+    gateReasons.push("ACTION_TYPE_NOT_EXPLICIT");
+  }
+  if (!requestedExecutionMode) {
+    gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+  }
+  if (abilityAction && actionType && abilityAction !== actionType) {
+    gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
+  } else if (actionType && actionType !== "read") {
+    gateReasons.push("ACTION_TYPE_UNSUPPORTED_FOR_COMMAND");
+  }
+  if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
+    gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
+  }
+  if (requestedExecutionMode === "live_write") {
+    gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+  }
+  if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
+    gateReasons.push("ACTION_DOMAIN_MISMATCH");
+  }
+  if (targetDomain === XHS_READ_DOMAIN && actionType !== "read") {
+    gateReasons.push("ACTION_DOMAIN_MISMATCH");
+  }
+
+  if (gateReasons.length > 0) {
+    gateDecision = "blocked";
+    if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
+    }
+  } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
+    gateReasons.push(
+      requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN"
+    );
+  } else {
+    gateDecision = "blocked";
+    effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
+
+    if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
+      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+    }
+    if (requestedExecutionMode === "live_write" && actionType === "read") {
+      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+    }
+    if (riskState !== "allowed") {
+      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+    }
+    if (
+      approvalRecord.approved !== true ||
+      !asString(approvalRecord.approver) ||
+      !asString(approvalRecord.approved_at)
+    ) {
+      gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+    }
+
+    const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter(
+      (key) => !asBoolean(approvalChecks[key])
+    );
+    if (missingChecks.length > 0) {
+      gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+    }
+
+    if (gateReasons.length === 0) {
+      gateDecision = "allowed";
+      effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
+      gateReasons.push("LIVE_MODE_APPROVED");
+    }
+  }
+
+  return {
+    scopeContext: { ...LOOPBACK_SCOPE_CONTEXT },
+    gateInput: {
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: requestedExecutionMode,
+      risk_state: riskState
+    },
+    gateOutcome: {
+      effective_execution_mode: effectiveExecutionMode,
+      gate_decision: gateDecision,
+      gate_reasons: gateReasons,
+      requires_manual_confirmation:
+        requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+    },
+    consumerGateResult: {
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: requestedExecutionMode,
+      effective_execution_mode: effectiveExecutionMode,
+      gate_decision: gateDecision,
+      gate_reasons: gateReasons
+    },
+    approvalRecord: {
+      approved: approvalRecord.approved === true,
+      approver: asString(approvalRecord.approver),
+      approved_at: asString(approvalRecord.approved_at),
+      checks: Object.fromEntries(
+        LOOPBACK_REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(approvalChecks[key])])
+      )
+    }
+  };
+};
+
+const buildLoopbackAuditRecord = (input: {
+  runId: string;
+  sessionId: string;
+  profile: string;
+  gate: ReturnType<typeof buildLoopbackGate>;
+}): Record<string, unknown> => ({
+  event_id: `gate_evt_${input.runId}`,
+  run_id: input.runId,
+  session_id: input.sessionId,
+  profile: input.profile,
+  target_domain: input.gate.consumerGateResult.target_domain,
+  target_tab_id: input.gate.consumerGateResult.target_tab_id,
+  target_page: input.gate.consumerGateResult.target_page,
+  action_type: input.gate.consumerGateResult.action_type,
+  requested_execution_mode: input.gate.consumerGateResult.requested_execution_mode,
+  effective_execution_mode: input.gate.consumerGateResult.effective_execution_mode,
+  gate_decision: input.gate.consumerGateResult.gate_decision,
+  gate_reasons: input.gate.consumerGateResult.gate_reasons,
+  approver: input.gate.approvalRecord.approver,
+  approved_at: input.gate.approvalRecord.approved_at,
+  recorded_at: "2026-03-23T10:00:00.000Z"
+});
 
 class InMemoryPort<TMessage> {
   #listeners = new Set<(message: TMessage) => void>();
@@ -97,6 +330,87 @@ class InMemoryContentScriptRuntime {
         typeof message.commandParams.input === "object" && message.commandParams.input !== null
           ? (message.commandParams.input as Record<string, unknown>)
           : {};
+      const options =
+        typeof message.commandParams.options === "object" && message.commandParams.options !== null
+          ? (message.commandParams.options as Record<string, unknown>)
+          : {};
+      const gate = buildLoopbackGate(options, asString(ability.action));
+      const consumerGateResult = gate.consumerGateResult;
+      const auditRecord = buildLoopbackAuditRecord({
+        runId: message.runId,
+        sessionId: message.sessionId,
+        profile: "loopback_profile",
+        gate
+      });
+      const gateBundle = {
+        scope_context: gate.scopeContext,
+        gate_input: {
+          run_id: message.runId,
+          session_id: message.sessionId,
+          profile: "loopback_profile",
+          ...gate.gateInput
+        },
+        gate_outcome: gate.gateOutcome,
+        consumer_gate_result: consumerGateResult,
+        approval_record: gate.approvalRecord,
+        audit_record: auditRecord
+      };
+      if (consumerGateResult.gate_decision === "blocked") {
+        return {
+          kind: "result",
+          id: message.id,
+          ok: false,
+          error: {
+            code: "ERR_EXECUTION_FAILED",
+            message: "执行模式门禁阻断了当前 xhs.search 请求"
+          },
+          payload: {
+            details: {
+              ability_id: String(ability.id ?? "xhs.note.search.v1"),
+              stage: "execution",
+              reason: "EXECUTION_MODE_GATE_BLOCKED"
+            },
+            ...gateBundle
+          }
+        };
+      }
+      if (
+        consumerGateResult.effective_execution_mode === "dry_run" ||
+        consumerGateResult.effective_execution_mode === "recon"
+      ) {
+        return {
+          kind: "result",
+          id: message.id,
+          ok: true,
+          payload: {
+            summary: {
+              capability_result: {
+                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                layer: String(ability.layer ?? "L3"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                outcome: "partial",
+                data_ref: {
+                  query: String(input.query ?? "")
+                },
+                metrics: {
+                  count: 0
+                }
+              },
+              ...gateBundle
+            },
+            observability: {
+              page_state: {
+                page_kind: "search",
+                url: "https://www.xiaohongshu.com/search_result",
+                title: "Search Result",
+                ready_state: "complete"
+              },
+              key_requests: [],
+              failure_site: null
+            }
+          }
+        };
+      }
 
       if (simulated === "success") {
         return {
@@ -108,7 +422,7 @@ class InMemoryContentScriptRuntime {
               capability_result: {
                 ability_id: String(ability.id ?? "xhs.note.search.v1"),
                 layer: String(ability.layer ?? "L3"),
-                action: String(ability.action ?? "read"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
                 outcome: "success",
                 data_ref: {
                   query: String(input.query ?? ""),
@@ -118,7 +432,8 @@ class InMemoryContentScriptRuntime {
                   count: 2,
                   duration_ms: 12
                 }
-              }
+              },
+              ...gateBundle
             },
             observability: {
               page_state: {
@@ -175,6 +490,7 @@ class InMemoryContentScriptRuntime {
                       ? "SIGNATURE_ENTRY_MISSING"
                       : "GATEWAY_INVOKER_FAILED"
           },
+          ...gateBundle,
           observability: {
             page_state: {
               page_kind: simulated === "login_required" ? "login" : "search",

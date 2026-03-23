@@ -133,8 +133,25 @@ describe("executeCommand", () => {
               query: "露营装备"
             },
             options: {
-              ...scopedXhsGateOptions,
-              simulate_result: "success"
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              simulate_result: "success",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed",
+              approval_record: {
+                approved: true,
+                approver: "qa-reviewer",
+                approved_at: "2026-03-23T10:00:00Z",
+                checks: {
+                  target_domain_confirmed: true,
+                  target_tab_confirmed: true,
+                  target_page_confirmed: true,
+                  risk_state_checked: true,
+                  action_type_confirmed: true
+                }
+              }
             }
           }
         },
