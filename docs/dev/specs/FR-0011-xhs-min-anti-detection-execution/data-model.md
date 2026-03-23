@@ -60,6 +60,7 @@
 约束：
 - `states` 缺任一基线状态视为无效。
 - `hard_block_when_paused` 不能为空。
+- `hard_block_when_paused` 必须显式包含所有 live 读写模式，至少覆盖 `live_read_limited`、`live_read_high_risk` 与 `live_write`。
 
 ## 实体 6：IssueActionMatrix
 

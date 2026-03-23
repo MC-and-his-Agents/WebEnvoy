@@ -114,7 +114,7 @@
       { "from": "paused", "to": "limited", "trigger": "cooldown_backoff_window_passed_and_manual_approve" },
       { "from": "limited", "to": "allowed", "trigger": "stability_window_passed_and_manual_approve" }
     ],
-    "hard_block_when_paused": ["live_write", "live_read_high_risk"]
+    "hard_block_when_paused": ["live_read_limited", "live_read_high_risk", "live_write"]
   }
 }
 ```
