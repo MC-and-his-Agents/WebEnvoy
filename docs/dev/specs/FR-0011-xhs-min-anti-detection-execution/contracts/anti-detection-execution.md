@@ -105,18 +105,44 @@
 ```json
 {
   "issue_action_matrix": {
-    "issue_208": {
-      "paused": ["dry_run", "recon"],
-      "limited": ["recon", "reversible_interaction_with_approval"],
-      "allowed": ["approved_scope_actions"],
-      "blocked_actions": ["live_write", "irreversible_write"]
-    },
-    "issue_209": {
-      "paused": ["dry_run", "recon"],
-      "limited": ["recon", "live_read_limited_with_approval"],
-      "allowed": ["approved_scope_actions"],
-      "blocked_actions": ["live_write", "expand_new_live_surface_without_gate"]
-    }
+    "entries": [
+      {
+        "issue_scope": "issue_208",
+        "state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "blocked_actions": ["live_read_high_risk", "live_write", "irreversible_write"]
+      },
+      {
+        "issue_scope": "issue_208",
+        "state": "limited",
+        "allowed_actions": ["recon", "reversible_interaction_with_approval"],
+        "blocked_actions": ["irreversible_write", "live_write"]
+      },
+      {
+        "issue_scope": "issue_208",
+        "state": "allowed",
+        "allowed_actions": ["approved_scope_actions"],
+        "blocked_actions": ["actions_outside_approved_scope"]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "blocked_actions": ["live_read_high_risk", "live_write", "expand_new_live_surface_without_gate"]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "limited",
+        "allowed_actions": ["recon", "live_read_limited_with_approval"],
+        "blocked_actions": ["live_write", "expand_new_live_surface_without_gate"]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "allowed",
+        "allowed_actions": ["approved_scope_actions"],
+        "blocked_actions": ["actions_outside_approved_scope"]
+      }
+    ]
   }
 }
 ```
@@ -125,7 +151,7 @@
 - `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
 - `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
 - `limited` 下 `issue_208` 不得包含不可逆写动作。
-- 每个 issue scope 都必须显式给出 `blocked_actions`，不得把阻断集合留给实现阶段猜测。
+- 每个 `(issue_scope, state)` 都必须同时定义 `allowed_actions` 与 `blocked_actions`，不得把阻断集合留给实现阶段猜测。
 
 ## risk_transition_audit
 
