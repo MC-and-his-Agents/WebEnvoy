@@ -434,6 +434,45 @@ describeWithSqlite("sqlite-runtime-store", () => {
     store.close();
   });
 
+  it("rejects allowed live_read_limited audit record without approver/approved_at", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-limited-invalid-001",
+      sessionId: "session-gate-limited-invalid",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T11:05:00.000Z",
+      endedAt: "2026-03-23T11:05:01.000Z",
+      errorCode: null
+    });
+
+    await expect(
+      store.appendAuditRecord({
+        eventId: "gate_evt_run-gate-limited-invalid-001",
+        runId: "run-gate-limited-invalid-001",
+        sessionId: "session-gate-limited-invalid",
+        profile: "profile-a",
+        riskState: "limited",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 33,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_limited",
+        effectiveExecutionMode: "live_read_limited",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: null,
+        approvedAt: null,
+        recordedAt: "2026-03-23T11:05:02.000Z"
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
   it("fails on schema mismatch", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);

@@ -993,8 +993,10 @@ export class SQLiteRuntimeStore {
     }
     const requiresApprovalEvidence =
       input.gateDecision === "allowed" &&
-      (input.requestedExecutionMode === "live_read_high_risk" ||
+      (input.requestedExecutionMode === "live_read_limited" ||
+        input.requestedExecutionMode === "live_read_high_risk" ||
         input.requestedExecutionMode === "live_write" ||
+        input.effectiveExecutionMode === "live_read_limited" ||
         input.effectiveExecutionMode === "live_read_high_risk" ||
         input.effectiveExecutionMode === "live_write");
     if (
