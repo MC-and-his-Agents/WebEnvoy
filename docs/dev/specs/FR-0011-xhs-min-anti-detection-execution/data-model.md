@@ -67,15 +67,19 @@
 - `issue_scope` ENUM NOT NULL（`issue_208` | `issue_209`）
 - `state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
 - `allowed_actions` ARRAY NOT NULL
+- `conditional_actions` ARRAY NOT NULL
 - `blocked_actions` ARRAY NOT NULL
 
 约束：
 - `issue_208` 与 `issue_209` 必须覆盖相同的 `state` 枚举集合。
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
+- `conditional_actions` 的每个元素必须至少包含 `action` 与 `requires` 两个字段。
+- `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
 - `issue_208` 在 `limited` 下不得出现不可逆写动作。
-- `blocked_actions` 不得为空，必须与 `allowed_actions` 一起定义完整边界。
-- `issue_209` 在 `limited` 下允许出现 `live_read_limited`，但该动作仍受审批证据与审计要求约束。
+- `blocked_actions` 不得为空，必须与 `allowed_actions`、`conditional_actions` 一起定义完整边界。
+- live 读模式若需要审批证据，不得直接出现在 `allowed_actions` 中，必须落入 `conditional_actions`。
+- `issue_209` 在 `limited` 下只允许把 `live_read_limited` 放入 `conditional_actions`，不得把 `live_read_high_risk` 视为可放行动作。
 
 ## 实体 7：RiskTransitionAuditRecord
 
