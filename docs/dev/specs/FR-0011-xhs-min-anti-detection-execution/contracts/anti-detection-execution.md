@@ -53,7 +53,7 @@
     "allowed_modes": ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
-      "risk_state_not_paused",
+      "risk_state_not_paused_for_live_eligibility",
       "risk_state_checked",
       "target_domain_confirmed",
       "target_tab_confirmed",
@@ -70,7 +70,9 @@
 约束：
 - `live_read_limited` 是正式公开的受控 live 读模式，可由外部请求方显式请求。
 - `live_read_limited` 与 `live_read_high_risk` 进入 live 前都必须满足 `live_entry_requirements`，且审批证据要求不可分叉。
+- `live_entry_requirements` 仅定义 live 读模式共享必备前置；其满足仅表示进入 live 判定所需必要条件，不表示在当前 `risk_state` 自动放行全部 live 读模式。
 - `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
+- 具体 `(issue_scope, state, execution_mode)` 是否允许，必须再受 `issue_action_matrix` 的显式边界约束；若与 `live_entry_requirements` 出现冲突，以 `issue_action_matrix` 为准。
 - 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
 
 ## write_interaction_tier

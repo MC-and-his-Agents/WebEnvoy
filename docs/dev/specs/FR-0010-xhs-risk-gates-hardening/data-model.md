@@ -97,7 +97,7 @@
 
 - 与 `FR-0009`：FR-0009 保留治理基线；FR-0010 作为 Sprint 2 实现与测试的唯一消费契约。
 - 与 `FR-0004`：复用运行标识与最小可观测信息，不重建外层错误壳。
-- 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 及后续 Sprint 3 follow-up 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+- 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
 
 ## FR-0009 -> FR-0010 字段迁移映射（规约层）
 

@@ -3,7 +3,7 @@
 ## 范围说明
 
 本模型描述 FR-0011 规约阶段需要稳定交付的共享对象，不新增持久化 schema，仅定义实现阶段必须遵循的数据结构语义。
-凡涉及门禁结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateDecision`、`ApprovalRecord` 与 `AuditRecord` 作为承载对象，FR-0011 只补充 Sprint 3 的新增枚举与约束。
+凡涉及门禁输入/结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateInput`、`GateDecision`、`ApprovalRecord`、`AuditRecord` 与 `ConsumerGateResult` 作为承载对象，FR-0011 只补充 Sprint 3 的增量约束。
 
 ## 实体 1：PluginGateOwnership
 
@@ -97,11 +97,12 @@
 
 ## 跨 FR 继承约束
 
-- FR-0011 不新增 `requested_execution_mode`、`effective_execution_mode`、`gate_decision` 的并行实体定义；对应稳定字段与基础约束一律继承 `FR-0010.GateInput` / `FR-0010.GateDecision`。
+- FR-0011 不新增 `requested_execution_mode`、`effective_execution_mode`、`gate_decision` 的并行实体定义；对应稳定字段与基础约束一律继承 `FR-0010.GateInput` / `FR-0010.GateDecision` / `FR-0010.ConsumerGateResult`。
 - 在继承 `FR-0010` 冻结对象的前提下，FR-0011 仅补充 Sprint 3 增量语义：
   - `live_read_limited` 作为正式公开的受控 live 模式存在，但只允许用于读动作。
   - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式。
   - `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，审批证据必须继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
+  - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。
 
 ## 生命周期
 

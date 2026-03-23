@@ -21,7 +21,7 @@
 3. 建立默认 `dry_run/recon` 执行模式，并定义升级到 live 的前置条件。
 4. 建立人工确认与审计记录最小闭环，支持事后追溯与回滚。
 5. 将 `#208` 与 `#209` 统一纳入同一门禁模型。
-6. 冻结统一门禁输出对象，确保 `#208/#209` 与后续 Sprint 3 follow-up 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+6. 冻结统一门禁输出对象，确保 `#208/#209` 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
 
 ## 非目标
 
@@ -150,7 +150,7 @@ And 不存在某一事项绕过门禁的路径
 3. 默认模式为 `dry_run/recon`，高风险 live 默认阻断。
 4. 显式目标域/目标页确认（含 `target_tab_id`）、人工确认、审计记录要求均已冻结。
 5. `#208` 与 `#209` 的后续 live 扩展前置条件已统一。
-6. 输出对象可被实现层与后续事项稳定消费。
+6. 输出对象可被实现层与当前已明确的 `#208/#209` 稳定消费。
 7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义，且其正式枚举已覆盖 `live_read_limited`。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
