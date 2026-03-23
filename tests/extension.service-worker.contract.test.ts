@@ -319,6 +319,110 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("accepts real xhs.search payload shape and reads target gate fields from options", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: false },
+          { id: 44, url: "https://www.xiaohongshu.com/home", active: true }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-options-shape-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-options-shape-001",
+        command: "xhs.search",
+        command_params: {
+          ability: { id: "xhs.search.notes.v1", layer: "L3", action: "read" },
+          input: { query: "露营" },
+          options: {
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            requested_execution_mode: "dry_run"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-options-shape-001",
+        command: "xhs.search"
+      })
+    );
+  });
+
+  it("allows explicit target tab in another window", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(
+      async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+        if (filter.url) {
+          expect(filter.url).toBe("*://www.xiaohongshu.com/*");
+          expect(filter.currentWindow).toBeUndefined();
+          return [
+            {
+              id: 77,
+              url: "https://www.xiaohongshu.com/search_result?keyword=跨窗口",
+              active: false
+            }
+          ];
+        }
+        return [{ id: 11 }];
+      }
+    );
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-cross-window-tab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-cross-window-tab-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_tab_id: 77
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({
+        id: "run-xhs-cross-window-tab-001",
+        command: "xhs.search"
+      })
+    );
+  });
+
   it("returns target-tab-unavailable when no xhs candidate tab exists", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

@@ -747,17 +747,28 @@ class ChromeBackgroundBridge {
     }
     async #evaluateXhsTargetGate(request) {
         const commandParams = asRecord(request.params.command_params) ?? {};
-        const targetDomain = typeof commandParams.target_domain === "string" && commandParams.target_domain.trim().length > 0
-            ? commandParams.target_domain.trim()
+        const optionParams = asRecord(commandParams.options);
+        const readGateParam = (key) => {
+            if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+                return commandParams[key];
+            }
+            return optionParams?.[key];
+        };
+        const rawTargetDomain = readGateParam("target_domain");
+        const rawTargetTabId = readGateParam("target_tab_id");
+        const rawTargetPage = readGateParam("target_page");
+        const rawRequestedExecutionMode = readGateParam("requested_execution_mode");
+        const targetDomain = typeof rawTargetDomain === "string" && rawTargetDomain.trim().length > 0
+            ? rawTargetDomain.trim()
             : null;
-        const targetTabId = typeof commandParams.target_tab_id === "number" && Number.isInteger(commandParams.target_tab_id)
-            ? commandParams.target_tab_id
+        const targetTabId = typeof rawTargetTabId === "number" && Number.isInteger(rawTargetTabId)
+            ? rawTargetTabId
             : null;
-        const targetPage = typeof commandParams.target_page === "string" && commandParams.target_page.trim().length > 0
-            ? commandParams.target_page.trim()
+        const targetPage = typeof rawTargetPage === "string" && rawTargetPage.trim().length > 0
+            ? rawTargetPage.trim()
             : null;
         const actionType = "read";
-        const requestedExecutionMode = resolveRequestedExecutionMode(commandParams.requested_execution_mode);
+        const requestedExecutionMode = resolveRequestedExecutionMode(rawRequestedExecutionMode);
         // #218 only handles target gate; keep execution mode unchanged here.
         const effectiveExecutionMode = requestedExecutionMode;
         const gateReasons = [];
@@ -778,7 +789,6 @@ class ChromeBackgroundBridge {
         }
         if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
             const domainTabs = await this.chromeApi.tabs.query({
-                currentWindow: true,
                 url: `*://${targetDomain}/*`
             });
             const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
