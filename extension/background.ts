@@ -1347,6 +1347,12 @@ class ChromeBackgroundBridge {
         approval_missing_requirements: approvalRequirementGaps,
         execution_enabled: false
       };
+    } else if (actionType !== null && actionType !== "read") {
+      if (isLiveReadMode) {
+        pushReason("ACTION_TYPE_MODE_MISMATCH");
+      }
+      pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
+      pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
     }
 
     if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {

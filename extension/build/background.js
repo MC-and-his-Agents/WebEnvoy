@@ -1060,6 +1060,13 @@ class ChromeBackgroundBridge {
                 execution_enabled: false
             };
         }
+        else if (actionType !== null && actionType !== "read") {
+            if (isLiveReadMode) {
+                pushReason("ACTION_TYPE_MODE_MISMATCH");
+            }
+            pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
+            pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
+        }
         if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
             const domainTabs = await this.chromeApi.tabs.query({
                 url: `*://${targetDomain}/*`
