@@ -1,4 +1,4 @@
-# FR-0012 研究记录（Layer 2 事件级拟人模拟增强）
+# FR-0013 研究记录（Layer 2 事件级拟人模拟增强）
 
 ## 研究问题
 
@@ -17,7 +17,7 @@
 - `docs/dev/architecture/system-design/execution.md`
   - 已冻结 CDP Input 与 JS 合成路径在 `isTrusted` 上的本质差异。
 - `FR-0011`
-  - 已冻结最小门禁、写路径动作分级、最小 session 节律和共享状态机，是 FR-0012 的前置而不是并列替代品。
+  - 已冻结最小门禁、写路径动作分级、最小 session 节律和共享状态机，是 FR-0013 的前置而不是并列替代品。
 
 ## 证据矩阵
 
@@ -26,7 +26,7 @@
 | C1 | Layer 2 属于 Phase 2 的延续反风控主线 | `docs/dev/roadmap.md`、`#233` | 路线图与 issue 对齐 | M2 | 95% | 不是 Sprint 3 的回写，也不是后层扩展 |
 | C2 | `FR-0011` 只冻结最小写路径分级与阻断边界 | `FR-0011/spec.md` | 套件边界审查 | M2 | 95% | 其重点是门禁与状态机，不是完整事件模拟 |
 | C3 | Layer 2 已形成稳定对象，值得创建 `contracts/` | `anti-detection.md`、`read-write.md`、`execution.md` | 架构边界审查 | M2 | 88% | 事件策略、事件链、节奏配置会被多个模块共享 |
-| C4 | FR-0012 需要独立 `data-model.md` 说明共享实体语义 | `spec_review.md`、`FR-0011/data-model.md` | 套件深度对齐 | M2 | 82% | 虽非持久化 schema，但属于跨模块共享对象 |
+| C4 | FR-0013 需要独立 `data-model.md` 说明共享实体语义 | `spec_review.md`、`FR-0011/data-model.md` | 套件深度对齐 | M2 | 82% | 虽非持久化 schema，但属于跨模块共享对象 |
 | C5 | Layer 2 的主要风险是越界到 Layer 3 或绕过 FR-0011 门禁 | `anti-detection.md`、`FR-0011/spec.md`、`#236` | 架构与治理交叉审查 | M2 | 93% | 是 reviewer 最可能阻断的方向 |
 
 ## 结论
@@ -36,8 +36,8 @@
 - `data-model.md`：需要。
   - 原因：虽不新增持久化 schema，但需要明确共享实体的字段语义、继承关系和生命周期，避免实现阶段再次平行造型。
 - 继承原则：
-  - `FR-0012` 不并行重定义 `FR-0011` 的门禁与状态机对象。
-  - `FR-0012` 只新增 Layer 2 的事件策略对象，并在字段级显式引用 `FR-0011` 的结果对象。
+  - `FR-0013` 不并行重定义 `FR-0011` 的门禁与状态机对象。
+  - `FR-0013` 只新增 Layer 2 的事件策略对象，并在字段级显式引用 `FR-0011` 的结果对象。
 
 ## 未决项
 
