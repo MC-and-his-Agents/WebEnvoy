@@ -221,7 +221,7 @@ export class SQLiteRuntimeStore {
             .get();
         if (!row) {
             this.#db
-                .prepare("INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', ?)")
+                .prepare("INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO NOTHING")
                 .run(String(SCHEMA_VERSION));
             return;
         }
