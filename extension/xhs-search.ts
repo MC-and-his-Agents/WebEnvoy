@@ -407,6 +407,13 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     }
   } else if (actionType && actionType !== "read") {
     gateDecision = "blocked";
+    if (
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk"
+    ) {
+      effectiveExecutionMode = fallbackMode;
+      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+    }
     gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
     gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
   } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {

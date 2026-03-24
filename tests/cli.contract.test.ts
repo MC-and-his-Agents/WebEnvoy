@@ -1162,6 +1162,130 @@ describe("webenvoy cli contract", () => {
     );
   });
 
+  it("blocks issue_209 write live_read_limited with fallback mode instead of exposing live execution", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const gateOutcome = asRecord(gateEnvelope.gate_outcome);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    expect(gateOutcome?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_read_limited");
+    expect(consumerGateResult?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "ACTION_TYPE_MODE_MISMATCH",
+        "RISK_STATE_LIMITED",
+        "ISSUE_ACTION_MATRIX_BLOCKED"
+      ])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("live_read_limited");
+    expect(auditRecord?.effective_execution_mode).toBe("recon");
+  });
+
+  it("blocks issue_209 write live_read_high_risk with fallback mode instead of exposing live execution", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const gateOutcome = asRecord(gateEnvelope.gate_outcome);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_read_high_risk");
+    expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "ACTION_TYPE_MODE_MISMATCH",
+        "RISK_STATE_ALLOWED",
+        "ISSUE_ACTION_MATRIX_BLOCKED"
+      ])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("live_read_high_risk");
+    expect(auditRecord?.effective_execution_mode).toBe("dry_run");
+  });
+
   it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
     const result = runCli([
       "xhs.search",
