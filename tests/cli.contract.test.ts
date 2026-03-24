@@ -1,11 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-store.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
@@ -1109,6 +1111,181 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
+  it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["RISK_STATE_ALLOWED", "ISSUE_ACTION_MATRIX_BLOCKED"])
+    );
+  });
+
+  it("blocks issue_209 write live_read_limited with fallback mode instead of exposing live execution", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const gateOutcome = asRecord(gateEnvelope.gate_outcome);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    expect(gateOutcome?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_read_limited");
+    expect(consumerGateResult?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "ACTION_TYPE_MODE_MISMATCH",
+        "RISK_STATE_LIMITED",
+        "ISSUE_ACTION_MATRIX_BLOCKED"
+      ])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("live_read_limited");
+    expect(auditRecord?.effective_execution_mode).toBe("recon");
+  });
+
+  it("blocks issue_209 write live_read_high_risk with fallback mode instead of exposing live execution", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const gateOutcome = asRecord(gateEnvelope.gate_outcome);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_read_high_risk");
+    expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "ACTION_TYPE_MODE_MISMATCH",
+        "RISK_STATE_ALLOWED",
+        "ISSUE_ACTION_MATRIX_BLOCKED"
+      ])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("live_read_high_risk");
+    expect(auditRecord?.effective_execution_mode).toBe("dry_run");
+  });
+
   it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
     const result = runCli([
       "xhs.search",
@@ -1382,6 +1559,7 @@ describe("webenvoy cli contract", () => {
         audit_records: [
           {
             run_id: runId,
+            issue_scope: "issue_209",
             risk_state: "allowed",
             gate_decision: "allowed",
             requested_execution_mode: "live_read_high_risk",
@@ -1390,6 +1568,9 @@ describe("webenvoy cli contract", () => {
             approved_at: "2026-03-23T10:00:00Z"
           }
         ],
+        write_action_matrix_decisions: {
+          issue_scope: "issue_209"
+        },
         risk_state_output: {
           current_state: "allowed",
           session_rhythm_policy: {
@@ -1498,6 +1679,7 @@ describe("webenvoy cli contract", () => {
           {
             run_id: runId,
             session_id: sessionId,
+            issue_scope: "issue_209",
             risk_state: "allowed",
             gate_decision: "blocked",
             requested_execution_mode: "live_read_high_risk",
@@ -1506,6 +1688,7 @@ describe("webenvoy cli contract", () => {
             approved_at: null
           }
         ],
+        write_action_matrix_decisions: null,
         risk_state_output: {
           current_state: "limited",
           session_rhythm_policy: {
@@ -1551,6 +1734,324 @@ describe("webenvoy cli contract", () => {
       ((((body.summary as Record<string, unknown>).audit_records as Record<string, unknown>[])[0]
         .gate_reasons as string[]) ?? [])
     ).toEqual(expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"]));
+  });
+
+  itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-issue-scope-208-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 91,
+          target_page: "publish_page",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused"
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(6);
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-query-issue-scope-208-002",
+      "--params",
+      JSON.stringify({
+        run_id: runId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          run_id: runId
+        },
+        audit_records: [
+          {
+            run_id: runId,
+            issue_scope: "issue_208"
+          }
+        ],
+        write_action_matrix_decisions: {
+          issue_scope: "issue_208"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("keeps unresolved issue_scope rows visible in runtime.audit query results", async () => {
+    const cwd = await createRuntimeCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '5');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-audit-missing-issue-scope-001",
+      "session-audit-missing-issue-scope-001",
+      "xhs_account_001",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id,
+        target_page, action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver,
+        approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-audit-missing-issue-scope-001",
+      "run-audit-missing-issue-scope-001",
+      "session-audit-missing-issue-scope-001",
+      "xhs_account_001",
+      null,
+      "allowed",
+      "allowed",
+      "gate_evaluation",
+      "creator.xiaohongshu.com",
+      52,
+      "creator_publish_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:20:11.000Z",
+      "2026-03-23T10:20:11.000Z"
+    );
+    db.close();
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-missing-issue-scope-query-001",
+      "--params",
+      JSON.stringify({
+        run_id: "run-audit-missing-issue-scope-001"
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          run_id: "run-audit-missing-issue-scope-001"
+        },
+        audit_records: [
+          {
+            run_id: "run-audit-missing-issue-scope-001",
+            issue_scope: null,
+            write_action_matrix_decisions: null
+          }
+        ],
+        write_action_matrix_decisions: null
+      }
+    });
+  });
+
+  itWithSqlite("keeps resolved audit records queryable when session window also contains unresolved legacy rows", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-session-mixed-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 91,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused"
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(0);
+    const executeBody = parseSingleJsonLine(executeResult.stdout);
+    const sessionId = String(
+      (((executeBody.summary as Record<string, unknown>).audit_record as Record<string, unknown>)
+        .session_id)
+    );
+
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(dbPath);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-audit-missing-issue-scope-002",
+      sessionId,
+      "xhs_account_001",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id,
+        target_page, action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver,
+        approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-audit-missing-issue-scope-002",
+      "run-audit-missing-issue-scope-002",
+      sessionId,
+      "xhs_account_001",
+      null,
+      "paused",
+      "paused",
+      "gate_evaluation",
+      "creator.xiaohongshu.com",
+      52,
+      "creator_publish_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:20:11.000Z",
+      "2026-03-23T10:20:11.000Z"
+    );
+    db.close();
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-mixed-session-query-001",
+      "--params",
+      JSON.stringify({
+        session_id: sessionId,
+        limit: 10
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body.summary).toMatchObject({
+      audit_records: expect.arrayContaining([
+        expect.objectContaining({
+          run_id: runId,
+          issue_scope: "issue_209"
+        }),
+        expect.objectContaining({
+          run_id: "run-audit-missing-issue-scope-002",
+          issue_scope: null,
+          write_action_matrix_decisions: null
+        })
+      ])
+    });
+    expect((body.summary.audit_records as Record<string, unknown>[])).toHaveLength(2);
   });
 
   it("returns invalid args when xhs.search requested_execution_mode is missing", () => {

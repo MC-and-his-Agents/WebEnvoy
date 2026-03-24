@@ -139,11 +139,12 @@ const resolveGate = (options) => {
             effectiveExecutionMode = fallbackMode;
         }
     }
-    else if (actionType &&
+    else if (issueScope === "issue_208" &&
+        actionType &&
         actionType !== "read" &&
         requestedExecutionMode !== null &&
         currentWriteActionDecision) {
-        effectiveExecutionMode = requestedExecutionMode;
+        effectiveExecutionMode = fallbackMode;
         gateDecision = "blocked";
         if (currentWriteActionDecision.decision === "blocked" ||
             currentWriteActionDecision.decision === "not_applicable") {
@@ -167,6 +168,16 @@ const resolveGate = (options) => {
             gateDecision = "allowed";
             gateReasons.push("WRITE_INTERACTION_ALLOWED");
         }
+    }
+    else if (actionType && actionType !== "read") {
+        gateDecision = "blocked";
+        if (requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk") {
+            effectiveExecutionMode = fallbackMode;
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
+        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
     }
     else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
         gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN");

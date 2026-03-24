@@ -196,6 +196,16 @@ const buildLoopbackGate = (options, abilityAction) => {
             gateReasons.push("WRITE_INTERACTION_ALLOWED");
         }
     }
+    else if (actionType && actionType !== "read") {
+        gateDecision = "blocked";
+        if (requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk") {
+            effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
+        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+    }
     else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
         gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN");
     }

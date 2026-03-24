@@ -2,7 +2,8 @@ import { CliError } from "../core/errors.js";
 import type { CommandDefinition, RuntimeContext } from "../core/types.js";
 import {
   WRITE_INTERACTION_TIER,
-  getWriteActionMatrixDecisions
+  getWriteActionMatrixDecisions,
+  isIssueScope
 } from "../../shared/risk-state.js";
 import {
   NativeMessagingBridge,
@@ -47,20 +48,29 @@ const resolveRuntimeBridge = (): NativeMessagingBridge => {
 };
 const profileRuntime = new ProfileRuntimeService();
 
-const deriveWriteActionDecisions = (auditRecord: Record<string, unknown>) =>
-  getWriteActionMatrixDecisions(
-    asString(auditRecord.issue_scope),
-    asString(auditRecord.action_type),
-    asString(auditRecord.requested_execution_mode)
-  );
+const deriveWriteActionDecisions = (
+  auditRecord: Record<string, unknown>
+): ReturnType<typeof getWriteActionMatrixDecisions> | null => {
+  const issueScope = asString(auditRecord.issue_scope);
+  const actionType = asString(auditRecord.action_type);
+  const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
+  if (!issueScope || !isIssueScope(issueScope) || !actionType || !requestedExecutionMode) {
+    return null;
+  }
+  return getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
+};
 
 const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) => {
   const writeActionMatrixDecisions = deriveWriteActionDecisions(auditRecord);
   const existingGateReasons = asStringArray(auditRecord.gate_reasons);
   const derivedGateReasons = [...existingGateReasons];
-  const tierReason = `WRITE_INTERACTION_TIER_${String(writeActionMatrixDecisions.write_interaction_tier).toUpperCase()}`;
+  const tierReason = writeActionMatrixDecisions
+    ? `WRITE_INTERACTION_TIER_${String(writeActionMatrixDecisions.write_interaction_tier).toUpperCase()}`
+    : null;
   if (
+    writeActionMatrixDecisions &&
     writeActionMatrixDecisions.action_type !== "read" &&
+    tierReason &&
     !derivedGateReasons.some((reason) => reason === tierReason)
   ) {
     derivedGateReasons.push(tierReason);
@@ -68,7 +78,7 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
   return {
     ...auditRecord,
     gate_reasons: derivedGateReasons,
-    write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+    write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null,
     write_action_matrix_decisions: writeActionMatrixDecisions
   };
 };
@@ -250,9 +260,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       },
       audit_records: enrichedAuditRecords,
       write_interaction_tier: WRITE_INTERACTION_TIER,
-      write_action_matrix_decisions:
-        (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
-          ?.write_action_matrix_decisions ?? null,
+      write_action_matrix_decisions: null,
       risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
         auditRecords: enrichedAuditRecords
       })

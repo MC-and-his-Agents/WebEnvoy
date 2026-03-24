@@ -896,6 +896,90 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
+  it("blocks issue_209 write live_read_limited in background before relay even with approval", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue209-write-limited-bg-blocked-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue209-write-limited-bg-blocked-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          issue_scope: "issue_209",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          action_type: "write",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            issue_scope?: string;
+            action_type?: string;
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-issue209-write-limited-bg-blocked-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-issue209-write-limited-bg-blocked-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "recon",
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining([
+            "ACTION_TYPE_MODE_MISMATCH",
+            "RISK_STATE_LIMITED",
+            "ISSUE_ACTION_MATRIX_BLOCKED"
+          ])
+        }
+      }
+    });
+  });
+
   it("blocks live_read_high_risk in paused state even with approval", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
@@ -1070,6 +1154,63 @@ describe("extension service worker recovery contract", () => {
     expect(consumerGateResult?.gate_decision).toBe("blocked");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+    );
+  });
+
+  it("blocks ability.action mismatch in background with the same gate reason as relay", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+        id: "run-xhs-ability-action-mismatch-bg-001",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "run-xhs-ability-action-mismatch-bg-001",
+          command: "xhs.search",
+          command_params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "dry_run",
+            risk_state: "paused"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-ability-action-mismatch-bg-001");
+    expect(blocked?.status).toBe("error");
+    expect(blocked?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.action_type).toBe("read");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["ABILITY_ACTION_CONTEXT_MISMATCH"])
     );
   });
 
