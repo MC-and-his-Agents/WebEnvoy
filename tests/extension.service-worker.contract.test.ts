@@ -1071,7 +1071,21 @@ describe("extension service worker recovery contract", () => {
       expect(blocked?.status).toBe("error");
       const blockedPayload = asRecord(blocked?.payload) ?? {};
       const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+      const blockedIssueActionMatrix = asRecord(blockedPayload.issue_action_matrix);
+      const blockedConditionalActions = Array.isArray(blockedIssueActionMatrix?.conditional_actions)
+        ? blockedIssueActionMatrix.conditional_actions
+        : [];
+      const blockedWriteMatrixDecisions = asRecord(blockedPayload.write_action_matrix_decisions);
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(blockedPayload.write_action_matrix).toBeUndefined();
+      expect(blockedWriteMatrixDecisions).not.toBeNull();
+      expect(blockedConditionalActions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "reversible_interaction_with_approval"
+          })
+        ])
+      );
       expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
 
       const approvedPort = createMockPort();
@@ -1128,10 +1142,24 @@ describe("extension service worker recovery contract", () => {
       const summary = asRecord(approved?.payload?.summary) ?? {};
       const capabilityResult = asRecord(summary.capability_result);
       const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
+      const approvedIssueActionMatrix = asRecord(summary.issue_action_matrix);
+      const approvedConditionalActions = Array.isArray(approvedIssueActionMatrix?.conditional_actions)
+        ? approvedIssueActionMatrix.conditional_actions
+        : [];
+      const approvedWriteMatrixDecisions = asRecord(summary.write_action_matrix_decisions);
       const writeGateOnlyDecision = asRecord(summary.write_gate_only_decision);
       expect(capabilityResult?.outcome).toBe("partial");
       expect(capabilityResult?.action).toBe("write");
       expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
+      expect(summary.write_action_matrix).toBeUndefined();
+      expect(approvedWriteMatrixDecisions).not.toBeNull();
+      expect(approvedConditionalActions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "reversible_interaction_with_approval"
+          })
+        ])
+      );
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
       expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
     }

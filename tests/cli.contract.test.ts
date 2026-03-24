@@ -1351,7 +1351,11 @@ describe("webenvoy cli contract", () => {
             {
               issue_scope: "issue_208",
               state: "allowed",
-              conditional_actions: []
+              conditional_actions: [
+                {
+                  action: "reversible_interaction_with_approval"
+                }
+              ]
             },
             {
               issue_scope: "issue_209",
@@ -1463,7 +1467,11 @@ describe("webenvoy cli contract", () => {
             {
               issue_scope: "issue_208",
               state: "limited",
-              conditional_actions: []
+              conditional_actions: [
+                {
+                  action: "reversible_interaction_with_approval"
+                }
+              ]
             },
             {
               issue_scope: "issue_209",

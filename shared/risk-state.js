@@ -52,8 +52,13 @@ const ISSUE_ACTION_MATRIX = [
   {
     issue_scope: "issue_208",
     state: "limited",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    conditional_actions: [],
+    allowed_actions: ["dry_run", "recon"],
+    conditional_actions: [
+      {
+        action: "reversible_interaction_with_approval",
+        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
+      }
+    ],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",
@@ -65,8 +70,13 @@ const ISSUE_ACTION_MATRIX = [
   {
     issue_scope: "issue_208",
     state: "allowed",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    conditional_actions: [],
+    allowed_actions: ["dry_run", "recon"],
+    conditional_actions: [
+      {
+        action: "reversible_interaction_with_approval",
+        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
+      }
+    ],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",

@@ -1194,7 +1194,7 @@ class ChromeBackgroundBridge {
             issue_action_matrix: resolvedIssueActionMatrixEntry,
             write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
             write_interaction_tier_contract: WRITE_INTERACTION_TIER,
-            write_action_matrix: writeActionMatrixDecisions,
+            write_action_matrix_decisions: writeActionMatrixDecisions,
             ...(writeGateOnlyApprovalDecision ? { write_gate_only_decision: writeGateOnlyApprovalDecision } : {}),
             risk_state_output: buildUnifiedRiskStateOutput(resolvedRiskState, {
                 auditRecords: [persistedAuditRecord],
