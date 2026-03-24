@@ -337,11 +337,11 @@ const isRiskSignalRecord = (record) => {
   if (asBoolean(record.risk_signal)) {
     return true;
   }
-  if (!isLiveExecutionMode(record.requested_execution_mode)) {
-    return false;
-  }
   if (record.gate_decision === "blocked") {
-    return true;
+    return isLiveExecutionMode(record.requested_execution_mode);
+  }
+  if (!isLiveExecutionMode(record.effective_execution_mode)) {
+    return false;
   }
   const reasons = Array.isArray(record.gate_reasons)
     ? record.gate_reasons.filter((item) => typeof item === "string")
@@ -355,7 +355,7 @@ const isRecoverySignalRecord = (record) => {
   if (asBoolean(record.recovery_signal)) {
     return true;
   }
-  return record.gate_decision === "allowed" && isLiveExecutionMode(record.requested_execution_mode);
+  return record.gate_decision === "allowed" && isLiveExecutionMode(record.effective_execution_mode);
 };
 const normalizeAuditRecords = (auditRecords) =>
   (Array.isArray(auditRecords) ? auditRecords : [])
