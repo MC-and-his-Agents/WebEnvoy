@@ -1194,6 +1194,7 @@ class ChromeBackgroundBridge {
 
   async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
     const commandParams = asRecord(request.params.command_params) ?? {};
+    const abilityParams = asRecord(commandParams.ability);
     const optionParams = asRecord(commandParams.options);
     const readGateParam = (key: string): unknown => {
       if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
@@ -1206,6 +1207,7 @@ class ChromeBackgroundBridge {
     const rawTargetPage = readGateParam("target_page");
     const rawRequestedExecutionMode = readGateParam("requested_execution_mode");
     const rawActionType = readGateParam("action_type");
+    const rawAbilityActionType = abilityParams?.action;
     const rawIssueScope = readGateParam("issue_scope");
     const rawRiskState = readGateParam("risk_state");
     const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
@@ -1215,6 +1217,7 @@ class ChromeBackgroundBridge {
     const issueScope = resolveIssueScope(rawIssueScope);
     const riskState = resolveRiskState(rawRiskState);
     const actionType = parseActionType(rawActionType);
+    const abilityActionType = parseActionType(rawAbilityActionType);
     const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
     const approvalRecord = normalizeApprovalRecord(rawApprovalRecord);
     const issueActionMatrixEntry = resolveIssueActionMatrixEntry(issueScope, riskState);
@@ -1347,7 +1350,11 @@ class ChromeBackgroundBridge {
         approval_missing_requirements: approvalRequirementGaps,
         execution_enabled: false
       };
-    } else if (actionType !== null && actionType !== "read") {
+    } else if (
+      issueScope !== "issue_208" &&
+      ((actionType !== null && actionType !== "read") ||
+        (abilityActionType !== null && abilityActionType !== "read"))
+    ) {
       if (isLiveReadMode) {
         pushReason("ACTION_TYPE_MODE_MISMATCH");
       }

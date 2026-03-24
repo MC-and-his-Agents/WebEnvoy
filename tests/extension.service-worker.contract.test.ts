@@ -1157,6 +1157,59 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("short-circuits non-issue_208 non-read request in background without forwarding", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-non-issue208-non-read-bg-short-circuit-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-non-issue208-non-read-bg-short-circuit-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "dry_run",
+            risk_state: "paused"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-non-issue208-non-read-bg-short-circuit-001");
+    expect(blocked?.status).toBe("error");
+    expect(blocked?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+  });
+
   it("allows issue_208 reversible_interaction_with_approval in limited/allowed only with complete approval", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
 

@@ -1802,7 +1802,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  itWithSqlite("returns null write matrix for audit records with missing issue_scope", async () => {
+  itWithSqlite("returns runtime unavailable when audit records contain unresolved issue_scope", async () => {
     const cwd = await createRuntimeCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -1916,22 +1916,22 @@ describe("webenvoy cli contract", () => {
         run_id: "run-audit-missing-issue-scope-001"
       })
     ], cwd);
-    expect(queryResult.status).toBe(0);
+    expect(queryResult.status).toBe(5);
     const body = parseSingleJsonLine(queryResult.stdout);
     expect(body).toMatchObject({
       command: "runtime.audit",
-      status: "success",
-      summary: {
-        query: {
-          run_id: "run-audit-missing-issue-scope-001"
-        },
-        audit_records: [
-          {
-            run_id: "run-audit-missing-issue-scope-001",
-            issue_scope: null
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: false,
+        details: {
+          ability_id: "runtime.audit",
+          stage: "execution",
+          reason: "AUDIT_QUERY_ISSUE_SCOPE_UNRESOLVED",
+          query: {
+            run_id: "run-audit-missing-issue-scope-001"
           }
-        ],
-        write_action_matrix_decisions: null
+        }
       }
     });
   });

@@ -83,6 +83,28 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
   };
 };
 
+const assertResolvedIssueScopeForAuditQuery = (
+  auditRecords: Record<string, unknown>[],
+  query: Record<string, unknown>
+): void => {
+  const unresolvedRecord = auditRecords.find(
+    (record) => asString(record.issue_scope) === null
+  );
+  if (!unresolvedRecord) {
+    return;
+  }
+
+  throw new CliError("ERR_RUNTIME_UNAVAILABLE", "审计记录存在未恢复的 issue_scope", {
+    retryable: false,
+    details: {
+      ability_id: "runtime.audit",
+      stage: "execution",
+      reason: "AUDIT_QUERY_ISSUE_SCOPE_UNRESOLVED",
+      query
+    }
+  });
+};
+
 const resolveCurrentRiskState = (
   approvalRecord: Record<string, unknown> | null,
   auditRecords: Record<string, unknown>[]
@@ -220,6 +242,9 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       const enrichedAuditRecords = trail.auditRecords.map((record) =>
         enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
       );
+      assertResolvedIssueScopeForAuditQuery(enrichedAuditRecords, {
+        run_id: runId
+      });
       const currentRiskState = resolveCurrentRiskState(
         asObject(trail.approvalRecord),
         enrichedAuditRecords
@@ -248,6 +273,11 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
     const enrichedAuditRecords = records.map((record) =>
       enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
     );
+    assertResolvedIssueScopeForAuditQuery(enrichedAuditRecords, {
+      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(profile ? { profile } : {}),
+      limit
+    });
     const currentRiskState = resolveCurrentRiskState(
       null,
       enrichedAuditRecords
