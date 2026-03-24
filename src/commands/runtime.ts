@@ -83,12 +83,6 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
   };
 };
 
-const filterResolvedAuditRecords = (auditRecords: Record<string, unknown>[]) =>
-  auditRecords.filter((record) => {
-    const issueScope = asString(record.issue_scope);
-    return issueScope !== null && isIssueScope(issueScope);
-  });
-
 const resolveCurrentRiskState = (
   approvalRecord: Record<string, unknown> | null,
   auditRecords: Record<string, unknown>[]
@@ -226,7 +220,6 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       const enrichedAuditRecords = trail.auditRecords.map((record) =>
         enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
       );
-      const resolvedAuditRecords = filterResolvedAuditRecords(enrichedAuditRecords);
       const currentRiskState = resolveCurrentRiskState(
         asObject(trail.approvalRecord),
         enrichedAuditRecords
@@ -236,10 +229,10 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
           run_id: runId
         },
         approval_record: trail.approvalRecord,
-        audit_records: resolvedAuditRecords,
+        audit_records: enrichedAuditRecords,
         write_interaction_tier: WRITE_INTERACTION_TIER,
         write_action_matrix_decisions:
-          (resolvedAuditRecords[0] as Record<string, unknown> | undefined)
+          (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
             ?.write_action_matrix_decisions ?? null,
         risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
           auditRecords: enrichedAuditRecords
@@ -255,7 +248,6 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
     const enrichedAuditRecords = records.map((record) =>
       enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
     );
-    const resolvedAuditRecords = filterResolvedAuditRecords(enrichedAuditRecords);
     const currentRiskState = resolveCurrentRiskState(
       null,
       enrichedAuditRecords
@@ -266,7 +258,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         ...(profile ? { profile } : {}),
         limit
       },
-      audit_records: resolvedAuditRecords,
+      audit_records: enrichedAuditRecords,
       write_interaction_tier: WRITE_INTERACTION_TIER,
       write_action_matrix_decisions: null,
       risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {

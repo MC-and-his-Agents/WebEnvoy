@@ -1802,7 +1802,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  itWithSqlite("filters unresolved issue_scope rows from runtime.audit query results", async () => {
+  itWithSqlite("keeps unresolved issue_scope rows visible in runtime.audit query results", async () => {
     const cwd = await createRuntimeCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -1925,7 +1925,13 @@ describe("webenvoy cli contract", () => {
         query: {
           run_id: "run-audit-missing-issue-scope-001"
         },
-        audit_records: [],
+        audit_records: [
+          {
+            run_id: "run-audit-missing-issue-scope-001",
+            issue_scope: null,
+            write_action_matrix_decisions: null
+          }
+        ],
         write_action_matrix_decisions: null
       }
     });
@@ -2033,14 +2039,19 @@ describe("webenvoy cli contract", () => {
     expect(queryResult.status).toBe(0);
     const body = parseSingleJsonLine(queryResult.stdout);
     expect(body.summary).toMatchObject({
-      audit_records: [
+      audit_records: expect.arrayContaining([
         expect.objectContaining({
           run_id: runId,
           issue_scope: "issue_209"
+        }),
+        expect.objectContaining({
+          run_id: "run-audit-missing-issue-scope-002",
+          issue_scope: null,
+          write_action_matrix_decisions: null
         })
-      ]
+      ])
     });
-    expect((body.summary.audit_records as Record<string, unknown>[])).toHaveLength(1);
+    expect((body.summary.audit_records as Record<string, unknown>[])).toHaveLength(2);
   });
 
   it("returns invalid args when xhs.search requested_execution_mode is missing", () => {
