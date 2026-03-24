@@ -578,6 +578,22 @@ describeWithSqlite("sqlite-runtime-store", () => {
         run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
+      "run-v4-issue209-write",
+      "session-v4-issue209-write",
+      "profile-c",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:06:00.000Z",
+      "2026-03-23T10:06:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:06:00.000Z",
+      "2026-03-23T10:06:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
       "run-v4-write",
       "session-v4-write",
       "profile-b",
@@ -621,6 +637,32 @@ describeWithSqlite("sqlite-runtime-store", () => {
         action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
+      "evt-v4-issue209-write",
+      "run-v4-issue209-write",
+      "session-v4-issue209-write",
+      "profile-c",
+      "paused",
+      "paused",
+      "gate_evaluation",
+      "www.xiaohongshu.com",
+      33,
+      "search_result_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:06:11.000Z",
+      "2026-03-23T10:06:11.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+        action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
       "evt-v4-write",
       "run-v4-write",
       "session-v4-write",
@@ -645,10 +687,12 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const store = new SQLiteRuntimeStore(dbPath);
     const readTrail = await store.getAuditTrailByRunId("run-v4-read");
+    const issue209WriteTrail = await store.getAuditTrailByRunId("run-v4-issue209-write");
     const writeTrail = await store.getAuditTrailByRunId("run-v4-write");
     store.close();
 
     expect(readTrail.audit_records[0]?.issue_scope).toBe("issue_209");
+    expect(issue209WriteTrail.audit_records[0]?.issue_scope).toBe("issue_209");
     expect(writeTrail.audit_records[0]?.issue_scope).toBe("issue_208");
   });
 });
