@@ -1,11 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-store.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
@@ -1672,6 +1674,140 @@ describe("webenvoy cli contract", () => {
         write_action_matrix_decisions: {
           issue_scope: "issue_208"
         }
+      }
+    });
+  });
+
+  itWithSqlite("returns null write matrix for legacy_unclassified audit records", async () => {
+    const cwd = await createRuntimeCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '5');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-audit-legacy-unclassified-001",
+      "session-audit-legacy-unclassified-001",
+      "xhs_account_001",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id,
+        target_page, action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver,
+        approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-audit-legacy-unclassified-001",
+      "run-audit-legacy-unclassified-001",
+      "session-audit-legacy-unclassified-001",
+      "xhs_account_001",
+      "legacy_unclassified",
+      "allowed",
+      "allowed",
+      "gate_evaluation",
+      "creator.xiaohongshu.com",
+      52,
+      "creator_publish_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:20:11.000Z",
+      "2026-03-23T10:20:11.000Z"
+    );
+    db.close();
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-legacy-unclassified-query-001",
+      "--params",
+      JSON.stringify({
+        run_id: "run-audit-legacy-unclassified-001"
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          run_id: "run-audit-legacy-unclassified-001"
+        },
+        audit_records: [
+          {
+            run_id: "run-audit-legacy-unclassified-001",
+            issue_scope: "legacy_unclassified"
+          }
+        ],
+        write_action_matrix_decisions: null
       }
     });
   });

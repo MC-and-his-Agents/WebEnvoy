@@ -1,5 +1,5 @@
 import { CliError } from "../core/errors.js";
-import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions } from "../../shared/risk-state.js";
+import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions, isIssueScope } from "../../shared/risk-state.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
@@ -28,7 +28,7 @@ const deriveWriteActionDecisions = (auditRecord) => {
     const issueScope = asString(auditRecord.issue_scope);
     const actionType = asString(auditRecord.action_type);
     const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
-    if (!issueScope || !actionType || !requestedExecutionMode) {
+    if (!issueScope || !isIssueScope(issueScope) || !actionType || !requestedExecutionMode) {
         return null;
     }
     return getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);

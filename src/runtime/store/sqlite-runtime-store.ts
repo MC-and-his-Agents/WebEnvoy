@@ -525,19 +525,26 @@ export class SQLiteRuntimeStore {
   }
 
   #migrateV4ToV5(): void {
+    // Prefer lossless restoration signals and mark ambiguous legacy rows explicitly.
     this.#db.exec(`
       ALTER TABLE runtime_gate_audit_records
       ADD COLUMN issue_scope TEXT;
       UPDATE runtime_gate_audit_records
       SET issue_scope = CASE
         WHEN issue_scope IS NOT NULL AND issue_scope != '' THEN issue_scope
-        WHEN target_domain = 'creator.xiaohongshu.com' THEN 'issue_208'
-        WHEN target_page IN ('creator_publish_tab', 'publish_page') THEN 'issue_208'
         WHEN target_domain = 'www.xiaohongshu.com' THEN 'issue_209'
         WHEN target_page = 'search_result_tab' THEN 'issue_209'
         WHEN requested_execution_mode IN ('live_read_limited', 'live_read_high_risk') THEN 'issue_209'
         WHEN action_type = 'read' THEN 'issue_209'
-        ELSE NULL
+        WHEN target_domain = 'creator.xiaohongshu.com'
+             AND target_page IN ('creator_publish_tab', 'publish_page')
+             AND (
+               requested_execution_mode = 'live_write'
+               OR effective_execution_mode = 'live_write'
+               OR action_type = 'irreversible_write'
+             )
+          THEN 'issue_208'
+        ELSE 'legacy_unclassified'
       END
       WHERE issue_scope IS NULL OR issue_scope = '';
     `);

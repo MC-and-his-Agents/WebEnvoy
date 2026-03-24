@@ -2,7 +2,8 @@ import { CliError } from "../core/errors.js";
 import type { CommandDefinition, RuntimeContext } from "../core/types.js";
 import {
   WRITE_INTERACTION_TIER,
-  getWriteActionMatrixDecisions
+  getWriteActionMatrixDecisions,
+  isIssueScope
 } from "../../shared/risk-state.js";
 import {
   NativeMessagingBridge,
@@ -53,7 +54,7 @@ const deriveWriteActionDecisions = (
   const issueScope = asString(auditRecord.issue_scope);
   const actionType = asString(auditRecord.action_type);
   const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
-  if (!issueScope || !actionType || !requestedExecutionMode) {
+  if (!issueScope || !isIssueScope(issueScope) || !actionType || !requestedExecutionMode) {
     return null;
   }
   return getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);

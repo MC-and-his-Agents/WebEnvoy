@@ -509,7 +509,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(() => new SQLiteRuntimeStore(dbPath)).toThrowError(RuntimeStoreError);
   });
 
-  it("backfills issue_scope when migrating v4 gate audit records", async () => {
+  it("backfills issue_scope conservatively when migrating v4 gate audit records", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -641,8 +641,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       "run-v4-issue209-write",
       "session-v4-issue209-write",
       "profile-c",
-      "paused",
-      "paused",
+      "allowed",
+      "allowed",
       "gate_evaluation",
       "www.xiaohongshu.com",
       33,
@@ -651,7 +651,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
       "dry_run",
       "dry_run",
       "blocked",
-      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      JSON.stringify(["RISK_STATE_ALLOWED", "ISSUE_ACTION_MATRIX_BLOCKED"]),
       null,
       null,
       "2026-03-23T10:06:11.000Z",
@@ -674,7 +674,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
       22,
       "creator_publish_tab",
       "write",
-      "dry_run",
+      "live_write",
       "dry_run",
       "blocked",
       JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
@@ -694,5 +694,104 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(readTrail.audit_records[0]?.issue_scope).toBe("issue_209");
     expect(issue209WriteTrail.audit_records[0]?.issue_scope).toBe("issue_209");
     expect(writeTrail.audit_records[0]?.issue_scope).toBe("issue_208");
+  });
+
+  it("marks ambiguous legacy write audit records as legacy_unclassified after v4->v5 migration", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '4');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-v4-legacy-ambiguous-write",
+      "session-v4-legacy-ambiguous-write",
+      "profile-legacy",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:16:00.000Z",
+      "2026-03-23T10:16:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:16:00.000Z",
+      "2026-03-23T10:16:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+        action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-v4-legacy-ambiguous-write",
+      "run-v4-legacy-ambiguous-write",
+      "session-v4-legacy-ambiguous-write",
+      "profile-legacy",
+      "allowed",
+      "allowed",
+      "gate_evaluation",
+      "creator.xiaohongshu.com",
+      52,
+      "creator_publish_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["RISK_STATE_ALLOWED", "ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:16:11.000Z",
+      "2026-03-23T10:16:11.000Z"
+    );
+    db.close();
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    const trail = await store.getAuditTrailByRunId("run-v4-legacy-ambiguous-write");
+    store.close();
+
+    expect(trail.audit_records[0]?.issue_scope).toBe("legacy_unclassified");
   });
 });
