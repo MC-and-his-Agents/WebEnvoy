@@ -21,6 +21,7 @@ const PROFILE_STATES = [
     "stopped"
 ];
 const PROXY_BINDING_SOURCES = ["runtime.start", "runtime.login"];
+const LINUX_KERNEL_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._+-]+)*$/u;
 const validateProfileName = (profileName, rootDir) => {
     if (!PROFILE_NAME_PATTERN.test(profileName)) {
         throw new Error(`Invalid profile name: ${profileName}`);
@@ -55,6 +56,39 @@ const resolveBrowserVersionFromResolvedExecutable = async () => {
     }
 };
 const withBrowserVersion = (input, browserVersion) => ({ ...input, browserVersion });
+const isLegacyLinuxKernelVersion = (value) => LINUX_KERNEL_VERSION_PATTERN.test(value);
+const migrateLegacyLinuxKernelBundleOsVersion = (meta) => {
+    if (!meta.fingerprintProfileBundle) {
+        return null;
+    }
+    const expectedEnvironment = meta.fingerprintProfileBundle.environment;
+    if (expectedEnvironment.os_family !== "linux") {
+        return null;
+    }
+    const actualEnvironment = resolveCurrentFingerprintEnvironment();
+    if (actualEnvironment.os_family !== "linux") {
+        return null;
+    }
+    if (actualEnvironment.os_version === "unknown") {
+        return null;
+    }
+    if (expectedEnvironment.os_version === actualEnvironment.os_version) {
+        return null;
+    }
+    if (!isLegacyLinuxKernelVersion(expectedEnvironment.os_version)) {
+        return null;
+    }
+    return {
+        ...meta,
+        fingerprintProfileBundle: {
+            ...meta.fingerprintProfileBundle,
+            environment: {
+                ...expectedEnvironment,
+                os_version: actualEnvironment.os_version
+            }
+        }
+    };
+};
 function assertProfileMeta(value) {
     if (!isObjectRecord(value)) {
         throw new Error("Invalid profile meta structure: expected object");
@@ -190,6 +224,13 @@ export class ProfileStore {
                     await this.writeMeta(profileName, migratedMeta);
                 }
                 return migratedMeta;
+            }
+            const migratedLinuxMeta = migrateLegacyLinuxKernelBundleOsVersion(parsed);
+            if (migratedLinuxMeta) {
+                if (options.mode !== "readonly") {
+                    await this.writeMeta(profileName, migratedLinuxMeta);
+                }
+                return migratedLinuxMeta;
             }
             return parsed;
         }
