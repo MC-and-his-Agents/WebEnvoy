@@ -115,6 +115,12 @@ export declare const buildFingerprintRuntimeContext: (input: {
   timezone?: string | null;
   ua?: string | null;
 }) => FingerprintRuntimeContext;
+export declare const buildIncompleteFingerprintRuntimeContext: (input: {
+  profile: string;
+  metaPresent: boolean;
+  actualEnvironment?: Partial<FingerprintEnvironment> | null;
+  reasonCode: string;
+}) => FingerprintRuntimeContext;
 export declare const ensureFingerprintRuntimeContext: (
   value: unknown
 ) => FingerprintRuntimeContext | null;

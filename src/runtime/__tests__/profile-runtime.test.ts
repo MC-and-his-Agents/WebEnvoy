@@ -987,4 +987,75 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
   });
+
+  it("treats legacy profile without fingerprint bundle as degraded and blocks live", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-legacy-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await store.ensureProfileDir("legacy_profile");
+    await writeFile(
+      store.getMetaPath("legacy_profile"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy_profile",
+          profileDir: store.getProfileDir("legacy_profile"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "legacy_profile",
+      runId: "run-runtime-test-fingerprint-legacy-status",
+      params: {
+        requested_execution_mode: "live_read_limited"
+      }
+    });
+    expect(status).toMatchObject({
+      fingerprint_runtime: {
+        source: "profile_meta",
+        fingerprint_profile_bundle: null,
+        execution: {
+          live_allowed: false,
+          live_decision: "dry_run_only",
+          allowed_execution_modes: ["dry_run", "recon"],
+          reason_codes: ["PROFILE_FIELD_MISSING"]
+        }
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "legacy_profile",
+        runId: "run-runtime-test-fingerprint-legacy-live",
+        params: {
+          requested_execution_mode: "live_read_limited"
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID"
+    });
+  });
 });

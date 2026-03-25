@@ -81,7 +81,9 @@ const createFingerprintContext = () => ({
   }
 });
 
-const withMockMainWorld = async (run: () => Promise<void>): Promise<void> => {
+const withMockMainWorld = async (
+  run: (context: { mockWindow: Window & Record<string, unknown> }) => Promise<void>
+): Promise<void> => {
   const previousWindow = (globalThis as { window?: unknown }).window;
   const previousDocument = (globalThis as { document?: unknown }).document;
   const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
@@ -127,6 +129,16 @@ const withMockMainWorld = async (run: () => Promise<void>): Promise<void> => {
     location: {
       href: "https://www.xiaohongshu.com/search_result?keyword=test"
     },
+    navigator: {},
+    AudioContext: class MockAudioContext {
+      createAnalyser() {
+        return {
+          getFloatFrequencyData(array: Float32Array) {
+            array[0] = 1;
+          }
+        };
+      }
+    },
     addEventListener: addListener,
     removeEventListener: removeListener,
     dispatchEvent: dispatch
@@ -171,7 +183,7 @@ const withMockMainWorld = async (run: () => Promise<void>): Promise<void> => {
   (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
 
   try {
-    await run();
+    await run({ mockWindow });
   } finally {
     (globalThis as { window?: unknown }).window = previousWindow;
     (globalThis as { document?: unknown }).document = previousDocument;
@@ -220,7 +232,7 @@ describe("content-script handler contract", () => {
   });
 
   it("returns fingerprint_runtime injection status for runtime.ping", async () => {
-    await withMockMainWorld(async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
       const handler = new ContentScriptHandler();
       const results: Array<Record<string, unknown>> = [];
       handler.onResult((message) => {
@@ -247,8 +259,22 @@ describe("content-script handler contract", () => {
       const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
       const injection = fingerprintRuntime?.injection as Record<string, unknown>;
       expect(injection?.installed).toBe(true);
-      expect(Array.isArray(injection?.applied_patches)).toBe(true);
+      expect(injection?.applied_patches).toEqual([
+        "audio_context",
+        "battery",
+        "navigator_plugins",
+        "navigator_mime_types"
+      ]);
       expect(injection?.source).toBe("profile_meta");
+      const battery = await (mockWindow.navigator as Navigator & { getBattery?: () => Promise<{ level: number }> }).getBattery?.();
+      expect(battery?.level).toBe(0.75);
+      expect((mockWindow.navigator as Navigator & { plugins?: { length: number } }).plugins?.length).toBe(1);
+      expect((mockWindow.navigator as Navigator & { mimeTypes?: { length: number } }).mimeTypes?.length).toBe(1);
+      const audioContext = new ((mockWindow as unknown as { AudioContext: new () => { createAnalyser(): { getFloatFrequencyData(array: Float32Array): void } } }).AudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const values = new Float32Array(1);
+      analyser.getFloatFrequencyData(values);
+      expect(values[0]).toBeGreaterThan(1);
     });
   });
 

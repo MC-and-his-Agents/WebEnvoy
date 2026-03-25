@@ -152,15 +152,96 @@ const mainWorldCall = async <T>(request: {
           }
           if (request.type === "fingerprint-install") {
             const runtime = request.payload.fingerprint_runtime ?? null;
+            const bundle = runtime?.fingerprint_profile_bundle ?? null;
+            const patchNameSet = new Set(
+              Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
+                ? runtime.fingerprint_patch_manifest.required_patches
+                : []
+            );
+            const appliedPatches = [];
+            const defineGetter = (target, property, getter) => {
+              Object.defineProperty(target, property, {
+                configurable: true,
+                get: getter
+              });
+            };
+            const createPluginArray = () => {
+              const plugins = [
+                {
+                  name: "Chrome PDF Viewer",
+                  filename: "internal-pdf-viewer",
+                  description: "Portable Document Format"
+                }
+              ];
+              plugins.item = (index) => plugins[index] ?? null;
+              plugins.namedItem = (name) => plugins.find((plugin) => plugin.name === name) ?? null;
+              plugins.refresh = () => undefined;
+              return plugins;
+            };
+            const createMimeTypeArray = () => {
+              const mimeTypes = [
+                {
+                  type: "application/pdf",
+                  suffixes: "pdf",
+                  description: "Portable Document Format"
+                }
+              ];
+              mimeTypes.item = (index) => mimeTypes[index] ?? null;
+              mimeTypes.namedItem = (name) =>
+                mimeTypes.find((mimeType) => mimeType.type === name) ?? null;
+              return mimeTypes;
+            };
+            if (bundle && patchNameSet.has("audio_context") && typeof window.AudioContext === "function") {
+              const originalCreateAnalyser = window.AudioContext.prototype.createAnalyser;
+              if (typeof originalCreateAnalyser === "function") {
+                window.AudioContext.prototype.createAnalyser = function (...args) {
+                  const analyser = originalCreateAnalyser.apply(this, args);
+                  if (analyser && typeof analyser.getFloatFrequencyData === "function") {
+                    const originalGetFloatFrequencyData = analyser.getFloatFrequencyData.bind(analyser);
+                    analyser.getFloatFrequencyData = (array) => {
+                      originalGetFloatFrequencyData(array);
+                      if (array && typeof array.length === "number" && array.length > 0) {
+                        array[0] = array[0] + bundle.audioNoiseSeed;
+                      }
+                    };
+                  }
+                  return analyser;
+                };
+                appliedPatches.push("audio_context");
+              }
+            }
+            if (bundle && patchNameSet.has("battery") && window.navigator) {
+              window.navigator.getBattery = () =>
+                Promise.resolve({
+                  charging: bundle.battery.charging,
+                  level: bundle.battery.level,
+                  chargingTime: bundle.battery.charging ? 0 : Infinity,
+                  dischargingTime: bundle.battery.charging ? Infinity : 3600,
+                  addEventListener() {},
+                  removeEventListener() {},
+                  dispatchEvent() {
+                    return true;
+                  }
+                });
+              appliedPatches.push("battery");
+            }
+            if (patchNameSet.has("navigator_plugins") && window.navigator) {
+              const plugins = createPluginArray();
+              defineGetter(window.navigator, "plugins", () => plugins);
+              appliedPatches.push("navigator_plugins");
+            }
+            if (patchNameSet.has("navigator_mime_types") && window.navigator) {
+              const mimeTypes = createMimeTypeArray();
+              defineGetter(window.navigator, "mimeTypes", () => mimeTypes);
+              appliedPatches.push("navigator_mime_types");
+            }
             window.__webenvoy_fingerprint_runtime__ = runtime;
             emit({
               id: request.id,
               ok: true,
               result: {
-                installed: runtime !== null,
-                applied_patches: Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
-                  ? runtime.fingerprint_patch_manifest.required_patches
-                  : [],
+                installed: appliedPatches.length > 0,
+                applied_patches: appliedPatches,
                 source: typeof runtime?.source === "string" ? runtime.source : "unknown"
               }
             });

@@ -125,20 +125,7 @@ const parseMeta = (raw) => {
         throw new Error("Invalid profile meta structure: invalid JSON");
     }
     assertProfileMeta(parsed);
-    return normalizeFingerprintProfileBundle(parsed);
-};
-const normalizeFingerprintProfileBundle = (meta) => {
-    if (isFingerprintProfileBundle(meta.fingerprintProfileBundle)) {
-        return meta;
-    }
-    return {
-        ...meta,
-        fingerprintProfileBundle: buildFingerprintProfileBundle({
-            profileName: meta.profileName,
-            fingerprintSeeds: meta.fingerprintSeeds,
-            environment: resolveCurrentEnvironment()
-        })
-    };
+    return parsed;
 };
 export class ProfileStore {
     rootDir;
@@ -181,10 +168,9 @@ export class ProfileStore {
         if (meta.profileDir !== profileDir) {
             throw new Error("Profile directory mismatch when writing meta");
         }
-        const normalizedMeta = normalizeFingerprintProfileBundle(meta);
         const metaPath = this.getMetaPath(profileName);
         const tempPath = `${metaPath}.tmp`;
-        const json = `${JSON.stringify(normalizedMeta, null, 2)}\n`;
+        const json = `${JSON.stringify(meta, null, 2)}\n`;
         await this.fs.writeFile(tempPath, json, "utf8");
         await this.fs.rename(tempPath, metaPath);
     }

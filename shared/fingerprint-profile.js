@@ -223,6 +223,41 @@ const isRuntimeContext = (value) =>
   Array.isArray(value.execution.reason_codes) &&
   value.execution.reason_codes.every((code) => typeof code === "string");
 
+const buildIncompleteFingerprintRuntimeContext = (input) => {
+  const reasonCode = input.reasonCode;
+  return {
+    profile: input.profile,
+    source: input.metaPresent ? "profile_meta" : "profile_missing",
+    fingerprint_profile_bundle: null,
+    fingerprint_patch_manifest: null,
+    fingerprint_consistency_check: {
+      profile: input.profile,
+      expected_environment: {
+        os_family: "unknown",
+        os_version: "unknown",
+        arch: "unknown"
+      },
+      actual_environment: {
+        os_family: normalizePlatform(input.actualEnvironment?.os_family),
+        os_version:
+          typeof input.actualEnvironment?.os_version === "string" &&
+          input.actualEnvironment.os_version.length > 0
+            ? input.actualEnvironment.os_version
+            : "unknown",
+        arch: normalizeArch(input.actualEnvironment?.arch)
+      },
+      decision: "mismatch",
+      reason_codes: [reasonCode]
+    },
+    execution: {
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: [reasonCode]
+    }
+  };
+};
+
 const buildFingerprintProfileBundle = (input) => {
   const environment = {
     os_family: normalizePlatform(input.environment?.os_family),
@@ -350,24 +385,21 @@ const buildFingerprintRuntimeContext = (input) => {
   const profile = typeof input.profile === "string" ? input.profile : "unknown";
 
   if (!input.metaPresent) {
-    const consistencyCheck = buildFingerprintConsistencyCheck({
+    return buildIncompleteFingerprintRuntimeContext({
       profile,
-      bundle: null,
-      actualEnvironment: input.actualEnvironment
+      metaPresent: false,
+      actualEnvironment: input.actualEnvironment,
+      reasonCode: "PROFILE_META_MISSING"
     });
-    return {
+  }
+
+  if (!isFingerprintProfileBundle(input.existingBundle)) {
+    return buildIncompleteFingerprintRuntimeContext({
       profile,
-      source: "profile_missing",
-      fingerprint_profile_bundle: null,
-      fingerprint_patch_manifest: null,
-      fingerprint_consistency_check: consistencyCheck,
-      execution: {
-        live_allowed: false,
-        live_decision: "dry_run_only",
-        allowed_execution_modes: ["dry_run", "recon"],
-        reason_codes: ["PROFILE_META_MISSING"]
-      }
-    };
+      metaPresent: true,
+      actualEnvironment: input.actualEnvironment,
+      reasonCode: "PROFILE_FIELD_MISSING"
+    });
   }
 
   const bundle = buildFingerprintProfileBundle(input);
@@ -425,6 +457,7 @@ export {
   buildFingerprintPatchManifest,
   buildFingerprintProfileBundle,
   buildFingerprintRuntimeContext,
+  buildIncompleteFingerprintRuntimeContext,
   ensureFingerprintRuntimeContext,
   isConsistencyCheck,
   isFingerprintProfileBundle,

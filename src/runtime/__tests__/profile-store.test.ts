@@ -114,7 +114,7 @@ describe("profile-store", () => {
     expect(meta?.localStorageSnapshots).toHaveLength(1);
   });
 
-  it("hydrates fingerprint profile bundle for legacy meta without bundle field", async () => {
+  it("keeps legacy meta without bundle field untouched for runtime-level downgrade handling", async () => {
     const store = await createStore();
     await store.ensureProfileDir("legacy");
     const metaPath = store.getMetaPath("legacy");
@@ -147,9 +147,7 @@ describe("profile-store", () => {
 
     const meta = await store.readMeta("legacy");
     expect(meta).not.toBeNull();
-    expect(meta?.fingerprintProfileBundle).toBeDefined();
-    expect(meta?.fingerprintProfileBundle?.environment.os_family).toBeTypeOf("string");
-    expect(meta?.fingerprintProfileBundle?.screen.width).toBeGreaterThan(0);
+    expect(meta?.fingerprintProfileBundle).toBeUndefined();
   });
 
   it("returns null when meta does not exist", async () => {
