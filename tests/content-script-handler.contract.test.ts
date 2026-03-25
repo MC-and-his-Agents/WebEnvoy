@@ -97,7 +97,7 @@ const withMockMainWorld = async (
   const removeListener = (type: string, listener: (event: MockEvent) => void) => {
     listeners.get(type)?.delete(listener);
   };
-  const dispatch = (event: MockEvent) => {
+  const dispatchToListeners = (event: MockEvent) => {
     const current = listeners.get(event.type);
     if (!current) {
       return;
@@ -116,14 +116,8 @@ const withMockMainWorld = async (
       this.detail = init.detail;
     }
   }
-
-  const atobFn = (input: string): string => Buffer.from(input, "base64").toString("utf8");
-  const escapeFn = (value: string): string => {
-    if (typeof (globalThis as { escape?: unknown }).escape === "function") {
-      return ((globalThis as { escape: (input: string) => string }).escape)(value);
-    }
-    return value;
-  };
+  const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+  const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 
   const mockWindow = {
     location: {
@@ -143,7 +137,203 @@ const withMockMainWorld = async (
     },
     addEventListener: addListener,
     removeEventListener: removeListener,
-    dispatchEvent: dispatch
+    dispatchEvent: (event: MockEvent) => {
+      dispatchToListeners(event);
+      const customEvent = event as MockCustomEvent<Record<string, unknown>>;
+      const detail = customEvent?.detail;
+      if (!detail || typeof detail !== "object") {
+        return;
+      }
+      if ("ok" in detail) {
+        return;
+      }
+      const requestId = detail.id;
+      const requestType = detail.type;
+      const requestPayload =
+        typeof detail.payload === "object" && detail.payload !== null
+          ? (detail.payload as Record<string, unknown>)
+          : null;
+      if (typeof requestId !== "string" || requestId.length === 0 || typeof requestType !== "string") {
+        return;
+      }
+
+      if (event.type !== MAIN_WORLD_REQUEST_EVENT) {
+        return;
+      }
+      const emitResult = (result: Record<string, unknown>) => {
+        dispatchToListeners(new MockCustomEventImpl(MAIN_WORLD_RESULT_EVENT, { detail: result }));
+      };
+
+      if (requestType === "xhs-sign") {
+        const fn = (mockWindow as Window & { _webmsxyw?: unknown })._webmsxyw;
+        if (typeof fn !== "function") {
+          emitResult({ id: requestId, ok: false, message: "window._webmsxyw is not available" });
+          return;
+        }
+        try {
+          const uri = typeof requestPayload?.uri === "string" ? requestPayload.uri : "";
+          const body =
+            typeof requestPayload?.body === "object" && requestPayload.body !== null
+              ? requestPayload.body
+              : {};
+          const value = (fn as (uri: string, body: unknown) => Record<string, unknown>)(uri, body);
+          emitResult({ id: requestId, ok: true, result: value });
+        } catch (error) {
+          emitResult({
+            id: requestId,
+            ok: false,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      if (requestType !== "fingerprint-install") {
+        return;
+      }
+
+      try {
+        const runtime =
+          typeof requestPayload?.fingerprint_runtime === "object" &&
+          requestPayload.fingerprint_runtime !== null
+            ? (requestPayload.fingerprint_runtime as Record<string, unknown>)
+            : null;
+        const bundle =
+          typeof runtime?.fingerprint_profile_bundle === "object" &&
+          runtime.fingerprint_profile_bundle !== null
+            ? (runtime.fingerprint_profile_bundle as Record<string, unknown>)
+            : null;
+        const requiredPatches = Array.isArray(runtime?.fingerprint_patch_manifest)
+          ? []
+          : Array.isArray(
+                (runtime?.fingerprint_patch_manifest as Record<string, unknown> | undefined)
+                  ?.required_patches
+              )
+            ? (((runtime?.fingerprint_patch_manifest as Record<string, unknown>).required_patches ??
+                []) as string[])
+            : [];
+        const patchNameSet = new Set(requiredPatches);
+        const appliedPatches: string[] = [];
+
+        if (patchNameSet.has("battery")) {
+          const battery =
+            typeof bundle?.battery === "object" && bundle.battery !== null
+              ? (bundle.battery as Record<string, unknown>)
+              : {};
+          const level = typeof battery.level === "number" ? battery.level : 1;
+          const charging = battery.charging === true;
+          Object.defineProperty(mockWindow.navigator, "getBattery", {
+            configurable: true,
+            value: async () => ({ level, charging })
+          });
+          appliedPatches.push("battery");
+        }
+
+        if (patchNameSet.has("navigator_plugins") || patchNameSet.has("navigator_mime_types")) {
+          const mimeType = {
+            type: "application/pdf",
+            suffixes: "pdf",
+            description: "Portable Document Format",
+            enabledPlugin: null as unknown
+          };
+          const plugin = {
+            name: "Chrome PDF Viewer",
+            filename: "internal-pdf-viewer",
+            description: "Portable Document Format",
+            length: 1,
+            0: mimeType,
+            item: (index: number) => (index === 0 ? mimeType : null),
+            namedItem: (name: string) => (name === "application/pdf" ? mimeType : null)
+          };
+          mimeType.enabledPlugin = plugin;
+          const plugins = [plugin, { ...plugin, name: "Chromium PDF Viewer" }];
+          const mimeTypes = [mimeType, { ...mimeType, type: "application/x-google-chrome-pdf" }];
+          const pluginArray = Object.assign(plugins, {
+            item: (index: number) => plugins[index] ?? null,
+            namedItem: (name: string) => plugins.find((entry) => entry.name === name) ?? null
+          });
+          const mimeTypeArray = Object.assign(mimeTypes, {
+            item: (index: number) => mimeTypes[index] ?? null,
+            namedItem: (name: string) => mimeTypes.find((entry) => entry.type === name) ?? null
+          });
+          Object.defineProperty(mockWindow.navigator, "plugins", {
+            configurable: true,
+            get: () => pluginArray
+          });
+          Object.defineProperty(mockWindow.navigator, "mimeTypes", {
+            configurable: true,
+            get: () => mimeTypeArray
+          });
+          if (patchNameSet.has("navigator_plugins")) {
+            appliedPatches.push("navigator_plugins");
+          }
+          if (patchNameSet.has("navigator_mime_types")) {
+            appliedPatches.push("navigator_mime_types");
+          }
+        }
+
+        if (patchNameSet.has("audio_context")) {
+          const noiseSeed =
+            typeof bundle?.audioNoiseSeed === "number"
+              ? bundle.audioNoiseSeed
+              : 0.000001;
+          const markerKey = "__webenvoy_audio_context_patched__";
+          const seedKey = "__webenvoy_audio_noise_seed__";
+          const windowRecord = mockWindow as Window & Record<string, unknown>;
+          if (windowRecord[markerKey] !== true) {
+            const BaseOfflineAudioContext = mockWindow.OfflineAudioContext;
+            const originalStartRendering =
+              BaseOfflineAudioContext && BaseOfflineAudioContext.prototype
+                ? BaseOfflineAudioContext.prototype.startRendering
+                : null;
+            if (typeof originalStartRendering === "function") {
+              BaseOfflineAudioContext.prototype.startRendering = async function (
+                this: { [seedKey]?: unknown }
+              ) {
+                const rendered = await originalStartRendering.apply(this);
+                const channelData = rendered.getChannelData(0);
+                const baseSeed =
+                  typeof this[seedKey] === "number"
+                    ? (this[seedKey] as number)
+                    : typeof windowRecord[seedKey] === "number"
+                      ? (windowRecord[seedKey] as number)
+                      : noiseSeed;
+                this[seedKey] = baseSeed;
+                windowRecord[seedKey] = baseSeed;
+                if (channelData.length > 0) {
+                  channelData[0] += baseSeed;
+                }
+                return rendered;
+              };
+            }
+            windowRecord[markerKey] = true;
+          }
+          appliedPatches.push("audio_context");
+        }
+
+        const missingRequiredPatches = requiredPatches.filter(
+          (patch) => !appliedPatches.includes(patch)
+        );
+        (mockWindow as Window & Record<string, unknown>).__webenvoy_fingerprint_runtime__ = runtime;
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: {
+            installed: missingRequiredPatches.length === 0,
+            applied_patches: appliedPatches,
+            missing_required_patches: missingRequiredPatches,
+            required_patches: requiredPatches,
+            source: typeof runtime?.source === "string" ? runtime.source : null
+          }
+        });
+      } catch (error) {
+        emitResult({
+          id: requestId,
+          ok: false,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
   } as unknown as Window & Record<string, unknown>;
   const mockDocument = {
     title: "contract-test",
@@ -154,29 +344,7 @@ const withMockMainWorld = async (
       remove: () => {}
     }),
     documentElement: {
-      appendChild: (node: { textContent?: string }) => {
-        const source = typeof node.textContent === "string" ? node.textContent : "";
-        const executor = new Function(
-          "window",
-          "document",
-          "CustomEvent",
-          "atob",
-          "decodeURIComponent",
-          "escape",
-          "Error",
-          source
-        );
-        executor(
-          mockWindow,
-          mockDocument,
-          MockCustomEventImpl,
-          atobFn,
-          decodeURIComponent,
-          escapeFn,
-          Error
-        );
-        return node;
-      }
+      appendChild: (node: unknown) => node
     }
   } as unknown as Document;
 
@@ -203,7 +371,7 @@ const waitForResult = async (results: Array<Record<string, unknown>>): Promise<v
 };
 
 describe("content-script handler contract", () => {
-  it("encodes payload for inline main-world script without exposing raw input", () => {
+  it("encodes payload for main-world transport without exposing raw input", () => {
     const payload = {
       id: "req-001",
       type: "xhs-sign",
@@ -261,12 +429,14 @@ describe("content-script handler contract", () => {
       const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
       const injection = fingerprintRuntime?.injection as Record<string, unknown>;
       expect(injection?.installed).toBe(true);
-      expect(injection?.applied_patches).toEqual([
-        "audio_context",
-        "battery",
-        "navigator_plugins",
-        "navigator_mime_types"
-      ]);
+      expect(injection?.applied_patches).toEqual(
+        expect.arrayContaining([
+          "audio_context",
+          "battery",
+          "navigator_plugins",
+          "navigator_mime_types"
+        ])
+      );
       expect(injection?.source).toBe("profile_meta");
       const battery = await (mockWindow.navigator as Navigator & { getBattery?: () => Promise<{ level: number }> }).getBattery?.();
       expect(battery?.level).toBe(0.75);

@@ -14,8 +14,9 @@ type BrowserLaunchErrorCode =
 
 const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
   darwin: [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium"
+    "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   ],
   linux: [
     "/usr/bin/google-chrome-stable",
@@ -121,6 +122,8 @@ const EXTENSION_BOOTSTRAP_PARAMS_KEY = "extensionBootstrap";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const CONTENT_SCRIPT_ENTRY_PATH = "build/content-script.js";
 const EXTENSION_BOOTSTRAP_SCRIPT_PATH = `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`;
+const SHARED_FINGERPRINT_PROFILE_PATH = "fingerprint-profile.js";
+const SHARED_RISK_STATE_PATH = "risk-state.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -336,6 +339,67 @@ const resolveCommandFromPath = async (command: string): Promise<string | null> =
   return null;
 };
 
+const readBrowserVersionOutput = async (executablePath: string): Promise<string | null> => {
+  return await new Promise<string | null>((resolve) => {
+    const child = spawn(executablePath, ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (value: string | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore kill failures
+      }
+      finish(null);
+    }, 2_000);
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      finish(null);
+    });
+    child.on("close", () => {
+      clearTimeout(timer);
+      const combined = `${stdout}\n${stderr}`.trim();
+      finish(combined.length > 0 ? combined : null);
+    });
+  });
+};
+
+const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
+  if (!versionOutput) {
+    return false;
+  }
+  const normalized = versionOutput.trim();
+  if (!/^Google Chrome\s/i.test(normalized) || /Google Chrome for Testing/i.test(normalized)) {
+    return false;
+  }
+  const match = normalized.match(/(\d+)\./);
+  if (!match) {
+    return false;
+  }
+  const major = Number.parseInt(match[1], 10);
+  return Number.isInteger(major) && major >= 137;
+};
+
 const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
   const explicitFromParams = parseOptionalString(params.browserPath);
   if (explicitFromParams !== null) {
@@ -349,18 +413,40 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
     explicitFromEnv,
     ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
   ].filter((item): item is string => item !== null);
+  let brandedChromeRejected = false;
 
   for (const candidate of candidates) {
+    let resolvedCandidate: string | null = null;
     if (isAbsolute(candidate) || hasPathSegment(candidate)) {
       if (await pathExists(candidate)) {
-        return candidate;
+        resolvedCandidate = candidate;
+      }
+    } else {
+      resolvedCandidate = await resolveCommandFromPath(candidate);
+    }
+    if (resolvedCandidate === null) {
+      continue;
+    }
+
+    const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
+    if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+      brandedChromeRejected = true;
+      if (explicitFromEnv && candidate === explicitFromEnv) {
+        throw new BrowserLaunchError(
+          "BROWSER_LAUNCH_FAILED",
+          "Google Chrome 137+ 已禁用命令行 --load-extension；请改用 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向受支持浏览器"
+        );
       }
       continue;
     }
-    const resolved = await resolveCommandFromPath(candidate);
-    if (resolved !== null) {
-      return resolved;
-    }
+    return resolvedCandidate;
+  }
+
+  if (brandedChromeRejected) {
+    throw new BrowserLaunchError(
+      "BROWSER_NOT_FOUND",
+      "未找到受支持的可加载扩展浏览器；Google Chrome 137+ 已禁用命令行 --load-extension，请安装 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向它们"
+    );
   }
 
   throw new BrowserLaunchError(
@@ -404,6 +490,26 @@ const resolveExtensionSourceDir = async (): Promise<string> => {
   );
 };
 
+const resolveSharedSourceDir = async (extensionSourceDir: string): Promise<string> => {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(extensionSourceDir, "..", "shared"),
+    join(moduleDir, "..", "..", "shared"),
+    join(process.cwd(), "shared")
+  ];
+  for (const candidate of candidates) {
+    const fingerprintPath = join(candidate, SHARED_FINGERPRINT_PROFILE_PATH);
+    const riskStatePath = join(candidate, SHARED_RISK_STATE_PATH);
+    if ((await pathExists(fingerprintPath)) && (await pathExists(riskStatePath))) {
+      return candidate;
+    }
+  }
+  throw new BrowserLaunchError(
+    "BROWSER_LAUNCH_FAILED",
+    "缺少 shared 指纹/risk-state 构建产物，无法生成 staged content script bundle"
+  );
+};
+
 const resolveExtensionBootstrapPayload = (input: BrowserLaunchInput): Record<string, unknown> | null => {
   if (input.extensionBootstrap) {
     return { ...input.extensionBootstrap };
@@ -419,6 +525,145 @@ const buildBootstrapScriptSource = (payload: Record<string, unknown> | null): st
     "})();",
     ""
   ].join("\n");
+
+const stripEsmSyntaxForClassicScript = (source: string): string => {
+  let transformed = source;
+  transformed = transformed.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+  transformed = transformed.replace(/^\s*export\s*\{[^;]*\};\s*$/gm, "");
+  transformed = transformed.replace(/\bexport\s+const\s+/g, "const ");
+  transformed = transformed.replace(/\bexport\s+class\s+/g, "class ");
+  transformed = transformed.replace(/\bexport\s+function\s+/g, "function ");
+  transformed = transformed.replace(/\nexport\s*\{[\s\S]*?\};?\s*$/m, "\n");
+  return transformed.trim();
+};
+
+const renderClassicModule = (input: {
+  moduleVar: string;
+  prelude?: string;
+  sourceBody: string;
+  exports: string[];
+}): string =>
+  [
+    `const ${input.moduleVar} = (() => {`,
+    input.prelude ?? "",
+    input.sourceBody,
+    `return { ${input.exports.join(", ")} };`,
+    "})();",
+    ""
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+
+const buildStagedContentScriptBundle = async (input: {
+  extensionSourceDir: string;
+  sharedSourceDir: string;
+}): Promise<string> => {
+  const readSource = async (path: string): Promise<string> =>
+    stripEsmSyntaxForClassicScript(await readFile(path, "utf8"));
+
+  const fingerprintSource = await readSource(
+    join(input.sharedSourceDir, SHARED_FINGERPRINT_PROFILE_PATH)
+  );
+  const riskStateSource = await readSource(join(input.sharedSourceDir, SHARED_RISK_STATE_PATH));
+  const xhsSearchSource = await readSource(join(input.extensionSourceDir, "build", "xhs-search.js"));
+  const handlerSource = await readSource(
+    join(input.extensionSourceDir, "build", "content-script-handler.js")
+  );
+  const contentScriptSource = await readSource(
+    join(input.extensionSourceDir, CONTENT_SCRIPT_ENTRY_PATH)
+  );
+
+  const riskStateModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_risk_state",
+    sourceBody: riskStateSource,
+    exports: [
+      "APPROVAL_CHECK_KEYS",
+      "EXECUTION_MODES",
+      "WRITE_INTERACTION_TIER",
+      "buildRiskTransitionAudit",
+      "buildUnifiedRiskStateOutput",
+      "getWriteActionMatrixDecisions",
+      "getIssueActionMatrixEntry",
+      "resolveIssueScope",
+      "resolveRiskState"
+    ]
+  });
+
+  const fingerprintModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_fingerprint_profile",
+    sourceBody: fingerprintSource,
+    exports: [
+      "DEFAULT_MIME_TYPE_DESCRIPTORS",
+      "DEFAULT_PLUGIN_DESCRIPTORS",
+      "ensureFingerprintRuntimeContext"
+    ]
+  });
+
+  const xhsSearchModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search",
+    prelude: [
+      "const {",
+      "  APPROVAL_CHECK_KEYS,",
+      "  EXECUTION_MODES,",
+      "  WRITE_INTERACTION_TIER,",
+      "  buildRiskTransitionAudit,",
+      "  buildUnifiedRiskStateOutput,",
+      "  getWriteActionMatrixDecisions,",
+      "  getIssueActionMatrixEntry,",
+      "  resolveIssueScope: resolveSharedIssueScope,",
+      "  resolveRiskState: resolveSharedRiskState",
+      "} = __webenvoy_module_risk_state;"
+    ].join("\n"),
+    sourceBody: xhsSearchSource,
+    exports: ["executeXhsSearch"]
+  });
+
+  const handlerModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_content_script_handler",
+    prelude: [
+      "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
+      "const {",
+      "  DEFAULT_MIME_TYPE_DESCRIPTORS,",
+      "  DEFAULT_PLUGIN_DESCRIPTORS,",
+      "  ensureFingerprintRuntimeContext",
+      "} = __webenvoy_module_fingerprint_profile;"
+    ].join("\n"),
+    sourceBody: handlerSource,
+    exports: ["ContentScriptHandler", "encodeMainWorldPayload", "resolveFingerprintContextForContract"]
+  });
+
+  const contentScriptModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_content_script",
+    prelude: [
+      "const { ContentScriptHandler } = __webenvoy_module_content_script_handler;",
+      "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;"
+    ].join("\n"),
+    sourceBody: contentScriptSource,
+    exports: ["bootstrapContentScript"]
+  });
+
+  return [
+    "/* WebEnvoy staged content script bundle: generated at runtime for MV3 classic script compatibility. */",
+    "",
+    riskStateModule,
+    fingerprintModule,
+    xhsSearchModule,
+    handlerModule,
+    contentScriptModule
+  ].join("\n");
+};
+
+const rewriteStagedContentScriptForRuntime = async (input: {
+  stagedExtensionDir: string;
+  extensionSourceDir: string;
+}): Promise<void> => {
+  const sharedSourceDir = await resolveSharedSourceDir(input.extensionSourceDir);
+  const bundleSource = await buildStagedContentScriptBundle({
+    extensionSourceDir: input.extensionSourceDir,
+    sharedSourceDir
+  });
+  await writeFile(join(input.stagedExtensionDir, CONTENT_SCRIPT_ENTRY_PATH), `${bundleSource}\n`, "utf8");
+};
 
 const injectBootstrapScriptIntoManifest = async (manifestPath: string): Promise<void> => {
   const raw = await readFile(manifestPath, "utf8");
@@ -493,6 +738,10 @@ const stageExtensionForRun = async (input: {
     buildBootstrapScriptSource(input.extensionBootstrap),
     "utf8"
   );
+  await rewriteStagedContentScriptForRuntime({
+    stagedExtensionDir,
+    extensionSourceDir
+  });
   await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
 
   return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };

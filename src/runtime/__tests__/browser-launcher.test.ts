@@ -19,8 +19,12 @@ const tempDirs: string[] = [];
 
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
 const originalBrowserMockLog = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+const originalBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
 
-const restoreEnv = (key: "WEBENVOY_BROWSER_PATH" | "WEBENVOY_BROWSER_MOCK_LOG", value: string | undefined): void => {
+const restoreEnv = (
+  key: "WEBENVOY_BROWSER_PATH" | "WEBENVOY_BROWSER_MOCK_LOG" | "WEBENVOY_BROWSER_MOCK_VERSION",
+  value: string | undefined
+): void => {
   if (value === undefined) {
     delete process.env[key];
     return;
@@ -38,6 +42,11 @@ const createMockBrowserExecutable = async (): Promise<{ scriptPath: string; logP
     `#!/usr/bin/env node
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 const logPath = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+const versionOutput = process.env.WEBENVOY_BROWSER_MOCK_VERSION ?? "Chromium 146.0.0.0";
+if (process.argv.includes("--version")) {
+  console.log(versionOutput);
+  process.exit(0);
+}
 let profileDir = "";
 for (const arg of process.argv.slice(2)) {
   if (arg.startsWith("--user-data-dir=")) {
@@ -139,6 +148,7 @@ const waitForExit = async (pid: number): Promise<void> => {
 afterEach(async () => {
   restoreEnv("WEBENVOY_BROWSER_PATH", originalBrowserPath);
   restoreEnv("WEBENVOY_BROWSER_MOCK_LOG", originalBrowserMockLog);
+  restoreEnv("WEBENVOY_BROWSER_MOCK_VERSION", originalBrowserMockVersion);
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -229,11 +239,22 @@ describe("browser-launcher", () => {
     expect(stagedExtensionPath).toContain("run-launcher-test-extension-stage-001");
     const manifestRaw = await readFile(join(stagedExtensionPath as string, "manifest.json"), "utf8");
     const manifest = JSON.parse(manifestRaw) as {
-      content_scripts?: Array<{ js?: string[] }>;
+      content_scripts?: Array<{ world?: string; js?: string[] }>;
     };
-    const contentScriptEntries = manifest.content_scripts?.[0]?.js ?? [];
-    expect(contentScriptEntries[0]).toBe(`build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`);
-    expect(contentScriptEntries[1]).toBe("build/content-script.js");
+    const contentScripts = manifest.content_scripts ?? [];
+    const mainWorldEntry = contentScripts.find((entry) => entry.world === "MAIN");
+    expect(mainWorldEntry?.js).toContain("build/main-world-bridge.js");
+    const isolatedWorldEntry = contentScripts.find(
+      (entry) => !entry.world || entry.world === "ISOLATED"
+    );
+    const isolatedWorldScripts = isolatedWorldEntry?.js ?? [];
+    const bootstrapIndex = isolatedWorldScripts.indexOf(
+      `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`
+    );
+    const contentScriptIndex = isolatedWorldScripts.indexOf("build/content-script.js");
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
+    expect(contentScriptIndex).toBeGreaterThanOrEqual(0);
+    expect(bootstrapIndex).toBeLessThan(contentScriptIndex);
     const bootstrapRaw = await readFile(
       join(stagedExtensionPath as string, EXTENSION_BOOTSTRAP_FILENAME),
       "utf8"
@@ -252,6 +273,14 @@ describe("browser-launcher", () => {
     );
     expect(bootstrapScriptRaw).toContain("__webenvoy_fingerprint_bootstrap_payload__");
     expect(bootstrapScriptRaw).toContain("unit-test-agent");
+    const bundledContentScriptRaw = await readFile(
+      join(stagedExtensionPath as string, "build", "content-script.js"),
+      "utf8"
+    );
+    expect(bundledContentScriptRaw).not.toContain('import { ContentScriptHandler } from');
+    expect(bundledContentScriptRaw).toContain("bootstrapContentScript");
+    expect(bundledContentScriptRaw).toContain("WebEnvoy staged content script bundle");
+    expect(bundledContentScriptRaw).toContain("__webenvoy_module_content_script");
 
     await shutdownBrowserSession({
       profileDir,
@@ -322,6 +351,25 @@ describe("browser-launcher", () => {
     ).rejects.toMatchObject({
       name: "BrowserLaunchError",
       code: "BROWSER_INVALID_ARGUMENT"
+    } satisfies Partial<BrowserLaunchError>);
+  });
+
+  it("fails fast for branded Google Chrome 137+ when only WEBENVOY_BROWSER_PATH is provided", async () => {
+    const { scriptPath } = await createMockBrowserExecutable();
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Google Chrome 146.0.7680.154";
+
+    await expect(
+      launchBrowser({
+        command: "runtime.start",
+        profileDir: join(tmpdir(), "webenvoy-browser-launcher-branded-chrome"),
+        proxyUrl: null,
+        runId: "run-branded-chrome-unsupported",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      name: "BrowserLaunchError",
+      code: "BROWSER_LAUNCH_FAILED"
     } satisfies Partial<BrowserLaunchError>);
   });
 

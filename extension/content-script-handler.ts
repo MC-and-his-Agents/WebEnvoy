@@ -1,7 +1,5 @@
 import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
 import {
-  DEFAULT_MIME_TYPE_DESCRIPTORS,
-  DEFAULT_PLUGIN_DESCRIPTORS,
   ensureFingerprintRuntimeContext,
   type FingerprintRuntimeContext
 } from "../shared/fingerprint-profile.js";
@@ -127,24 +125,33 @@ const encodeUtf8Base64 = (value: string): string => {
 export const encodeMainWorldPayload = (value: Record<string, unknown>): string =>
   encodeUtf8Base64(JSON.stringify(value));
 
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+
 const mainWorldCall = async <T>(request: {
   type: "xhs-sign" | "fingerprint-install";
   payload: Record<string, unknown>;
 }): Promise<T> => {
-  const eventName = "__webenvoy_main_world_result__";
   const requestId =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `mw-${Date.now()}`;
 
   return await new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
+      reject(new Error("main world bridge response timeout"));
+    }, MAIN_WORLD_CALL_TIMEOUT_MS);
+
     const listener = (event: Event) => {
       const customEvent = event as CustomEvent<Record<string, unknown>>;
       if (!customEvent.detail || customEvent.detail.id !== requestId) {
         return;
       }
 
-      window.removeEventListener(eventName, listener as EventListener);
+      clearTimeout(timeout);
+      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
 
       if (customEvent.detail.ok === true) {
         resolve(customEvent.detail.result as T);
@@ -160,220 +167,16 @@ const mainWorldCall = async <T>(request: {
       );
     };
 
-    window.addEventListener(eventName, listener as EventListener);
-    const encodedRequest = encodeMainWorldPayload({
+    window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
+    const requestDetail = {
       id: requestId,
       ...request
-    });
-    const script = document.createElement("script");
-    script.textContent = `
-      (() => {
-        const decodeRequest = (encoded) => JSON.parse(decodeURIComponent(escape(atob(encoded))));
-        const request = decodeRequest(${JSON.stringify(encodedRequest)});
-        const emit = (detail) => {
-          window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail }));
-        };
-        try {
-          if (request.type === "xhs-sign") {
-            const fn = window._webmsxyw;
-            if (typeof fn !== "function") {
-              emit({ id: request.id, ok: false, message: "window._webmsxyw is not available" });
-              return;
-            }
-            const result = fn(request.payload.uri, request.payload.body);
-            emit({ id: request.id, ok: true, result });
-            return;
-          }
-          if (request.type === "fingerprint-install") {
-            const runtime = request.payload.fingerprint_runtime ?? null;
-            const bundle =
-              runtime && typeof runtime === "object" ? runtime.fingerprint_profile_bundle ?? null : null;
-            const requiredPatches = Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
-              ? runtime.fingerprint_patch_manifest.required_patches
-              : [];
-            const patchNameSet = new Set(requiredPatches);
-            const appliedPatches = [];
-            const missingRequiredPatches = [];
-            const pluginDescriptors = ${JSON.stringify(DEFAULT_PLUGIN_DESCRIPTORS)};
-            const mimeTypeDescriptors = ${JSON.stringify(DEFAULT_MIME_TYPE_DESCRIPTORS)};
-            const AUDIO_PATCH_MARKER = "__webenvoy_audio_context_patched__";
-            const AUDIO_NOISE_SEED_KEY = "__webenvoy_audio_noise_seed__";
-            const defineGetter = (target, property, getter) => {
-              Object.defineProperty(target, property, {
-                configurable: true,
-                get: getter
-              });
-            };
-            const createPluginAndMimeTypeArrays = () => {
-              const pluginByName = new Map();
-              const plugins = pluginDescriptors.map((descriptor) => {
-                const plugin = {
-                  name: descriptor.name,
-                  filename: descriptor.filename,
-                  description: descriptor.description,
-                  length: 0
-                };
-                plugin.item = (index) => plugin[index] ?? null;
-                plugin.namedItem = (name) => {
-                  if (typeof name !== "string") {
-                    return null;
-                  }
-                  for (let index = 0; index < plugin.length; index += 1) {
-                    const entry = plugin[index];
-                    if (entry && entry.type === name) {
-                      return entry;
-                    }
-                  }
-                  return null;
-                };
-                pluginByName.set(plugin.name, plugin);
-                return plugin;
-              });
-              plugins.item = (index) => plugins[index] ?? null;
-              plugins.namedItem = (name) =>
-                plugins.find((plugin) => plugin.name === name) ?? null;
-              plugins.refresh = () => undefined;
-
-              const mimeTypes = mimeTypeDescriptors.map((descriptor) => {
-                const linkedPlugin =
-                  pluginByName.get(descriptor.enabledPlugin) ??
-                  plugins[0] ??
-                  null;
-                const mimeType = {
-                  type: descriptor.type,
-                  suffixes: descriptor.suffixes,
-                  description: descriptor.description,
-                  enabledPlugin: linkedPlugin
-                };
-                if (linkedPlugin) {
-                  const nextIndex =
-                    typeof linkedPlugin.length === "number" ? linkedPlugin.length : 0;
-                  linkedPlugin[nextIndex] = mimeType;
-                  linkedPlugin.length = nextIndex + 1;
-                }
-                return mimeType;
-              });
-              mimeTypes.item = (index) => mimeTypes[index] ?? null;
-              mimeTypes.namedItem = (name) =>
-                mimeTypes.find((mimeType) => mimeType.type === name) ?? null;
-              return { plugins, mimeTypes };
-            };
-            const pluginAndMimeTypes = createPluginAndMimeTypeArrays();
-            const markAudioContextPatched = () => {
-              if (!bundle || !patchNameSet.has("audio_context")) {
-                return;
-              }
-              const OfflineCtor =
-                typeof window.OfflineAudioContext === "function"
-                  ? window.OfflineAudioContext
-                  : typeof window.webkitOfflineAudioContext === "function"
-                    ? window.webkitOfflineAudioContext
-                    : null;
-              if (!OfflineCtor) {
-                return;
-              }
-              const prototype = OfflineCtor.prototype;
-              const originalStartRendering = prototype?.startRendering;
-              if (typeof originalStartRendering !== "function") {
-                return;
-              }
-              prototype[AUDIO_NOISE_SEED_KEY] = bundle.audioNoiseSeed;
-              if (prototype[AUDIO_PATCH_MARKER] === true) {
-                appliedPatches.push("audio_context");
-                return;
-              }
-              const patchedChannelData = new WeakSet();
-              const patchAudioBuffer = (audioBuffer) => {
-                if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
-                  return audioBuffer;
-                }
-                const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
-                audioBuffer.getChannelData = (channel) => {
-                  const channelData = originalGetChannelData(channel);
-                  if (
-                    channelData &&
-                    typeof channelData.length === "number" &&
-                    channelData.length > 0 &&
-                    !patchedChannelData.has(channelData)
-                  ) {
-                    const noiseSeed =
-                      typeof prototype[AUDIO_NOISE_SEED_KEY] === "number"
-                        ? prototype[AUDIO_NOISE_SEED_KEY]
-                        : bundle.audioNoiseSeed;
-                    channelData[0] = channelData[0] + noiseSeed;
-                    patchedChannelData.add(channelData);
-                  }
-                  return channelData;
-                };
-                return audioBuffer;
-              };
-              prototype.startRendering = function (...args) {
-                const renderingResult = originalStartRendering.apply(this, args);
-                if (renderingResult && typeof renderingResult.then === "function") {
-                  return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
-                }
-                return patchAudioBuffer(renderingResult);
-              };
-              prototype[AUDIO_PATCH_MARKER] = true;
-              appliedPatches.push("audio_context");
-            };
-            markAudioContextPatched();
-            if (bundle && patchNameSet.has("battery") && window.navigator) {
-              window.navigator.getBattery = () =>
-                Promise.resolve({
-                  charging: bundle.battery.charging,
-                  level: bundle.battery.level,
-                  chargingTime: bundle.battery.charging ? 0 : Infinity,
-                  dischargingTime: bundle.battery.charging ? Infinity : 3600,
-                  addEventListener() {},
-                  removeEventListener() {},
-                  dispatchEvent() {
-                    return true;
-                  }
-                });
-              appliedPatches.push("battery");
-            }
-            if (patchNameSet.has("navigator_plugins") && window.navigator) {
-              const plugins = pluginAndMimeTypes.plugins;
-              defineGetter(window.navigator, "plugins", () => plugins);
-              appliedPatches.push("navigator_plugins");
-            }
-            if (patchNameSet.has("navigator_mime_types") && window.navigator) {
-              const mimeTypes = pluginAndMimeTypes.mimeTypes;
-              defineGetter(window.navigator, "mimeTypes", () => mimeTypes);
-              appliedPatches.push("navigator_mime_types");
-            }
-            for (const patchName of requiredPatches) {
-              if (!appliedPatches.includes(patchName)) {
-                missingRequiredPatches.push(patchName);
-              }
-            }
-            window.__webenvoy_fingerprint_runtime__ = runtime;
-            emit({
-              id: request.id,
-              ok: true,
-              result: {
-                installed: missingRequiredPatches.length === 0,
-                applied_patches: appliedPatches,
-                required_patches: requiredPatches,
-                missing_required_patches: missingRequiredPatches,
-                source: typeof runtime?.source === "string" ? runtime.source : "unknown"
-              }
-            });
-            return;
-          }
-          emit({ id: request.id, ok: false, message: "unsupported main world call" });
-        } catch (error) {
-          emit({
-            id: request.id,
-            ok: false,
-            message: error instanceof Error ? error.message : String(error)
-          });
-        }
-      })();
-    `;
-    (document.documentElement ?? document.head ?? document.body).appendChild(script);
-    script.remove();
+    };
+    window.dispatchEvent(
+      new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
+        detail: requestDetail
+      })
+    );
   });
 };
 
