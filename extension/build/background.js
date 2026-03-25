@@ -747,39 +747,6 @@ class ChromeBackgroundBridge {
             this.#trustedFingerprintContexts.delete(oldestKey);
         }
     }
-    #consumeStartupFingerprintTrust(payload) {
-        const trust = asRecord(payload.startup_fingerprint_trust);
-        if (!trust) {
-            return false;
-        }
-        const profile = asNonEmptyString(trust.profile);
-        const runId = asNonEmptyString(trust.run_id);
-        const fingerprintRuntime = ensureFingerprintRuntimeContext(trust.fingerprint_runtime ?? null);
-        if (!profile || !runId || !fingerprintRuntime || fingerprintRuntime.profile !== profile) {
-            return true;
-        }
-        const installState = asRecord(trust.install_state);
-        const status = asNonEmptyString(installState?.status) ?? "failed";
-        const installMissing = asStringArray(installState?.missing_required_patches);
-        const runtimeRecord = asRecord(fingerprintRuntime);
-        const runtimeInjection = asRecord(runtimeRecord?.injection);
-        const runtimeMissing = asStringArray(runtimeInjection?.missing_required_patches);
-        const effectiveMissing = installMissing.length > 0 ? installMissing : runtimeMissing;
-        const installed = status === "installed" && effectiveMissing.length === 0;
-        if (!installed) {
-            this.#clearTrustedFingerprintContextByRun(profile, runId);
-            return true;
-        }
-        const trustedFingerprintRuntime = ensureFingerprintRuntimeContext({
-            ...fingerprintRuntime,
-            injection: undefined
-        });
-        if (!trustedFingerprintRuntime) {
-            return true;
-        }
-        this.#upsertTrustedFingerprintContext(profile, runId, this.#sessionId, trustedFingerprintRuntime);
-        return true;
-    }
     #resolveTrustedFingerprintContext(request) {
         const profile = asNonEmptyString(request.profile);
         if (!profile) {
@@ -1595,7 +1562,6 @@ class ChromeBackgroundBridge {
             : {};
         const pending = this.#pending.get(result.id);
         if (!pending) {
-            this.#consumeStartupFingerprintTrust(payload);
             return;
         }
         clearTimeout(pending.timeout);

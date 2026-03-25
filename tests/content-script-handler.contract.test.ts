@@ -232,32 +232,153 @@ const withMockMainWorld = async (
         }
 
         if (patchNameSet.has("navigator_plugins") || patchNameSet.has("navigator_mime_types")) {
-          const mimeType = {
-            type: "application/pdf",
-            suffixes: "pdf",
-            description: "Portable Document Format",
-            enabledPlugin: null as unknown
+          const defineValue = (
+            target: object,
+            property: string | number | symbol,
+            value: unknown
+          ) => {
+            Object.defineProperty(target, property, {
+              configurable: true,
+              enumerable: false,
+              writable: false,
+              value
+            });
           };
-          const plugin = {
-            name: "Chrome PDF Viewer",
-            filename: "internal-pdf-viewer",
-            description: "Portable Document Format",
-            length: 1,
-            0: mimeType,
-            item: (index: number) => (index === 0 ? mimeType : null),
-            namedItem: (name: string) => (name === "application/pdf" ? mimeType : null)
+          const defineMethod = (
+            target: object,
+            property: string | symbol,
+            fn: (...args: unknown[]) => unknown
+          ) => {
+            Object.defineProperty(target, property, {
+              configurable: true,
+              enumerable: false,
+              writable: true,
+              value: fn
+            });
           };
-          mimeType.enabledPlugin = plugin;
-          const plugins = [plugin, { ...plugin, name: "Chromium PDF Viewer" }];
-          const mimeTypes = [mimeType, { ...mimeType, type: "application/x-google-chrome-pdf" }];
-          const pluginArray = Object.assign(plugins, {
-            item: (index: number) => plugins[index] ?? null,
-            namedItem: (name: string) => plugins.find((entry) => entry.name === name) ?? null
-          });
-          const mimeTypeArray = Object.assign(mimeTypes, {
-            item: (index: number) => mimeTypes[index] ?? null,
-            namedItem: (name: string) => mimeTypes.find((entry) => entry.type === name) ?? null
-          });
+          const resolveIndex = (input: unknown): number | null => {
+            const numeric =
+              typeof input === "number"
+                ? input
+                : typeof input === "string" && input.length > 0
+                  ? Number.parseInt(input, 10)
+                  : NaN;
+            const index = Number.isFinite(numeric) ? Math.trunc(numeric) : NaN;
+            if (!Number.isFinite(index) || index < 0) {
+              return null;
+            }
+            return index;
+          };
+          const getIndexedValue = (collection: Record<string, unknown>, index: unknown) => {
+            const resolved = resolveIndex(index);
+            if (resolved === null) {
+              return null;
+            }
+            return collection[resolved] ?? null;
+          };
+
+          const pluginPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            pluginPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            pluginPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineValue(pluginPrototype, Symbol.toStringTag, "Plugin");
+
+          const mimeTypePrototype: Record<string | symbol, unknown> = {};
+          defineValue(mimeTypePrototype, Symbol.toStringTag, "MimeType");
+
+          const pluginArrayPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            pluginArrayPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            pluginArrayPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineMethod(pluginArrayPrototype, "refresh", () => undefined);
+          defineValue(pluginArrayPrototype, Symbol.toStringTag, "PluginArray");
+
+          const mimeTypeArrayPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            mimeTypeArrayPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            mimeTypeArrayPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineValue(mimeTypeArrayPrototype, Symbol.toStringTag, "MimeTypeArray");
+
+          const plugin = Object.create(pluginPrototype) as Record<string, unknown>;
+          defineValue(plugin, "name", "Chrome PDF Viewer");
+          defineValue(plugin, "filename", "internal-pdf-viewer");
+          defineValue(plugin, "description", "Portable Document Format");
+
+          const secondPlugin = Object.create(pluginPrototype) as Record<string, unknown>;
+          defineValue(secondPlugin, "name", "Chromium PDF Viewer");
+          defineValue(secondPlugin, "filename", "internal-pdf-viewer");
+          defineValue(secondPlugin, "description", "Portable Document Format");
+
+          const mimeType = Object.create(mimeTypePrototype) as Record<string, unknown>;
+          defineValue(mimeType, "type", "application/pdf");
+          defineValue(mimeType, "suffixes", "pdf");
+          defineValue(mimeType, "description", "Portable Document Format");
+          defineValue(mimeType, "enabledPlugin", plugin);
+
+          const secondMimeType = Object.create(mimeTypePrototype) as Record<string, unknown>;
+          defineValue(secondMimeType, "type", "application/x-google-chrome-pdf");
+          defineValue(secondMimeType, "suffixes", "pdf");
+          defineValue(secondMimeType, "description", "Portable Document Format");
+          defineValue(secondMimeType, "enabledPlugin", plugin);
+
+          defineValue(plugin, 0, mimeType);
+          defineValue(plugin, "application/pdf", mimeType);
+          defineValue(plugin, 1, secondMimeType);
+          defineValue(plugin, "application/x-google-chrome-pdf", secondMimeType);
+          defineValue(plugin, "length", 2);
+          defineValue(secondPlugin, "length", 0);
+
+          const pluginArray = Object.create(pluginArrayPrototype) as Record<string, unknown>;
+          defineValue(pluginArray, 0, plugin);
+          defineValue(pluginArray, "Chrome PDF Viewer", plugin);
+          defineValue(pluginArray, 1, secondPlugin);
+          defineValue(pluginArray, "Chromium PDF Viewer", secondPlugin);
+          defineValue(pluginArray, "length", 2);
+
+          const mimeTypeArray = Object.create(mimeTypeArrayPrototype) as Record<string, unknown>;
+          defineValue(mimeTypeArray, 0, mimeType);
+          defineValue(mimeTypeArray, "application/pdf", mimeType);
+          defineValue(mimeTypeArray, 1, secondMimeType);
+          defineValue(
+            mimeTypeArray,
+            "application/x-google-chrome-pdf",
+            secondMimeType
+          );
+          defineValue(mimeTypeArray, "length", 2);
+
           Object.defineProperty(mockWindow.navigator, "plugins", {
             configurable: true,
             get: () => pluginArray
@@ -440,6 +561,18 @@ describe("content-script handler contract", () => {
         (mockWindow.navigator as Navigator & { mimeTypes?: Record<string, unknown>[] }).mimeTypes;
       expect(plugins?.length).toBeGreaterThan(1);
       expect(mimeTypes?.length).toBeGreaterThan(1);
+      expect(Array.isArray(plugins)).toBe(false);
+      expect(Array.isArray(mimeTypes)).toBe(false);
+      expect(Object.prototype.toString.call(plugins)).toBe("[object PluginArray]");
+      expect(Object.prototype.toString.call(mimeTypes)).toBe("[object MimeTypeArray]");
+      const pluginItemDescriptor = plugins
+        ? Object.getOwnPropertyDescriptor(plugins, "item")
+        : undefined;
+      const mimeTypeItemDescriptor = mimeTypes
+        ? Object.getOwnPropertyDescriptor(mimeTypes, "item")
+        : undefined;
+      expect(pluginItemDescriptor).toBeUndefined();
+      expect(mimeTypeItemDescriptor).toBeUndefined();
       const chromePdfViewer = (plugins as unknown as { namedItem?: (name: string) => Record<string, unknown> | null })
         ?.namedItem?.("Chrome PDF Viewer");
       const applicationPdfMimeType = (mimeTypes as unknown as {
@@ -447,6 +580,8 @@ describe("content-script handler contract", () => {
       })?.namedItem?.("application/pdf");
       expect(chromePdfViewer).toBeTruthy();
       expect(applicationPdfMimeType?.enabledPlugin).toBe(chromePdfViewer);
+      expect(Object.prototype.toString.call(chromePdfViewer)).toBe("[object Plugin]");
+      expect(Object.prototype.toString.call(applicationPdfMimeType)).toBe("[object MimeType]");
       expect(
         (
           chromePdfViewer as {

@@ -9,12 +9,20 @@ const manifestPath = path.join(extensionRoot, "manifest.json");
 const backgroundBuildPath = path.join(extensionRoot, "build", "background.js");
 const mainWorldBridgeBuildPath = path.join(extensionRoot, "build", "main-world-bridge.js");
 const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script.js");
+const expectedMainWorldBridgeMatches = [
+  "https://www.xiaohongshu.com/*",
+  "https://creator.xiaohongshu.com/*",
+  "https://edith.xiaohongshu.com/*",
+  "http://127.0.0.1/*",
+  "http://localhost/*"
+];
 
 describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
       background: { service_worker: string };
       content_scripts: Array<{
+        matches?: string[];
         js: string[];
         run_at?: string;
         world?: string;
@@ -29,6 +37,7 @@ describe("extension build contract", () => {
 
     expect(manifest.background.service_worker).toBe("build/background.js");
     expect(bridgeEntry).toBeDefined();
+    expect(bridgeEntry?.matches).toEqual(expectedMainWorldBridgeMatches);
     expect(bridgeEntry?.run_at).toBe("document_start");
     expect(bridgeEntry?.world).toBe("MAIN");
     expect(contentScriptEntry).toBeDefined();

@@ -1745,7 +1745,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows first live mode when startup bootstrap trust is synced before first live request", async () => {
+  it("keeps live mode blocked when startup bootstrap trust payload arrives before first live request", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -1822,18 +1822,19 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: liveRequestId,
-        command: "xhs.search",
-        fingerprintContext
-      })
-    );
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     const blocked = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string })
-      .find((message) => message.id === liveRequestId && message.status === "error");
-    expect(blocked).toBeUndefined();
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRequestId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
   });
 
   it("invalidates trusted fingerprint context after disconnect/recovery with new session", async () => {

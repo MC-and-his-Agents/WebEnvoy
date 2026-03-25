@@ -9,7 +9,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://creator.xiaohongshu.com/*",
+        "https://edith.xiaohongshu.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
       "js": ["build/main-world-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN"

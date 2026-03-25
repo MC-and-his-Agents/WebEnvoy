@@ -95,53 +95,153 @@ const defineGetter = (target: object, property: string, getter: () => unknown): 
 };
 
 const createPluginAndMimeTypeArrays = () => {
-  const pluginByName = new Map<string, any>();
-  const plugins = DEFAULT_PLUGIN_DESCRIPTORS.map((descriptor) => {
-    const plugin: any = {
-      name: descriptor.name,
-      filename: descriptor.filename,
-      description: descriptor.description,
-      length: 0
-    };
-    plugin.item = (index: number) => plugin[index] ?? null;
-    plugin.namedItem = (name: unknown) => {
-      if (typeof name !== "string") {
-        return null;
-      }
-      for (let index = 0; index < plugin.length; index += 1) {
-        const entry = plugin[index];
-        if (entry && entry.type === name) {
-          return entry;
-        }
-      }
+  const defineValue = (
+    target: object,
+    property: string | number | symbol,
+    value: unknown
+  ): void => {
+    Object.defineProperty(target, property, {
+      configurable: true,
+      enumerable: false,
+      writable: false,
+      value
+    });
+  };
+  const defineMethod = (
+    target: object,
+    property: string | symbol,
+    value: (...args: unknown[]) => unknown
+  ): void => {
+    Object.defineProperty(target, property, {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value
+    });
+  };
+  const resolveIndex = (input: unknown): number | null => {
+    const numeric =
+      typeof input === "number"
+        ? input
+        : typeof input === "string" && input.length > 0
+          ? Number.parseInt(input, 10)
+          : NaN;
+    const index = Number.isFinite(numeric) ? Math.trunc(numeric) : NaN;
+    if (!Number.isFinite(index) || index < 0) {
       return null;
-    };
-    pluginByName.set(plugin.name, plugin);
+    }
+    return index;
+  };
+  const getIndexedValue = (collection: Record<string, unknown>, index: unknown) => {
+    const resolvedIndex = resolveIndex(index);
+    if (resolvedIndex === null) {
+      return null;
+    }
+    return collection[resolvedIndex] ?? null;
+  };
+
+  const pluginPrototype: Record<string | symbol, unknown> = {};
+  defineMethod(pluginPrototype, "item", function (this: Record<string, unknown>, index: unknown) {
+    return getIndexedValue(this, index);
+  });
+  defineMethod(pluginPrototype, "namedItem", function (this: Record<string, unknown>, name: unknown) {
+    return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+  });
+  defineValue(pluginPrototype, Symbol.toStringTag, "Plugin");
+
+  const mimeTypePrototype: Record<string | symbol, unknown> = {};
+  defineValue(mimeTypePrototype, Symbol.toStringTag, "MimeType");
+
+  const pluginArrayPrototype: Record<string | symbol, unknown> = {};
+  defineMethod(
+    pluginArrayPrototype,
+    "item",
+    function (this: Record<string, unknown>, index: unknown) {
+      return getIndexedValue(this, index);
+    }
+  );
+  defineMethod(
+    pluginArrayPrototype,
+    "namedItem",
+    function (this: Record<string, unknown>, name: unknown) {
+      return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+    }
+  );
+  defineMethod(pluginArrayPrototype, "refresh", () => undefined);
+  defineValue(pluginArrayPrototype, Symbol.toStringTag, "PluginArray");
+
+  const mimeTypeArrayPrototype: Record<string | symbol, unknown> = {};
+  defineMethod(
+    mimeTypeArrayPrototype,
+    "item",
+    function (this: Record<string, unknown>, index: unknown) {
+      return getIndexedValue(this, index);
+    }
+  );
+  defineMethod(
+    mimeTypeArrayPrototype,
+    "namedItem",
+    function (this: Record<string, unknown>, name: unknown) {
+      return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+    }
+  );
+  defineValue(mimeTypeArrayPrototype, Symbol.toStringTag, "MimeTypeArray");
+
+  const pluginByName = new Map<string, Record<string, unknown>>();
+  const pluginMimeTypes = new Map<Record<string, unknown>, Record<string, unknown>[]>();
+  const pluginsList = DEFAULT_PLUGIN_DESCRIPTORS.map((descriptor) => {
+    const plugin = Object.create(pluginPrototype) as Record<string, unknown>;
+    defineValue(plugin, "name", descriptor.name);
+    defineValue(plugin, "filename", descriptor.filename);
+    defineValue(plugin, "description", descriptor.description);
+    pluginByName.set(descriptor.name, plugin);
+    pluginMimeTypes.set(plugin, []);
     return plugin;
   });
-  (plugins as any).item = (index: number) => plugins[index] ?? null;
-  (plugins as any).namedItem = (name: string) =>
-    plugins.find((plugin) => plugin.name === name) ?? null;
-  (plugins as any).refresh = () => undefined;
 
-  const mimeTypes = DEFAULT_MIME_TYPE_DESCRIPTORS.map((descriptor) => {
-    const linkedPlugin = pluginByName.get(descriptor.enabledPlugin) ?? plugins[0] ?? null;
-    const mimeType: any = {
-      type: descriptor.type,
-      suffixes: descriptor.suffixes,
-      description: descriptor.description,
-      enabledPlugin: linkedPlugin
-    };
+  const mimeTypesList = DEFAULT_MIME_TYPE_DESCRIPTORS.map((descriptor) => {
+    const linkedPlugin = pluginByName.get(descriptor.enabledPlugin) ?? pluginsList[0] ?? null;
+    const mimeType = Object.create(mimeTypePrototype) as Record<string, unknown>;
+    defineValue(mimeType, "type", descriptor.type);
+    defineValue(mimeType, "suffixes", descriptor.suffixes);
+    defineValue(mimeType, "description", descriptor.description);
+    defineValue(mimeType, "enabledPlugin", linkedPlugin);
     if (linkedPlugin) {
-      const nextIndex = typeof linkedPlugin.length === "number" ? linkedPlugin.length : 0;
-      linkedPlugin[nextIndex] = mimeType;
-      linkedPlugin.length = nextIndex + 1;
+      const linkedMimeTypes = pluginMimeTypes.get(linkedPlugin) ?? [];
+      const nextIndex = linkedMimeTypes.length;
+      linkedMimeTypes.push(mimeType);
+      pluginMimeTypes.set(linkedPlugin, linkedMimeTypes);
+      defineValue(linkedPlugin, nextIndex, mimeType);
+      defineValue(linkedPlugin, descriptor.type, mimeType);
     }
     return mimeType;
   });
-  (mimeTypes as any).item = (index: number) => mimeTypes[index] ?? null;
-  (mimeTypes as any).namedItem = (name: string) =>
-    mimeTypes.find((mimeType) => mimeType.type === name) ?? null;
+
+  for (const plugin of pluginsList) {
+    const linkedMimeTypes = pluginMimeTypes.get(plugin) ?? [];
+    defineValue(plugin, "length", linkedMimeTypes.length);
+  }
+
+  const plugins = Object.create(pluginArrayPrototype) as Record<string, unknown>;
+  for (let index = 0; index < pluginsList.length; index += 1) {
+    const plugin = pluginsList[index];
+    defineValue(plugins, index, plugin);
+    if (typeof plugin.name === "string") {
+      defineValue(plugins, plugin.name, plugin);
+    }
+  }
+  defineValue(plugins, "length", pluginsList.length);
+
+  const mimeTypes = Object.create(mimeTypeArrayPrototype) as Record<string, unknown>;
+  for (let index = 0; index < mimeTypesList.length; index += 1) {
+    const mimeType = mimeTypesList[index];
+    defineValue(mimeTypes, index, mimeType);
+    if (typeof mimeType.type === "string") {
+      defineValue(mimeTypes, mimeType.type, mimeType);
+    }
+  }
+  defineValue(mimeTypes, "length", mimeTypesList.length);
+
   return {
     plugins,
     mimeTypes
