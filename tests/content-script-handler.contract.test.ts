@@ -194,6 +194,13 @@ const withMockMainWorld = async (
         return;
       }
 
+      if (
+        (mockWindow as Window & Record<string, unknown>)
+          .__disableMainWorldBridgeFingerprintInstall__ === true
+      ) {
+        return;
+      }
+
       try {
         const runtime =
           typeof requestPayload?.fingerprint_runtime === "object" &&
@@ -599,6 +606,81 @@ describe("content-script handler contract", () => {
       expect(
         (mockWindow as Window & Record<string, unknown>).__webenvoy_main_world_bridge_installed__
       ).toBeUndefined();
+    });
+  });
+
+  it("does not trust forged main-world fingerprint-install success by request id only", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+      const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeFingerprintInstall__ =
+        true;
+
+      mockWindow.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
+        const detail = (event as MockCustomEvent<Record<string, unknown>>).detail;
+        if (!detail || detail.type !== "fingerprint-install" || typeof detail.id !== "string") {
+          return;
+        }
+        mockWindow.dispatchEvent({
+          type: MAIN_WORLD_RESULT_EVENT,
+          detail: {
+            id: detail.id,
+            ok: true,
+            result: {
+              installed: true,
+              required_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              applied_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              missing_required_patches: []
+            }
+          }
+        } as unknown as Event);
+      });
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-ping-forged-001",
+        runId: "run-ping-forged-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.ping",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      const verification = injection?.verification as Record<string, unknown>;
+      const probes = verification?.probes as Record<string, unknown>;
+      expect(injection?.installed).toBe(false);
+      expect(injection?.missing_required_patches).toEqual(
+        expect.arrayContaining(["battery", "navigator_plugins", "navigator_mime_types"])
+      );
+      expect(verification?.channel).toBe("isolated_world_probes");
+      expect((probes?.battery as Record<string, unknown>)?.verified).toBe(false);
+      expect((probes?.navigator_plugins as Record<string, unknown>)?.verified).toBe(false);
+      expect((probes?.navigator_mime_types as Record<string, unknown>)?.verified).toBe(false);
     });
   });
 

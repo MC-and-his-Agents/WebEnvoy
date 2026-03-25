@@ -75,6 +75,7 @@ export const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const AUDIO_PATCH_EPSILON = 1e-12;
 const mainWorldCall = async (request) => {
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -108,6 +109,134 @@ const mainWorldCall = async (request) => {
             detail: requestDetail
         }));
     });
+};
+const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+const probeAudioFirstSample = async () => {
+    const offlineAudioCtor = typeof window.OfflineAudioContext === "function"
+        ? window.OfflineAudioContext
+        : typeof window
+            .webkitOfflineAudioContext === "function"
+            ? window
+                .webkitOfflineAudioContext ?? null
+            : null;
+    if (!offlineAudioCtor) {
+        return null;
+    }
+    try {
+        const offlineAudioContext = new offlineAudioCtor(1, 256, 44_100);
+        const renderedBuffer = await offlineAudioContext.startRendering();
+        if (!renderedBuffer || typeof renderedBuffer.getChannelData !== "function") {
+            return null;
+        }
+        const channelData = renderedBuffer.getChannelData(0);
+        if (!channelData || typeof channelData.length !== "number" || channelData.length < 1) {
+            return null;
+        }
+        const firstSample = Number(channelData[0]);
+        return Number.isFinite(firstSample) ? firstSample : null;
+    }
+    catch {
+        return null;
+    }
+};
+const probeBatteryApi = async () => {
+    const getBattery = window.navigator
+        .getBattery;
+    if (typeof getBattery !== "function") {
+        return false;
+    }
+    try {
+        const battery = asRecord(await getBattery());
+        return typeof battery?.level === "number" && typeof battery?.charging === "boolean";
+    }
+    catch {
+        return false;
+    }
+};
+const probeNavigatorPlugins = () => {
+    const plugins = window.navigator.plugins;
+    return (typeof plugins === "object" &&
+        plugins !== null &&
+        typeof plugins.length === "number" &&
+        Number(plugins.length) > 0);
+};
+const probeNavigatorMimeTypes = () => {
+    const mimeTypes = window.navigator.mimeTypes;
+    return (typeof mimeTypes === "object" &&
+        mimeTypes !== null &&
+        typeof mimeTypes.length === "number" &&
+        Number(mimeTypes.length) > 0);
+};
+const verifyFingerprintInstallResult = async (input) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(input.fingerprintRuntime);
+    const reportedAppliedPatches = asStringArray(input.installResult?.applied_patches);
+    const appliedPatches = [];
+    const missingRequiredPatches = [];
+    const probeDetails = {};
+    if (requiredPatches.includes("audio_context")) {
+        const postInstallAudioSample = await probeAudioFirstSample();
+        const audioPatched = postInstallAudioSample !== null &&
+            (input.preInstallAudioSample === null ||
+                Math.abs(postInstallAudioSample - input.preInstallAudioSample) > AUDIO_PATCH_EPSILON ||
+                reportedAppliedPatches.includes("audio_context"));
+        probeDetails.audio_context = {
+            pre_install_first_sample: input.preInstallAudioSample,
+            post_install_first_sample: postInstallAudioSample,
+            verified: audioPatched
+        };
+        if (audioPatched) {
+            appliedPatches.push("audio_context");
+        }
+        else {
+            missingRequiredPatches.push("audio_context");
+        }
+    }
+    if (requiredPatches.includes("battery")) {
+        const batteryPatched = await probeBatteryApi();
+        probeDetails.battery = { verified: batteryPatched };
+        if (batteryPatched) {
+            appliedPatches.push("battery");
+        }
+        else {
+            missingRequiredPatches.push("battery");
+        }
+    }
+    if (requiredPatches.includes("navigator_plugins")) {
+        const pluginsPatched = probeNavigatorPlugins();
+        probeDetails.navigator_plugins = { verified: pluginsPatched };
+        if (pluginsPatched) {
+            appliedPatches.push("navigator_plugins");
+        }
+        else {
+            missingRequiredPatches.push("navigator_plugins");
+        }
+    }
+    if (requiredPatches.includes("navigator_mime_types")) {
+        const mimeTypesPatched = probeNavigatorMimeTypes();
+        probeDetails.navigator_mime_types = { verified: mimeTypesPatched };
+        if (mimeTypesPatched) {
+            appliedPatches.push("navigator_mime_types");
+        }
+        else {
+            missingRequiredPatches.push("navigator_mime_types");
+        }
+    }
+    for (const patchName of requiredPatches) {
+        if (!appliedPatches.includes(patchName) && !missingRequiredPatches.includes(patchName)) {
+            missingRequiredPatches.push(patchName);
+        }
+    }
+    return {
+        ...(input.installResult ?? {}),
+        installed: missingRequiredPatches.length === 0,
+        required_patches: requiredPatches,
+        applied_patches: appliedPatches,
+        missing_required_patches: missingRequiredPatches,
+        verification: {
+            channel: "isolated_world_probes",
+            probes: probeDetails
+        }
+    };
 };
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
@@ -212,15 +341,24 @@ export class ContentScriptHandler {
             return null;
         }
         try {
+            const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+            const preInstallAudioSample = requiredPatches.includes("audio_context")
+                ? await probeAudioFirstSample()
+                : null;
             const installResult = await mainWorldCall({
                 type: "fingerprint-install",
                 payload: {
                     fingerprint_runtime: fingerprintRuntime
                 }
             });
+            const verifiedInjection = await verifyFingerprintInstallResult({
+                fingerprintRuntime,
+                installResult: asRecord(installResult),
+                preInstallAudioSample
+            });
             return {
                 ...fingerprintRuntime,
-                injection: installResult
+                injection: verifiedInjection
             };
         }
         catch (error) {

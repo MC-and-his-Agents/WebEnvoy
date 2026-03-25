@@ -128,6 +128,7 @@ export const encodeMainWorldPayload = (value: Record<string, unknown>): string =
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const AUDIO_PATCH_EPSILON = 1e-12;
 
 const mainWorldCall = async <T>(request: {
   type: "xhs-sign" | "fingerprint-install";
@@ -178,6 +179,154 @@ const mainWorldCall = async <T>(request: {
       })
     );
   });
+};
+
+const resolveRequiredFingerprintPatches = (
+  fingerprintRuntime: FingerprintRuntimeContext
+): string[] =>
+  asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+
+const probeAudioFirstSample = async (): Promise<number | null> => {
+  const offlineAudioCtor =
+    typeof window.OfflineAudioContext === "function"
+      ? window.OfflineAudioContext
+      : typeof (window as Window & { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+            .webkitOfflineAudioContext === "function"
+        ? (window as Window & { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+            .webkitOfflineAudioContext ?? null
+        : null;
+  if (!offlineAudioCtor) {
+    return null;
+  }
+
+  try {
+    const offlineAudioContext = new offlineAudioCtor(1, 256, 44_100);
+    const renderedBuffer = await offlineAudioContext.startRendering();
+    if (!renderedBuffer || typeof renderedBuffer.getChannelData !== "function") {
+      return null;
+    }
+    const channelData = renderedBuffer.getChannelData(0);
+    if (!channelData || typeof channelData.length !== "number" || channelData.length < 1) {
+      return null;
+    }
+    const firstSample = Number(channelData[0]);
+    return Number.isFinite(firstSample) ? firstSample : null;
+  } catch {
+    return null;
+  }
+};
+
+const probeBatteryApi = async (): Promise<boolean> => {
+  const getBattery = (window.navigator as Navigator & { getBattery?: () => Promise<unknown> })
+    .getBattery;
+  if (typeof getBattery !== "function") {
+    return false;
+  }
+  try {
+    const battery = asRecord(await getBattery());
+    return typeof battery?.level === "number" && typeof battery?.charging === "boolean";
+  } catch {
+    return false;
+  }
+};
+
+const probeNavigatorPlugins = (): boolean => {
+  const plugins = (window.navigator as Navigator & { plugins?: unknown }).plugins;
+  return (
+    typeof plugins === "object" &&
+    plugins !== null &&
+    typeof (plugins as { length?: unknown }).length === "number" &&
+    Number((plugins as { length?: unknown }).length) > 0
+  );
+};
+
+const probeNavigatorMimeTypes = (): boolean => {
+  const mimeTypes = (window.navigator as Navigator & { mimeTypes?: unknown }).mimeTypes;
+  return (
+    typeof mimeTypes === "object" &&
+    mimeTypes !== null &&
+    typeof (mimeTypes as { length?: unknown }).length === "number" &&
+    Number((mimeTypes as { length?: unknown }).length) > 0
+  );
+};
+
+const verifyFingerprintInstallResult = async (input: {
+  fingerprintRuntime: FingerprintRuntimeContext;
+  installResult: Record<string, unknown> | null;
+  preInstallAudioSample: number | null;
+}): Promise<Record<string, unknown>> => {
+  const requiredPatches = resolveRequiredFingerprintPatches(input.fingerprintRuntime);
+  const reportedAppliedPatches = asStringArray(input.installResult?.applied_patches);
+  const appliedPatches: string[] = [];
+  const missingRequiredPatches: string[] = [];
+  const probeDetails: Record<string, unknown> = {};
+
+  if (requiredPatches.includes("audio_context")) {
+    const postInstallAudioSample = await probeAudioFirstSample();
+    const audioPatched =
+      postInstallAudioSample !== null &&
+      (input.preInstallAudioSample === null ||
+        Math.abs(postInstallAudioSample - input.preInstallAudioSample) > AUDIO_PATCH_EPSILON ||
+        reportedAppliedPatches.includes("audio_context"));
+    probeDetails.audio_context = {
+      pre_install_first_sample: input.preInstallAudioSample,
+      post_install_first_sample: postInstallAudioSample,
+      verified: audioPatched
+    };
+    if (audioPatched) {
+      appliedPatches.push("audio_context");
+    } else {
+      missingRequiredPatches.push("audio_context");
+    }
+  }
+
+  if (requiredPatches.includes("battery")) {
+    const batteryPatched = await probeBatteryApi();
+    probeDetails.battery = { verified: batteryPatched };
+    if (batteryPatched) {
+      appliedPatches.push("battery");
+    } else {
+      missingRequiredPatches.push("battery");
+    }
+  }
+
+  if (requiredPatches.includes("navigator_plugins")) {
+    const pluginsPatched = probeNavigatorPlugins();
+    probeDetails.navigator_plugins = { verified: pluginsPatched };
+    if (pluginsPatched) {
+      appliedPatches.push("navigator_plugins");
+    } else {
+      missingRequiredPatches.push("navigator_plugins");
+    }
+  }
+
+  if (requiredPatches.includes("navigator_mime_types")) {
+    const mimeTypesPatched = probeNavigatorMimeTypes();
+    probeDetails.navigator_mime_types = { verified: mimeTypesPatched };
+    if (mimeTypesPatched) {
+      appliedPatches.push("navigator_mime_types");
+    } else {
+      missingRequiredPatches.push("navigator_mime_types");
+    }
+  }
+
+  for (const patchName of requiredPatches) {
+    if (!appliedPatches.includes(patchName) && !missingRequiredPatches.includes(patchName)) {
+      missingRequiredPatches.push(patchName);
+    }
+  }
+
+  return {
+    ...(input.installResult ?? {}),
+    installed: missingRequiredPatches.length === 0,
+    required_patches: requiredPatches,
+    applied_patches: appliedPatches,
+    missing_required_patches: missingRequiredPatches,
+    verification: {
+      channel: "isolated_world_probes",
+      probes: probeDetails
+    }
+  };
 };
 
 const createBrowserEnvironment = (): XhsSearchEnvironment => ({
@@ -299,15 +448,24 @@ export class ContentScriptHandler {
     }
 
     try {
+      const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+      const preInstallAudioSample = requiredPatches.includes("audio_context")
+        ? await probeAudioFirstSample()
+        : null;
       const installResult = await mainWorldCall<Record<string, unknown>>({
         type: "fingerprint-install",
         payload: {
           fingerprint_runtime: fingerprintRuntime
         }
       });
+      const verifiedInjection = await verifyFingerprintInstallResult({
+        fingerprintRuntime,
+        installResult: asRecord(installResult),
+        preInstallAudioSample
+      });
       return {
         ...fingerprintRuntime,
-        injection: installResult
+        injection: verifiedInjection
       };
     } catch (error) {
       const requiredPatches = asStringArray(

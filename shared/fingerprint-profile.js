@@ -9,6 +9,8 @@ const OPTIONAL_PATCHES = [
   "hardware_concurrency",
   "device_memory",
   "performance_memory",
+  "screen_color_depth",
+  "screen_pixel_depth",
   "permissions_api",
   "navigator_connection"
 ];
@@ -21,6 +23,8 @@ const FIELD_DEPENDENCIES = {
   hardware_concurrency: ["hardwareConcurrency"],
   device_memory: ["deviceMemory"],
   performance_memory: ["deviceMemory"],
+  screen_color_depth: ["screen.colorDepth"],
+  screen_pixel_depth: ["screen.pixelDepth"],
   permissions_api: [],
   navigator_connection: []
 };

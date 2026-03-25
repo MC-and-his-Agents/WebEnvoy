@@ -31,7 +31,7 @@ const createMockPort = () => {
 const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   let connectIndex = 0;
   const runtimeMessageListeners: Array<
-    (message: unknown, sender: { tab?: { id?: number } }) => void
+    (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
   > = [];
   const chromeApi = {
     runtime: {
@@ -41,7 +41,9 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
         return current.port;
       }),
       onMessage: {
-        addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
+        addListener: (
+          listener: (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
+        ) => {
           runtimeMessageListeners.push(listener);
         }
       },
@@ -88,12 +90,15 @@ const respondHandshake = (
 };
 
 const primeTrustedFingerprintContext = async (input: {
-  runtimeMessageListeners: Array<(message: unknown, sender: { tab?: { id?: number } }) => void>;
+  runtimeMessageListeners: Array<
+    (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
+  >;
   runId: string;
   profile: string;
   fingerprintContext: Record<string, unknown>;
   sessionId?: string;
   tabId?: number;
+  tabUrl?: string;
 }) => {
   input.runtimeMessageListeners[0]?.(
     {
@@ -114,7 +119,8 @@ const primeTrustedFingerprintContext = async (input: {
     },
     {
       tab: {
-        id: input.tabId ?? 11
+        id: input.tabId ?? 32,
+        url: input.tabUrl ?? "https://www.xiaohongshu.com/search_result?keyword=露营"
       }
     }
   );
@@ -1724,6 +1730,62 @@ describe("extension service worker recovery contract", () => {
     const payload = asRecord(blocked?.payload) ?? {};
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("rejects startup trust primed by non-allowlist sender tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-untrusted-startup-tab-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 9,
+      tabUrl: "https://example.com/"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-untrusted-startup-tab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-untrusted-startup-tab-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-untrusted-startup-tab-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
     expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
     expect(consumerGateResult?.gate_reasons).toEqual(

@@ -60,6 +60,8 @@ interface TrustedFingerprintContextEntry {
   sessionId: string;
   fingerprintRuntime: FingerprintRuntimeContext;
   serializedFingerprintRuntime: string;
+  sourceTabId: number | null;
+  sourceDomain: string | null;
 }
 
 const defaultForwardTimeoutMs = 3_000;
@@ -80,7 +82,9 @@ const readTimeoutMs = (value: unknown): number | null => {
 type RuntimeMessageSender = {
   tab?: {
     id?: number;
+    url?: string;
   };
+  url?: string;
 };
 
 type ExtensionTab = {
@@ -177,6 +181,7 @@ interface XhsTargetGateResult {
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const STARTUP_TRUST_ALLOWLIST_URLS = [`*://${XHS_READ_DOMAIN}/*`, `*://${XHS_WRITE_DOMAIN}/*`];
 const XHS_ACTION_TYPES = new Set<XhsActionType>(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>(EXECUTION_MODES);
 const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
@@ -988,7 +993,65 @@ class ChromeBackgroundBridge {
     this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
   }
 
-  #rememberStartupTrustedFingerprintContext(payload: Record<string, unknown>): void {
+  async #resolveStartupTrustSenderBinding(
+    sender: RuntimeMessageSender
+  ): Promise<{ tabId: number; domain: string } | null> {
+    const tabId = asInteger(sender.tab?.id);
+    if (tabId === null) {
+      return null;
+    }
+
+    const senderUrl = asNonEmptyString(sender.tab?.url ?? sender.url);
+    if (senderUrl) {
+      const parsedSenderUrl = parseUrl(senderUrl);
+      if (!parsedSenderUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname)) {
+        return null;
+      }
+      return {
+        tabId,
+        domain: parsedSenderUrl.hostname
+      };
+    }
+
+    const allowlistTabs = await this.chromeApi.tabs.query({
+      url: STARTUP_TRUST_ALLOWLIST_URLS
+    });
+    const senderTab = allowlistTabs.find((tab) => tab.id === tabId);
+    const senderTabUrl = typeof senderTab?.url === "string" ? senderTab.url : "";
+    const parsedTabUrl = parseUrl(senderTabUrl);
+    if (!parsedTabUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedTabUrl.hostname)) {
+      return null;
+    }
+    return {
+      tabId,
+      domain: parsedTabUrl.hostname
+    };
+  }
+
+  #resolveRequestTargetBinding(
+    request: BridgeRequest
+  ): { tabId: number; domain: string } | null {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const options = asRecord(commandParams.options);
+    const readTarget = (key: string): unknown =>
+      Object.prototype.hasOwnProperty.call(commandParams, key)
+        ? commandParams[key]
+        : options?.[key];
+    const targetTabId = asInteger(readTarget("target_tab_id"));
+    const targetDomain = asNonEmptyString(readTarget("target_domain"));
+    if (targetTabId === null || !targetDomain || !XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
+      return null;
+    }
+    return {
+      tabId: targetTabId,
+      domain: targetDomain
+    };
+  }
+
+  async #rememberStartupTrustedFingerprintContext(
+    payload: Record<string, unknown>,
+    sender: RuntimeMessageSender
+  ): Promise<void> {
     const startupTrust = asRecord(payload.startup_fingerprint_trust);
     if (!startupTrust) {
       return;
@@ -1015,8 +1078,15 @@ class ChromeBackgroundBridge {
     if (explicitSessionId && explicitSessionId !== this.#sessionId) {
       return;
     }
+    const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
+    if (!senderBinding) {
+      return;
+    }
     const sessionId = explicitSessionId ?? this.#sessionId;
-    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
+    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, {
+      sourceTabId: senderBinding.tabId,
+      sourceDomain: senderBinding.domain
+    });
   }
 
   #normalizeTrustedFingerprintRuntime(
@@ -1041,23 +1111,33 @@ class ChromeBackgroundBridge {
   #upsertTrustedFingerprintContext(
     profile: string,
     sessionId: string,
-    fingerprintRuntime: FingerprintRuntimeContext
+    fingerprintRuntime: FingerprintRuntimeContext,
+    source?: {
+      sourceTabId: number | null;
+      sourceDomain: string | null;
+    }
   ): void {
     const normalized = this.#normalizeTrustedFingerprintRuntime(fingerprintRuntime);
     const key = buildTrustedFingerprintContextKey(profile, sessionId);
     const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
+    const sourceTabId = source?.sourceTabId ?? null;
+    const sourceDomain = source?.sourceDomain ?? null;
     const existing = this.#trustedFingerprintContexts.get(key);
     const shouldRotate =
       !!existing &&
       (existing.sessionId !== sessionId ||
-        existing.serializedFingerprintRuntime !== serializedFingerprintRuntime);
+        existing.serializedFingerprintRuntime !== serializedFingerprintRuntime ||
+        existing.sourceTabId !== sourceTabId ||
+        existing.sourceDomain !== sourceDomain);
     if (shouldRotate) {
       this.#trustedFingerprintContexts.delete(key);
     }
     this.#trustedFingerprintContexts.set(key, {
       sessionId,
       fingerprintRuntime: normalized,
-      serializedFingerprintRuntime
+      serializedFingerprintRuntime,
+      sourceTabId,
+      sourceDomain
     });
     if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
       return;
@@ -1068,7 +1148,7 @@ class ChromeBackgroundBridge {
     }
   }
 
-  #resolveTrustedFingerprintContext(request: BridgeRequest): FingerprintRuntimeContext | null {
+  #resolveTrustedFingerprintContext(request: BridgeRequest): TrustedFingerprintContextEntry | null {
     const profile = asNonEmptyString(request.profile);
     if (!profile) {
       return null;
@@ -1083,17 +1163,18 @@ class ChromeBackgroundBridge {
       this.#trustedFingerprintContexts.delete(key);
       return null;
     }
-    return { ...trusted.fingerprintRuntime };
+    return trusted;
   }
 
   #resolveValidatedTrustedFingerprintContext(
     request: BridgeRequest,
     requestedFingerprintContext: FingerprintRuntimeContext | null
   ): FingerprintRuntimeContext | null {
-    const trusted = this.#resolveTrustedFingerprintContext(request);
-    if (!trusted) {
+    const trustedEntry = this.#resolveTrustedFingerprintContext(request);
+    if (!trustedEntry) {
       return null;
     }
+    const trusted = trustedEntry.fingerprintRuntime;
     if (
       requestedFingerprintContext &&
       !isFingerprintRuntimeContextEquivalent(trusted, requestedFingerprintContext)
@@ -1107,7 +1188,17 @@ class ChromeBackgroundBridge {
       }
       return null;
     }
-    return trusted;
+    const requestTargetBinding = this.#resolveRequestTargetBinding(request);
+    if (
+      trustedEntry.sourceTabId !== null &&
+      trustedEntry.sourceDomain !== null &&
+      (!requestTargetBinding ||
+        requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
+        requestTargetBinding.domain !== trustedEntry.sourceDomain)
+    ) {
+      return null;
+    }
+    return { ...trusted };
   }
 
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
@@ -1972,7 +2063,7 @@ class ChromeBackgroundBridge {
         : {};
     const pending = this.#pending.get(result.id);
     if (!pending) {
-      this.#rememberStartupTrustedFingerprintContext(payload);
+      void this.#rememberStartupTrustedFingerprintContext(payload, sender);
       return;
     }
 
