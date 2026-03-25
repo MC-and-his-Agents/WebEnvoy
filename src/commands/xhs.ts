@@ -41,6 +41,11 @@ const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 
 const asObject = (value: unknown): JsonObject | null =>
@@ -337,6 +342,9 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   try {
     const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
+      requestedExecutionMode: gate.requestedExecutionMode
+    });
     const commandParams = appendFingerprintContext(
       {
         target_domain: gate.targetDomain,
@@ -347,10 +355,21 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         input: parseSearchInput(envelope.input, envelope.ability.id),
         options: gate.options
       },
-      buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
-        requestedExecutionMode: gate.requestedExecutionMode
-      })
+      fingerprintContext
     );
+    if (XHS_LIVE_EXECUTION_MODES.has(gate.requestedExecutionMode)) {
+      await bridge.runtimePing({
+        runId: context.run_id,
+        profile: context.profile,
+        cwd: context.cwd,
+        params: appendFingerprintContext(
+          {
+            requested_execution_mode: gate.requestedExecutionMode
+          },
+          fingerprintContext
+        )
+      });
+    }
     const bridgeResult = await bridge.runCommand({
       runId: context.run_id,
       profile: context.profile,
