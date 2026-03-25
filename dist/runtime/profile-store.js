@@ -1,8 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { release } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerprintProfileBundleAsLegacyBackfilled, normalizeArch, normalizePlatform } from "../../shared/fingerprint-profile.js";
+import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerprintProfileBundleAsLegacyBackfilled } from "../../shared/fingerprint-profile.js";
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
+import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
@@ -37,11 +37,6 @@ const validateProfileName = (profileName, rootDir) => {
 const isObjectRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const isIsoTimestamp = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
 const isOptionalIsoTimestamp = (value) => value === null || isIsoTimestamp(value);
-const resolveCurrentEnvironment = () => ({
-    os_family: normalizePlatform(process.platform),
-    os_version: release(),
-    arch: normalizeArch(process.arch)
-});
 const resolveCurrentTimezone = () => {
     try {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -151,7 +146,7 @@ const buildLegacyBundleMigration = async (input) => {
         profileName: input.meta.profileName,
         fingerprintSeeds: input.meta.fingerprintSeeds,
         timezone: input.timezone,
-        environment: resolveCurrentEnvironment(),
+        environment: resolveCurrentFingerprintEnvironment(),
         migratedAt: input.meta.updatedAt,
         sourceSchemaVersion: input.meta.schemaVersion,
         reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
@@ -176,7 +171,7 @@ export class ProfileStore {
         await this.fs.mkdir(profileDir, { recursive: true });
         return profileDir;
     }
-    async readMeta(profileName) {
+    async readMeta(profileName, options = {}) {
         const metaPath = this.getMetaPath(profileName);
         try {
             const raw = await this.fs.readFile(metaPath, "utf8");
@@ -191,7 +186,9 @@ export class ProfileStore {
                         timezone: "unknown"
                     })
                 };
-                await this.writeMeta(profileName, migratedMeta);
+                if (options.mode !== "readonly") {
+                    await this.writeMeta(profileName, migratedMeta);
+                }
                 return migratedMeta;
             }
             return parsed;
@@ -240,7 +237,7 @@ export class ProfileStore {
                         canvasNoiseSeed: `${profileName}-canvas-seed`
                     },
                     timezone,
-                    environment: resolveCurrentEnvironment()
+                    environment: resolveCurrentFingerprintEnvironment()
                 }, browserVersion)
             }),
             localStorageSnapshots: [],

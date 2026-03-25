@@ -153,7 +153,11 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
             };
         }
         const envelope = asRecord(await response.json());
-        return resolveBootstrapFingerprintContext(envelope?.extension_bootstrap ?? null);
+        const resolved = resolveBootstrapFingerprintContext(envelope?.extension_bootstrap ?? envelope ?? null);
+        return {
+            fingerprintRuntime: resolved.fingerprintRuntime,
+            runId: resolved.runId ?? asNonEmptyString(envelope?.run_id ?? envelope?.runId)
+        };
     }
     catch {
         return {

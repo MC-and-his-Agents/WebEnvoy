@@ -17,6 +17,7 @@ import {
 } from "./profile-lock.js";
 import {
   ProfileStore,
+  type ReadMetaOptions,
   type LocalStorageSnapshot,
   type ProfileMeta
 } from "./profile-store.js";
@@ -51,7 +52,7 @@ interface RuntimeActionInput {
 interface ProfileStoreLike {
   ensureProfileDir(profileName: string): Promise<string>;
   getProfileDir(profileName: string): string;
-  readMeta(profileName: string): Promise<ProfileMeta | null>;
+  readMeta(profileName: string, options?: ReadMetaOptions): Promise<ProfileMeta | null>;
   initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta>;
   writeMeta(profileName: string, meta: ProfileMeta): Promise<void>;
 }
@@ -623,7 +624,7 @@ export class ProfileRuntimeService {
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     const lockPath = this.#getLockPath(profileDir);
-    const meta = await this.#readMeta(store, input.profile);
+    const meta = await this.#readMeta(store, input.profile, { mode: "readonly" });
     const lock = await this.#readLock(lockPath);
 
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
@@ -766,9 +767,13 @@ export class ProfileRuntimeService {
     return join(profileDir, PROFILE_LOCK_FILENAME);
   }
 
-  async #readMeta(store: ProfileStoreLike, profile: string): Promise<ProfileMeta | null> {
+  async #readMeta(
+    store: ProfileStoreLike,
+    profile: string,
+    options?: ReadMetaOptions
+  ): Promise<ProfileMeta | null> {
     try {
-      return await store.readMeta(profile);
+      return await store.readMeta(profile, options);
     } catch {
       throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 元数据损坏");
     }

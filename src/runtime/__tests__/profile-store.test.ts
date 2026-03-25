@@ -229,6 +229,51 @@ describe("profile-store", () => {
     });
   });
 
+  it("reads legacy meta in readonly mode without persisting backfill", async () => {
+    const browserPath = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = browserPath;
+
+    const store = await createStore();
+    await store.ensureProfileDir("legacy-readonly");
+    const metaPath = store.getMetaPath("legacy-readonly");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy-readonly",
+          profileDir: store.getProfileDir("legacy-readonly"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const meta = await store.readMeta("legacy-readonly", { mode: "readonly" });
+    expect(meta?.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
+
+    const persistedRaw = await readFile(metaPath, "utf8");
+    const persistedMeta = JSON.parse(persistedRaw) as { fingerprintProfileBundle?: unknown };
+    expect(persistedMeta.fingerprintProfileBundle).toBeUndefined();
+  });
+
   it("returns null when meta does not exist", async () => {
     const store = await createStore();
     const meta = await store.readMeta("missing-profile");

@@ -422,8 +422,8 @@ describe("content-script bootstrap contract", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
+        run_id: "run-bootstrap-fetch-001",
         extension_bootstrap: {
-          run_id: "run-bootstrap-fetch-001",
           fingerprint_runtime: context
         }
       })

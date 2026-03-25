@@ -442,7 +442,7 @@ export class ProfileRuntimeService {
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
-        const meta = await this.#readMeta(store, input.profile);
+        const meta = await this.#readMeta(store, input.profile, { mode: "readonly" });
         const lock = await this.#readLock(lockPath);
         const storedProfileState = meta?.profileState ?? "uninitialized";
         const activeState = isRuntimeActiveProfileState(storedProfileState);
@@ -566,9 +566,9 @@ export class ProfileRuntimeService {
     #getLockPath(profileDir) {
         return join(profileDir, PROFILE_LOCK_FILENAME);
     }
-    async #readMeta(store, profile) {
+    async #readMeta(store, profile, options) {
         try {
-            return await store.readMeta(profile);
+            return await store.readMeta(profile, options);
         }
         catch {
             throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 元数据损坏");

@@ -1120,6 +1120,12 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
 
+    const storedAfterStatusRaw = await readFile(store.getMetaPath("legacy_profile"), "utf8");
+    const storedAfterStatus = JSON.parse(storedAfterStatusRaw) as {
+      fingerprintProfileBundle?: unknown;
+    };
+    expect(storedAfterStatus.fingerprintProfileBundle).toBeUndefined();
+
     const degradedStart = await service.start({
       cwd: baseDir,
       profile: "legacy_profile",
