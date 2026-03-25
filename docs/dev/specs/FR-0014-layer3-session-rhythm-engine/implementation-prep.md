@@ -81,16 +81,16 @@
 
 ### 2.1 第 1 层：补齐 Layer 3 新增真相源
 
-先落地这些 `FR-0014` 新增对象：
+先落地这些 `FR-0014` 新增真相源：
 
 - `session_rhythm_window_state`
 - `session_rhythm_event`
-- `session_rhythm_decision`
 
 其中：
 
 - `approval_record` / `audit_record` 继续是审批与门禁审计真相源
-- `session_rhythm_window_state` / `session_rhythm_event` / `session_rhythm_decision` 只补 Layer 3 自己的窗口、阶段、事件与决策语义
+- `session_rhythm_window_state` / `session_rhythm_event` 只补 Layer 3 自己的窗口、阶段与事件语义
+- `session_rhythm_decision` 继续作为 `FR-0014` 的正式决策对象存在，但在第一刀中优先按共享 projector / 读模型收口，不要求先单独持久化
 - 不新增 `risk_state_v2`、`approval_record_v2`、`audit_record_v2`
 
 ### 2.2 第 2 层：建立 Layer 3 的查询投影
@@ -111,7 +111,7 @@
 
 - `audit_record` 驱动 `session_rhythm_event`
 - `session_rhythm_event` 推进 `session_rhythm_window_state`
-- `session_rhythm_window_state` 产出 `session_rhythm_decision`
+- 共享 projector 基于窗口状态产出 `session_rhythm_decision`
 - `runtime.audit` 读取并投影为 `session_rhythm_status_view`
 
 这里的关键约束是：
@@ -308,6 +308,12 @@
 7. 把 `resolveCurrentRiskState()` 一类 trail projector 下沉到共享层
 8. `runtime.audit` 追加 `session_rhythm_status_view`
 9. 针对当前已有 `audit_record` 信号做最小窗口推进
+
+补充约束：
+
+- `session_rhythm_decision` 仍是 `FR-0014` 的正式对象
+- 但 Slice A 先只要求它作为共享 projector 的稳定输出语义存在
+- Slice A 不要求先为 `session_rhythm_decision` 建独立持久化表或独立查询入口
 
 ### Slice A 明确不包含
 
