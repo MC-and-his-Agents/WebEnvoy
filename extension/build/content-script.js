@@ -1,4 +1,5 @@
 import { ContentScriptHandler } from "./content-script-handler.js";
+import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 export { ContentScriptHandler };
 const normalizeForwardMessage = (request) => ({
     kind: "forward",
@@ -16,7 +17,13 @@ const normalizeForwardMessage = (request) => ({
         : {},
     commandParams: typeof request.commandParams === "object" && request.commandParams !== null
         ? request.commandParams
-        : {}
+        : {},
+    fingerprintContext: ensureFingerprintRuntimeContext(request.fingerprintContext ??
+        (typeof request.commandParams === "object" &&
+            request.commandParams !== null &&
+            "fingerprint_context" in request.commandParams
+            ? request.commandParams.fingerprint_context
+            : null))
 });
 export const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {

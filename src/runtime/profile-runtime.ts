@@ -22,6 +22,9 @@ import {
 } from "./profile-store.js";
 import type { ProfileState } from "./profile-state.js";
 import {
+  buildFingerprintContextForMeta
+} from "./fingerprint-runtime.js";
+import {
   applyProfileProxyBinding,
   beginLoginSession,
   beginStartSession,
@@ -221,6 +224,35 @@ const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
 const shouldRecoverAsDisconnected = (acquisition: LockAcquisition, state: ProfileState): boolean =>
   acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+
+const readRequestedExecutionMode = (params: JsonObject): string | null => {
+  const mode = params.requested_execution_mode;
+  return typeof mode === "string" && mode.length > 0 ? mode : null;
+};
+
+const ensureFingerprintExecutionAllowed = (
+  requestedExecutionMode: string | null,
+  fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
+): void => {
+  if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
+    return;
+  }
+  if (fingerprintRuntime.execution.live_allowed) {
+    return;
+  }
+  throw new CliError(
+    "ERR_PROFILE_INVALID",
+    `profile 指纹一致性校验未通过，禁止 ${requestedExecutionMode}`,
+    {
+      details: {
+        ability_id: "runtime.profile",
+        stage: "input_validation",
+        reason: fingerprintRuntime.execution.reason_codes[0] ?? "FINGERPRINT_RUNTIME_INCONSISTENT"
+      }
+    }
+  );
+};
 
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
@@ -319,6 +351,7 @@ export class ProfileRuntimeService {
               profileDir,
               profileState: "disconnected",
               proxyBinding: existingMeta.proxyBinding,
+              fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
               updatedAt: nowIso,
               lastDisconnectedAt: nowIso
             })
@@ -332,6 +365,11 @@ export class ProfileRuntimeService {
       }
 
       let session = buildRuntimeSession(input.profile, recoveredMeta);
+      const requestedExecutionMode = readRequestedExecutionMode(input.params);
+      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+        requestedExecutionMode
+      });
+      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -357,6 +395,7 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
+        fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
         updatedAt: nowIso,
         lastStartedAt: nowIso
       });
@@ -377,6 +416,7 @@ export class ProfileRuntimeService {
         browserPid: browserLaunch.browserPid,
         controllerPid: browserLaunch.controllerPid,
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
+        fingerprint_runtime: fingerprintRuntime,
         startedAt: nowIso
       };
     } catch (error) {
@@ -421,6 +461,7 @@ export class ProfileRuntimeService {
             profileDir,
             profileState: "disconnected",
             proxyBinding: existingMeta.proxyBinding,
+            fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
             updatedAt: nowIso,
             lastDisconnectedAt: nowIso
           })
@@ -452,6 +493,7 @@ export class ProfileRuntimeService {
               profileDir,
               profileState: "disconnected",
               proxyBinding: recoveredMeta.proxyBinding,
+              fingerprintProfileBundle: recoveredMeta.fingerprintProfileBundle,
               updatedAt: nowIso,
               lastDisconnectedAt: nowIso
             })
@@ -466,6 +508,11 @@ export class ProfileRuntimeService {
       }
 
       let session = buildRuntimeSession(input.profile, recoveredMeta);
+      const requestedExecutionMode = readRequestedExecutionMode(input.params);
+      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+        requestedExecutionMode
+      });
+      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -495,6 +542,7 @@ export class ProfileRuntimeService {
           profileDir,
           profileState: session.profileState,
           proxyBinding: session.proxyBinding,
+          fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
           updatedAt: nowIso
         })
       );
@@ -510,6 +558,7 @@ export class ProfileRuntimeService {
           proxyUrl: session.proxyBinding?.url ?? null,
           lockHeld: true,
           recoverableSession: buildRecoverableSessionSummary(recoveredMeta),
+          fingerprint_runtime: fingerprintRuntime,
           confirmationRequired: true,
           confirmPath: "runtime.login --params '{\"confirm\":true}'"
         };
@@ -522,6 +571,7 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
+        fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
         updatedAt: nowIso,
         lastLoginAt: nowIso,
         localStorageSnapshots: upsertLocalStorageSnapshot(
@@ -543,6 +593,7 @@ export class ProfileRuntimeService {
         proxyUrl: session.proxyBinding?.url ?? null,
         lockHeld: true,
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
+        fingerprint_runtime: fingerprintRuntime,
         lastLoginAt: nowIso
       };
     } catch (error) {
@@ -570,6 +621,10 @@ export class ProfileRuntimeService {
     const profileState: ProfileState =
       activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
     const lockHeld = activeState && healthyLock;
+    const requestedExecutionMode = readRequestedExecutionMode(input.params);
+    const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
+      requestedExecutionMode
+    });
 
     return {
       profile: input.profile,
@@ -580,6 +635,7 @@ export class ProfileRuntimeService {
       lockHeld,
       lockOwnerPid: lock?.ownerPid ?? null,
       recoverableSession: buildRecoverableSessionSummary(meta),
+      fingerprint_runtime: fingerprintRuntime,
       updatedAt: meta?.updatedAt ?? null
     };
   }
@@ -609,6 +665,10 @@ export class ProfileRuntimeService {
       ...session,
       ownerRunId: lock.ownerRunId
     };
+    const requestedExecutionMode = readRequestedExecutionMode(input.params);
+    const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, existingMeta, {
+      requestedExecutionMode
+    });
 
     try {
       const stopping = beginStopSession(session, {
@@ -646,6 +706,7 @@ export class ProfileRuntimeService {
           profileDir,
           profileState: session.profileState,
           proxyBinding: session.proxyBinding,
+          fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
           updatedAt: nowIso,
           lastStoppedAt: nowIso
         })
@@ -671,6 +732,7 @@ export class ProfileRuntimeService {
       proxyUrl: session.proxyBinding?.url ?? null,
       lockHeld: false,
       recoverableSession: buildRecoverableSessionSummary(existingMeta),
+      fingerprint_runtime: fingerprintRuntime,
       stoppedAt: nowIso
     };
   }
@@ -987,6 +1049,7 @@ export class ProfileRuntimeService {
       profileDir: string;
       profileState: ProfileState;
       proxyBinding: ProfileMeta["proxyBinding"];
+      fingerprintProfileBundle: ProfileMeta["fingerprintProfileBundle"] | null;
       updatedAt: string;
       localStorageSnapshots?: ProfileMeta["localStorageSnapshots"];
       lastStartedAt?: string;
@@ -1001,6 +1064,7 @@ export class ProfileRuntimeService {
       profileDir: patch.profileDir,
       profileState: patch.profileState,
       proxyBinding: patch.proxyBinding,
+      fingerprintProfileBundle: patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,
       localStorageSnapshots: patch.localStorageSnapshots ?? current.localStorageSnapshots,
       updatedAt: patch.updatedAt,
       lastStartedAt: patch.lastStartedAt ?? current.lastStartedAt,

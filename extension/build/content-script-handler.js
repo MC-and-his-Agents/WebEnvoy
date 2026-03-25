@@ -1,7 +1,29 @@
 import { executeXhsSearch } from "./xhs-search.js";
+import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const resolveFingerprintContextFromMessage = (message) => {
+    const direct = ensureFingerprintRuntimeContext(message.fingerprintContext ?? null);
+    if (direct) {
+        return direct;
+    }
+    const fallback = ensureFingerprintRuntimeContext(asRecord(message.commandParams)?.fingerprint_context ?? null);
+    return fallback ?? null;
+};
+export const resolveFingerprintContextForContract = (message) => resolveFingerprintContextFromMessage({
+    kind: "forward",
+    id: "contract",
+    runId: "contract",
+    tabId: null,
+    profile: null,
+    cwd: "",
+    timeoutMs: 1_000,
+    command: "runtime.ping",
+    params: {},
+    commandParams: message.commandParams,
+    fingerprintContext: message.fingerprintContext
+});
 const extractFetchBody = async (response) => {
     const text = await response.text();
     if (text.length === 0) {
@@ -69,6 +91,22 @@ const mainWorldCall = async (request) => {
             }
             const result = fn(request.payload.uri, request.payload.body);
             emit({ id: request.id, ok: true, result });
+            return;
+          }
+          if (request.type === "fingerprint-install") {
+            const runtime = request.payload.fingerprint_runtime ?? null;
+            window.__webenvoy_fingerprint_runtime__ = runtime;
+            emit({
+              id: request.id,
+              ok: true,
+              result: {
+                installed: runtime !== null,
+                applied_patches: Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
+                  ? runtime.fingerprint_patch_manifest.required_patches
+                  : [],
+                source: typeof runtime?.source === "string" ? runtime.source : "unknown"
+              }
+            });
             return;
           }
           emit({ id: request.id, ok: false, message: "unsupported main world call" });
@@ -168,6 +206,10 @@ export class ContentScriptHandler {
         if (message.commandParams.simulate_no_response === true) {
             return true;
         }
+        if (message.command === "runtime.ping") {
+            void this.#handleRuntimePing(message);
+            return true;
+        }
         if (message.command === "xhs.search") {
             void this.#handleXhsSearch(message);
             return true;
@@ -177,6 +219,48 @@ export class ContentScriptHandler {
             listener(result);
         }
         return true;
+    }
+    async #installFingerprintIfPresent(message) {
+        const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+        if (!fingerprintRuntime) {
+            return null;
+        }
+        try {
+            const installResult = await mainWorldCall({
+                type: "fingerprint-install",
+                payload: {
+                    fingerprint_runtime: fingerprintRuntime
+                }
+            });
+            return {
+                ...fingerprintRuntime,
+                injection: installResult
+            };
+        }
+        catch (error) {
+            return {
+                ...fingerprintRuntime,
+                injection: {
+                    installed: false,
+                    error: error instanceof Error ? error.message : String(error)
+                }
+            };
+        }
+    }
+    async #handleRuntimePing(message) {
+        const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
+        this.#emit({
+            kind: "result",
+            id: message.id,
+            ok: true,
+            payload: {
+                message: "pong",
+                run_id: message.runId,
+                profile: message.profile,
+                cwd: message.cwd,
+                ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+            }
+        });
     }
     #handleForward(message) {
         if (message.command !== "runtime.ping") {
@@ -203,6 +287,7 @@ export class ContentScriptHandler {
         };
     }
     async #handleXhsSearch(message) {
+        const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const ability = asRecord(message.commandParams.ability);
         const input = asRecord(message.commandParams.input);
         const options = asRecord(message.commandParams.options) ?? {};
@@ -222,7 +307,8 @@ export class ContentScriptHandler {
                     details: {
                         stage: "execution",
                         reason: "ABILITY_PAYLOAD_MISSING"
-                    }
+                    },
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
                 }
             });
             return;
@@ -282,7 +368,7 @@ export class ContentScriptHandler {
                     profile: message.profile ?? "unknown"
                 }
             }, this.#xhsEnv);
-            this.#emit(this.#toContentMessage(message.id, result));
+            this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {
             this.#emit({
@@ -292,25 +378,32 @@ export class ContentScriptHandler {
                 error: {
                     code: "ERR_EXECUTION_FAILED",
                     message: error instanceof Error ? error.message : String(error)
-                }
+                },
+                payload: fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}
             });
         }
     }
-    #toContentMessage(id, result) {
+    #toContentMessage(id, result, fingerprintRuntime) {
         if (!result.ok) {
             return {
                 kind: "result",
                 id,
                 ok: false,
                 error: result.error,
-                payload: result.payload
+                payload: {
+                    ...(result.payload ?? {}),
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+                }
             };
         }
         return {
             kind: "result",
             id,
             ok: true,
-            payload: result.payload
+            payload: {
+                ...(result.payload ?? {}),
+                ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+            }
         };
     }
     #emit(message) {

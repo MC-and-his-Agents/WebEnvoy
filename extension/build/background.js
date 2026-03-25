@@ -1,4 +1,5 @@
 import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, getWriteActionMatrixDecisions, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
+import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
@@ -75,6 +76,10 @@ const scoreXhsTab = (tab) => {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const resolveFingerprintContext = (commandParams) => {
+    const context = ensureFingerprintRuntimeContext(commandParams.fingerprint_context);
+    return context ? { ...context } : null;
+};
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
@@ -282,7 +287,8 @@ export class BackgroundRelay {
             params: typeof request.params === "object" && request.params !== null
                 ? { ...request.params }
                 : {},
-            commandParams
+            commandParams,
+            fingerprintContext: resolveFingerprintContext(commandParams)
         };
         try {
             const accepted = this.contentScript.onBackgroundMessage(forward);
@@ -887,7 +893,10 @@ class ChromeBackgroundBridge {
                 : {},
             commandParams: typeof request.params.command_params === "object" && request.params.command_params !== null
                 ? request.params.command_params
-                : {}
+                : {},
+            fingerprintContext: resolveFingerprintContext(typeof request.params.command_params === "object" && request.params.command_params !== null
+                ? request.params.command_params
+                : {})
         };
         try {
             await this.chromeApi.tabs.sendMessage(tabId, forward);

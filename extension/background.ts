@@ -21,6 +21,10 @@ import {
   type WriteActionMatrixDecision,
   type WriteActionMatrixDecisionsOutput
 } from "../shared/risk-state.js";
+import {
+  ensureFingerprintRuntimeContext,
+  type FingerprintRuntimeContext
+} from "../shared/fingerprint-profile.js";
 
 type BridgeRequest = {
   id: string;
@@ -227,6 +231,13 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const resolveFingerprintContext = (
+  commandParams: Record<string, unknown>
+): FingerprintRuntimeContext | null => {
+  const context = ensureFingerprintRuntimeContext(commandParams.fingerprint_context);
+  return context ? { ...context } : null;
+};
 
 const asNonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -482,7 +493,8 @@ export class BackgroundRelay {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams
+      commandParams,
+      fingerprintContext: resolveFingerprintContext(commandParams)
     };
     try {
       const accepted = this.contentScript.onBackgroundMessage(forward);
@@ -1146,7 +1158,12 @@ class ChromeBackgroundBridge {
       commandParams:
         typeof request.params.command_params === "object" && request.params.command_params !== null
           ? (request.params.command_params as Record<string, unknown>)
+          : {},
+      fingerprintContext: resolveFingerprintContext(
+        typeof request.params.command_params === "object" && request.params.command_params !== null
+          ? (request.params.command_params as Record<string, unknown>)
           : {}
+      )
     };
 
     try {

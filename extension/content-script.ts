@@ -3,6 +3,7 @@ import {
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
 } from "./content-script-handler.js";
+import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 
 export {
   ContentScriptHandler,
@@ -39,7 +40,15 @@ const normalizeForwardMessage = (
   commandParams:
     typeof request.commandParams === "object" && request.commandParams !== null
       ? (request.commandParams as Record<string, unknown>)
-      : {}
+      : {},
+  fingerprintContext: ensureFingerprintRuntimeContext(
+    request.fingerprintContext ??
+      (typeof request.commandParams === "object" &&
+      request.commandParams !== null &&
+      "fingerprint_context" in request.commandParams
+        ? (request.commandParams as Record<string, unknown>).fingerprint_context
+        : null)
+  )
 });
 
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {

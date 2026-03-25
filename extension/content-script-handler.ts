@@ -1,4 +1,8 @@
 import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
+import {
+  ensureFingerprintRuntimeContext,
+  type FingerprintRuntimeContext
+} from "../shared/fingerprint-profile.js";
 
 export type BackgroundToContentMessage = {
   kind: "forward";
@@ -11,6 +15,7 @@ export type BackgroundToContentMessage = {
   command: string;
   params: Record<string, unknown>;
   commandParams: Record<string, unknown>;
+  fingerprintContext?: FingerprintRuntimeContext | null;
 };
 
 export type ContentToBackgroundMessage = {
@@ -27,6 +32,37 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const resolveFingerprintContextFromMessage = (
+  message: BackgroundToContentMessage
+): FingerprintRuntimeContext | null => {
+  const direct = ensureFingerprintRuntimeContext(message.fingerprintContext ?? null);
+  if (direct) {
+    return direct;
+  }
+
+  const fallback = ensureFingerprintRuntimeContext(
+    asRecord(message.commandParams)?.fingerprint_context ?? null
+  );
+  return fallback ?? null;
+};
+
+export const resolveFingerprintContextForContract = (
+  message: Pick<BackgroundToContentMessage, "fingerprintContext" | "commandParams">
+): FingerprintRuntimeContext | null =>
+  resolveFingerprintContextFromMessage({
+    kind: "forward",
+    id: "contract",
+    runId: "contract",
+    tabId: null,
+    profile: null,
+    cwd: "",
+    timeoutMs: 1_000,
+    command: "runtime.ping",
+    params: {},
+    commandParams: message.commandParams,
+    fingerprintContext: message.fingerprintContext
+  });
 
 const extractFetchBody = async (response: Response): Promise<unknown> => {
   const text = await response.text();
@@ -58,7 +94,7 @@ export const encodeMainWorldPayload = (value: Record<string, unknown>): string =
   encodeUtf8Base64(JSON.stringify(value));
 
 const mainWorldCall = async <T>(request: {
-  type: "xhs-sign";
+  type: "xhs-sign" | "fingerprint-install";
   payload: Record<string, unknown>;
 }): Promise<T> => {
   const eventName = "__webenvoy_main_world_result__";
@@ -112,6 +148,22 @@ const mainWorldCall = async <T>(request: {
             }
             const result = fn(request.payload.uri, request.payload.body);
             emit({ id: request.id, ok: true, result });
+            return;
+          }
+          if (request.type === "fingerprint-install") {
+            const runtime = request.payload.fingerprint_runtime ?? null;
+            window.__webenvoy_fingerprint_runtime__ = runtime;
+            emit({
+              id: request.id,
+              ok: true,
+              result: {
+                installed: runtime !== null,
+                applied_patches: Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
+                  ? runtime.fingerprint_patch_manifest.required_patches
+                  : [],
+                source: typeof runtime?.source === "string" ? runtime.source : "unknown"
+              }
+            });
             return;
           }
           emit({ id: request.id, ok: false, message: "unsupported main world call" });
@@ -222,6 +274,11 @@ export class ContentScriptHandler {
       return true;
     }
 
+    if (message.command === "runtime.ping") {
+      void this.#handleRuntimePing(message);
+      return true;
+    }
+
     if (message.command === "xhs.search") {
       void this.#handleXhsSearch(message);
       return true;
@@ -232,6 +289,52 @@ export class ContentScriptHandler {
       listener(result);
     }
     return true;
+  }
+
+  async #installFingerprintIfPresent(
+    message: BackgroundToContentMessage
+  ): Promise<Record<string, unknown> | null> {
+    const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+    if (!fingerprintRuntime) {
+      return null;
+    }
+
+    try {
+      const installResult = await mainWorldCall<Record<string, unknown>>({
+        type: "fingerprint-install",
+        payload: {
+          fingerprint_runtime: fingerprintRuntime
+        }
+      });
+      return {
+        ...fingerprintRuntime,
+        injection: installResult
+      };
+    } catch (error) {
+      return {
+        ...fingerprintRuntime,
+        injection: {
+          installed: false,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
+  async #handleRuntimePing(message: BackgroundToContentMessage): Promise<void> {
+    const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
+    this.#emit({
+      kind: "result",
+      id: message.id,
+      ok: true,
+      payload: {
+        message: "pong",
+        run_id: message.runId,
+        profile: message.profile,
+        cwd: message.cwd,
+        ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+      }
+    });
   }
 
   #handleForward(message: BackgroundToContentMessage): ContentToBackgroundMessage {
@@ -261,6 +364,7 @@ export class ContentScriptHandler {
   }
 
   async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
+    const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const ability = asRecord(message.commandParams.ability);
     const input = asRecord(message.commandParams.input);
     const options = asRecord(message.commandParams.options) ?? {};
@@ -281,7 +385,8 @@ export class ContentScriptHandler {
           details: {
             stage: "execution",
             reason: "ABILITY_PAYLOAD_MISSING"
-          }
+          },
+          ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
         }
       });
       return;
@@ -345,8 +450,7 @@ export class ContentScriptHandler {
         },
         this.#xhsEnv
       );
-
-      this.#emit(this.#toContentMessage(message.id, result));
+      this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
     } catch (error) {
       this.#emit({
         kind: "result",
@@ -355,19 +459,27 @@ export class ContentScriptHandler {
         error: {
           code: "ERR_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : String(error)
-        }
+        },
+        payload: fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}
       });
     }
   }
 
-  #toContentMessage(id: string, result: SearchExecutionResult): ContentToBackgroundMessage {
+  #toContentMessage(
+    id: string,
+    result: SearchExecutionResult,
+    fingerprintRuntime: Record<string, unknown> | null
+  ): ContentToBackgroundMessage {
     if (!result.ok) {
       return {
         kind: "result",
         id,
         ok: false,
         error: result.error,
-        payload: result.payload
+        payload: {
+          ...(result.payload ?? {}),
+          ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+        }
       };
     }
 
@@ -375,7 +487,10 @@ export class ContentScriptHandler {
       kind: "result",
       id,
       ok: true,
-      payload: result.payload
+      payload: {
+        ...(result.payload ?? {}),
+        ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+      }
     };
   }
 

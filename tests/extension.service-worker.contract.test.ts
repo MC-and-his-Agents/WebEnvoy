@@ -216,6 +216,107 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("forwards fingerprint_context without dropping fields", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = {
+      profile: "profile-a",
+      source: "profile_meta",
+      fingerprint_profile_bundle: {
+        ua: "Mozilla/5.0",
+        hardwareConcurrency: 8,
+        deviceMemory: 8,
+        screen: {
+          width: 1440,
+          height: 900,
+          colorDepth: 24,
+          pixelDepth: 24
+        },
+        battery: {
+          level: 0.73,
+          charging: false
+        },
+        timezone: "Asia/Shanghai",
+        audioNoiseSeed: 0.000047231,
+        canvasNoiseSeed: 0.000083154,
+        environment: {
+          os_family: "macos",
+          os_version: "14.6",
+          arch: "arm64"
+        }
+      },
+      fingerprint_patch_manifest: {
+        profile: "profile-a",
+        manifest_version: "1",
+        required_patches: [
+          "audio_context",
+          "battery",
+          "navigator_plugins",
+          "navigator_mime_types"
+        ],
+        optional_patches: [],
+        field_dependencies: {
+          audio_context: ["audioNoiseSeed"],
+          battery: ["battery.level", "battery.charging"]
+        },
+        unsupported_reason_codes: []
+      },
+      fingerprint_consistency_check: {
+        profile: "profile-a",
+        expected_environment: {
+          os_family: "macos",
+          os_version: "14.6",
+          arch: "arm64"
+        },
+        actual_environment: {
+          os_family: "macos",
+          os_version: "14.6",
+          arch: "arm64"
+        },
+        decision: "match",
+        reason_codes: []
+      },
+      execution: {
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: ["dry_run", "recon", "live_read_limited"],
+        reason_codes: []
+      }
+    };
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-fingerprint-forward-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-fingerprint-forward-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-fingerprint-forward-001",
+        fingerprintContext: fingerprintContext
+      })
+    );
+  });
+
   it("forwards content-script error payload through background bridge", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

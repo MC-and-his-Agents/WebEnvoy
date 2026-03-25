@@ -35,6 +35,14 @@ describe("profile-store", () => {
       audioNoiseSeed: "default-audio-seed",
       canvasNoiseSeed: "default-canvas-seed"
     });
+    expect(meta.fingerprintProfileBundle).toBeDefined();
+    expect(meta.fingerprintProfileBundle?.audioNoiseSeed).toBeTypeOf("number");
+    expect(meta.fingerprintProfileBundle?.canvasNoiseSeed).toBeTypeOf("number");
+    expect(meta.fingerprintProfileBundle?.environment).toMatchObject({
+      os_family: expect.any(String),
+      os_version: expect.any(String),
+      arch: expect.any(String)
+    });
     expect(meta.localStorageSnapshots).toEqual([]);
 
     const profileDir = store.getProfileDir("default");
@@ -45,6 +53,29 @@ describe("profile-store", () => {
   it("reads and writes meta with stable profile identity", async () => {
     const store = await createStore();
     await store.initializeMeta("default", "2026-03-19T10:00:00.000Z");
+    const expectedBundle = {
+      ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_0) AppleWebKit/537.36",
+      hardwareConcurrency: 8,
+      deviceMemory: 8,
+      screen: {
+        width: 1440,
+        height: 900,
+        colorDepth: 30,
+        pixelDepth: 30
+      },
+      battery: {
+        level: 0.73,
+        charging: false
+      },
+      timezone: "Asia/Shanghai",
+      audioNoiseSeed: 0.000047231,
+      canvasNoiseSeed: 0.000083154,
+      environment: {
+        os_family: "macos",
+        os_version: "14.6",
+        arch: "arm64"
+      }
+    };
 
     await store.writeMeta("default", {
       schemaVersion: 1,
@@ -60,6 +91,7 @@ describe("profile-store", () => {
         audioNoiseSeed: "seed-a-001",
         canvasNoiseSeed: "seed-c-001"
       },
+      fingerprintProfileBundle: expectedBundle,
       localStorageSnapshots: [
         {
           origin: "https://example.com",
@@ -78,7 +110,46 @@ describe("profile-store", () => {
     expect(meta?.profileState).toBe("ready");
     expect(meta?.proxyBinding?.url).toBe("http://127.0.0.1:8080/");
     expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
+    expect(meta?.fingerprintProfileBundle).toEqual(expectedBundle);
     expect(meta?.localStorageSnapshots).toHaveLength(1);
+  });
+
+  it("hydrates fingerprint profile bundle for legacy meta without bundle field", async () => {
+    const store = await createStore();
+    await store.ensureProfileDir("legacy");
+    const metaPath = store.getMetaPath("legacy");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy",
+          profileDir: store.getProfileDir("legacy"),
+          profileState: "ready",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: "2026-03-19T10:01:00.000Z",
+          lastLoginAt: null,
+          lastStoppedAt: null,
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const meta = await store.readMeta("legacy");
+    expect(meta).not.toBeNull();
+    expect(meta?.fingerprintProfileBundle).toBeDefined();
+    expect(meta?.fingerprintProfileBundle?.environment.os_family).toBeTypeOf("string");
+    expect(meta?.fingerprintProfileBundle?.screen.width).toBeGreaterThan(0);
   });
 
   it("returns null when meta does not exist", async () => {

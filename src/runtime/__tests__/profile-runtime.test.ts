@@ -850,3 +850,141 @@ describe("profile-runtime login", () => {
     });
   });
 });
+
+describe("profile-runtime fingerprint runtime contract", () => {
+  it("returns fingerprint_runtime on start/status/stop/login", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-runtime-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "fingerprint_runtime_profile",
+      runId: "run-runtime-test-fingerprint-001",
+      params: {}
+    });
+    expect(started).toMatchObject({
+      profile: "fingerprint_runtime_profile",
+      fingerprint_runtime: {
+        source: "profile_meta",
+        execution: {
+          live_decision: "allowed"
+        }
+      }
+    });
+    expect(typeof (started as { fingerprint_runtime?: { execution?: { live_allowed?: unknown } } }).fingerprint_runtime?.execution?.live_allowed).toBe("boolean");
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "fingerprint_runtime_profile",
+      runId: "run-runtime-test-fingerprint-002",
+      params: {}
+    });
+    expect(status).toMatchObject({
+      profile: "fingerprint_runtime_profile",
+      fingerprint_runtime: {
+        source: "profile_meta"
+      }
+    });
+
+    const stopped = await service.stop({
+      cwd: baseDir,
+      profile: "fingerprint_runtime_profile",
+      runId: "run-runtime-test-fingerprint-001",
+      params: {}
+    });
+    expect(stopped).toMatchObject({
+      profile: "fingerprint_runtime_profile",
+      fingerprint_runtime: {
+        source: "profile_meta"
+      }
+    });
+
+    const loginStart = await service.login({
+      cwd: baseDir,
+      profile: "fingerprint_runtime_profile",
+      runId: "run-runtime-test-fingerprint-003",
+      params: {}
+    });
+    expect(loginStart).toMatchObject({
+      profile: "fingerprint_runtime_profile",
+      fingerprint_runtime: {
+        source: "profile_meta"
+      }
+    });
+  });
+
+  it("blocks live start when fingerprint environment mismatches and downgrades status", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-mismatch-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "fingerprint_mismatch_profile",
+      runId: "run-runtime-test-fingerprint-101",
+      params: {}
+    });
+    await service.stop({
+      cwd: baseDir,
+      profile: "fingerprint_mismatch_profile",
+      runId: "run-runtime-test-fingerprint-101",
+      params: {}
+    });
+
+    const metaPath = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "fingerprint_mismatch_profile",
+      "__webenvoy_meta.json"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as ProfileMeta;
+    expect(meta.fingerprintProfileBundle).toBeTruthy();
+    if (!meta.fingerprintProfileBundle) {
+      throw new Error("fingerprintProfileBundle is required for mismatch test");
+    }
+    meta.fingerprintProfileBundle.environment = {
+      os_family: "linux",
+      os_version: "99.99",
+      arch: "x64"
+    };
+    await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "fingerprint_mismatch_profile",
+        runId: "run-runtime-test-fingerprint-102",
+        params: {
+          requested_execution_mode: "live_read_high_risk"
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID"
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "fingerprint_mismatch_profile",
+      runId: "run-runtime-test-fingerprint-103",
+      params: {
+        requested_execution_mode: "live_read_high_risk"
+      }
+    });
+    expect(status).toMatchObject({
+      fingerprint_runtime: {
+        execution: {
+          live_allowed: false,
+          live_decision: "dry_run_only",
+          allowed_execution_modes: ["dry_run", "recon"]
+        }
+      }
+    });
+  });
+});

@@ -1,6 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { release } from "node:os";
 import { join, resolve, sep } from "node:path";
 
+import {
+  buildFingerprintProfileBundle,
+  isFingerprintProfileBundle,
+  normalizeArch,
+  normalizePlatform,
+  type FingerprintProfileBundle
+} from "../../shared/fingerprint-profile.js";
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
@@ -28,6 +36,7 @@ export interface ProfileMeta {
   profileState: ProfileState;
   proxyBinding: ProxyBinding | null;
   fingerprintSeeds: FingerprintSeeds;
+  fingerprintProfileBundle?: FingerprintProfileBundle;
   localStorageSnapshots: LocalStorageSnapshot[];
   createdAt: string;
   updatedAt: string;
@@ -86,6 +95,12 @@ const isIsoTimestamp = (value: unknown): value is string =>
 
 const isOptionalIsoTimestamp = (value: unknown): value is string | null =>
   value === null || isIsoTimestamp(value);
+
+const resolveCurrentEnvironment = () => ({
+  os_family: normalizePlatform(process.platform),
+  os_version: release(),
+  arch: normalizeArch(process.arch)
+});
 
 function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   if (!isObjectRecord(value)) {
@@ -146,6 +161,12 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   ) {
     throw new Error("Invalid profile meta structure: fingerprintSeeds.*");
   }
+  if (
+    value.fingerprintProfileBundle !== undefined &&
+    !isFingerprintProfileBundle(value.fingerprintProfileBundle)
+  ) {
+    throw new Error("Invalid profile meta structure: fingerprintProfileBundle");
+  }
 
   if (!Array.isArray(value.localStorageSnapshots)) {
     throw new Error("Invalid profile meta structure: localStorageSnapshots");
@@ -179,7 +200,22 @@ const parseMeta = (raw: string): ProfileMeta => {
     throw new Error("Invalid profile meta structure: invalid JSON");
   }
   assertProfileMeta(parsed);
-  return parsed;
+  return normalizeFingerprintProfileBundle(parsed);
+};
+
+const normalizeFingerprintProfileBundle = (meta: ProfileMeta): ProfileMeta => {
+  if (isFingerprintProfileBundle(meta.fingerprintProfileBundle)) {
+    return meta;
+  }
+
+  return {
+    ...meta,
+    fingerprintProfileBundle: buildFingerprintProfileBundle({
+      profileName: meta.profileName,
+      fingerprintSeeds: meta.fingerprintSeeds,
+      environment: resolveCurrentEnvironment()
+    })
+  };
 };
 
 export class ProfileStore {
@@ -231,9 +267,10 @@ export class ProfileStore {
       throw new Error("Profile directory mismatch when writing meta");
     }
 
+    const normalizedMeta = normalizeFingerprintProfileBundle(meta);
     const metaPath = this.getMetaPath(profileName);
     const tempPath = `${metaPath}.tmp`;
-    const json = `${JSON.stringify(meta, null, 2)}\n`;
+    const json = `${JSON.stringify(normalizedMeta, null, 2)}\n`;
     await this.fs.writeFile(tempPath, json, "utf8");
     await this.fs.rename(tempPath, metaPath);
   }
@@ -251,6 +288,14 @@ export class ProfileStore {
         audioNoiseSeed: `${profileName}-audio-seed`,
         canvasNoiseSeed: `${profileName}-canvas-seed`
       },
+      fingerprintProfileBundle: buildFingerprintProfileBundle({
+        profileName,
+        fingerprintSeeds: {
+          audioNoiseSeed: `${profileName}-audio-seed`,
+          canvasNoiseSeed: `${profileName}-canvas-seed`
+        },
+        environment: resolveCurrentEnvironment()
+      }),
       localStorageSnapshots: [],
       createdAt: nowIso,
       updatedAt: nowIso,
