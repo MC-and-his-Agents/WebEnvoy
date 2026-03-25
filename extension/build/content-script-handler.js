@@ -7,6 +7,10 @@ const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk"
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveRequestedExecutionMode = (message) => {
+    const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
+    if (topLevelMode) {
+        return topLevelMode;
+    }
     const options = asRecord(message.commandParams.options);
     return asString(options?.requested_execution_mode);
 };
@@ -531,8 +535,8 @@ export class ContentScriptHandler {
                     ...(typeof options.issue_scope === "string"
                         ? { issue_scope: options.issue_scope }
                         : {}),
-                    ...(typeof options.requested_execution_mode === "string"
-                        ? { requested_execution_mode: options.requested_execution_mode }
+                    ...(requestedExecutionMode !== null
+                        ? { requested_execution_mode: requestedExecutionMode }
                         : {}),
                     ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
                     ...(asRecord(options.approval_record)

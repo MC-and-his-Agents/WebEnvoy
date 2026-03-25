@@ -42,6 +42,10 @@ const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
 const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): string | null => {
+  const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
+  if (topLevelMode) {
+    return topLevelMode;
+  }
   const options = asRecord(message.commandParams.options);
   return asString(options?.requested_execution_mode);
 };
@@ -625,8 +629,8 @@ export class ContentScriptHandler {
             ...(typeof options.issue_scope === "string"
               ? { issue_scope: options.issue_scope }
               : {}),
-            ...(typeof options.requested_execution_mode === "string"
-              ? { requested_execution_mode: options.requested_execution_mode }
+            ...(requestedExecutionMode !== null
+              ? { requested_execution_mode: requestedExecutionMode }
               : {}),
             ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
             ...(asRecord(options.approval_record)

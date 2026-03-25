@@ -364,7 +364,7 @@ describe("content-script handler contract", () => {
     });
   });
 
-  it("blocks live xhs.search when required fingerprint patches are missing", async () => {
+  it("blocks live xhs.search when required fingerprint patches are missing (top-level requested_execution_mode)", async () => {
     await withMockMainWorld(async () => {
       const fingerprintContext = createFingerprintContext();
       fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
@@ -386,6 +386,7 @@ describe("content-script handler contract", () => {
         command: "xhs.search",
         params: {},
         commandParams: {
+          requested_execution_mode: "live_read_limited",
           ability: {
             id: "xhs.search",
             layer: "L3",
@@ -393,9 +394,6 @@ describe("content-script handler contract", () => {
           },
           input: {
             query: "test"
-          },
-          options: {
-            requested_execution_mode: "live_read_limited"
           }
         },
         fingerprintContext

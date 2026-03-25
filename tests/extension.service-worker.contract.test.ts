@@ -1634,6 +1634,107 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-top-level-patch-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-top-level-patch-missing-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-top-level-patch-missing-001",
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          requested_execution_mode: "live_read_limited"
+        })
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-top-level-patch-missing-001",
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "fingerprint required patches missing for live execution"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+            requested_execution_mode: "live_read_limited",
+            missing_required_patches: ["unknown_required_patch"]
+          },
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: false,
+              required_patches: fingerprintContext.fingerprint_patch_manifest.required_patches,
+              missing_required_patches: ["unknown_required_patch"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-top-level-patch-missing-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-top-level-patch-missing-001",
+      status: "error",
+      payload: {
+        details: {
+          stage: "execution",
+          reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+          requested_execution_mode: "live_read_limited"
+        },
+        fingerprint_runtime: {
+          injection: {
+            installed: false,
+            missing_required_patches: ["unknown_required_patch"]
+          }
+        }
+      }
+    });
+  });
+
   it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
