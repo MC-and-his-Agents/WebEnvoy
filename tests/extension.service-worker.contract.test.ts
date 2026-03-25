@@ -826,7 +826,8 @@ describe("extension service worker recovery contract", () => {
         command: "xhs.search",
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed"
+          risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext()
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -963,7 +964,8 @@ describe("extension service worker recovery contract", () => {
         command: "xhs.search",
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
-          risk_state: "limited"
+          risk_state: "limited",
+          fingerprint_context: createFingerprintRuntimeContext()
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -1115,6 +1117,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "paused",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1583,6 +1586,54 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("blocks live mode when fingerprint_context is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-003",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-003");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_MISSING", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
   it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
@@ -1738,6 +1789,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1844,6 +1896,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",

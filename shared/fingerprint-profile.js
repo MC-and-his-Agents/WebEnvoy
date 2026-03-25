@@ -390,16 +390,11 @@ const buildFingerprintRuntimeContext = (input) => {
     });
   }
 
-  if (!isFingerprintProfileBundle(input.existingBundle)) {
-    return buildIncompleteFingerprintRuntimeContext({
-      profile,
-      metaPresent: true,
-      actualEnvironment: input.actualEnvironment,
-      reasonCode: "PROFILE_FIELD_MISSING"
-    });
-  }
-
-  const bundle = buildFingerprintProfileBundle(input);
+  const bundle = buildFingerprintProfileBundle({
+    ...input,
+    existingBundle: isFingerprintProfileBundle(input.existingBundle) ? input.existingBundle : null,
+    environment: input.actualEnvironment
+  });
   const manifest = buildFingerprintPatchManifest({
     profile,
     bundle

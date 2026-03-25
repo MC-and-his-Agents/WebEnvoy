@@ -161,7 +161,7 @@ interface XhsTargetGateResult {
     effective_execution_mode: XhsExecutionMode;
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];
-    fingerprint_gate_decision?: "allowed" | "blocked" | "not_provided";
+    fingerprint_gate_decision?: "allowed" | "blocked";
     fingerprint_reason_codes?: string[];
     write_interaction_tier?: string | null;
   };
@@ -309,6 +309,7 @@ const xhsGateReasonMessage = (reason: string): string => {
     RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
     MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
     APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
+    FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
     TARGET_TAB_NOT_FOUND: "target tab is unavailable",
     TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
     TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
@@ -1263,19 +1264,20 @@ class ChromeBackgroundBridge {
       writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
     const requestedLiveMode =
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
+    const fingerprintContextMissing =
+      requestedLiveMode && !issue208WriteGateOnly && fingerprintExecution === null;
     const fingerprintLiveBlocked =
       requestedLiveMode &&
-      fingerprintExecution !== null &&
-      (fingerprintExecution.live_allowed !== true ||
+      !issue208WriteGateOnly &&
+      (fingerprintExecution === null ||
+        fingerprintExecution.live_allowed !== true ||
         fingerprintExecution.live_decision === "dry_run_only" ||
         !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode));
-    const fingerprintGateDecision: "allowed" | "blocked" | "not_provided" = requestedLiveMode
-      ? fingerprintExecution === null
-        ? "not_provided"
-        : fingerprintLiveBlocked
-          ? "blocked"
-          : "allowed"
-      : "allowed";
+    const fingerprintGateDecision: "allowed" | "blocked" =
+      requestedLiveMode && fingerprintLiveBlocked ? "blocked" : "allowed";
+    const resolvedFingerprintReasonCodes = fingerprintContextMissing
+      ? ["FINGERPRINT_CONTEXT_MISSING"]
+      : fingerprintReasonCodes;
     const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
     const gateReasons: string[] = [];
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
@@ -1316,6 +1318,9 @@ class ChromeBackgroundBridge {
 
     if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
       pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+    }
+    if (fingerprintContextMissing) {
+      pushReason("FINGERPRINT_CONTEXT_MISSING");
     }
     if (fingerprintLiveBlocked) {
       pushReason("FINGERPRINT_EXECUTION_BLOCKED");
@@ -1487,7 +1492,7 @@ class ChromeBackgroundBridge {
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
       fingerprint_gate_decision: fingerprintGateDecision,
-      fingerprint_reason_codes: fingerprintReasonCodes,
+      fingerprint_reason_codes: resolvedFingerprintReasonCodes,
       write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
     };
     const runId = String(request.params.run_id ?? request.id);

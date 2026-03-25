@@ -114,7 +114,7 @@ describe("profile-store", () => {
     expect(meta?.localStorageSnapshots).toHaveLength(1);
   });
 
-  it("keeps legacy meta without bundle field untouched for runtime-level downgrade handling", async () => {
+  it("keeps legacy meta without bundle field untouched for runtime-level migration handling", async () => {
     const store = await createStore();
     await store.ensureProfileDir("legacy");
     const metaPath = store.getMetaPath("legacy");

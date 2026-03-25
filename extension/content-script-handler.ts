@@ -188,6 +188,8 @@ const mainWorldCall = async <T>(request: {
             const patchNameSet = new Set(requiredPatches);
             const appliedPatches = [];
             const missingRequiredPatches = [];
+            const AUDIO_PATCH_MARKER = "__webenvoy_audio_context_patched__";
+            const AUDIO_NOISE_SEED_KEY = "__webenvoy_audio_noise_seed__";
             const defineGetter = (target, property, getter) => {
               Object.defineProperty(target, property, {
                 configurable: true,
@@ -233,10 +235,17 @@ const mainWorldCall = async <T>(request: {
               if (!OfflineCtor) {
                 return;
               }
-              const originalStartRendering = OfflineCtor.prototype?.startRendering;
+              const prototype = OfflineCtor.prototype;
+              const originalStartRendering = prototype?.startRendering;
               if (typeof originalStartRendering !== "function") {
                 return;
               }
+              prototype[AUDIO_NOISE_SEED_KEY] = bundle.audioNoiseSeed;
+              if (prototype[AUDIO_PATCH_MARKER] === true) {
+                appliedPatches.push("audio_context");
+                return;
+              }
+              const patchedChannelData = new WeakSet();
               const patchAudioBuffer = (audioBuffer) => {
                 if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
                   return audioBuffer;
@@ -244,20 +253,31 @@ const mainWorldCall = async <T>(request: {
                 const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
                 audioBuffer.getChannelData = (channel) => {
                   const channelData = originalGetChannelData(channel);
-                  if (channelData && typeof channelData.length === "number" && channelData.length > 0) {
-                    channelData[0] = channelData[0] + bundle.audioNoiseSeed;
+                  if (
+                    channelData &&
+                    typeof channelData.length === "number" &&
+                    channelData.length > 0 &&
+                    !patchedChannelData.has(channelData)
+                  ) {
+                    const noiseSeed =
+                      typeof prototype[AUDIO_NOISE_SEED_KEY] === "number"
+                        ? prototype[AUDIO_NOISE_SEED_KEY]
+                        : bundle.audioNoiseSeed;
+                    channelData[0] = channelData[0] + noiseSeed;
+                    patchedChannelData.add(channelData);
                   }
                   return channelData;
                 };
                 return audioBuffer;
               };
-              OfflineCtor.prototype.startRendering = function (...args) {
+              prototype.startRendering = function (...args) {
                 const renderingResult = originalStartRendering.apply(this, args);
                 if (renderingResult && typeof renderingResult.then === "function") {
                   return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
                 }
                 return patchAudioBuffer(renderingResult);
               };
+              prototype[AUDIO_PATCH_MARKER] = true;
               appliedPatches.push("audio_context");
             };
             markAudioContextPatched();

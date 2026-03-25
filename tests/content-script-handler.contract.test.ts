@@ -279,6 +279,58 @@ describe("content-script handler contract", () => {
     });
   });
 
+  it("keeps audio noise stable across repeated runtime.ping fingerprint installs", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      const sendPing = (id: string): void => {
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id,
+          runId: id,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "runtime.ping",
+          params: {},
+          commandParams: {},
+          fingerprintContext: createFingerprintContext()
+        });
+      };
+
+      sendPing("run-ping-idempotent-001");
+      await waitForResult(results);
+
+      const firstAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const firstRenderedBuffer = await firstAudioContext.startRendering();
+      const firstValue = firstRenderedBuffer.getChannelData(0)[0];
+
+      sendPing("run-ping-idempotent-002");
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (results.length >= 2) {
+          break;
+        }
+        await Promise.resolve();
+      }
+
+      const secondAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const secondRenderedBuffer = await secondAudioContext.startRendering();
+      const secondValue = secondRenderedBuffer.getChannelData(0)[0];
+
+      expect(firstValue).toBeGreaterThan(1);
+      expect(secondValue).toBeCloseTo(firstValue, 12);
+      const secondPayload = results[1]?.payload as Record<string, unknown>;
+      const secondFingerprintRuntime = secondPayload?.fingerprint_runtime as Record<string, unknown>;
+      const secondInjection = secondFingerprintRuntime?.injection as Record<string, unknown>;
+      expect(secondInjection?.applied_patches).toContain("audio_context");
+    });
+  });
+
   it("keeps fingerprint_runtime on xhs.search validation failures", async () => {
     await withMockMainWorld(async () => {
       const handler = new ContentScriptHandler();
