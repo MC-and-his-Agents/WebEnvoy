@@ -13,6 +13,7 @@ export {
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 
 type ContentScriptStorageArea = {
   get?: (
@@ -51,6 +52,14 @@ type FingerprintRuntimeContext = NonNullable<
 type BootstrapFingerprintContext = {
   fingerprintRuntime: FingerprintRuntimeContext | null;
   runId: string | null;
+};
+
+type MainWorldFingerprintInstallRequest = {
+  id: string;
+  type: "fingerprint-install";
+  payload: {
+    fingerprint_runtime: FingerprintRuntimeContext;
+  };
 };
 
 const normalizeForwardMessage = (
@@ -209,6 +218,37 @@ const persistExtensionFingerprintContext = (
   }
 };
 
+const installStartupFingerprintPatch = (fingerprintRuntime: FingerprintRuntimeContext): void => {
+  if (
+    typeof window === "undefined" ||
+    typeof window.dispatchEvent !== "function" ||
+    typeof CustomEvent !== "function"
+  ) {
+    return;
+  }
+
+  const installRequest: MainWorldFingerprintInstallRequest = {
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `startup-fingerprint-install-${Date.now()}`,
+    type: "fingerprint-install",
+    payload: {
+      fingerprint_runtime: fingerprintRuntime
+    }
+  };
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
+        detail: installRequest
+      })
+    );
+  } catch {
+    // ignore startup install dispatch failures
+  }
+};
+
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
   if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
     return false;
@@ -219,6 +259,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
   if (bootstrapContext) {
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
+    installStartupFingerprintPatch(bootstrapContext);
   }
 
   handler.onResult((message) => {

@@ -436,7 +436,7 @@ const isFingerprintRuntimeContextEquivalent = (
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
-const TRUST_PRIMING_COMMANDS = new Set(["runtime.ping"]);
+const TRUST_PRIMING_COMMANDS = new Set(["runtime.start", "runtime.login", "runtime.status"]);
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();

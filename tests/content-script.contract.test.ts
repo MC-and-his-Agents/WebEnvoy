@@ -4,6 +4,7 @@ import { ContentScriptHandler, bootstrapContentScript } from "../extension/conte
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -85,6 +86,11 @@ const buildScopedCacheKey = (
   );
   return `${FINGERPRINT_CONTEXT_CACHE_KEY}:${context.profile}:${runToken}:${executionToken}`;
 };
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
 const createSessionStorage = (
   initial?: Record<string, string>
@@ -177,6 +183,35 @@ const createRuntime = () => {
   };
 };
 
+const createStartupInstallProbeWindow = (
+  sessionStorage: Storage & { read: (key: string) => string | null }
+): {
+  window: {
+    sessionStorage: Storage & { read: (key: string) => string | null };
+    dispatchEvent: (event: Event) => boolean;
+  };
+  startupInstallRequests: Record<string, unknown>[];
+} => {
+  const startupInstallRequests: Record<string, unknown>[] = [];
+  return {
+    window: {
+      sessionStorage,
+      dispatchEvent(event: Event) {
+        const customEvent = event as CustomEvent<unknown>;
+        if (customEvent.type !== MAIN_WORLD_REQUEST_EVENT) {
+          return true;
+        }
+        const detail = asRecord(customEvent.detail);
+        if (detail?.type === "fingerprint-install") {
+          startupInstallRequests.push(detail);
+        }
+        return true;
+      }
+    },
+    startupInstallRequests
+  };
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   delete (globalThis as { window?: unknown }).window;
@@ -185,13 +220,22 @@ afterEach(() => {
 });
 
 describe("content-script bootstrap contract", () => {
-  it("does not auto-install fingerprint patch from startup bootstrap payload", () => {
+  it("auto-installs fingerprint patch from startup bootstrap payload at bootstrap without trust restore", () => {
     const context = createFingerprintContext();
-    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
-    const scopedKey = buildScopedCacheKey(context, null);
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+      run_id: "run-bootstrap-001",
+      fingerprint_runtime: context,
+      startup_fingerprint_trust: {
+        profile: "profile-a",
+        run_id: "run-bootstrap-001",
+        trusted: true
+      }
+    };
+    const scopedKey = buildScopedCacheKey(context, "run-bootstrap-001");
     const sessionStorage = createSessionStorage();
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
     const extensionStorage = createExtensionStorageArea();
-    (globalThis as { window?: unknown }).window = { sessionStorage };
+    (globalThis as { window?: unknown }).window = window;
     (globalThis as { chrome?: unknown }).chrome = {
       storage: {
         session: extensionStorage
@@ -207,17 +251,28 @@ describe("content-script bootstrap contract", () => {
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(startupInstallRequests).toHaveLength(1);
+    const startupInstall = startupInstallRequests[0] ?? {};
+    expect(startupInstall.type).toBe("fingerprint-install");
+    const startupInstallPayload = asRecord(startupInstall.payload);
+    expect(startupInstallPayload?.startup_fingerprint_trust).toBeUndefined();
+    expect(asRecord(startupInstallPayload?.fingerprint_runtime ?? null)).toMatchObject({
+      profile: "profile-a",
+      source: "profile_meta"
+    });
     expect(sessionStorage.read(scopedKey)).toBeNull();
     expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
     expect(extensionStorage.read(scopedKey)).toMatchObject({
       profile: "profile-a",
       source: "profile_meta"
     });
+    expect(extensionStorage.read("startup_fingerprint_trust")).toBeNull();
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
     const sessionStorage = createSessionStorage();
-    (globalThis as { window?: unknown }).window = { sessionStorage };
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
 
     const { runtime } = createRuntime();
     const onBackgroundMessage = vi
@@ -230,16 +285,18 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(startupInstallRequests).toHaveLength(0);
   });
 
-  it("does not auto-install fingerprint patch at bootstrap when cached context exists", () => {
+  it("still auto-installs fingerprint patch at bootstrap when cached context exists", () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
     const cacheKey = buildScopedCacheKey(context, null);
     const sessionStorage = createSessionStorage({
       [cacheKey]: JSON.stringify(context)
     });
-    (globalThis as { window?: unknown }).window = { sessionStorage };
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
 
     const { runtime } = createRuntime();
     const onBackgroundMessage = vi
@@ -250,17 +307,19 @@ describe("content-script bootstrap contract", () => {
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(startupInstallRequests).toHaveLength(1);
   });
 
-  it("does not auto-install fingerprint patch from extension storage during bootstrap", async () => {
+  it("still auto-installs fingerprint patch during bootstrap when extension storage cache exists", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
     const cacheKey = buildScopedCacheKey(context, null);
     const sessionStorage = createSessionStorage();
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
     const extensionStorage = createExtensionStorageArea({
       [cacheKey]: context
     });
-    (globalThis as { window?: unknown }).window = { sessionStorage };
+    (globalThis as { window?: unknown }).window = window;
     (globalThis as { chrome?: unknown }).chrome = {
       storage: {
         session: extensionStorage
@@ -278,6 +337,7 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(startupInstallRequests).toHaveLength(1);
   });
 
   it("persists normalized fingerprint context from forwarded messages", () => {
@@ -318,7 +378,7 @@ describe("content-script bootstrap contract", () => {
     expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
   });
 
-  it("does not auto-install from scoped cache during bootstrap across profile/run", async () => {
+  it("auto-installs from startup payload (not scoped cache) during bootstrap across profile/run", async () => {
     const bootstrapContext = createFingerprintContext();
     const foreignContext = {
       ...createFingerprintContext(),
@@ -330,7 +390,8 @@ describe("content-script bootstrap contract", () => {
     const sessionStorage = createSessionStorage({
       [buildScopedCacheKey(foreignContext, null)]: JSON.stringify(foreignContext)
     });
-    (globalThis as { window?: unknown }).window = { sessionStorage };
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
 
     const { runtime } = createRuntime();
     const onBackgroundMessage = vi
@@ -342,5 +403,6 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(startupInstallRequests).toHaveLength(1);
   });
 });

@@ -3,6 +3,7 @@ import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.j
 export { ContentScriptHandler };
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const normalizeForwardMessage = (request) => ({
     kind: "forward",
     id: request.id,
@@ -124,6 +125,30 @@ const persistExtensionFingerprintContext = (normalized, runId) => {
         // ignore cache failures
     }
 };
+const installStartupFingerprintPatch = (fingerprintRuntime) => {
+    if (typeof window === "undefined" ||
+        typeof window.dispatchEvent !== "function" ||
+        typeof CustomEvent !== "function") {
+        return;
+    }
+    const installRequest = {
+        id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `startup-fingerprint-install-${Date.now()}`,
+        type: "fingerprint-install",
+        payload: {
+            fingerprint_runtime: fingerprintRuntime
+        }
+    };
+    try {
+        window.dispatchEvent(new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
+            detail: installRequest
+        }));
+    }
+    catch {
+        // ignore startup install dispatch failures
+    }
+};
 export const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
         return false;
@@ -133,6 +158,7 @@ export const bootstrapContentScript = (runtime) => {
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
+        installStartupFingerprintPatch(bootstrapContext);
     }
     handler.onResult((message) => {
         runtime.sendMessage?.(message);

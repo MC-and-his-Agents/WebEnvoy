@@ -93,8 +93,10 @@ const primeTrustedFingerprintContext = async (input: {
   runId: string;
   profile: string;
   fingerprintContext: Record<string, unknown>;
+  primeCommand?: "runtime.start" | "runtime.login" | "runtime.status";
   tabId?: number;
 }) => {
+  const primeCommand = input.primeCommand ?? "runtime.start";
   input.mockPort.onMessageListeners[0]?.({
     id: `prime-${input.runId}`,
     method: "bridge.forward",
@@ -102,7 +104,7 @@ const primeTrustedFingerprintContext = async (input: {
     params: {
       session_id: "nm-session-001",
       run_id: input.runId,
-      command: "runtime.ping",
+      command: primeCommand,
       command_params: {
         fingerprint_context: input.fingerprintContext
       },
@@ -119,7 +121,7 @@ const primeTrustedFingerprintContext = async (input: {
       id: `prime-${input.runId}`,
       ok: true,
       payload: {
-        message: "pong",
+        message: `${primeCommand} ok`,
         run_id: input.runId,
         profile: input.profile,
         fingerprint_runtime: input.fingerprintContext
@@ -1547,7 +1549,8 @@ describe("extension service worker recovery contract", () => {
       runtimeMessageListeners,
       runId: "run-xhs-live-blocked-by-fingerprint-001",
       profile: "profile-a",
-      fingerprintContext
+      fingerprintContext,
+      primeCommand: "runtime.status"
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -1609,7 +1612,8 @@ describe("extension service worker recovery contract", () => {
       runtimeMessageListeners,
       runId: "run-xhs-live-blocked-by-fingerprint-002",
       profile: "profile-a",
-      fingerprintContext
+      fingerprintContext,
+      primeCommand: "runtime.login"
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -2012,7 +2016,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("rotates trusted fingerprint context when runtime.ping overwrites same profile::runId", async () => {
+  it("rotates trusted fingerprint context when runtime.status overwrites same profile::runId", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2049,7 +2053,8 @@ describe("extension service worker recovery contract", () => {
       runtimeMessageListeners,
       runId,
       profile,
-      fingerprintContext: trustedBlocked
+      fingerprintContext: trustedBlocked,
+      primeCommand: "runtime.status"
     });
     chromeApi.tabs.sendMessage.mockClear();
 

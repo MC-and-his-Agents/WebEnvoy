@@ -1257,6 +1257,37 @@ describe("fingerprint runtime real browser integration", () => {
       expect(targetBeforePing.url).toBe(probeUrl);
       expect(typeof targetBeforePing.title).toBe("string");
 
+      const startupProbe = await runStage(
+        stageState,
+        "wait-fingerprint-probe-before-runtime-ping",
+        async () =>
+          waitForFingerprintProbe(
+            wsUrl,
+            20_000,
+            {
+              phase: "before_runtime_ping",
+              pageBeforePing,
+              stagedBootstrapDiagnostics,
+              browserTargetDiagnostics
+            },
+            {
+              requireInstalled: true
+            }
+          )
+      );
+      expect(startupProbe.installed).toBe(true);
+      expect(startupProbe.hasPatchSignals).toBe(true);
+      expect(startupProbe.pluginsLength).toBeGreaterThan(0);
+      expect(startupProbe.mimeTypesLength).toBeGreaterThan(0);
+      expect(startupProbe.hasGetBattery).toBe(true);
+      expect(startupProbe.batteryProbeSucceeded).toBe(true);
+      expect(startupProbe.batteryHasExpectedShape).toBe(true);
+      expect(startupProbe.missingRequiredPatches).toEqual([]);
+      if (startupProbe.cdpRecent) {
+        expect(hasInlineScriptCspViolation(startupProbe.cdpRecent)).toBe(false);
+        expect(hasMainWorldBridgeTimeout(startupProbe.cdpRecent)).toBe(false);
+      }
+
       const ping = await runStage(stageState, "runtime.ping", async () =>
         runCli(
           [
@@ -1296,29 +1327,6 @@ describe("fingerprint runtime real browser integration", () => {
         title: "probe",
         readyState: "complete"
       });
-      const probe = await runStage(stageState, "wait-fingerprint-probe", async () =>
-        waitForFingerprintProbe(wsUrl, 20_000, {
-          pingDiagnostics: pingRuntime.diagnostics,
-          pageAfterPing,
-          stagedBootstrapDiagnostics,
-          browserTargetDiagnostics
-        }, {
-          requireInstalled: true
-        })
-      );
-
-      expect(probe.installed).toBe(true);
-      expect(probe.hasPatchSignals).toBe(true);
-      expect(probe.pluginsLength).toBeGreaterThan(0);
-      expect(probe.mimeTypesLength).toBeGreaterThan(0);
-      expect(probe.hasGetBattery).toBe(true);
-      expect(probe.batteryProbeSucceeded).toBe(true);
-      expect(probe.batteryHasExpectedShape).toBe(true);
-      expect(probe.missingRequiredPatches).toEqual([]);
-      if (probe.cdpRecent) {
-        expect(hasInlineScriptCspViolation(probe.cdpRecent)).toBe(false);
-        expect(hasMainWorldBridgeTimeout(probe.cdpRecent)).toBe(false);
-      }
     } catch (error) {
       const failureDiagnostics = await collectRealBrowserFailureDiagnostics({
         cdpPort,
