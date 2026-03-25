@@ -7,18 +7,34 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const extensionRoot = path.join(repoRoot, "extension");
 const manifestPath = path.join(extensionRoot, "manifest.json");
 const backgroundBuildPath = path.join(extensionRoot, "build", "background.js");
+const mainWorldBridgeBuildPath = path.join(extensionRoot, "build", "main-world-bridge.js");
 const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script.js");
 
 describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
       background: { service_worker: string };
-      content_scripts: Array<{ js: string[] }>;
+      content_scripts: Array<{
+        js: string[];
+        run_at?: string;
+        world?: string;
+      }>;
     };
+    const bridgeEntry = manifest.content_scripts.find((entry) =>
+      entry.js.includes("build/main-world-bridge.js"),
+    );
+    const contentScriptEntry = manifest.content_scripts.find((entry) =>
+      entry.js.includes("build/content-script.js"),
+    );
 
     expect(manifest.background.service_worker).toBe("build/background.js");
-    expect(manifest.content_scripts[0]?.js?.[0]).toBe("build/content-script.js");
+    expect(bridgeEntry).toBeDefined();
+    expect(bridgeEntry?.run_at).toBe("document_start");
+    expect(bridgeEntry?.world).toBe("MAIN");
+    expect(contentScriptEntry).toBeDefined();
+    expect(contentScriptEntry?.run_at).toBe("document_start");
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
+    expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);
   });
 
