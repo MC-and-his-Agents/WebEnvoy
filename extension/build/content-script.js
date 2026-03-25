@@ -3,6 +3,10 @@ import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.j
 export { ContentScriptHandler };
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const MAIN_WORLD_INSTALL_TIMEOUT_MS = 800;
+const STARTUP_INSTALL_RETRY_DELAYS_MS = [0, 40, 120];
 const normalizeForwardMessage = (request) => ({
     kind: "forward",
     id: request.id,
@@ -27,18 +31,6 @@ const normalizeForwardMessage = (request) => ({
             ? request.commandParams.fingerprint_context
             : null))
 });
-const readWindowCachedFingerprintContext = () => {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    try {
-        const raw = window.sessionStorage?.getItem(FINGERPRINT_CONTEXT_CACHE_KEY) ?? null;
-        return raw ? JSON.parse(raw) : null;
-    }
-    catch {
-        return null;
-    }
-};
 const readBootstrapFingerprintContext = () => globalThis[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] ?? null;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -118,42 +110,6 @@ const getExtensionStorageArea = () => {
     }
     return area;
 };
-const readExtensionCachedFingerprintContext = async (scopedKey) => {
-    const storageArea = getExtensionStorageArea();
-    const storageGet = storageArea?.get;
-    if (typeof storageGet !== "function") {
-        return null;
-    }
-    return await new Promise((resolve) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            resolve(null);
-        }, 50);
-        const finish = (value) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(timer);
-            resolve(value);
-        };
-        try {
-            const maybePromise = storageGet([scopedKey], (items) => finish(items?.[scopedKey] ?? null));
-            if (maybePromise && typeof maybePromise.then === "function") {
-                maybePromise
-                    .then((items) => finish(items?.[scopedKey] ?? null))
-                    .catch(() => finish(null));
-            }
-        }
-        catch {
-            finish(null);
-        }
-    });
-};
 const persistExtensionFingerprintContext = (normalized, runId) => {
     const storageArea = getExtensionStorageArea();
     if (!storageArea || typeof storageArea.set !== "function") {
@@ -172,47 +128,77 @@ const persistExtensionFingerprintContext = (normalized, runId) => {
         // ignore cache failures
     }
 };
+const hasMainWorldBridgeApi = (candidate) => {
+    const value = candidate;
+    return (!!value &&
+        typeof value.addEventListener === "function" &&
+        typeof value.removeEventListener === "function" &&
+        typeof value.dispatchEvent === "function" &&
+        typeof CustomEvent === "function");
+};
+const createMainWorldRequestId = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `mw-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+const installFingerprintRuntimeInMainWorld = async (normalized) => {
+    if (typeof window === "undefined" || !hasMainWorldBridgeApi(window)) {
+        throw new Error("main world bridge unavailable");
+    }
+    const requestId = createMainWorldRequestId();
+    await new Promise((resolve, reject) => {
+        const listener = (event) => {
+            const detail = asRecord(event.detail);
+            if (!detail || detail.id !== requestId) {
+                return;
+            }
+            clearTimeout(timer);
+            window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
+            if (detail.ok === true) {
+                resolve();
+                return;
+            }
+            reject(new Error(typeof detail.message === "string" ? detail.message : "main world fingerprint install failed"));
+        };
+        const timer = setTimeout(() => {
+            window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
+            reject(new Error("main world bridge response timeout"));
+        }, MAIN_WORLD_INSTALL_TIMEOUT_MS);
+        window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener);
+        window.dispatchEvent(new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
+            detail: {
+                id: requestId,
+                type: "fingerprint-install",
+                payload: {
+                    fingerprint_runtime: normalized
+                }
+            }
+        }));
+    });
+};
+const scheduleStartupFingerprintInstall = (normalized) => {
+    let attempt = 0;
+    const runAttempt = () => {
+        void installFingerprintRuntimeInMainWorld(normalized).catch(() => {
+            attempt += 1;
+            if (attempt >= STARTUP_INSTALL_RETRY_DELAYS_MS.length) {
+                return;
+            }
+            const delay = STARTUP_INSTALL_RETRY_DELAYS_MS[attempt] ?? 0;
+            setTimeout(runAttempt, delay);
+        });
+    };
+    runAttempt();
+};
 export const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
         return false;
     }
     const handler = new ContentScriptHandler();
-    let bootstrapInstalled = false;
-    let bootstrapScopeKey = null;
-    const installBootstrapFingerprintPatch = (fingerprintContext) => {
-        if (bootstrapInstalled) {
-            return;
-        }
-        const normalizedContext = normalizeFingerprintRuntimeContextInput(fingerprintContext);
-        if (!normalizedContext) {
-            return;
-        }
-        bootstrapScopeKey = buildScopedCacheKey(normalizedContext, null);
-        bootstrapInstalled = true;
-        handler.onBackgroundMessage(normalizeForwardMessage({
-            id: "__webenvoy-bootstrap-fingerprint__",
-            runId: "__webenvoy-bootstrap-fingerprint__",
-            command: "runtime.ping",
-            commandParams: {},
-            params: {},
-            timeoutMs: 1_000,
-            cwd: "",
-            fingerprintContext: normalizedContext
-        }));
-    };
-    installBootstrapFingerprintPatch(readBootstrapFingerprintContext());
-    if (bootstrapScopeKey) {
-        const windowCachedContext = readWindowCachedFingerprintContext();
-        if (windowCachedContext !== null) {
-            const normalizedWindowContext = normalizeFingerprintRuntimeContextInput(windowCachedContext);
-            if (normalizedWindowContext &&
-                buildScopedCacheKey(normalizedWindowContext, null) === bootstrapScopeKey) {
-                installBootstrapFingerprintPatch(windowCachedContext);
-            }
-        }
-        void readExtensionCachedFingerprintContext(bootstrapScopeKey).then((cachedContext) => {
-            installBootstrapFingerprintPatch(cachedContext);
-        });
+    const bootstrapContext = normalizeFingerprintRuntimeContextInput(readBootstrapFingerprintContext());
+    if (bootstrapContext) {
+        // Startup install goes directly to main-world bridge; do not proxy through runtime.ping.
+        scheduleStartupFingerprintInstall(bootstrapContext);
+        persistWindowFingerprintContext(bootstrapContext, null);
+        persistExtensionFingerprintContext(bootstrapContext, null);
     }
     handler.onResult((message) => {
         runtime.sendMessage?.(message);

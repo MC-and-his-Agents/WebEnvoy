@@ -13,6 +13,10 @@ export {
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const MAIN_WORLD_INSTALL_TIMEOUT_MS = 800;
+const STARTUP_INSTALL_RETRY_DELAYS_MS = [0, 40, 120] as const;
 
 type ContentScriptStorageArea = {
   get?: (
@@ -47,6 +51,13 @@ type ContentScriptBootstrapHost = {
 type FingerprintRuntimeContext = NonNullable<
   ReturnType<typeof ensureFingerprintRuntimeContext>
 >;
+
+type MainWorldRequestWindow = Window &
+  typeof globalThis & {
+    addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+    removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+    dispatchEvent: (event: Event) => boolean;
+  };
 
 const normalizeForwardMessage = (
   request: Partial<BackgroundToContentMessage> & { id: string }
@@ -205,6 +216,86 @@ const persistExtensionFingerprintContext = (
   }
 };
 
+const hasMainWorldBridgeApi = (candidate: unknown): candidate is MainWorldRequestWindow => {
+  const value = candidate as Partial<MainWorldRequestWindow> | null;
+  return (
+    !!value &&
+    typeof value.addEventListener === "function" &&
+    typeof value.removeEventListener === "function" &&
+    typeof value.dispatchEvent === "function" &&
+    typeof CustomEvent === "function"
+  );
+};
+
+const createMainWorldRequestId = (): string =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `mw-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+
+const installFingerprintRuntimeInMainWorld = async (
+  normalized: FingerprintRuntimeContext
+): Promise<void> => {
+  if (typeof window === "undefined" || !hasMainWorldBridgeApi(window)) {
+    throw new Error("main world bridge unavailable");
+  }
+
+  const requestId = createMainWorldRequestId();
+  await new Promise<void>((resolve, reject) => {
+    const listener = (event: Event): void => {
+      const detail = asRecord((event as CustomEvent<unknown>).detail);
+      if (!detail || detail.id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
+      if (detail.ok === true) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          typeof detail.message === "string" ? detail.message : "main world fingerprint install failed"
+        )
+      );
+    };
+
+    const timer = setTimeout(() => {
+      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
+      reject(new Error("main world bridge response timeout"));
+    }, MAIN_WORLD_INSTALL_TIMEOUT_MS);
+
+    window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
+    window.dispatchEvent(
+      new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
+        detail: {
+          id: requestId,
+          type: "fingerprint-install",
+          payload: {
+            fingerprint_runtime: normalized
+          }
+        }
+      })
+    );
+  });
+};
+
+const scheduleStartupFingerprintInstall = (normalized: FingerprintRuntimeContext): void => {
+  let attempt = 0;
+
+  const runAttempt = (): void => {
+    void installFingerprintRuntimeInMainWorld(normalized).catch(() => {
+      attempt += 1;
+      if (attempt >= STARTUP_INSTALL_RETRY_DELAYS_MS.length) {
+        return;
+      }
+      const delay = STARTUP_INSTALL_RETRY_DELAYS_MS[attempt] ?? 0;
+      setTimeout(runAttempt, delay);
+    });
+  };
+
+  runAttempt();
+};
+
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
   if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
     return false;
@@ -215,7 +306,8 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     readBootstrapFingerprintContext()
   );
   if (bootstrapContext) {
-    // Keep startup bootstrap context as cache only. Do not auto-trigger fingerprint patch install.
+    // Startup install goes directly to main-world bridge; do not proxy through runtime.ping.
+    scheduleStartupFingerprintInstall(bootstrapContext);
     persistWindowFingerprintContext(bootstrapContext, null);
     persistExtensionFingerprintContext(bootstrapContext, null);
   }

@@ -436,6 +436,12 @@ const isFingerprintRuntimeContextEquivalent = (
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
+const TRUST_PRIMING_COMMANDS = new Set([
+  "runtime.ping",
+  "runtime.start",
+  "runtime.login",
+  "runtime.status"
+]);
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -971,7 +977,8 @@ class ChromeBackgroundBridge {
     if (!ok) {
       return;
     }
-    if (String(request.params.command ?? "") !== "runtime.ping") {
+    const command = String(request.params.command ?? "");
+    if (!TRUST_PRIMING_COMMANDS.has(command)) {
       return;
     }
     const profile = asNonEmptyString(request.profile);

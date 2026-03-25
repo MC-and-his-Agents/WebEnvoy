@@ -357,19 +357,6 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
       },
       fingerprintContext
     );
-    if (XHS_LIVE_EXECUTION_MODES.has(gate.requestedExecutionMode)) {
-      await bridge.runtimePing({
-        runId: context.run_id,
-        profile: context.profile,
-        cwd: context.cwd,
-        params: appendFingerprintContext(
-          {
-            requested_execution_mode: gate.requestedExecutionMode
-          },
-          fingerprintContext
-        )
-      });
-    }
     const bridgeResult = await bridge.runCommand({
       runId: context.run_id,
       profile: context.profile,

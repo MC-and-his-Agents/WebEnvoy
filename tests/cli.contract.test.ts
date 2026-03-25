@@ -1387,7 +1387,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("prewarms runtime.ping with same run_id before live xhs.search on native transport", async () => {
+  it("sends live xhs.search directly without hidden runtime.ping prewarm on native transport", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const nativeHostPath = path.join(runtimeCwd, "native-host-live-prewarm.cjs");
     const tracePath = path.join(runtimeCwd, "native-host-live-prewarm-trace.json");
@@ -1397,7 +1397,6 @@ describe("webenvoy cli contract", () => {
 const { writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
-const trusted = new Set();
 const forwards = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
 
@@ -1475,38 +1474,21 @@ const onRequest = (request) => {
     profile
   });
 
-  if (command === "runtime.ping") {
+  if (command === "xhs.search") {
     const fingerprintContext = request.params?.command_params?.fingerprint_context ?? null;
     if (!fingerprintContext) {
       emit({
         id: request.id,
         status: "error",
         summary: {},
-        error: { code: "ERR_EXECUTION_FAILED", message: "fingerprint_context missing on ping" }
-      });
-      writeTrace();
-      process.exit(0);
-      return;
-    }
-    trusted.add(profile + "::" + runId);
-    emit(success(request, { message: "pong", fingerprint_runtime: fingerprintContext }));
-    return;
-  }
-
-  if (command === "xhs.search") {
-    if (!trusted.has(profile + "::" + runId)) {
-      emit({
-        id: request.id,
-        status: "error",
-        summary: {},
         error: {
           code: "ERR_EXECUTION_FAILED",
-          message: "fingerprint_context is not trusted"
+          message: "fingerprint_context missing on xhs.search"
         },
         payload: {
           details: {
             stage: "execution",
-            reason: "FINGERPRINT_CONTEXT_UNTRUSTED"
+            reason: "FINGERPRINT_CONTEXT_MISSING"
           }
         }
       });
@@ -1514,7 +1496,6 @@ const onRequest = (request) => {
       process.exit(0);
       return;
     }
-
     emit(
       success(request, {
         summary: {
@@ -1560,7 +1541,7 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-live-prewarm-001";
+    const runId = "run-contract-xhs-live-direct-001";
     const profile = "xhs_account_001";
     const result = runCli([
       "xhs.search",
@@ -1621,11 +1602,6 @@ process.stdin.on("data", (chunk) => {
       forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
     };
     expect(trace.forwards).toEqual([
-      {
-        command: "runtime.ping",
-        run_id: runId,
-        profile
-      },
       {
         command: "xhs.search",
         run_id: runId,

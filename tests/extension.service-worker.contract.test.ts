@@ -1745,6 +1745,99 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("allows first live mode when trust comes from runtime.start fingerprint contract", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-trusted-by-runtime-start-001";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+    const runtimeStartRequestId = `${runId}-start`;
+
+    firstPort.onMessageListeners[0]?.({
+      id: runtimeStartRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "runtime.start",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runtimeStartRequestId,
+        ok: true,
+        payload: {
+          message: "runtime started",
+          run_id: runId,
+          profile,
+          fingerprint_runtime: fingerprintContext
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const liveRequestId = `${runId}-live`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search",
+        fingerprintContext
+      })
+    );
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string })
+      .find((message) => message.id === liveRequestId && message.status === "error");
+    expect(blocked).toBeUndefined();
+  });
+
   it("invalidates trusted fingerprint context after disconnect/recovery with new session", async () => {
     const firstPort = createMockPort();
     const secondPort = createMockPort();
