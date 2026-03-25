@@ -119,7 +119,6 @@ const SUPERVISOR_STATE_WAIT_ATTEMPTS = 40;
 const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
 const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
 const EXTENSION_BOOTSTRAP_PARAMS_KEY = "extensionBootstrap";
-const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const CONTENT_SCRIPT_ENTRY_PATH = "build/content-script.js";
 const EXTENSION_BOOTSTRAP_SCRIPT_PATH = `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`;
 const SHARED_FINGERPRINT_PROFILE_PATH = "fingerprint-profile.js";
@@ -518,10 +517,99 @@ const resolveExtensionBootstrapPayload = (input: BrowserLaunchInput): Record<str
   return fromParams ? { ...fromParams } : null;
 };
 
+const resolveBootstrapInstallRuntime = (
+  extensionBootstrap: Record<string, unknown> | null
+): Record<string, unknown> | null => {
+  const runtimeRecord = asRecord(extensionBootstrap?.fingerprint_runtime ?? extensionBootstrap);
+  if (!runtimeRecord) {
+    return null;
+  }
+  const patchManifest = asRecord(runtimeRecord.fingerprint_patch_manifest ?? null);
+  const bundle = asRecord(runtimeRecord.fingerprint_profile_bundle ?? null);
+  const batteryRecord = asRecord(bundle?.battery ?? null);
+  const batteryLevel =
+    typeof batteryRecord?.level === "number" && Number.isFinite(batteryRecord.level)
+      ? batteryRecord.level
+      : null;
+  const batteryCharging =
+    typeof batteryRecord?.charging === "boolean" ? batteryRecord.charging : null;
+  const audioNoiseSeed =
+    typeof bundle?.audioNoiseSeed === "number" && Number.isFinite(bundle.audioNoiseSeed)
+      ? bundle.audioNoiseSeed
+      : null;
+
+  return {
+    fingerprint_patch_manifest: {
+      required_patches: Array.isArray(patchManifest?.required_patches)
+        ? patchManifest.required_patches.filter((entry): entry is string => typeof entry === "string")
+        : []
+    },
+    fingerprint_profile_bundle: {
+      ...(audioNoiseSeed === null ? {} : { audioNoiseSeed }),
+      ...(batteryLevel === null || batteryCharging === null
+        ? {}
+        : { battery: { level: batteryLevel, charging: batteryCharging } })
+    }
+  };
+};
+
 const buildBootstrapScriptSource = (payload: Record<string, unknown> | null): string =>
   [
     "(() => {",
-    `  globalThis["${FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY}"] = ${JSON.stringify(payload)};`,
+    `  const bootstrapPayload = ${JSON.stringify(payload)};`,
+    "  const asRecord = (value) =>",
+    "    typeof value === \"object\" && value !== null && !Array.isArray(value) ? value : null;",
+    "  const asStringArray = (value) =>",
+    "    Array.isArray(value) ? value.filter((entry) => typeof entry === \"string\") : [];",
+    "  const asNumber = (value) => (typeof value === \"number\" && Number.isFinite(value) ? value : null);",
+    "  const asBoolean = (value) => (typeof value === \"boolean\" ? value : null);",
+    "  const runtimeRecord = asRecord(bootstrapPayload);",
+    "  if (!runtimeRecord) {",
+    "    return;",
+    "  }",
+    "  const fingerprintRuntime = asRecord(runtimeRecord.fingerprint_runtime);",
+    "  if (!fingerprintRuntime) {",
+    "    return;",
+    "  }",
+    "  const patchManifest = asRecord(fingerprintRuntime.fingerprint_patch_manifest);",
+    "  const bundle = asRecord(fingerprintRuntime.fingerprint_profile_bundle);",
+    "  const batteryRecord = asRecord(bundle?.battery ?? null);",
+    "  const batteryLevel = asNumber(batteryRecord?.level);",
+    "  const batteryCharging = asBoolean(batteryRecord?.charging);",
+    "  const audioNoiseSeed = asNumber(bundle?.audioNoiseSeed);",
+    "  const installRuntime = {",
+    "    fingerprint_patch_manifest: {",
+    "      required_patches: asStringArray(patchManifest?.required_patches)",
+    "    },",
+    "    fingerprint_profile_bundle: {",
+    "      ...(audioNoiseSeed === null ? {} : { audioNoiseSeed }),",
+    "      ...(batteryLevel === null || batteryCharging === null",
+    "        ? {}",
+    "        : { battery: { level: batteryLevel, charging: batteryCharging } })",
+    "    }",
+    "  };",
+    "  if (typeof window === \"undefined\" || typeof CustomEvent !== \"function\") {",
+    "    return;",
+    "  }",
+    "  if (typeof window.dispatchEvent !== \"function\") {",
+    "    return;",
+    "  }",
+    "  const requestEvent = \"__webenvoy_main_world_request__\";",
+    "  const requestId =",
+    "    typeof crypto !== \"undefined\" && typeof crypto.randomUUID === \"function\"",
+    "      ? crypto.randomUUID()",
+    "      : `startup-fingerprint-install-${Date.now()}`;",
+    "  window.dispatchEvent(",
+    "    new CustomEvent(requestEvent, {",
+    "      detail: {",
+    "        id: requestId,",
+    "        type: \"fingerprint-install\",",
+    "        payload: {",
+    "          fingerprint_runtime: installRuntime",
+    "        }",
+    "      }",
+    "    })",
+    "  );",
     "})();",
     ""
   ].join("\n");
@@ -733,13 +821,16 @@ const stageExtensionForRun = async (input: {
   await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
 
   const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
-  const bootstrapScriptPayload = {
-    ...(input.extensionBootstrap ?? {}),
-    run_id: input.runId
-  };
+  const bootstrapScriptPayload = resolveBootstrapInstallRuntime(input.extensionBootstrap);
   await writeFile(
     bootstrapScriptPath,
-    buildBootstrapScriptSource(bootstrapScriptPayload),
+    buildBootstrapScriptSource(
+      bootstrapScriptPayload
+        ? {
+            fingerprint_runtime: bootstrapScriptPayload
+          }
+        : null
+    ),
     "utf8"
   );
   await rewriteStagedContentScriptForRuntime({

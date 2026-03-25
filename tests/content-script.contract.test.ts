@@ -5,7 +5,6 @@ import { ContentScriptHandler, bootstrapContentScript } from "../extension/conte
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -176,7 +175,8 @@ const createRuntime = () => {
           listener = callback;
         }
       },
-      sendMessage: vi.fn()
+      sendMessage: vi.fn(),
+      getURL: vi.fn((path: string) => `chrome-extension://unit-test/${path}`)
     },
     dispatch(message: unknown) {
       listener?.(message);
@@ -261,6 +261,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete (globalThis as { window?: unknown }).window;
   delete (globalThis as { chrome?: unknown }).chrome;
+  delete (globalThis as { fetch?: unknown }).fetch;
   delete (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY];
 });
 
@@ -323,15 +324,20 @@ describe("content-script bootstrap contract", () => {
           startup_fingerprint_trust: expect.objectContaining({
             run_id: "run-bootstrap-001",
             profile: "profile-a",
-            trusted: true,
-            install_state: expect.objectContaining({
-              status: "installed",
-              installed: true
-            })
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
           })
         }
       })
     );
+    const startupTrustMessage = (
+      runtime.sendMessage as unknown as { mock: { calls: Array<[unknown]> } }
+    ).mock.calls[0]?.[0];
+    const startupTrustPayload = asRecord(asRecord(startupTrustMessage)?.payload);
+    const startupTrust = asRecord(startupTrustPayload?.startup_fingerprint_trust);
+    expect(startupTrust?.trusted).toBeUndefined();
+    expect(startupTrust?.install_state).toBeUndefined();
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
@@ -405,6 +411,54 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(1);
     expect(runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("loads startup fingerprint truth-source from extension bootstrap json when page global payload is absent", async () => {
+    const context = createFingerprintContext();
+    const scopedKey = buildScopedCacheKey(context, "run-bootstrap-fetch-001");
+    const sessionStorage = createSessionStorage();
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
+    const extensionStorage = createExtensionStorageArea();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        extension_bootstrap: {
+          run_id: "run-bootstrap-fetch-001",
+          fingerprint_runtime: context
+        }
+      })
+    }));
+    (globalThis as { fetch?: unknown }).fetch = fetchMock;
+    (globalThis as { window?: unknown }).window = window;
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: {
+        session: extensionStorage
+      }
+    };
+
+    const { runtime } = createRuntime();
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "chrome-extension://unit-test/__webenvoy_fingerprint_bootstrap.json"
+    );
+    expect(startupInstallRequests).toHaveLength(1);
+    expect(extensionStorage.read(scopedKey)).toMatchObject({
+      profile: "profile-a",
+      source: "profile_meta"
+    });
+    expect(runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "startup-fingerprint-trust:run-bootstrap-fetch-001",
+        ok: true
+      })
+    );
   });
 
   it("persists normalized fingerprint context from forwarded messages", () => {

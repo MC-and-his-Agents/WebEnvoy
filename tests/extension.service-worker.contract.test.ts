@@ -95,14 +95,6 @@ const primeTrustedFingerprintContext = async (input: {
   sessionId?: string;
   tabId?: number;
 }) => {
-  const requiredPatches = Array.isArray(
-    (asRecord(input.fingerprintContext.fingerprint_patch_manifest) ?? {}).required_patches
-  )
-    ? (
-        (asRecord(input.fingerprintContext.fingerprint_patch_manifest) ?? {})
-          .required_patches as unknown[]
-      ).filter((entry): entry is string => typeof entry === "string")
-    : [];
   input.runtimeMessageListeners[0]?.(
     {
       kind: "result",
@@ -113,23 +105,10 @@ const primeTrustedFingerprintContext = async (input: {
           run_id: input.runId,
           profile: input.profile,
           session_id: input.sessionId ?? "nm-session-001",
-          trusted: true,
-          fingerprint_runtime: {
-            ...input.fingerprintContext,
-            injection: {
-              installed: true,
-              required_patches: requiredPatches,
-              applied_patches: requiredPatches,
-              missing_required_patches: []
-            }
-          },
-          install_state: {
-            status: "installed",
-            installed: true,
-            required_patches: requiredPatches,
-            applied_patches: requiredPatches,
-            missing_required_patches: []
-          }
+          fingerprint_runtime: input.fingerprintContext,
+          trust_source: "extension_bootstrap_context",
+          bootstrap_attested: true,
+          main_world_result_used_for_trust: false
         }
       }
     },
@@ -1782,23 +1761,10 @@ describe("extension service worker recovery contract", () => {
             run_id: startupRunId,
             profile,
             session_id: "nm-session-001",
-            trusted: true,
-            fingerprint_runtime: {
-              ...fingerprintContext,
-              injection: {
-                installed: true,
-                required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
-                applied_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
-                missing_required_patches: []
-              }
-            },
-            install_state: {
-              status: "installed",
-              installed: true,
-              required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
-              applied_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
-              missing_required_patches: []
-            }
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
           }
         }
       },
@@ -1945,6 +1911,99 @@ describe("extension service worker recovery contract", () => {
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
     );
+  });
+
+  it("keeps trusted fingerprint context after disconnect/recovery in the same session", async () => {
+    const firstPort = createMockPort();
+    const secondPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort, secondPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi, {
+      heartbeatIntervalMs: 10_000,
+      recoveryRetryIntervalMs: 5,
+      recoveryWindowMs: 100
+    });
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const profile = "profile-a";
+    const startupRunId = "run-xhs-live-recovery-keep-trust-startup-001";
+    const liveRunId = "run-xhs-live-recovery-keep-trust-live-002";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: startupRunId,
+      profile,
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onDisconnectListeners[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    respondHandshake(secondPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    secondPort.onMessageListeners[0]?.({
+      id: liveRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
+    );
+    expect(liveDispatch).toBeDefined();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRunId,
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const allowed = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string })
+      .find((message) => message.id === liveRunId);
+    expect(allowed?.status).toBe("success");
   });
 
   it("reuses startup trust across new run_id in the same session for live xhs.search", async () => {

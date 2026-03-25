@@ -1014,6 +1014,33 @@ const waitForFingerprintProbe = async (
               const pluginsLength = typeof navigator.plugins?.length === "number" ? navigator.plugins.length : -1;
               const mimeTypesLength = typeof navigator.mimeTypes?.length === "number" ? navigator.mimeTypes.length : -1;
               const hasGetBattery = typeof navigator.getBattery === "function";
+              const OfflineCtor =
+                typeof window.OfflineAudioContext === "function"
+                  ? window.OfflineAudioContext
+                  : typeof window.webkitOfflineAudioContext === "function"
+                    ? window.webkitOfflineAudioContext
+                    : null;
+              const hasOfflineAudioContext = typeof OfflineCtor === "function";
+              let audioProbeSucceeded = false;
+              let audioFirstSample = null;
+              let audioPatchedByNoise = false;
+              let audioProbeError = null;
+              if (hasOfflineAudioContext && OfflineCtor) {
+                try {
+                  const offline = new OfflineCtor(1, 256, 44_100);
+                  const rendered = await offline.startRendering();
+                  const channelData = rendered?.getChannelData?.(0);
+                  if (channelData && typeof channelData.length === "number" && channelData.length > 0) {
+                    audioProbeSucceeded = true;
+                    const firstSample = Number(channelData[0]);
+                    audioFirstSample = Number.isFinite(firstSample) ? firstSample : null;
+                    audioPatchedByNoise =
+                      Number.isFinite(firstSample) && Math.abs(firstSample) > 1e-12;
+                  }
+                } catch (error) {
+                  audioProbeError = error instanceof Error ? error.message : String(error);
+                }
+              }
               let batteryProbeSucceeded = false;
               let batteryHasExpectedShape = false;
               let batteryProbeError = null;
@@ -1031,18 +1058,22 @@ const waitForFingerprintProbe = async (
                 }
               }
               const requiredPatches = [
+                "audio_context.firstSampleNoised",
                 "navigator.plugins.length>0",
                 "navigator.mimeTypes.length>0",
                 "navigator.getBattery()",
                 "battery shape"
               ];
               const missingRequiredPatches = [
+                ...(audioProbeSucceeded && audioPatchedByNoise ? [] : ["audio_context.firstSampleNoised"]),
                 ...(pluginsLength > 0 ? [] : ["navigator.plugins.length>0"]),
                 ...(mimeTypesLength > 0 ? [] : ["navigator.mimeTypes.length>0"]),
                 ...(hasGetBattery ? [] : ["navigator.getBattery()"]),
                 ...(batteryProbeSucceeded && batteryHasExpectedShape ? [] : ["battery shape"])
               ];
               const hasPatchSignals =
+                audioProbeSucceeded &&
+                audioPatchedByNoise &&
                 pluginsLength > 0 &&
                 mimeTypesLength > 0 &&
                 hasGetBattery &&
@@ -1055,6 +1086,11 @@ const waitForFingerprintProbe = async (
                 missingRequiredPatches,
                 pluginsLength,
                 mimeTypesLength,
+                hasOfflineAudioContext,
+                audioProbeSucceeded,
+                audioFirstSample,
+                audioPatchedByNoise,
+                audioProbeError,
                 hasGetBattery,
                 batteryProbeSucceeded,
                 batteryHasExpectedShape,
@@ -1205,6 +1241,7 @@ describe("fingerprint runtime real browser integration", () => {
               error: "profileDir missing from runtime.start summary"
             };
       expect(stagedBootstrapDiagnostics.manifestInjectsMainWorldBridgeScript).toBe(true);
+      expect(stagedBootstrapDiagnostics.bootstrapScriptContainsPayloadKey).toBe(false);
 
       const browserWsUrl = await runStage(stageState, "resolve-browser-target-ws-url", async () =>
         waitForBrowserWebSocketUrl(cdpPort, 20_000)
@@ -1277,6 +1314,9 @@ describe("fingerprint runtime real browser integration", () => {
       );
       expect(startupProbe.installed).toBe(true);
       expect(startupProbe.hasPatchSignals).toBe(true);
+      expect(startupProbe.hasOfflineAudioContext).toBe(true);
+      expect(startupProbe.audioProbeSucceeded).toBe(true);
+      expect(startupProbe.audioPatchedByNoise).toBe(true);
       expect(startupProbe.pluginsLength).toBeGreaterThan(0);
       expect(startupProbe.mimeTypesLength).toBeGreaterThan(0);
       expect(startupProbe.hasGetBattery).toBe(true);

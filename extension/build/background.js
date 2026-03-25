@@ -59,6 +59,7 @@ const XHS_GATE_CONTRACT_MARKERS = {
     session_rhythm_policy: "session_rhythm_policy",
     session_rhythm: "session_rhythm"
 };
+const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAX_TRUSTED_FINGERPRINT_CONTEXTS = 64;
 const XHS_PLUGIN_GATE_OWNERSHIP = {
     background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
@@ -516,7 +517,6 @@ class ChromeBackgroundBridge {
         this.#pendingHandshakeId = null;
         this.#pendingHeartbeatId = null;
         this.#missedHeartbeatCount = 0;
-        this.#clearTrustedFingerprintContexts();
         this.#failAllPending({
             code: "ERR_TRANSPORT_DISCONNECTED",
             message
@@ -566,7 +566,7 @@ class ChromeBackgroundBridge {
             ? response.summary.session_id
             : this.#sessionId;
         this.#sessionId = sessionId;
-        if (sessionId !== prevSessionId || this.#state !== "ready") {
+        if (sessionId !== prevSessionId) {
             this.#clearTrustedFingerprintContexts();
         }
         this.#state = "ready";
@@ -603,7 +603,6 @@ class ChromeBackgroundBridge {
     }
     #enterRecovery(message) {
         const recoveryWindowMs = this.options?.recoveryWindowMs ?? 30_000;
-        this.#clearTrustedFingerprintContexts();
         this.#state = "recovering";
         this.#recoveryDeadlineMs = Date.now() + recoveryWindowMs;
         this.#startRecoveryLoop();
@@ -710,10 +709,14 @@ class ChromeBackgroundBridge {
         if (!startupTrust) {
             return;
         }
-        const installState = asRecord(startupTrust.install_state);
-        const trustedByFlag = startupTrust.trusted === true;
-        const trustedByInstallState = installState?.installed === true || installState?.status === "installed";
-        if (!trustedByFlag && !trustedByInstallState) {
+        const trustSource = asNonEmptyString(startupTrust.trust_source ?? startupTrust.source);
+        if (trustSource !== STARTUP_TRUST_SOURCE) {
+            return;
+        }
+        if (startupTrust.bootstrap_attested !== true) {
+            return;
+        }
+        if (startupTrust.main_world_result_used_for_trust === true) {
             return;
         }
         const profile = asNonEmptyString(startupTrust.profile);
@@ -724,7 +727,11 @@ class ChromeBackgroundBridge {
         if (!fingerprintRuntime || fingerprintRuntime.profile !== profile) {
             return;
         }
-        const sessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId) ?? this.#sessionId;
+        const explicitSessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId);
+        if (explicitSessionId && explicitSessionId !== this.#sessionId) {
+            return;
+        }
+        const sessionId = explicitSessionId ?? this.#sessionId;
         this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
     }
     #normalizeTrustedFingerprintRuntime(fingerprintRuntime) {

@@ -271,8 +271,12 @@ describe("browser-launcher", () => {
       join(stagedExtensionPath as string, "build", EXTENSION_BOOTSTRAP_SCRIPT_FILENAME),
       "utf8"
     );
-    expect(bootstrapScriptRaw).toContain("__webenvoy_fingerprint_bootstrap_payload__");
-    expect(bootstrapScriptRaw).toContain("unit-test-agent");
+    expect(bootstrapScriptRaw).not.toContain("__webenvoy_fingerprint_bootstrap_payload__");
+    expect(bootstrapScriptRaw).toContain("__webenvoy_main_world_request__");
+    expect(bootstrapScriptRaw).toContain("fingerprint-install");
+    expect(bootstrapScriptRaw).not.toContain("__webenvoy_main_world_result__");
+    expect(bootstrapScriptRaw).not.toContain("startup-fingerprint-trust:");
+    expect(bootstrapScriptRaw).not.toContain("unit-test-agent");
     const bundledContentScriptRaw = await readFile(
       join(stagedExtensionPath as string, "build", "content-script.js"),
       "utf8"
