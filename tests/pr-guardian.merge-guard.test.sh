@@ -32,13 +32,30 @@ set -euo pipefail
 
 echo "$*" >> "${MOCK_GH_CALLS_LOG:?missing MOCK_GH_CALLS_LOG}"
 
+pop_pr_view_response() {
+  local line
+  line="$(sed -n '1p' "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:?missing MOCK_GH_PR_VIEW_SEQUENCE_FILE}")"
+  tail -n +2 "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}.next"
+  mv "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}.next" "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  printf '%s\n' "${line}"
+}
+
 if [[ "${1:-}" == "pr" && "${2:-}" == "checks" ]]; then
   cat "${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}"
   exit 0
 fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
-  cat "${MOCK_GH_PR_VIEW_JSON:?missing MOCK_GH_PR_VIEW_JSON}"
+  if [[ -n "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" ]]; then
+    pop_pr_view_response
+  else
+    cat "${MOCK_GH_PR_VIEW_JSON:?missing MOCK_GH_PR_VIEW_JSON}"
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "review" ]]; then
+  echo "$*" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
   exit 0
 fi
 
@@ -87,14 +104,14 @@ EOF
 }
 
 assert_pass() {
-  if ! "$@"; then
+  if ! ( "$@" ); then
     echo "expected command to pass: $*" >&2
     exit 1
   fi
 }
 
 assert_fail() {
-  if "$@"; then
+  if ( "$@" ); then
     echo "expected command to fail: $*" >&2
     exit 1
   fi
@@ -105,6 +122,14 @@ assert_file_contains() {
   local expected="$2"
   if ! grep -Fq -- "${expected}" "${file}"; then
     echo "expected '${expected}' in ${file}" >&2
+    exit 1
+  fi
+}
+
+assert_file_empty() {
+  local file="$1"
+  if [[ -s "${file}" ]]; then
+    echo "expected ${file} to be empty" >&2
     exit 1
   fi
 }
@@ -121,13 +146,17 @@ setup_case_dir() {
 
   MOCK_GH_CALLS_LOG="${case_dir}/gh.calls.log"
   MOCK_GH_MERGE_LOG="${case_dir}/gh.merge.log"
+  MOCK_GH_REVIEW_LOG="${case_dir}/gh.review.log"
   : > "${MOCK_GH_CALLS_LOG}"
   : > "${MOCK_GH_MERGE_LOG}"
+  : > "${MOCK_GH_REVIEW_LOG}"
   export MOCK_GH_CALLS_LOG
   export MOCK_GH_MERGE_LOG
+  export MOCK_GH_REVIEW_LOG
 
   MOCK_GH_REVIEWS_REQUIRE_PAGINATE=0
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
+  unset MOCK_GH_PR_VIEW_SEQUENCE_FILE || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -151,6 +180,9 @@ setup_merge_if_safe_fixture() {
   local require_paginate="${6:-0}"
 
   setup_case_dir "${case_name}"
+
+  HEAD_SHA="head-sha-123"
+  export HEAD_SHA
 
   RESULT_FILE="${TMP_DIR}/review.json"
   printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true}' > "${RESULT_FILE}"
@@ -211,6 +243,40 @@ test_merge_if_safe_finds_head_review_across_paginated_reviews() {
   assert_file_contains "${MOCK_GH_CALLS_LOG}" "--paginate"
 }
 
+test_post_review_fails_when_head_changes_after_review_snapshot() {
+  setup_merge_if_safe_fixture \
+    "post-review-head-drift" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  MOCK_GH_PR_VIEW_SEQUENCE_FILE="${TEST_TMP_DIR}/post-review-head-drift/mock/pr-view-seq.jsonl"
+  printf '%s\n' '{"headRefOid":"head-sha-999"}' > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  export MOCK_GH_PR_VIEW_SEQUENCE_FILE
+
+  assert_fail post_review 274
+  assert_file_empty "${MOCK_GH_REVIEW_LOG}"
+}
+
+test_merge_if_safe_fails_when_head_changes_after_review_snapshot() {
+  setup_merge_if_safe_fixture \
+    "merge-head-drift" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  MOCK_GH_PR_VIEW_SEQUENCE_FILE="${TEST_TMP_DIR}/merge-head-drift/mock/pr-view-seq.jsonl"
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-999","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  export MOCK_GH_PR_VIEW_SEQUENCE_FILE
+
+  assert_fail merge_if_safe 274 0
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -221,6 +287,8 @@ main() {
 
   test_merge_if_safe_without_post_review_respects_comment_contract
   test_merge_if_safe_finds_head_review_across_paginated_reviews
+  test_post_review_fails_when_head_changes_after_review_snapshot
+  test_merge_if_safe_fails_when_head_changes_after_review_snapshot
 
   echo "pr-guardian merge-guard semantics test passed."
 }

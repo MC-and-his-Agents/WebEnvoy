@@ -246,11 +246,27 @@ post_review() {
   local verdict
   local current_user
 
+  assert_pr_head_matches_snapshot "${pr_number}" "回写 review 前检测到 PR HEAD 已变化"
+
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   current_user="$(gh api user --jq '.login')"
 
   post_inline_comments "${pr_number}"
   submit_review_event "${pr_number}" "${verdict}" "${current_user}"
+}
+
+assert_pr_head_matches_snapshot() {
+  local pr_number="$1"
+  local reason="$2"
+  local current_head_sha
+  local head_meta_file="${TMP_DIR}/head-check.json"
+
+  gh pr view "${pr_number}" --json headRefOid > "${head_meta_file}"
+  current_head_sha="$(jq -r '.headRefOid' "${head_meta_file}")"
+
+  if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
+    die "${reason}：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
+  fi
 }
 
 post_inline_comments() {
@@ -392,6 +408,10 @@ merge_if_safe() {
   is_draft="$(jq -r '.isDraft' "${current_meta_file}")"
   expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${current_user}")"
 
+  if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
+    die "合并前检测到 PR HEAD 已变化：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
+  fi
+
   [[ "${current_base_ref}" == "main" ]] || die "仅允许合并到 main，当前 base: ${current_base_ref}"
   [[ "${is_draft}" == "false" ]] || die "PR 仍是 Draft，拒绝合并。"
   [[ "${verdict}" == "APPROVE" ]] || die "Codex 审查未批准，拒绝合并。"
@@ -400,8 +420,8 @@ merge_if_safe() {
   [[ "${merge_state_status}" == "CLEAN" || "${merge_state_status}" == "HAS_HOOKS" || "${merge_state_status}" == "UNSTABLE" ]] \
     || die "GitHub mergeStateStatus 阻断合并，状态为: ${merge_state_status}"
 
-  if ! head_has_expected_review_state "${pr_number}" "${current_head_sha}" "${current_user}" "${expected_review_state}"; then
-    die "当前 HEAD (${current_head_sha}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}），拒绝合并。"
+  if ! head_has_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}），拒绝合并。"
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then
@@ -409,9 +429,9 @@ merge_if_safe() {
   fi
 
   if [[ "${delete_branch}" == "1" ]]; then
-    gh pr merge "${pr_number}" --squash --delete-branch --match-head-commit "${current_head_sha}"
+    gh pr merge "${pr_number}" --squash --delete-branch --match-head-commit "${HEAD_SHA}"
   else
-    gh pr merge "${pr_number}" --squash --match-head-commit "${current_head_sha}"
+    gh pr merge "${pr_number}" --squash --match-head-commit "${HEAD_SHA}"
   fi
 }
 
