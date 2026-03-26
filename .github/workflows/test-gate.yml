@@ -4,6 +4,12 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'code_review.md'
+      - 'scripts/pr-guardian.sh'
+      - 'scripts/merge-pr.sh'
+      - '.github/workflows/test-gate.yml'
 
 jobs:
   test:
