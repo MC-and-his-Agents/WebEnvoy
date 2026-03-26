@@ -241,6 +241,30 @@ head_has_expected_review_state() {
     )' "${reviews_file}" >/dev/null 2>&1
 }
 
+wait_for_expected_review_state() {
+  local pr_number="$1"
+  local head_sha="$2"
+  local reviewer="$3"
+  local expected_state="$4"
+  local max_attempts="${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_REVIEW_STATE_RETRY_DELAY_SECONDS:-1}"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if head_has_expected_review_state "${pr_number}" "${head_sha}" "${reviewer}" "${expected_state}"; then
+      return 0
+    fi
+
+    if (( attempt < max_attempts )); then
+      sleep "${retry_delay_seconds}"
+    fi
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
 post_review() {
   local pr_number="$1"
   local verdict
@@ -428,8 +452,8 @@ merge_if_safe() {
       ;;
   esac
 
-  if ! head_has_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
-    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}），拒绝合并。"
+  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then

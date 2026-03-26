@@ -32,11 +32,12 @@ set -euo pipefail
 
 echo "$*" >> "${MOCK_GH_CALLS_LOG:?missing MOCK_GH_CALLS_LOG}"
 
-pop_pr_view_response() {
+pop_sequence_response_line() {
+  local sequence_file="$1"
   local line
-  line="$(sed -n '1p' "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:?missing MOCK_GH_PR_VIEW_SEQUENCE_FILE}")"
-  tail -n +2 "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}.next"
-  mv "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}.next" "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  line="$(sed -n '1p' "${sequence_file}")"
+  tail -n +2 "${sequence_file}" > "${sequence_file}.next"
+  mv "${sequence_file}.next" "${sequence_file}"
   printf '%s\n' "${line}"
 }
 
@@ -47,7 +48,7 @@ fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
   if [[ -n "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" ]]; then
-    pop_pr_view_response
+    pop_sequence_response_line "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
   else
     cat "${MOCK_GH_PR_VIEW_JSON:?missing MOCK_GH_PR_VIEW_JSON}"
   fi
@@ -86,6 +87,11 @@ if [[ "${1:-}" == "api" ]]; then
   fi
 
   if [[ "${endpoint}" == repos/:owner/:repo/pulls/*/reviews ]]; then
+    if [[ -n "${MOCK_GH_REVIEWS_SEQUENCE_FILE:-}" && -s "${MOCK_GH_REVIEWS_SEQUENCE_FILE}" ]]; then
+      pop_sequence_response_line "${MOCK_GH_REVIEWS_SEQUENCE_FILE}"
+      exit 0
+    fi
+
     if [[ "${MOCK_GH_REVIEWS_REQUIRE_PAGINATE:-0}" == "1" && "${has_paginate}" != "1" ]]; then
       cat "${MOCK_GH_REVIEWS_FIRST_PAGE_JSON:?missing MOCK_GH_REVIEWS_FIRST_PAGE_JSON}"
     else
@@ -157,6 +163,7 @@ setup_case_dir() {
   MOCK_GH_REVIEWS_REQUIRE_PAGINATE=0
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
   unset MOCK_GH_PR_VIEW_SEQUENCE_FILE || true
+  unset MOCK_GH_REVIEWS_SEQUENCE_FILE || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -313,6 +320,38 @@ test_merge_if_safe_treats_unknown_as_retryable_wait_state() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
+test_merge_if_safe_retries_until_review_state_is_visible() {
+  setup_merge_if_safe_fixture \
+    "merge-review-state-retry" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  MOCK_GH_REVIEWS_SEQUENCE_FILE="${TEST_TMP_DIR}/merge-review-state-retry/mock/reviews-seq.jsonl"
+  {
+    printf '%s\n' '[[{"user":{"login":"other-reviewer"},"commit_id":"head-sha-123","state":"APPROVED"}]]'
+    printf '%s\n' '[[{"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED"}]]'
+  } > "${MOCK_GH_REVIEWS_SEQUENCE_FILE}"
+  export MOCK_GH_REVIEWS_SEQUENCE_FILE
+
+  PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS=2
+  PR_GUARDIAN_REVIEW_STATE_RETRY_DELAY_SECONDS=0
+  export PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS
+  export PR_GUARDIAN_REVIEW_STATE_RETRY_DELAY_SECONDS
+
+  assert_pass merge_if_safe 274 0
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+
+  local review_calls
+  review_calls="$(grep -c "repos/:owner/:repo/pulls/274/reviews" "${MOCK_GH_CALLS_LOG}")"
+  if [[ "${review_calls}" -lt 2 ]]; then
+    echo "expected merge_if_safe to retry review-state check at least once" >&2
+    exit 1
+  fi
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -327,6 +366,7 @@ main() {
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_treats_behind_as_retryable_wait_state
   test_merge_if_safe_treats_unknown_as_retryable_wait_state
+  test_merge_if_safe_retries_until_review_state_is_visible
 
   echo "pr-guardian merge-guard semantics test passed."
 }

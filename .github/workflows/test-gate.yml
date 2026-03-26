@@ -39,10 +39,17 @@ jobs:
           done
 
           process_only="yes"
+          workflow_changed="no"
           if [ "${#changed_files[@]}" -eq 0 ]; then
             process_only="no"
           else
             for file in "${changed_files[@]}"; do
+              case "$file" in
+                .github/workflows/*.yml|.github/workflows/*.yaml)
+                  workflow_changed="yes"
+                  ;;
+              esac
+
               case "$file" in
                 "AGENTS.md"|\
                 "code_review.md"|\
@@ -60,12 +67,51 @@ jobs:
 
           {
             echo "process_only=$process_only"
+            echo "workflow_changed=$workflow_changed"
             echo "changed_count=${#changed_files[@]}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed files (${#changed_files[@]}):"
           printf '%s\n' "${changed_files[@]}"
           echo "process_only=$process_only"
+
+      - name: Validate Changed Workflows
+        if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
+        run: |
+          set -euo pipefail
+
+          ACTIONLINT_VERSION="1.7.8"
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz actionlint
+
+          mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          workflow_files=()
+          for entry in "${changed_entries[@]}"; do
+            IFS=$'\t' read -r _status path_a path_b <<< "$entry"
+            for candidate in "$path_a" "$path_b"; do
+              if [ -z "${candidate:-}" ]; then
+                continue
+              fi
+              case "$candidate" in
+                .github/workflows/*.yml|.github/workflows/*.yaml)
+                  if [ -f "$candidate" ]; then
+                    workflow_files+=("$candidate")
+                  fi
+                  ;;
+              esac
+            done
+          done
+
+          if [ "${#workflow_files[@]}" -eq 0 ]; then
+            echo "No workflow file exists in HEAD to lint (likely deletion-only change)."
+            exit 0
+          fi
+
+          mapfile -t unique_workflow_files < <(printf '%s\n' "${workflow_files[@]}" | awk '!seen[$0]++')
+          echo "Linting workflow files with actionlint:"
+          printf '%s\n' "${unique_workflow_files[@]}"
+
+          ./actionlint -color "${unique_workflow_files[@]}"
 
       - name: Run Process-Only Smoke
         if: ${{ steps.change-scope.outputs.process_only == 'yes' }}
