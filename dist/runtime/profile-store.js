@@ -55,6 +55,13 @@ const resolveBrowserVersionFromResolvedExecutable = async () => {
         return null;
     }
 };
+const resolveRequiredBrowserVersionFromResolvedExecutable = async () => {
+    const browserVersion = await resolveBrowserVersionTruthSource();
+    if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
+        throw new Error("Browser version truth-source unavailable");
+    }
+    return browserVersion.browserVersion;
+};
 const withBrowserVersion = (input, browserVersion) => ({ ...input, browserVersion });
 const isLegacyLinuxKernelVersion = (value) => LINUX_KERNEL_VERSION_PATTERN.test(value);
 const migrateLegacyLinuxKernelBundleOsVersion = (meta) => {
@@ -176,6 +183,9 @@ const parseMeta = (raw) => {
     return parsed;
 };
 const buildLegacyBundleMigration = async (input) => {
+    const browserVersion = input.intent === "persistent_upgrade"
+        ? await resolveRequiredBrowserVersionFromResolvedExecutable()
+        : input.browserVersion;
     return markFingerprintProfileBundleAsLegacyBackfilled(withBrowserVersion({
         profileName: input.meta.profileName,
         fingerprintSeeds: input.meta.fingerprintSeeds,
@@ -184,7 +194,7 @@ const buildLegacyBundleMigration = async (input) => {
         migratedAt: input.intent === "persistent_upgrade" ? new Date().toISOString() : input.meta.updatedAt,
         sourceSchemaVersion: input.meta.schemaVersion,
         reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
-    }, input.browserVersion));
+    }, browserVersion));
 };
 export class ProfileStore {
     rootDir;
@@ -260,7 +270,7 @@ export class ProfileStore {
     }
     async initializeMeta(profileName, nowIso) {
         const profileDir = await this.ensureProfileDir(profileName);
-        const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
+        const browserVersion = await resolveRequiredBrowserVersionFromResolvedExecutable();
         const timezone = resolveCurrentTimezone();
         const meta = {
             schemaVersion: 1,

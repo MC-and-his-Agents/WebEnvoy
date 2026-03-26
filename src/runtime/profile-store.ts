@@ -119,6 +119,14 @@ const resolveBrowserVersionFromResolvedExecutable = async (): Promise<string | n
   }
 };
 
+const resolveRequiredBrowserVersionFromResolvedExecutable = async (): Promise<string> => {
+  const browserVersion = await resolveBrowserVersionTruthSource();
+  if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
+    throw new Error("Browser version truth-source unavailable");
+  }
+  return browserVersion.browserVersion;
+};
+
 const withBrowserVersion = <T extends object>(input: T, browserVersion: string | null): T =>
   ({ ...(input as Record<string, unknown>), browserVersion } as T);
 
@@ -268,6 +276,10 @@ const buildLegacyBundleMigration = async (input: {
   timezone: string;
   intent: "transient_backfill" | "persistent_upgrade";
 }): Promise<FingerprintProfileBundle> => {
+  const browserVersion =
+    input.intent === "persistent_upgrade"
+      ? await resolveRequiredBrowserVersionFromResolvedExecutable()
+      : input.browserVersion;
   return markFingerprintProfileBundleAsLegacyBackfilled(
     withBrowserVersion(
       {
@@ -280,7 +292,7 @@ const buildLegacyBundleMigration = async (input: {
         sourceSchemaVersion: input.meta.schemaVersion,
         reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
       },
-      input.browserVersion
+      browserVersion
     )
   );
 };
@@ -369,7 +381,7 @@ export class ProfileStore {
 
   async initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta> {
     const profileDir = await this.ensureProfileDir(profileName);
-    const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
+    const browserVersion = await resolveRequiredBrowserVersionFromResolvedExecutable();
     const timezone = resolveCurrentTimezone();
 
     const meta: ProfileMeta = {

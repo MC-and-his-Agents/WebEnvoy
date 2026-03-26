@@ -1,8 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
@@ -11,6 +11,29 @@ import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
 const tempDirs: string[] = [];
+const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+
+const createMockBrowserExecutable = async (
+  versionOutput: string = "Chromium 146.0.0.0"
+): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-browser-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "mock-browser.mjs");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+if (process.argv.includes("--version")) {
+  console.log(${JSON.stringify(versionOutput)});
+  process.exit(0);
+}
+setInterval(() => {}, 1000);
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
+};
 
 const createMockBrowserLauncher = () => ({
   launch: async () => ({
@@ -47,7 +70,22 @@ const createTestService = (
     browserLauncher: options?.browserLauncher ?? createMockBrowserLauncher()
   });
 
+beforeEach(async () => {
+  process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable();
+  delete process.env.WEBENVOY_BROWSER_VERSION;
+});
+
 afterEach(async () => {
+  if (originalBrowserPath === undefined) {
+    delete process.env.WEBENVOY_BROWSER_PATH;
+  } else {
+    process.env.WEBENVOY_BROWSER_PATH = originalBrowserPath;
+  }
+  if (originalBrowserVersion === undefined) {
+    delete process.env.WEBENVOY_BROWSER_VERSION;
+  } else {
+    process.env.WEBENVOY_BROWSER_VERSION = originalBrowserVersion;
+  }
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
