@@ -92,14 +92,23 @@ jobs:
           echo "guardrail_only=$guardrail_only"
           echo "guardrail_changed=$guardrail_changed"
 
+      - name: Setup Go for Workflow Lint
+        if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+
       - name: Validate Changed Workflows
         if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
         run: |
           set -euo pipefail
 
-          ACTIONLINT_VERSION="1.7.8"
-          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz actionlint
+          ACTIONLINT_VERSION="v1.7.8"
+          export GOBIN="$RUNNER_TEMP/bin"
+          export GOPROXY="https://proxy.golang.org,direct"
+          export GOSUMDB="sum.golang.org"
+          mkdir -p "$GOBIN"
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
 
           mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
           workflow_files=()
@@ -128,7 +137,7 @@ jobs:
           echo "Linting workflow files with actionlint:"
           printf '%s\n' "${unique_workflow_files[@]}"
 
-          ./actionlint -color "${unique_workflow_files[@]}"
+          "$GOBIN/actionlint" -color "${unique_workflow_files[@]}"
 
       - name: Run Guardrail Fixed Validation
         if: ${{ steps.change-scope.outputs.guardrail_changed == 'yes' }}
