@@ -231,6 +231,42 @@ run_all_checks_pass_without_required_checks_reported() {
   all_required_checks_pass 123 >/dev/null 2>&1
 }
 
+run_all_checks_pass_when_required_checks_pass_but_all_checks_fail() {
+  setup_case_dir "checks-required-pass-all-fail"
+
+  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
+  export MOCK_GH_REQUIRED_CHECKS_JSON
+  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
+
+  MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
+  export MOCK_GH_CHECKS_JSON
+  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"},{"name":"Validate Docs And Scripts","bucket":"fail","state":"FAILURE","link":"https://example.test/docs"}]' > "${MOCK_GH_CHECKS_JSON}"
+
+  MOCK_GH_CHECKS_EXIT_CODE=0
+  unset MOCK_GH_CHECKS_STDERR || true
+  export MOCK_GH_CHECKS_EXIT_CODE
+
+  all_required_checks_pass 123 >/dev/null 2>&1
+}
+
+run_all_checks_pass_when_all_checks_list_is_empty() {
+  setup_case_dir "checks-all-empty"
+
+  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
+  export MOCK_GH_REQUIRED_CHECKS_JSON
+  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
+
+  MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
+  export MOCK_GH_CHECKS_JSON
+  printf '%s\n' '[]' > "${MOCK_GH_CHECKS_JSON}"
+
+  MOCK_GH_CHECKS_EXIT_CODE=0
+  unset MOCK_GH_CHECKS_STDERR || true
+  export MOCK_GH_CHECKS_EXIT_CODE
+
+  all_required_checks_pass 123 >/dev/null 2>&1
+}
+
 setup_merge_if_safe_fixture() {
   local case_name="$1"
   local pr_author="$2"
@@ -522,6 +558,8 @@ main() {
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"fail","state":"FAILURE","link":"https://example.test/tests"}]'
   assert_pass run_all_checks_pass_without_required_checks_reported
+  assert_fail run_all_checks_pass_when_required_checks_pass_but_all_checks_fail
+  assert_fail run_all_checks_pass_when_all_checks_list_is_empty
 
   test_merge_if_safe_without_post_review_respects_comment_contract
   test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api
