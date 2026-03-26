@@ -468,8 +468,8 @@ const isFingerprintRuntimeContextEquivalent = (
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
-// Only explicit runtime.ping may prime trust through the bridge; lifecycle commands are local.
-const TRUST_PRIMING_COMMANDS = new Set(["runtime.ping"]);
+// Trust must come from startup trust bound to an allowlist page, not generic bridge commands.
+const TRUST_PRIMING_COMMANDS = new Set<string>();
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();

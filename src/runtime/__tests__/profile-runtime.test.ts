@@ -921,6 +921,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     const startLaunch = launchInputs[0];
     expect(startLaunch.command).toBe("runtime.start");
     expect(startLaunch.extensionBootstrap).toMatchObject({
+      run_id: "run-runtime-test-fingerprint-bootstrap-001",
       session_id: "nm-session-001",
       fingerprint_runtime: started.fingerprint_runtime
     });
@@ -937,6 +938,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     const loginLaunch = launchInputs[1];
     expect(loginLaunch.command).toBe("runtime.login");
     expect(loginLaunch.extensionBootstrap).toMatchObject({
+      run_id: "run-runtime-test-fingerprint-bootstrap-002",
       session_id: "nm-session-001",
       fingerprint_runtime: loginStart.fingerprint_runtime
     });

@@ -269,14 +269,17 @@ const ensureFingerprintExecutionAllowed = (
 };
 
 type ExtensionBootstrapInput = {
+  run_id: string;
   session_id: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
 };
 
 const buildExtensionBootstrapInput = (
+  runId: string,
   sessionId: string,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
 ): ExtensionBootstrapInput => ({
+  run_id: runId,
   session_id: sessionId,
   fingerprint_runtime: fingerprintRuntime
 });
@@ -451,6 +454,7 @@ export class ProfileRuntimeService {
         runId: input.runId,
         params: input.params,
         extensionBootstrap: buildExtensionBootstrapInput(
+          input.runId,
           readSessionId(input.params),
           fingerprintRuntime
         )
@@ -605,6 +609,7 @@ export class ProfileRuntimeService {
           runId: input.runId,
           params: input.params,
           extensionBootstrap: buildExtensionBootstrapInput(
+            input.runId,
             readSessionId(input.params),
             fingerprintRuntime
           )

@@ -142,7 +142,8 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
-const buildExtensionBootstrapInput = (sessionId, fingerprintRuntime) => ({
+const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime) => ({
+    run_id: runId,
     session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime
 });
@@ -286,7 +287,7 @@ export class ProfileRuntimeService {
                 proxyUrl: session.proxyBinding?.url ?? null,
                 runId: input.runId,
                 params: input.params,
-                extensionBootstrap: buildExtensionBootstrapInput(readSessionId(input.params), fingerprintRuntime)
+                extensionBootstrap: buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
             });
             launchedControllerPid = browserLaunch.controllerPid;
             await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -405,7 +406,7 @@ export class ProfileRuntimeService {
                     proxyUrl: session.proxyBinding?.url ?? null,
                     runId: input.runId,
                     params: input.params,
-                    extensionBootstrap: buildExtensionBootstrapInput(readSessionId(input.params), fingerprintRuntime)
+                    extensionBootstrap: buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
                 });
                 launchedControllerPid = browserLaunch.controllerPid;
                 await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
