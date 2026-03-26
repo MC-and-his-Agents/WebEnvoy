@@ -35,84 +35,27 @@
 
 ---
 
-## runtime bootstrap 握手协议
+## runtime bootstrap 与现有 transport 契约的边界
 
-`runtime_bootstrap_envelope` 不是普通业务命令参数，而是 **业务命令开始前的单独协议阶段**。正式时序固定如下：
+本次 architecture freeze 只冻结 **run/session 上下文必须与 transport handshake 解耦** 这一上位边界，不在这里改写已冻结的 FR-0002 Native Messaging 最小握手契约。
 
-1. profile 内已安装扩展启动并建立 Native Messaging 连接
-2. CLI / runtime controller 发送 bootstrap 请求
-3. Extension Background 对当前 `(profile, extension_id, session_id, run_id)` 完成绑定或拒绝
-4. 只有收到 bootstrap 成功确认后，后续业务 JSON-RPC 命令才能发送
+因此需要同时满足两条约束：
 
-### bootstrap 请求
+- FR-0002 负责的仍是 **连接级握手**、最小转发、心跳和断连处理
+- `runtime_bootstrap_envelope` 负责的则是 **run/session 级上下文输入边界**
 
-```json
-{
-  "id": "bootstrap-20260327-001",
-  "method": "runtime.bootstrap",
-  "params": {
-    "run_id": "run-20260327-001",
-    "session_id": "session-abc123",
-    "profile": "xhs_account_001",
-    "extension_id": "<stable-extension-id>",
-    "fingerprint_runtime": {},
-    "fingerprint_patch_manifest": {},
-    "main_world_secret": "<ephemeral-secret>"
-  }
-}
-```
+这意味着：
 
-约束：
+- `runtime_bootstrap_envelope` 不应再通过 per-run staged extension 文件承载
+- 但它在后续运行时里究竟以何种消息名、何种确认时机、何种失败面进入正式 transport contract，应在 `#281` 对应的后续 spec / implementation-prep 中单独收口
+- 在这些后续契约冻结前，不应把 `runtime_bootstrap_envelope` 直接写成已经替代 FR-0002 link-layer handshake 的正式握手阶段
 
-- `runtime.bootstrap` 是当前 run/session 的 first-contact 消息，不与业务命令复用同一语义
-- 同一 `(profile, session_id, run_id)` 在进入 `ready` 前，必须先完成一次成功 bootstrap
-- Background 若发现 `profile`、`extension_id` 或当前连接上下文不匹配，必须显式拒绝，而不是静默降级
+当前只冻结以下最小事实：
 
-### bootstrap 成功确认
-
-```json
-{
-  "id": "bootstrap-20260327-001",
-  "status": "ok",
-  "result": {
-    "profile": "xhs_account_001",
-    "extension_id": "<stable-extension-id>",
-    "session_id": "session-abc123",
-    "run_id": "run-20260327-001",
-    "binding_status": "bound"
-  }
-}
-```
-
-成功确认表示：
-
-- 当前 Background 已接受该 envelope
-- 当前 run/session 与已安装扩展身份边界一致
-- 业务命令可进入正常 JSON-RPC 阶段
-
-### bootstrap 拒绝与失败语义
-
-bootstrap 失败必须结构化返回，至少允许以下错误面：
-
-- `bootstrap_profile_mismatch`
-- `bootstrap_extension_identity_mismatch`
-- `bootstrap_session_conflict`
-- `bootstrap_payload_invalid`
-- `bootstrap_binding_lost`
-
-失败约束：
-
-- 只要 bootstrap 未收到 `status: "ok"` 确认，运行态不得进入 `ready`
-- bootstrap 失败后，后续业务命令必须被拒绝或要求先重新 bootstrap，不能假设沿用旧绑定
-- `bootstrap_binding_lost` 适用于 Background 重启、Service Worker 休眠恢复、Native Messaging 断连重连后，原绑定不再可信的场景
-
-### 断连重连后的重新绑定
-
-心跳或连接恢复只说明通信链路恢复，不等于 bootstrap 绑定自动仍然有效。正式语义如下：
-
-- 若断连重连后 Background 无法证明原 `(profile, extension_id, session_id, run_id)` 绑定仍然有效，则必须重新执行 `runtime.bootstrap`
-- 在重新收到 bootstrap 成功确认前，业务命令不得直接恢复发送
-- 该规则与 [account.md](./account.md) 中的浏览器生命周期状态机保持一致
+- 它属于 run/session 级输入，而不是 profile 永久元数据
+- 它与 `profile + stable extension_id + allowed_origins` 的持久 identity 边界有关
+- 它必须作为独立于静态扩展资产的运行时输入被建模
+- 其具体 transport 语义需要在后续正式 spec 中与 FR-0002 / FR-0003 对齐后再进入实现
 
 ---
 
