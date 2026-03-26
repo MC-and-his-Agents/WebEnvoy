@@ -1172,4 +1172,81 @@ describe("profile-runtime fingerprint runtime contract", () => {
       code: "ERR_PROFILE_INVALID"
     });
   });
+
+  it("persists legacy fingerprint bundle only when explicit migrate mode is requested", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-migrate-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await store.ensureProfileDir("legacy_profile_migrate");
+    await writeFile(
+      store.getMetaPath("legacy_profile_migrate"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy_profile_migrate",
+          profileDir: store.getProfileDir("legacy_profile_migrate"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "legacy_profile_migrate",
+      runId: "run-runtime-test-fingerprint-legacy-migrate-status",
+      params: {
+        migrate_fingerprint_profile_bundle: true
+      }
+    });
+    expect(status).toMatchObject({
+      fingerprint_runtime: {
+        fingerprint_profile_bundle: {
+          timezone: expect.any(String),
+          ua: expect.stringContaining("Chrome/")
+        }
+      }
+    });
+
+    const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile_migrate"), "utf8");
+    const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
+    expect(storedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(storedMeta.fingerprintProfileBundle?.timezone).toBeTruthy();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "legacy_profile_migrate",
+        runId: "run-runtime-test-fingerprint-legacy-migrate-live",
+        params: {
+          requested_execution_mode: "live_read_limited"
+        }
+      })
+    ).resolves.toMatchObject({
+      fingerprint_runtime: {
+        execution: {
+          live_allowed: true,
+          live_decision: "allowed"
+        }
+      }
+    });
+  });
 });

@@ -197,12 +197,11 @@ const resolveChromeVersion = (input) => {
 const buildDefaultUserAgent = (environment, input) => {
   const archToken = environment.arch === "arm64" ? "ARM 64" : "Win64; x64";
   const linuxArchToken = environment.arch === "arm64" ? "arm64" : "x86_64";
-  const macArchToken = environment.arch === "arm64" ? "ARM Mac" : "Intel Mac";
   const chromeVersion = resolveChromeVersion(input) ?? "0.0.0.0";
 
   if (environment.os_family === "macos") {
     const version = String(environment.os_version ?? "14_0").replace(/\./g, "_");
-    return `Mozilla/5.0 (Macintosh; ${macArchToken} OS X ${version}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X ${version}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
   }
 
   if (environment.os_family === "windows") {

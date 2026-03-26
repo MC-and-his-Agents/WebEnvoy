@@ -382,7 +382,7 @@ describe("profile-store", () => {
     expect(bundle.ua).not.toContain("Mac OS X 24_4_0");
   });
 
-  it("uses arm64 architecture token for macOS default UA when profile arch is arm64", () => {
+  it("keeps Chromium-compatible Intel Mac UA token on macOS even when profile arch is arm64", () => {
     const bundle = buildFingerprintProfileBundle({
       profileName: "default",
       fingerprintSeeds: {
@@ -397,8 +397,8 @@ describe("profile-store", () => {
       timezone: "Asia/Shanghai"
     });
 
-    expect(bundle.ua).toContain("Macintosh; ARM Mac OS X");
-    expect(bundle.ua).not.toContain("Macintosh; Intel Mac OS X");
+    expect(bundle.ua).toContain("Macintosh; Intel Mac OS X");
+    expect(bundle.ua).not.toContain("Macintosh; ARM Mac OS X");
   });
 
   it("uses arm64 architecture token for Linux default UA when profile arch is arm64", () => {

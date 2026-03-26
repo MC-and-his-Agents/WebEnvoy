@@ -17,6 +17,7 @@ import {
 } from "./profile-lock.js";
 import {
   ProfileStore,
+  type ReadMetaMode,
   type ReadMetaOptions,
   type LocalStorageSnapshot,
   type ProfileMeta
@@ -154,6 +155,9 @@ const readSessionId = (params: JsonObject): string => {
   }
   return "nm-session-001";
 };
+
+const readFingerprintMetaMode = (params: JsonObject): ReadMetaMode | undefined =>
+  params.migrate_fingerprint_profile_bundle === true ? "migrate" : undefined;
 
 const asObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -399,7 +403,12 @@ export class ProfileRuntimeService {
     let launchedControllerPid: number | null = null;
 
     try {
-      let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
+      let existingMeta = await this.#readOrInitializeMeta(
+        store,
+        input.profile,
+        nowIso,
+        readFingerprintMetaMode(input.params)
+      );
       const recoveredMeta =
         shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
           ? this.#patchMeta(existingMeta, {
@@ -511,7 +520,12 @@ export class ProfileRuntimeService {
     let launchedControllerPid: number | null = null;
 
     try {
-      let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
+      let existingMeta = await this.#readOrInitializeMeta(
+        store,
+        input.profile,
+        nowIso,
+        readFingerprintMetaMode(input.params)
+      );
       const recoveredMeta = shouldRecoverAsDisconnected(
         lockAcquireResult.acquisition,
         existingMeta.profileState
@@ -674,7 +688,9 @@ export class ProfileRuntimeService {
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     const lockPath = this.#getLockPath(profileDir);
-    const meta = await this.#readMeta(store, input.profile, { mode: "readonly" });
+    const meta = await this.#readMeta(store, input.profile, {
+      mode: readFingerprintMetaMode(input.params) ?? "readonly"
+    });
     const lock = await this.#readLock(lockPath);
 
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
@@ -832,9 +848,10 @@ export class ProfileRuntimeService {
   async #readOrInitializeMeta(
     store: ProfileStoreLike,
     profile: string,
-    nowIso: string
+    nowIso: string,
+    mode?: ReadMetaMode
   ): Promise<ProfileMeta> {
-    const meta = await this.#readMeta(store, profile);
+    const meta = await this.#readMeta(store, profile, mode ? { mode } : undefined);
     if (meta) {
       return meta;
     }
