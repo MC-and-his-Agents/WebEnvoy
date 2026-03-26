@@ -17,8 +17,16 @@ type MainWorldResult = {
 
 type MainWorldWindow = Window & typeof globalThis;
 
-const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+type MainWorldEventChannel = {
+  requestEvent: string;
+  resultEvent: string;
+};
+
+const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
+let activeMainWorldRequestListener: ((event: Event) => void) | null = null;
 const patchedAudioContextPrototypes = new WeakSet<object>();
 const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
@@ -76,12 +84,21 @@ const asStringArray = (value: unknown): string[] =>
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-const emitResult = async (result: MainWorldResult): Promise<void> => {
-  window.dispatchEvent(
-    new CustomEvent(MAIN_WORLD_RESULT_EVENT, {
-      detail: result
-    })
-  );
+const createWindowEvent = (type: string, detail: unknown): Event => {
+  if (typeof CustomEvent === "function") {
+    return new CustomEvent(type, { detail });
+  }
+  return {
+    type,
+    detail
+  } as unknown as Event;
+};
+
+const emitResult = async (resultEvent: string, result: MainWorldResult): Promise<void> => {
+  if (typeof mainWindow.dispatchEvent !== "function") {
+    return;
+  }
+  mainWindow.dispatchEvent(createWindowEvent(resultEvent, result));
 };
 
 const defineGetter = (target: object, property: string, getter: () => unknown): void => {
@@ -381,23 +398,74 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
 const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
-  await emitResult({
+  if (!activeMainWorldEventChannel) {
+    return;
+  }
+  await emitResult(activeMainWorldEventChannel.resultEvent, {
     id: request.id,
     ok: true,
     result
   });
 };
 
-window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
-  const request = parseMainWorldRequest(event);
-  if (!request) {
+const isValidChannelEventName = (value: string, prefix: string): boolean =>
+  value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
+
+const parseMainWorldEventChannel = (event: Event): MainWorldEventChannel | null => {
+  const detail = asRecord((event as CustomEvent<unknown>).detail);
+  const requestEvent = asString(detail?.request_event ?? detail?.requestEvent);
+  const resultEvent = asString(detail?.result_event ?? detail?.resultEvent);
+  if (!requestEvent || !resultEvent) {
+    return null;
+  }
+  if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+    return null;
+  }
+  if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+    return null;
+  }
+  return {
+    requestEvent,
+    resultEvent
+  };
+};
+
+const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
+  if (activeMainWorldEventChannel) {
+    if (
+      activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
+      activeMainWorldEventChannel.resultEvent === channel.resultEvent
+    ) {
+      return;
+    }
     return;
   }
-  void handleRequest(request).catch(async (error) => {
-    await emitResult({
-      id: request.id,
-      ok: false,
-      message: error instanceof Error ? error.message : String(error)
+  activeMainWorldEventChannel = channel;
+  activeMainWorldRequestListener = (event: Event) => {
+    const request = parseMainWorldRequest(event);
+    if (!request) {
+      return;
+    }
+    void handleRequest(request).catch(async (error) => {
+      if (!activeMainWorldEventChannel) {
+        return;
+      }
+      await emitResult(activeMainWorldEventChannel.resultEvent, {
+        id: request.id,
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      });
     });
-  });
-});
+  };
+  window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
+};
+
+const bootstrapMainWorldEventChannel = (event: Event): void => {
+  const channel = parseMainWorldEventChannel(event);
+  if (!channel) {
+    return;
+  }
+  attachMainWorldEventChannel(channel);
+};
+
+window.addEventListener(MAIN_WORLD_CHANNEL_INIT_EVENT, bootstrapMainWorldEventChannel);

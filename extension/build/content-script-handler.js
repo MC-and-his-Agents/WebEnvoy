@@ -72,55 +72,163 @@ const encodeUtf8Base64 = (value) => {
     throw new Error("base64 encoder is unavailable");
 };
 export const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
-const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 const AUDIO_PATCH_EPSILON = 1e-12;
+let mainWorldEventChannel = null;
+let mainWorldResultListener = null;
+let mainWorldResultListenerEventName = null;
+const pendingMainWorldRequests = new Map();
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+export const resolveMainWorldEventNamesForSecret = (secret) => {
+    const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+    return {
+        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+    };
+};
+const createWindowEvent = (type, detail) => {
+    if (typeof CustomEvent === "function") {
+        return new CustomEvent(type, { detail });
+    }
+    return {
+        type,
+        detail
+    };
+};
+const emitMainWorldChannelInitEvent = (channel) => {
+    if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+        return;
+    }
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_CHANNEL_INIT_EVENT, {
+        request_event: channel.requestEvent,
+        result_event: channel.resultEvent
+    }));
+};
+const onMainWorldResultEvent = (event) => {
+    const detail = asRecord(event.detail);
+    if (!detail || typeof detail.id !== "string") {
+        return;
+    }
+    const pending = pendingMainWorldRequests.get(detail.id);
+    if (!pending) {
+        return;
+    }
+    pendingMainWorldRequests.delete(detail.id);
+    clearTimeout(pending.timeout);
+    if (detail.ok === true) {
+        pending.resolve(detail.result);
+        return;
+    }
+    pending.reject(new Error(typeof detail.message === "string" ? detail.message : "main world call failed"));
+};
+const detachMainWorldResultListener = () => {
+    if (!mainWorldResultListener ||
+        !mainWorldResultListenerEventName ||
+        typeof window === "undefined" ||
+        typeof window.removeEventListener !== "function") {
+        mainWorldResultListener = null;
+        mainWorldResultListenerEventName = null;
+        return;
+    }
+    window.removeEventListener(mainWorldResultListenerEventName, mainWorldResultListener);
+    mainWorldResultListener = null;
+    mainWorldResultListenerEventName = null;
+};
+export const installMainWorldEventChannelSecret = (secret) => {
+    const normalizedSecret = normalizeMainWorldSecret(secret);
+    if (typeof window === "undefined" ||
+        typeof window.addEventListener !== "function" ||
+        typeof window.dispatchEvent !== "function") {
+        mainWorldEventChannel = null;
+        detachMainWorldResultListener();
+        return false;
+    }
+    if (!normalizedSecret) {
+        mainWorldEventChannel = null;
+        detachMainWorldResultListener();
+        return false;
+    }
+    const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    if (mainWorldEventChannel &&
+        mainWorldEventChannel.secret === normalizedSecret &&
+        mainWorldResultListenerEventName === names.resultEvent) {
+        emitMainWorldChannelInitEvent(mainWorldEventChannel);
+        return true;
+    }
+    detachMainWorldResultListener();
+    window.addEventListener(names.resultEvent, onMainWorldResultEvent);
+    mainWorldResultListener = onMainWorldResultEvent;
+    mainWorldResultListenerEventName = names.resultEvent;
+    mainWorldEventChannel = {
+        secret: normalizedSecret,
+        requestEvent: names.requestEvent,
+        resultEvent: names.resultEvent
+    };
+    emitMainWorldChannelInitEvent(mainWorldEventChannel);
+    return true;
+};
+export const resetMainWorldEventChannelForContract = () => {
+    for (const pending of pendingMainWorldRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("main world event channel reset"));
+    }
+    pendingMainWorldRequests.clear();
+    mainWorldEventChannel = null;
+    detachMainWorldResultListener();
+};
 const mainWorldCall = async (request) => {
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `mw-${Date.now()}`;
     return await new Promise((resolve, reject) => {
-        let settled = false;
-        const complete = (fn) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(timeout);
-            window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
-            fn();
-        };
+        if (!mainWorldEventChannel ||
+            typeof window === "undefined" ||
+            typeof window.dispatchEvent !== "function") {
+            reject(new Error("main world event channel unavailable"));
+            return;
+        }
+        emitMainWorldChannelInitEvent(mainWorldEventChannel);
         const timeout = setTimeout(() => {
-            complete(() => {
-                reject(new Error("main world bridge response timeout"));
-            });
+            pendingMainWorldRequests.delete(requestId);
+            reject(new Error("main world event channel response timeout"));
         }, MAIN_WORLD_CALL_TIMEOUT_MS);
-        const listener = (event) => {
-            const detail = asRecord(event.detail);
-            if (!detail || detail.id !== requestId) {
-                return;
-            }
-            if (detail.ok === true) {
-                complete(() => {
-                    resolve(detail.result);
-                });
-                return;
-            }
-            complete(() => {
-                reject(new Error(typeof detail.message === "string" ? detail.message : "main world call failed"));
-            });
-        };
-        window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener);
+        pendingMainWorldRequests.set(requestId, {
+            resolve: (value) => resolve(value),
+            reject,
+            timeout
+        });
         const requestDetail = {
             id: requestId,
             ...request
         };
-        window.dispatchEvent(new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
-            detail: requestDetail
-        }));
+        try {
+            window.dispatchEvent(createWindowEvent(mainWorldEventChannel.requestEvent, requestDetail));
+        }
+        catch (error) {
+            clearTimeout(timeout);
+            pendingMainWorldRequests.delete(requestId);
+            reject(error);
+        }
     });
 };
+export const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => await mainWorldCall({
+    type: "fingerprint-install",
+    payload: {
+        fingerprint_runtime: fingerprintRuntime
+    }
+});
 const requestXhsSignatureViaExtension = async (uri, body) => {
     const runtime = globalThis.chrome?.runtime;
     const sendMessage = runtime?.sendMessage;
@@ -387,12 +495,7 @@ export class ContentScriptHandler {
             const preInstallAudioSample = requiredPatches.includes("audio_context")
                 ? await probeAudioFirstSample()
                 : null;
-            const installResult = await mainWorldCall({
-                type: "fingerprint-install",
-                payload: {
-                    fingerprint_runtime: fingerprintRuntime
-                },
-            });
+            const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
             const verifiedInjection = await verifyFingerprintInstallResult({
                 fingerprintRuntime,
                 installResult: asRecord(installResult),

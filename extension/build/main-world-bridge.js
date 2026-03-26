@@ -1,6 +1,9 @@
 "use strict";
-const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+let activeMainWorldEventChannel = null;
+let activeMainWorldRequestListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
 const audioNoiseSeedByPrototype = new WeakMap();
 const DEFAULT_PLUGIN_DESCRIPTORS = [
@@ -46,10 +49,20 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
-const emitResult = async (result) => {
-    window.dispatchEvent(new CustomEvent(MAIN_WORLD_RESULT_EVENT, {
-        detail: result
-    }));
+const createWindowEvent = (type, detail) => {
+    if (typeof CustomEvent === "function") {
+        return new CustomEvent(type, { detail });
+    }
+    return {
+        type,
+        detail
+    };
+};
+const emitResult = async (resultEvent, result) => {
+    if (typeof mainWindow.dispatchEvent !== "function") {
+        return;
+    }
+    mainWindow.dispatchEvent(createWindowEvent(resultEvent, result));
 };
 const defineGetter = (target, property, getter) => {
     Object.defineProperty(target, property, {
@@ -292,22 +305,66 @@ const parseMainWorldRequest = (event) => {
 const handleRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
-    await emitResult({
+    if (!activeMainWorldEventChannel) {
+        return;
+    }
+    await emitResult(activeMainWorldEventChannel.resultEvent, {
         id: request.id,
         ok: true,
         result
     });
 };
-window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event) => {
-    const request = parseMainWorldRequest(event);
-    if (!request) {
+const isValidChannelEventName = (value, prefix) => value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
+const parseMainWorldEventChannel = (event) => {
+    const detail = asRecord(event.detail);
+    const requestEvent = asString(detail?.request_event ?? detail?.requestEvent);
+    const resultEvent = asString(detail?.result_event ?? detail?.resultEvent);
+    if (!requestEvent || !resultEvent) {
+        return null;
+    }
+    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+        return null;
+    }
+    if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+        return null;
+    }
+    return {
+        requestEvent,
+        resultEvent
+    };
+};
+const attachMainWorldEventChannel = (channel) => {
+    if (activeMainWorldEventChannel) {
+        if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
+            activeMainWorldEventChannel.resultEvent === channel.resultEvent) {
+            return;
+        }
         return;
     }
-    void handleRequest(request).catch(async (error) => {
-        await emitResult({
-            id: request.id,
-            ok: false,
-            message: error instanceof Error ? error.message : String(error)
+    activeMainWorldEventChannel = channel;
+    activeMainWorldRequestListener = (event) => {
+        const request = parseMainWorldRequest(event);
+        if (!request) {
+            return;
+        }
+        void handleRequest(request).catch(async (error) => {
+            if (!activeMainWorldEventChannel) {
+                return;
+            }
+            await emitResult(activeMainWorldEventChannel.resultEvent, {
+                id: request.id,
+                ok: false,
+                message: error instanceof Error ? error.message : String(error)
+            });
         });
-    });
-});
+    };
+    window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
+};
+const bootstrapMainWorldEventChannel = (event) => {
+    const channel = parseMainWorldEventChannel(event);
+    if (!channel) {
+        return;
+    }
+    attachMainWorldEventChannel(channel);
+};
+window.addEventListener(MAIN_WORLD_CHANNEL_INIT_EVENT, bootstrapMainWorldEventChannel);

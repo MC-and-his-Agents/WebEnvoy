@@ -1,11 +1,11 @@
-import { ContentScriptHandler } from "./content-script-handler.js";
+import { ContentScriptHandler, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret } from "./content-script-handler.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 export { ContentScriptHandler };
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
-const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
+const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
 const normalizeForwardMessage = (request) => ({
     kind: "forward",
     id: request.id,
@@ -36,33 +36,91 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
-const createWindowEvent = (type, detail) => {
-    if (typeof CustomEvent === "function") {
-        return new CustomEvent(type, { detail });
+const hashMainWorldSecret = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
     }
-    return {
-        type,
-        detail
-    };
+    return `mwsec_${(hash >>> 0).toString(36)}`;
+};
+const stableSerializeForSecret = (value, seen = new WeakSet()) => {
+    if (value === null) {
+        return "null";
+    }
+    if (typeof value === "string") {
+        return JSON.stringify(value);
+    }
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? String(value) : '"NaN"';
+    }
+    if (typeof value === "boolean") {
+        return value ? "true" : "false";
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableSerializeForSecret(item, seen)).join(",")}]`;
+    }
+    if (typeof value !== "object") {
+        return JSON.stringify(String(value));
+    }
+    if (seen.has(value)) {
+        return '"[Circular]"';
+    }
+    seen.add(value);
+    const record = value;
+    const keys = Object.keys(record).sort();
+    const body = keys
+        .map((key) => `${JSON.stringify(key)}:${stableSerializeForSecret(record[key], seen)}`)
+        .join(",");
+    seen.delete(value);
+    return `{${body}}`;
+};
+const resolveExplicitMainWorldSecret = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    return asNonEmptyString(record.main_world_secret ??
+        record.mainWorldSecret ??
+        record.main_world_bridge_secret ??
+        record.mainWorldBridgeSecret);
+};
+const deriveMainWorldSecretFromBootstrapPayload = (value) => {
+    const explicit = resolveExplicitMainWorldSecret(value);
+    if (explicit) {
+        return explicit;
+    }
+    if (value === null || value === undefined) {
+        return null;
+    }
+    const serialized = stableSerializeForSecret(value);
+    if (serialized.length === 0) {
+        return null;
+    }
+    return hashMainWorldSecret(`${MAIN_WORLD_SECRET_NAMESPACE}|${serialized}`);
 };
 const resolveBootstrapFingerprintContext = (value) => {
+    const mainWorldSecret = deriveMainWorldSecretFromBootstrapPayload(value);
     const direct = ensureFingerprintRuntimeContext(value);
     if (direct) {
         return {
             fingerprintRuntime: direct,
-            runId: null
+            runId: null,
+            mainWorldSecret
         };
     }
     const record = asRecord(value);
     if (!record) {
         return {
             fingerprintRuntime: null,
-            runId: null
+            runId: null,
+            mainWorldSecret: null
         };
     }
     return {
         fingerprintRuntime: ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null),
-        runId: asNonEmptyString(record.run_id ?? record.runId)
+        runId: asNonEmptyString(record.run_id ?? record.runId),
+        mainWorldSecret
     };
 };
 const sanitizeScopePart = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -141,7 +199,8 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
     if (!bootstrapUrl || typeof fetch !== "function") {
         return {
             fingerprintRuntime: null,
-            runId: null
+            runId: null,
+            mainWorldSecret: null
         };
     }
     try {
@@ -149,44 +208,30 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
         if (!response.ok) {
             return {
                 fingerprintRuntime: null,
-                runId: null
+                runId: null,
+                mainWorldSecret: null
             };
         }
         const envelope = asRecord(await response.json());
         const resolved = resolveBootstrapFingerprintContext(envelope?.extension_bootstrap ?? envelope ?? null);
         return {
             fingerprintRuntime: resolved.fingerprintRuntime,
-            runId: resolved.runId ?? asNonEmptyString(envelope?.run_id ?? envelope?.runId)
+            runId: resolved.runId ?? asNonEmptyString(envelope?.run_id ?? envelope?.runId),
+            mainWorldSecret: resolved.mainWorldSecret
         };
     }
     catch {
         return {
             fingerprintRuntime: null,
-            runId: null
+            runId: null,
+            mainWorldSecret: null
         };
     }
 };
 const installStartupFingerprintPatch = (fingerprintRuntime) => {
-    if (typeof window === "undefined" ||
-        typeof window.dispatchEvent !== "function" ||
-        typeof window.addEventListener !== "function") {
-        return;
-    }
-    const installRequest = {
-        id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-            ? crypto.randomUUID()
-            : `startup-fingerprint-install-${Date.now()}`,
-        type: "fingerprint-install",
-        payload: {
-            fingerprint_runtime: fingerprintRuntime
-        }
-    };
-    try {
-        window.dispatchEvent(createWindowEvent(MAIN_WORLD_REQUEST_EVENT, installRequest));
-    }
-    catch {
-        // ignore dispatch failures; startup trust must not rely on page-visible event results
-    }
+    void installFingerprintRuntimeViaMainWorld(fingerprintRuntime).catch(() => {
+        // ignore install failures; startup trust must not rely on main-world response
+    });
 };
 const installAndEmitStartupFingerprintTrust = (runtime, input) => {
     installStartupFingerprintPatch(input.fingerprintRuntime);
@@ -214,7 +259,9 @@ export const bootstrapContentScript = (runtime) => {
         return false;
     }
     const handler = new ContentScriptHandler();
-    const bootstrapInput = resolveBootstrapFingerprintContext(readBootstrapFingerprintContext());
+    const bootstrapPayload = readBootstrapFingerprintContext();
+    const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
+    installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -225,6 +272,7 @@ export const bootstrapContentScript = (runtime) => {
     }
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+            installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
             if (!resolvedBootstrap.fingerprintRuntime) {
                 return;
             }

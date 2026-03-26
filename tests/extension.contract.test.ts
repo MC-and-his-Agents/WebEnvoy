@@ -15,6 +15,12 @@ const expectedMainWorldBridgeMatches = [
   "http://127.0.0.1/*",
   "http://localhost/*"
 ];
+const expectedContentScriptMatches = [
+  "https://www.xiaohongshu.com/*",
+  "https://creator.xiaohongshu.com/*",
+  "http://127.0.0.1/*",
+  "http://localhost/*"
+];
 
 describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
@@ -40,6 +46,7 @@ describe("extension build contract", () => {
     expect(bridgeEntry?.run_at).toBe("document_start");
     expect(bridgeEntry?.world).toBe("MAIN");
     expect(contentScriptEntry).toBeDefined();
+    expect(contentScriptEntry?.matches).toEqual(expectedContentScriptMatches);
     expect(contentScriptEntry?.run_at).toBe("document_start");
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
     expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);

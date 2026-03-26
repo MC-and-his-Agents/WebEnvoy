@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   ContentScriptHandler,
   encodeMainWorldPayload,
-  resolveFingerprintContextForContract
+  installMainWorldEventChannelSecret,
+  resetMainWorldEventChannelForContract,
+  resolveFingerprintContextForContract,
+  resolveMainWorldEventNamesForSecret
 } from "../extension/content-script-handler.js";
 
 interface MockEvent {
@@ -13,6 +16,11 @@ interface MockEvent {
 interface MockCustomEvent<T = unknown> extends MockEvent {
   detail: T;
 }
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -94,13 +102,21 @@ const createApprovedReadApprovalRecord = () => ({
   }
 });
 
+const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
+
 const withMockMainWorld = async (
-  run: (context: { mockWindow: Window & Record<string, unknown> }) => Promise<void>
+  run: (context: {
+    mockWindow: Window & Record<string, unknown>;
+    mainWorldRequestEvent: string;
+    mainWorldResultEvent: string;
+  }) => Promise<void>
 ): Promise<void> => {
   const previousWindow = (globalThis as { window?: unknown }).window;
   const previousDocument = (globalThis as { document?: unknown }).document;
   const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
   const previousChrome = (globalThis as { chrome?: unknown }).chrome;
+  const { requestEvent: mainWorldRequestEvent, resultEvent: mainWorldResultEvent } =
+    resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET);
 
   const listeners = new Map<string, Set<(event: MockEvent) => void>>();
   const addListener = (type: string, listener: (event: MockEvent) => void) => {
@@ -130,8 +146,6 @@ const withMockMainWorld = async (
       this.detail = init.detail;
     }
   }
-  const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-  const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
   const patchedAudioContextPrototypes = new WeakSet<object>();
   const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
@@ -173,11 +187,11 @@ const withMockMainWorld = async (
         return;
       }
 
-      if (event.type !== MAIN_WORLD_REQUEST_EVENT) {
+      if (event.type !== mainWorldRequestEvent) {
         return;
       }
       const emitResult = (result: Record<string, unknown>) => {
-        dispatchToListeners(new MockCustomEventImpl(MAIN_WORLD_RESULT_EVENT, { detail: result }));
+        dispatchToListeners(new MockCustomEventImpl(mainWorldResultEvent, { detail: result }));
       };
 
       if (requestType === "xhs-sign") {
@@ -491,6 +505,7 @@ const withMockMainWorld = async (
   (globalThis as { window?: unknown }).window = mockWindow;
   (globalThis as { document?: unknown }).document = mockDocument;
   (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
+  installMainWorldEventChannelSecret(MAIN_WORLD_CHANNEL_SECRET);
   (globalThis as {
     chrome?: {
       runtime?: {
@@ -562,8 +577,13 @@ const withMockMainWorld = async (
   };
 
   try {
-    await run({ mockWindow });
+    await run({
+      mockWindow,
+      mainWorldRequestEvent,
+      mainWorldResultEvent
+    });
   } finally {
+    resetMainWorldEventChannelForContract();
     (globalThis as { window?: unknown }).window = previousWindow;
     (globalThis as { document?: unknown }).document = previousDocument;
     (globalThis as { CustomEvent?: unknown }).CustomEvent = previousCustomEvent;
@@ -697,19 +717,17 @@ describe("content-script handler contract", () => {
   });
 
   it("does not trust forged main-world fingerprint-install success by request id only", async () => {
-    await withMockMainWorld(async ({ mockWindow }) => {
-      const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-      const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+    await withMockMainWorld(async ({ mockWindow, mainWorldRequestEvent, mainWorldResultEvent }) => {
       (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeFingerprintInstall__ =
         true;
 
-      mockWindow.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
+      mockWindow.addEventListener(mainWorldRequestEvent, (event: Event) => {
         const detail = (event as MockCustomEvent<Record<string, unknown>>).detail;
         if (!detail || detail.type !== "fingerprint-install" || typeof detail.id !== "string") {
           return;
         }
         mockWindow.dispatchEvent({
-          type: MAIN_WORLD_RESULT_EVENT,
+          type: mainWorldResultEvent,
           detail: {
             id: detail.id,
             ok: true,
@@ -771,11 +789,62 @@ describe("content-script handler contract", () => {
     });
   });
 
+  it("ignores forged main-world result when event name is derived from an invalid secret", async () => {
+    await withMockMainWorld(async ({ mockWindow, mainWorldRequestEvent }) => {
+      const forgedEventNames = resolveMainWorldEventNamesForSecret("forged-secret");
+      let forgedReplySent = false;
+      mockWindow.addEventListener(mainWorldRequestEvent, (event: Event) => {
+        const detail = (event as MockCustomEvent<Record<string, unknown>>).detail;
+        if (!detail || typeof detail.id !== "string") {
+          return;
+        }
+        forgedReplySent = true;
+        mockWindow.dispatchEvent({
+          type: forgedEventNames.resultEvent,
+          detail: {
+            id: detail.id,
+            ok: true,
+            result: {
+              installed: true
+            }
+          }
+        } as unknown as Event);
+      });
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-ping-forged-secret-001",
+        runId: "run-ping-forged-secret-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.ping",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(forgedReplySent).toBe(true);
+      expect(injection?.installed).toBe(true);
+      expect(injection?.missing_required_patches).toEqual([]);
+    });
+  });
+
   it("does not trust forged main-world xhs-sign success by request id only", async () => {
-    await withMockMainWorld(async ({ mockWindow }) => {
+    await withMockMainWorld(async ({ mockWindow, mainWorldResultEvent }) => {
       const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-      const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
-      const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
       (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
       (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
 
@@ -795,7 +864,7 @@ describe("content-script handler contract", () => {
       const emitForgedMainWorldResult = () => {
         forgedReplySent = true;
         mockWindow.dispatchEvent({
-          type: MAIN_WORLD_RESULT_EVENT,
+          type: mainWorldResultEvent,
           detail: {
             id: "forged-main-world-result",
             ok: true,
@@ -901,11 +970,11 @@ describe("content-script handler contract", () => {
       const firstValue = firstRenderedBuffer.getChannelData(0)[0];
 
       sendPing("run-ping-idempotent-002");
-      for (let attempt = 0; attempt < 10; attempt += 1) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
         if (results.length >= 2) {
           break;
         }
-        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
       const secondAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();

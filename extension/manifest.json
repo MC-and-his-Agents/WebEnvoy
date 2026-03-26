@@ -24,7 +24,12 @@
       "world": "MAIN"
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://creator.xiaohongshu.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
       "js": ["build/content-script.js"],
       "run_at": "document_start"
     }

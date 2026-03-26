@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContentScriptHandler, bootstrapContentScript } from "../extension/content-script.js";
+import { resetMainWorldEventChannelForContract } from "../extension/content-script-handler.js";
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
-const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -197,6 +198,9 @@ const createStartupInstallProbeWindow = (
 } => {
   const startupInstallRequests: Record<string, unknown>[] = [];
   const listeners = new Map<string, Set<EventListener>>();
+  let requestEventName: string | null = null;
+  let resultEventName: string | null = null;
+
   const emit = (type: string, detail: unknown): void => {
     const handlers = listeners.get(type);
     if (!handlers) {
@@ -210,6 +214,7 @@ const createStartupInstallProbeWindow = (
       listener(event);
     }
   };
+
   return {
     window: {
       sessionStorage,
@@ -223,33 +228,53 @@ const createStartupInstallProbeWindow = (
       },
       dispatchEvent(event: Event) {
         const customEvent = event as CustomEvent<unknown>;
-        if (customEvent.type !== MAIN_WORLD_REQUEST_EVENT) {
-          return true;
+        if (customEvent.type === MAIN_WORLD_CHANNEL_INIT_EVENT) {
+          const detail = asRecord(customEvent.detail);
+          requestEventName =
+            typeof detail?.request_event === "string"
+              ? detail.request_event
+              : typeof detail?.requestEvent === "string"
+                ? detail.requestEvent
+                : null;
+          resultEventName =
+            typeof detail?.result_event === "string"
+              ? detail.result_event
+              : typeof detail?.resultEvent === "string"
+                ? detail.resultEvent
+                : null;
         }
-        const detail = asRecord(customEvent.detail);
-        if (detail?.type === "fingerprint-install") {
+
+        if (requestEventName && customEvent.type === requestEventName) {
+          const detail = asRecord(customEvent.detail);
+          if (detail?.type !== "fingerprint-install") {
+            return true;
+          }
           startupInstallRequests.push(detail);
-          emit(MAIN_WORLD_RESULT_EVENT, {
-            id: detail.id,
-            ok: true,
-            result: {
-              installed: true,
-              required_patches: [
-                "audio_context",
-                "battery",
-                "navigator_plugins",
-                "navigator_mime_types"
-              ],
-              applied_patches: [
-                "audio_context",
-                "battery",
-                "navigator_plugins",
-                "navigator_mime_types"
-              ],
-              missing_required_patches: []
-            }
-          });
+          if (resultEventName) {
+            emit(resultEventName, {
+              id: detail.id,
+              ok: true,
+              result: {
+                installed: true,
+                required_patches: [
+                  "audio_context",
+                  "battery",
+                  "navigator_plugins",
+                  "navigator_mime_types"
+                ],
+                applied_patches: [
+                  "audio_context",
+                  "battery",
+                  "navigator_plugins",
+                  "navigator_mime_types"
+                ],
+                missing_required_patches: []
+              }
+            });
+          }
         }
+
+        emit(customEvent.type, customEvent.detail);
         return true;
       }
     },
@@ -259,6 +284,7 @@ const createStartupInstallProbeWindow = (
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetMainWorldEventChannelForContract();
   delete (globalThis as { window?: unknown }).window;
   delete (globalThis as { chrome?: unknown }).chrome;
   delete (globalThis as { fetch?: unknown }).fetch;
@@ -359,7 +385,36 @@ describe("content-script bootstrap contract", () => {
     expect(startupInstallRequests).toHaveLength(0);
   });
 
-  it("still auto-installs fingerprint patch at bootstrap when cached context exists", () => {
+  it("ignores page-forged fingerprint-install event without secret-derived event name", async () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+      run_id: "run-bootstrap-secret-001",
+      fingerprint_runtime: context
+    };
+    const sessionStorage = createSessionStorage();
+    const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
+
+    const { runtime } = createRuntime();
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(startupInstallRequests).toHaveLength(1);
+    window.dispatchEvent({
+      type: "__webenvoy_main_world_request__",
+      detail: {
+        id: "forged-request",
+        type: "fingerprint-install",
+        payload: {
+          fingerprint_runtime: context
+        }
+      }
+    } as unknown as Event);
+    expect(startupInstallRequests).toHaveLength(1);
+  });
+
+  it("still auto-installs fingerprint patch at bootstrap when cached context exists", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
     const cacheKey = buildScopedCacheKey(context, null);
@@ -378,6 +433,8 @@ describe("content-script bootstrap contract", () => {
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(startupInstallRequests).toHaveLength(1);
     expect(runtime.sendMessage).not.toHaveBeenCalled();
   });

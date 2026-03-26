@@ -120,14 +120,39 @@ const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
 const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
 const EXTENSION_BOOTSTRAP_PARAMS_KEY = "extensionBootstrap";
 const CONTENT_SCRIPT_ENTRY_PATH = "build/content-script.js";
+const MAIN_WORLD_BRIDGE_ENTRY_PATH = "build/main-world-bridge.js";
 const EXTENSION_BOOTSTRAP_SCRIPT_PATH = `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`;
 const SHARED_FINGERPRINT_PROFILE_PATH = "fingerprint-profile.js";
 const SHARED_RISK_STATE_PATH = "risk-state.js";
+const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const BRIDGE_BOOTSTRAP_PAYLOAD_KEY = "bridge_bootstrap";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const hashMainWorldEventChannel = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const resolveMainWorldEventNamesForSecret = (
+  secret: string
+): { requestEvent: string; resultEvent: string } => {
+  const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+  return {
+    requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
+    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+  };
+};
 
 const sanitizePathSegment = (value: string): string => {
   const normalized = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
@@ -601,66 +626,137 @@ const resolveBootstrapInstallRuntime = (
   };
 };
 
-const buildBootstrapScriptSource = (payload: Record<string, unknown> | null): string =>
+const buildBridgeBootstrapPayload = (input: {
+  bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
+}): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {
+    [BRIDGE_BOOTSTRAP_PAYLOAD_KEY]: input.bridgeSecret
+  };
+  const installRuntime = resolveBootstrapInstallRuntime(input.extensionBootstrap);
+  if (installRuntime) {
+    payload.fingerprint_runtime = installRuntime;
+  }
+  return payload;
+};
+
+const buildBootstrapScriptSource = (input: {
+  payload: Record<string, unknown>;
+}): string =>
   [
     "(() => {",
-    `  const bootstrapPayload = ${JSON.stringify(payload)};`,
-    "  const asRecord = (value) =>",
-    "    typeof value === \"object\" && value !== null && !Array.isArray(value) ? value : null;",
-    "  const asStringArray = (value) =>",
-    "    Array.isArray(value) ? value.filter((entry) => typeof entry === \"string\") : [];",
-    "  const asNumber = (value) => (typeof value === \"number\" && Number.isFinite(value) ? value : null);",
-    "  const asBoolean = (value) => (typeof value === \"boolean\" ? value : null);",
-    "  const runtimeRecord = asRecord(bootstrapPayload);",
-    "  if (!runtimeRecord) {",
-    "    return;",
+    `  const payloadKey = ${JSON.stringify(FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY)};`,
+    `  const bootstrapPayload = ${JSON.stringify(input.payload)};`,
+    "  const host = typeof globalThis === \"object\" && globalThis !== null ? globalThis : null;",
+    "  if (!host) {",
+      "    return;",
     "  }",
-    "  const fingerprintRuntime = asRecord(runtimeRecord.fingerprint_runtime);",
-    "  if (!fingerprintRuntime) {",
-    "    return;",
-    "  }",
-    "  const patchManifest = asRecord(fingerprintRuntime.fingerprint_patch_manifest);",
-    "  const bundle = asRecord(fingerprintRuntime.fingerprint_profile_bundle);",
-    "  const batteryRecord = asRecord(bundle?.battery ?? null);",
-    "  const batteryLevel = asNumber(batteryRecord?.level);",
-    "  const batteryCharging = asBoolean(batteryRecord?.charging);",
-    "  const audioNoiseSeed = asNumber(bundle?.audioNoiseSeed);",
-    "  const installRuntime = {",
-    "    fingerprint_patch_manifest: {",
-    "      required_patches: asStringArray(patchManifest?.required_patches)",
-    "    },",
-    "    fingerprint_profile_bundle: {",
-    "      ...(audioNoiseSeed === null ? {} : { audioNoiseSeed }),",
-    "      ...(batteryLevel === null || batteryCharging === null",
-    "        ? {}",
-    "        : { battery: { level: batteryLevel, charging: batteryCharging } })",
+    "  try {",
+    "    Object.defineProperty(host, payloadKey, {",
+    "      configurable: false,",
+    "      enumerable: false,",
+    "      writable: false,",
+    "      value: bootstrapPayload",
+    "    });",
+    "  } catch {",
+    "    try {",
+    "      host[payloadKey] = bootstrapPayload;",
+    "    } catch {",
+    "      // ignore assignment fallback failure",
     "    }",
-    "  };",
-    "  if (typeof window === \"undefined\" || typeof CustomEvent !== \"function\") {",
-    "    return;",
     "  }",
-    "  if (typeof window.dispatchEvent !== \"function\") {",
-    "    return;",
-    "  }",
-    "  const requestEvent = \"__webenvoy_main_world_request__\";",
-    "  const requestId =",
-    "    typeof crypto !== \"undefined\" && typeof crypto.randomUUID === \"function\"",
-    "      ? crypto.randomUUID()",
-    "      : `startup-fingerprint-install-${Date.now()}`;",
-    "  window.dispatchEvent(",
-    "    new CustomEvent(requestEvent, {",
-    "      detail: {",
-    "        id: requestId,",
-    "        type: \"fingerprint-install\",",
-    "        payload: {",
-    "          fingerprint_runtime: installRuntime",
-    "        }",
-    "      }",
-    "    })",
-    "  );",
     "})();",
     ""
   ].join("\n");
+
+const replaceSourceToken = (input: {
+  source: string;
+  target: string;
+  replacement: string;
+  errorMessage: string;
+}): string => {
+  if (!input.source.includes(input.target)) {
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", input.errorMessage);
+  }
+  return input.source.replace(input.target, input.replacement);
+};
+
+const rewriteStagedContentScriptSourceForBridge = (input: {
+  source: string;
+  bridgeSecret: string;
+}): string => {
+  let rewritten = input.source;
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "  installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);",
+    replacement: [
+      `  const bridgeBootstrapFallbackSecret = ${JSON.stringify(input.bridgeSecret)};`,
+      "  const bridgeBootstrapSecret =",
+      "    typeof bootstrapPayload === \"object\" &&",
+      "    bootstrapPayload !== null &&",
+      "    !Array.isArray(bootstrapPayload) &&",
+      `    typeof bootstrapPayload.${BRIDGE_BOOTSTRAP_PAYLOAD_KEY} === \"string\"`,
+      `      ? bootstrapPayload.${BRIDGE_BOOTSTRAP_PAYLOAD_KEY}`,
+      "      : bridgeBootstrapFallbackSecret;",
+      "  const bootstrapMainWorldSecret =",
+      "    typeof bootstrapInput.mainWorldSecret === \"string\" && bootstrapInput.mainWorldSecret.length > 0",
+      "      ? bootstrapInput.mainWorldSecret",
+      "      : bridgeBootstrapSecret;",
+      "  installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
+    ].join("\n"),
+    errorMessage:
+      "staged content-script 缺少 main-world secret 安装锚点，无法注入 per-run secret channel"
+  });
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "      installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);",
+    replacement: [
+      "      const resolvedMainWorldSecret =",
+      "        typeof resolvedBootstrap.mainWorldSecret === \"string\" &&",
+      "        resolvedBootstrap.mainWorldSecret.length > 0",
+      "          ? resolvedBootstrap.mainWorldSecret",
+      "          : bridgeBootstrapSecret;",
+      "      installMainWorldEventChannelSecret(resolvedMainWorldSecret);"
+    ].join("\n"),
+    errorMessage:
+      "staged content-script 缺少 fallback main-world secret 安装锚点，无法注入 per-run secret channel"
+  });
+  return rewritten;
+};
+
+const rewriteStagedMainWorldBridgeSourceForBridge = (input: {
+  source: string;
+  bridgeSecret: string;
+}): string => {
+  const expectedEventNames = resolveMainWorldEventNamesForSecret(input.bridgeSecret);
+  let rewritten = input.source;
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: 'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+    replacement: [
+      'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+      `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = ${JSON.stringify(expectedEventNames.requestEvent)};`,
+      `const EXPECTED_MAIN_WORLD_RESULT_EVENT = ${JSON.stringify(expectedEventNames.resultEvent)};`
+    ].join("\n"),
+    errorMessage: "staged main-world-bridge 缺少 event 常量锚点，无法注入 secret-derived channel"
+  });
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {",
+    replacement: [
+      "    if (",
+      "      requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||",
+      "      resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT",
+      "    ) {",
+      "      return null;",
+      "    }",
+      "    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {"
+    ].join("\n"),
+    errorMessage:
+      "staged main-world-bridge 缺少 channel 校验锚点，无法注入 secret-derived channel"
+  });
+  return rewritten;
+};
 
 const stripEsmSyntaxForClassicScript = (source: string): string => {
   let transformed = source;
@@ -792,13 +888,35 @@ const buildStagedContentScriptBundle = async (input: {
 const rewriteStagedContentScriptForRuntime = async (input: {
   stagedExtensionDir: string;
   extensionSourceDir: string;
+  bridgeSecret: string;
 }): Promise<void> => {
   const sharedSourceDir = await resolveSharedSourceDir(input.extensionSourceDir);
   const bundleSource = await buildStagedContentScriptBundle({
     extensionSourceDir: input.extensionSourceDir,
     sharedSourceDir
   });
-  await writeFile(join(input.stagedExtensionDir, CONTENT_SCRIPT_ENTRY_PATH), `${bundleSource}\n`, "utf8");
+  const rewrittenBundleSource = rewriteStagedContentScriptSourceForBridge({
+    source: bundleSource,
+    bridgeSecret: input.bridgeSecret
+  });
+  await writeFile(
+    join(input.stagedExtensionDir, CONTENT_SCRIPT_ENTRY_PATH),
+    `${rewrittenBundleSource}\n`,
+    "utf8"
+  );
+};
+
+const rewriteStagedMainWorldBridgeForRuntime = async (input: {
+  stagedExtensionDir: string;
+  bridgeSecret: string;
+}): Promise<void> => {
+  const mainWorldBridgePath = join(input.stagedExtensionDir, MAIN_WORLD_BRIDGE_ENTRY_PATH);
+  const raw = await readFile(mainWorldBridgePath, "utf8");
+  const rewritten = rewriteStagedMainWorldBridgeSourceForBridge({
+    source: raw,
+    bridgeSecret: input.bridgeSecret
+  });
+  await writeFile(mainWorldBridgePath, rewritten, "utf8");
 };
 
 const injectBootstrapScriptIntoManifest = async (manifestPath: string): Promise<void> => {
@@ -858,6 +976,7 @@ const stageExtensionForRun = async (input: {
   await mkdir(stagedExtensionParent, { recursive: true });
   await rm(stagedExtensionDir, { recursive: true, force: true });
   await cp(extensionSourceDir, stagedExtensionDir, { recursive: true });
+  const bridgeSecret = randomUUID();
 
   const bootstrapPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
   const envelope: ExtensionBootstrapEnvelope = {
@@ -869,21 +988,25 @@ const stageExtensionForRun = async (input: {
   await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
 
   const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
-  const bootstrapScriptPayload = resolveBootstrapInstallRuntime(input.extensionBootstrap);
+  const bootstrapScriptPayload = buildBridgeBootstrapPayload({
+    bridgeSecret,
+    extensionBootstrap: input.extensionBootstrap
+  });
   await writeFile(
     bootstrapScriptPath,
-    buildBootstrapScriptSource(
-      bootstrapScriptPayload
-        ? {
-            fingerprint_runtime: bootstrapScriptPayload
-          }
-        : null
-    ),
+    buildBootstrapScriptSource({
+      payload: bootstrapScriptPayload
+    }),
     "utf8"
   );
   await rewriteStagedContentScriptForRuntime({
     stagedExtensionDir,
-    extensionSourceDir
+    extensionSourceDir,
+    bridgeSecret
+  });
+  await rewriteStagedMainWorldBridgeForRuntime({
+    stagedExtensionDir,
+    bridgeSecret
   });
   await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
 
@@ -1038,6 +1161,7 @@ const launchProcess = async (
 export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserLaunchResult> => {
   const executablePath = await resolveExecutablePath(input.params);
   const supervisorScriptPath = await resolveSupervisorScriptPath();
+  const startUrl = parseStartUrl(input.params);
   const extensionBootstrap = resolveExtensionBootstrapPayload(input);
   const extensionStaging = await stageExtensionForRun({
     profileDir: input.profileDir,
@@ -1061,7 +1185,7 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
   if (shouldHeadless) {
     launchArgs.push("--headless=new");
   }
-  launchArgs.push(parseStartUrl(input.params));
+  launchArgs.push(startUrl);
 
   const launchToken = randomUUID();
   const stateFilePath = getStateFilePath(input.profileDir);

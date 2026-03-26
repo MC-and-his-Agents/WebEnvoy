@@ -156,6 +156,35 @@ const findArgValue = (args: string[], prefix: string): string | null => {
   return null;
 };
 
+const matchConstStringValue = (source: string, constantName: string): string | null => {
+  const escapedName = constantName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matched = source.match(new RegExp(`const ${escapedName} = "([^"]+)";`));
+  return matched ? matched[1] : null;
+};
+
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+
+const hashMainWorldEventChannel = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const resolveMainWorldEventNamesForSecret = (
+  secret: string
+): { requestEvent: string; resultEvent: string } => {
+  const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+  return {
+    requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
+    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+  };
+};
+
 const waitForExit = async (pid: number): Promise<void> => {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
@@ -315,25 +344,146 @@ describe("browser-launcher", () => {
       join(stagedExtensionPath as string, "build", EXTENSION_BOOTSTRAP_SCRIPT_FILENAME),
       "utf8"
     );
-    expect(bootstrapScriptRaw).not.toContain("__webenvoy_fingerprint_bootstrap_payload__");
-    expect(bootstrapScriptRaw).toContain("__webenvoy_main_world_request__");
-    expect(bootstrapScriptRaw).toContain("fingerprint-install");
+    expect(bootstrapScriptRaw).toContain(
+      'const payloadKey = "__webenvoy_fingerprint_bootstrap_payload__";'
+    );
+    expect(bootstrapScriptRaw).toContain("bridge_bootstrap");
+    expect(bootstrapScriptRaw).toContain('"required_patches":["audio_context"]');
+    expect(bootstrapScriptRaw).toContain("Object.defineProperty");
+    expect(bootstrapScriptRaw).not.toContain("__webenvoy_main_world_request__");
+    expect(bootstrapScriptRaw).not.toContain("dispatchEvent");
     expect(bootstrapScriptRaw).not.toContain("__webenvoy_main_world_result__");
+    expect(bootstrapScriptRaw).not.toContain('"run_id"');
     expect(bootstrapScriptRaw).not.toContain("startup-fingerprint-trust:");
     expect(bootstrapScriptRaw).not.toContain("unit-test-agent");
     const bundledContentScriptRaw = await readFile(
       join(stagedExtensionPath as string, "build", "content-script.js"),
       "utf8"
     );
+    const mainWorldBridgeRaw = await readFile(
+      join(stagedExtensionPath as string, "build", "main-world-bridge.js"),
+      "utf8"
+    );
     expect(bundledContentScriptRaw).not.toContain('import { ContentScriptHandler } from');
     expect(bundledContentScriptRaw).toContain("bootstrapContentScript");
     expect(bundledContentScriptRaw).toContain("WebEnvoy staged content script bundle");
     expect(bundledContentScriptRaw).toContain("__webenvoy_module_content_script");
+    const payloadKey = matchConstStringValue(
+      bundledContentScriptRaw,
+      "FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY"
+    );
+    const contentFallbackSecret = matchConstStringValue(
+      bundledContentScriptRaw,
+      "bridgeBootstrapFallbackSecret"
+    );
+    const expectedRequestEvent = matchConstStringValue(
+      mainWorldBridgeRaw,
+      "EXPECTED_MAIN_WORLD_REQUEST_EVENT"
+    );
+    const expectedResultEvent = matchConstStringValue(
+      mainWorldBridgeRaw,
+      "EXPECTED_MAIN_WORLD_RESULT_EVENT"
+    );
+    expect(payloadKey).toBeTruthy();
+    expect(payloadKey).toBe("__webenvoy_fingerprint_bootstrap_payload__");
+    expect(contentFallbackSecret).toBeTruthy();
+    expect(expectedRequestEvent).toBeTruthy();
+    expect(expectedResultEvent).toBeTruthy();
+    const expectedEvents = resolveMainWorldEventNamesForSecret(contentFallbackSecret as string);
+    expect(expectedRequestEvent).toBe(expectedEvents.requestEvent);
+    expect(expectedResultEvent).toBe(expectedEvents.resultEvent);
+    expect(bundledContentScriptRaw).toContain(
+      "installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
+    );
+    expect(bundledContentScriptRaw).toContain(
+      "typeof bootstrapPayload.bridge_bootstrap === \"string\""
+    );
+    expect(bundledContentScriptRaw).toContain("installMainWorldEventChannelSecret(resolvedMainWorldSecret);");
+    expect(bundledContentScriptRaw).not.toContain("window.postMessage(");
+    expect(mainWorldBridgeRaw).toContain(
+      `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = "${expectedEvents.requestEvent}";`
+    );
+    expect(mainWorldBridgeRaw).toContain(
+      `const EXPECTED_MAIN_WORLD_RESULT_EVENT = "${expectedEvents.resultEvent}";`
+    );
+    expect(mainWorldBridgeRaw).toContain(
+      "requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||"
+    );
+    expect(mainWorldBridgeRaw).toContain(
+      "resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT"
+    );
+    expect(bootstrapScriptRaw).toContain(`const payloadKey = "${payloadKey as string}";`);
+    expect(bootstrapScriptRaw).toContain(
+      `"bridge_bootstrap":"${contentFallbackSecret as string}"`
+    );
 
     await shutdownBrowserSession({
       profileDir,
       controllerPid: launched.controllerPid,
       runId: "run-launcher-test-extension-stage-001"
+    });
+  });
+
+  it("generates unique bridge secret for each staged run", async () => {
+    const { scriptPath: scriptPathA, logPath: logPathA } = await createMockBrowserExecutable();
+    const { scriptPath: scriptPathB, logPath: logPathB } = await createMockBrowserExecutable();
+    const profileDirA = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-secret-a-"));
+    const profileDirB = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-secret-b-"));
+    tempDirs.push(profileDirA, profileDirB);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPathA;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPathA;
+
+    const launchA = await launchBrowser({
+      command: "runtime.start",
+      profileDir: profileDirA,
+      proxyUrl: null,
+      runId: "run-launcher-test-secret-001",
+      params: {}
+    });
+    const launchArgsA = parseLaunchArgs(await waitForLaunchLog(logPathA));
+    const stagedExtensionPathA = findArgValue(launchArgsA, "--load-extension=");
+    expect(stagedExtensionPathA).toBeTruthy();
+    const bundledContentScriptA = await readFile(
+      join(stagedExtensionPathA as string, "build", "content-script.js"),
+      "utf8"
+    );
+    const bridgeSecretA = matchConstStringValue(
+      bundledContentScriptA,
+      "bridgeBootstrapFallbackSecret"
+    );
+    expect(bridgeSecretA).toBeTruthy();
+    await shutdownBrowserSession({
+      profileDir: profileDirA,
+      controllerPid: launchA.controllerPid,
+      runId: "run-launcher-test-secret-001"
+    });
+
+    process.env.WEBENVOY_BROWSER_PATH = scriptPathB;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPathB;
+    const launchB = await launchBrowser({
+      command: "runtime.start",
+      profileDir: profileDirB,
+      proxyUrl: null,
+      runId: "run-launcher-test-secret-002",
+      params: {}
+    });
+    const launchArgsB = parseLaunchArgs(await waitForLaunchLog(logPathB));
+    const stagedExtensionPathB = findArgValue(launchArgsB, "--load-extension=");
+    expect(stagedExtensionPathB).toBeTruthy();
+    const bundledContentScriptB = await readFile(
+      join(stagedExtensionPathB as string, "build", "content-script.js"),
+      "utf8"
+    );
+    const bridgeSecretB = matchConstStringValue(
+      bundledContentScriptB,
+      "bridgeBootstrapFallbackSecret"
+    );
+    expect(bridgeSecretB).toBeTruthy();
+    expect(bridgeSecretB).not.toBe(bridgeSecretA);
+    await shutdownBrowserSession({
+      profileDir: profileDirB,
+      controllerPid: launchB.controllerPid,
+      runId: "run-launcher-test-secret-002"
     });
   });
 
