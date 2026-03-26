@@ -1221,14 +1221,26 @@ describe("profile-runtime fingerprint runtime contract", () => {
       fingerprint_runtime: {
         fingerprint_profile_bundle: {
           timezone: expect.any(String),
-          ua: expect.stringContaining("Chrome/")
+          ua: expect.stringContaining("Chrome/"),
+          legacy_migration: {
+            status: "backfilled_from_legacy",
+            reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+          }
+        },
+        execution: {
+          live_allowed: false,
+          live_decision: "allowed",
+          reason_codes: expect.arrayContaining(["LEGACY_PROFILE_BUNDLE_MIGRATED"])
         }
       }
     });
 
     const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile_migrate"), "utf8");
     const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
-    expect(storedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(storedMeta.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
     expect(storedMeta.fingerprintProfileBundle?.timezone).toBeTruthy();
 
     await expect(
@@ -1240,12 +1252,11 @@ describe("profile-runtime fingerprint runtime contract", () => {
           requested_execution_mode: "live_read_limited"
         }
       })
-    ).resolves.toMatchObject({
-      fingerprint_runtime: {
-        execution: {
-          live_allowed: true,
-          live_decision: "allowed"
-        }
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        stage: "input_validation",
+        reason: "LEGACY_PROFILE_BUNDLE_MIGRATED"
       }
     });
   });

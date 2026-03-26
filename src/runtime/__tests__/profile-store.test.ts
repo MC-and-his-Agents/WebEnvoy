@@ -309,7 +309,10 @@ describe("profile-store", () => {
     );
 
     const meta = await store.readMeta("legacy-migrate", { mode: "migrate" });
-    expect(meta?.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(meta?.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
     expect(meta?.fingerprintProfileBundle?.timezone).toBe(resolveCurrentTimezone());
     expect(meta?.fingerprintProfileBundle?.ua).toContain("Chrome/146.0.0.0");
 
@@ -321,7 +324,10 @@ describe("profile-store", () => {
         ua?: string;
       };
     };
-    expect(persistedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(persistedMeta.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
     expect(persistedMeta.fingerprintProfileBundle?.timezone).toBe(resolveCurrentTimezone());
     expect(persistedMeta.fingerprintProfileBundle?.ua).toContain("Chrome/146.0.0.0");
   });

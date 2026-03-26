@@ -268,19 +268,6 @@ const buildLegacyBundleMigration = async (input: {
   timezone: string;
   intent: "transient_backfill" | "persistent_upgrade";
 }): Promise<FingerprintProfileBundle> => {
-  if (input.intent === "persistent_upgrade") {
-    return buildFingerprintProfileBundle(
-      withBrowserVersion(
-        {
-          profileName: input.meta.profileName,
-          fingerprintSeeds: input.meta.fingerprintSeeds,
-          timezone: input.timezone,
-          environment: resolveCurrentFingerprintEnvironment()
-        },
-        input.browserVersion
-      )
-    );
-  }
   return markFingerprintProfileBundleAsLegacyBackfilled(
     withBrowserVersion(
       {
@@ -288,7 +275,8 @@ const buildLegacyBundleMigration = async (input: {
         fingerprintSeeds: input.meta.fingerprintSeeds,
         timezone: input.timezone,
         environment: resolveCurrentFingerprintEnvironment(),
-        migratedAt: input.meta.updatedAt,
+        migratedAt:
+          input.intent === "persistent_upgrade" ? new Date().toISOString() : input.meta.updatedAt,
         sourceSchemaVersion: input.meta.schemaVersion,
         reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
       },

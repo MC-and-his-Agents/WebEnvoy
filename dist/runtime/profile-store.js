@@ -176,20 +176,12 @@ const parseMeta = (raw) => {
     return parsed;
 };
 const buildLegacyBundleMigration = async (input) => {
-    if (input.intent === "persistent_upgrade") {
-        return buildFingerprintProfileBundle(withBrowserVersion({
-            profileName: input.meta.profileName,
-            fingerprintSeeds: input.meta.fingerprintSeeds,
-            timezone: input.timezone,
-            environment: resolveCurrentFingerprintEnvironment()
-        }, input.browserVersion));
-    }
     return markFingerprintProfileBundleAsLegacyBackfilled(withBrowserVersion({
         profileName: input.meta.profileName,
         fingerprintSeeds: input.meta.fingerprintSeeds,
         timezone: input.timezone,
         environment: resolveCurrentFingerprintEnvironment(),
-        migratedAt: input.meta.updatedAt,
+        migratedAt: input.intent === "persistent_upgrade" ? new Date().toISOString() : input.meta.updatedAt,
         sourceSchemaVersion: input.meta.schemaVersion,
         reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
     }, input.browserVersion));
