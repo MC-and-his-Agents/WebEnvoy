@@ -56,6 +56,13 @@ const parseProxyUrl = (params) => {
     }
     return value;
 };
+const readSessionId = (params) => {
+    const value = params.session_id;
+    if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+    }
+    return "nm-session-001";
+};
 const asObjectRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const parseLocalStorageSnapshot = (params) => {
     const rawSnapshot = params.localStorageSnapshot;
@@ -134,9 +141,33 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
-const buildExtensionBootstrapInput = (fingerprintRuntime) => ({
+const buildExtensionBootstrapInput = (sessionId, fingerprintRuntime) => ({
+    session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime
 });
+const shouldPersistFingerprintBundle = (currentMeta, fingerprintRuntime) => {
+    const currentBundle = currentMeta.fingerprintProfileBundle;
+    const nextBundle = fingerprintRuntime.fingerprint_profile_bundle;
+    const isLegacyBackfilledBundle = (bundle) => {
+        if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
+            return false;
+        }
+        const legacyMigration = bundle.legacy_migration;
+        return (typeof legacyMigration === "object" &&
+            legacyMigration !== null &&
+            !Array.isArray(legacyMigration) &&
+            legacyMigration.status === "backfilled_from_legacy");
+    };
+    if (!nextBundle) {
+        return currentBundle ?? null;
+    }
+    const isTransientLegacyBackfill = isLegacyBackfilledBundle(nextBundle) &&
+        (!currentBundle || isLegacyBackfilledBundle(currentBundle));
+    if (isTransientLegacyBackfill) {
+        return null;
+    }
+    return nextBundle;
+};
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
@@ -254,7 +285,7 @@ export class ProfileRuntimeService {
                 proxyUrl: session.proxyBinding?.url ?? null,
                 runId: input.runId,
                 params: input.params,
-                extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
+                extensionBootstrap: buildExtensionBootstrapInput(readSessionId(input.params), fingerprintRuntime)
             });
             launchedControllerPid = browserLaunch.controllerPid;
             await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -264,7 +295,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
-                fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
+                fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
             });
@@ -373,7 +404,7 @@ export class ProfileRuntimeService {
                     proxyUrl: session.proxyBinding?.url ?? null,
                     runId: input.runId,
                     params: input.params,
-                    extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
+                    extensionBootstrap: buildExtensionBootstrapInput(readSessionId(input.params), fingerprintRuntime)
                 });
                 launchedControllerPid = browserLaunch.controllerPid;
                 await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -383,7 +414,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
-                fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
+                fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso
             }));
             if (!confirmLogin) {
@@ -409,7 +440,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
-                fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
+                fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastLoginAt: nowIso,
                 localStorageSnapshots: upsertLocalStorageSnapshot(recoveredMeta.localStorageSnapshots, localStorageSnapshot)
@@ -522,7 +553,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
-                fingerprintProfileBundle: fingerprintRuntime.fingerprint_profile_bundle,
+                fingerprintProfileBundle: shouldPersistFingerprintBundle(existingMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStoppedAt: nowIso
             }));
@@ -823,7 +854,9 @@ export class ProfileRuntimeService {
             profileDir: patch.profileDir,
             profileState: patch.profileState,
             proxyBinding: patch.proxyBinding,
-            fingerprintProfileBundle: patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,
+            fingerprintProfileBundle: patch.fingerprintProfileBundle === null
+                ? undefined
+                : patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,
             localStorageSnapshots: patch.localStorageSnapshots ?? current.localStorageSnapshots,
             updatedAt: patch.updatedAt,
             lastStartedAt: patch.lastStartedAt ?? current.lastStartedAt,

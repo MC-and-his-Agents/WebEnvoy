@@ -4,7 +4,6 @@ import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerpr
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
-const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
     readFile,
@@ -220,7 +219,7 @@ export class ProfileStore {
             const raw = await this.fs.readFile(metaPath, "utf8");
             const parsed = parseMeta(raw);
             if (parsed.fingerprintProfileBundle === undefined) {
-                const legacyBackfillMode = await this.resolveLegacyBackfillMode(profileName, options);
+                const legacyBackfillMode = options.mode === "migrate" ? "migrate" : "readonly";
                 const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
                 const migratedMeta = {
                     ...parsed,
@@ -302,25 +301,5 @@ export class ProfileStore {
         };
         await this.writeMeta(profileName, meta);
         return meta;
-    }
-    async resolveLegacyBackfillMode(profileName, options) {
-        if (options.mode === "migrate") {
-            return "migrate";
-        }
-        if (options.mode === "readonly") {
-            return "readonly";
-        }
-        const lockPath = join(this.getProfileDir(profileName), PROFILE_LOCK_FILENAME);
-        try {
-            const raw = await this.fs.readFile(lockPath, "utf8");
-            const parsed = JSON.parse(raw);
-            if (isObjectRecord(parsed) && Number.isInteger(parsed.ownerPid) && parsed.ownerPid === process.pid) {
-                return "migrate";
-            }
-        }
-        catch {
-            // Treat lock read/parse failures as readonly fallback to avoid write side effects.
-        }
-        return "readonly";
     }
 }

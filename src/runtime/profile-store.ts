@@ -13,7 +13,6 @@ import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
-const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 export type ReadMetaMode = "readonly" | "migrate";
 
 export interface ReadMetaOptions {
@@ -329,7 +328,7 @@ export class ProfileStore {
       const raw = await this.fs.readFile(metaPath, "utf8");
       const parsed = parseMeta(raw);
       if (parsed.fingerprintProfileBundle === undefined) {
-        const legacyBackfillMode = await this.resolveLegacyBackfillMode(profileName, options);
+        const legacyBackfillMode = options.mode === "migrate" ? "migrate" : "readonly";
         const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
         const migratedMeta: ProfileMeta = {
           ...parsed,
@@ -420,30 +419,5 @@ export class ProfileStore {
 
     await this.writeMeta(profileName, meta);
     return meta;
-  }
-
-  private async resolveLegacyBackfillMode(
-    profileName: string,
-    options: ReadMetaOptions
-  ): Promise<ReadMetaMode> {
-    if (options.mode === "migrate") {
-      return "migrate";
-    }
-    if (options.mode === "readonly") {
-      return "readonly";
-    }
-
-    const lockPath = join(this.getProfileDir(profileName), PROFILE_LOCK_FILENAME);
-    try {
-      const raw = await this.fs.readFile(lockPath, "utf8");
-      const parsed = JSON.parse(raw) as unknown;
-      if (isObjectRecord(parsed) && Number.isInteger(parsed.ownerPid) && parsed.ownerPid === process.pid) {
-        return "migrate";
-      }
-    } catch {
-      // Treat lock read/parse failures as readonly fallback to avoid write side effects.
-    }
-
-    return "readonly";
   }
 }

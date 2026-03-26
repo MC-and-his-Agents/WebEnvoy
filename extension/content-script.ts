@@ -343,7 +343,7 @@ const installStartupFingerprintPatch = (fingerprintRuntime: FingerprintRuntimeCo
   });
 };
 
-const installAndEmitStartupFingerprintTrust = (
+const emitStartupFingerprintTrust = (
   runtime: ContentScriptRuntime,
   input: {
     runId: string | null;
@@ -351,7 +351,6 @@ const installAndEmitStartupFingerprintTrust = (
     fingerprintRuntime: FingerprintRuntimeContext;
   }
 ): void => {
-  installStartupFingerprintPatch(input.fingerprintRuntime);
   if (!input.runId || !input.sessionId) {
     return;
   }
@@ -385,11 +384,24 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
   if (bootstrapContext) {
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
-    installAndEmitStartupFingerprintTrust(runtime, {
+    installStartupFingerprintPatch(bootstrapContext);
+    emitStartupFingerprintTrust(runtime, {
       runId: bootstrapInput.runId,
       sessionId: bootstrapInput.sessionId,
       fingerprintRuntime: bootstrapContext
     });
+    if (!bootstrapInput.runId || !bootstrapInput.sessionId) {
+      void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+        if (!resolvedBootstrap.runId || !resolvedBootstrap.sessionId) {
+          return;
+        }
+        emitStartupFingerprintTrust(runtime, {
+          runId: resolvedBootstrap.runId,
+          sessionId: resolvedBootstrap.sessionId,
+          fingerprintRuntime: bootstrapContext
+        });
+      });
+    }
   } else {
     void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
       installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
@@ -400,7 +412,8 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
         resolvedBootstrap.fingerprintRuntime,
         resolvedBootstrap.runId
       );
-      installAndEmitStartupFingerprintTrust(runtime, {
+      installStartupFingerprintPatch(resolvedBootstrap.fingerprintRuntime);
+      emitStartupFingerprintTrust(runtime, {
         runId: resolvedBootstrap.runId,
         sessionId: resolvedBootstrap.sessionId,
         fingerprintRuntime: resolvedBootstrap.fingerprintRuntime

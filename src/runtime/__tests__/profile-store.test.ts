@@ -382,6 +382,25 @@ describe("profile-store", () => {
     expect(bundle.ua).not.toContain("Mac OS X 24_4_0");
   });
 
+  it("uses arm64 architecture token for macOS default UA when profile arch is arm64", () => {
+    const bundle = buildFingerprintProfileBundle({
+      profileName: "default",
+      fingerprintSeeds: {
+        audioNoiseSeed: "default-audio-seed",
+        canvasNoiseSeed: "default-canvas-seed"
+      },
+      environment: {
+        os_family: "macos",
+        os_version: "15.0",
+        arch: "arm64"
+      },
+      timezone: "Asia/Shanghai"
+    });
+
+    expect(bundle.ua).toContain("Macintosh; ARM Mac OS X");
+    expect(bundle.ua).not.toContain("Macintosh; Intel Mac OS X");
+  });
+
   it("uses arm64 architecture token for Linux default UA when profile arch is arm64", () => {
     const bundle = buildFingerprintProfileBundle({
       profileName: "default",

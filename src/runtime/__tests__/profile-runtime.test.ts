@@ -883,6 +883,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     const startLaunch = launchInputs[0];
     expect(startLaunch.command).toBe("runtime.start");
     expect(startLaunch.extensionBootstrap).toMatchObject({
+      session_id: "nm-session-001",
       fingerprint_runtime: started.fingerprint_runtime
     });
     expect(
@@ -898,6 +899,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     const loginLaunch = launchInputs[1];
     expect(loginLaunch.command).toBe("runtime.login");
     expect(loginLaunch.extensionBootstrap).toMatchObject({
+      session_id: "nm-session-001",
       fingerprint_runtime: loginStart.fingerprint_runtime
     });
     expect(
@@ -1058,7 +1060,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
   });
 
-  it("keeps legacy profile readonly on status and upgrades it to a live-compatible bundle on start", async () => {
+  it("keeps legacy profile degraded until explicit migrate and never persists transient backfill during runtime actions", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-legacy-"));
     tempDirs.push(baseDir);
     const service = createTestService({
@@ -1126,20 +1128,21 @@ describe("profile-runtime fingerprint runtime contract", () => {
     };
     expect(storedAfterStatus.fingerprintProfileBundle).toBeUndefined();
 
-    const upgradedStart = await service.start({
+    const started = await service.start({
       cwd: baseDir,
       profile: "legacy_profile",
       runId: "run-runtime-test-fingerprint-legacy-start",
       params: {}
     });
-    expect(upgradedStart).toMatchObject({
+    expect(started).toMatchObject({
       fingerprint_runtime: {
         fingerprint_profile_bundle: {
-          timezone: expect.any(String),
-          ua: expect.stringContaining("Chrome/")
+          legacy_migration: {
+            status: "backfilled_from_legacy",
+            reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+          }
         },
         execution: {
-          live_allowed: true,
           live_decision: "allowed"
         }
       }
@@ -1147,8 +1150,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
 
     const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile"), "utf8");
     const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
-    expect(storedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
-    expect(storedMeta.fingerprintProfileBundle?.timezone).toBeTruthy();
+    expect(storedMeta.fingerprintProfileBundle).toBeUndefined();
 
     await service.stop({
       cwd: baseDir,
@@ -1166,13 +1168,8 @@ describe("profile-runtime fingerprint runtime contract", () => {
           requested_execution_mode: "live_read_limited"
         }
       })
-    ).resolves.toMatchObject({
-      fingerprint_runtime: {
-        execution: {
-          live_allowed: true,
-          live_decision: "allowed"
-        }
-      }
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID"
     });
   });
 });
