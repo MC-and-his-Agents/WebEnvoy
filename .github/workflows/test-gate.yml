@@ -4,12 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - 'AGENTS.md'
-      - 'code_review.md'
-      - 'scripts/pr-guardian.sh'
-      - 'scripts/merge-pr.sh'
-      - '.github/workflows/test-gate.yml'
 
 jobs:
   test:
@@ -20,15 +14,62 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify Change Scope
+        id: change-scope
+        run: |
+          set -euo pipefail
+
+          mapfile -t changed_files < <(git diff --name-only --diff-filter=ACMR "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+
+          process_only="yes"
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            process_only="no"
+          else
+            for file in "${changed_files[@]}"; do
+              case "$file" in
+                "AGENTS.md"|\
+                "code_review.md"|\
+                "scripts/pr-guardian.sh"|\
+                "scripts/merge-pr.sh"|\
+                ".github/workflows/test-gate.yml")
+                  ;;
+                *)
+                  process_only="no"
+                  break
+                  ;;
+              esac
+            done
+          fi
+
+          {
+            echo "process_only=$process_only"
+            echo "changed_count=${#changed_files[@]}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Changed files (${#changed_files[@]}):"
+          printf '%s\n' "${changed_files[@]}"
+          echo "process_only=$process_only"
+
+      - name: Run Process-Only Smoke
+        if: ${{ steps.change-scope.outputs.process_only == 'yes' }}
+        run: |
+          set -euo pipefail
+          echo "Process-only change detected, running lightweight smoke checks."
+          bash -n scripts/pr-guardian.sh
+          bash -n scripts/merge-pr.sh
+          bash scripts/merge-pr.sh --help >/dev/null
 
       - name: Setup Node.js
-        if: ${{ hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' && hashFiles('package.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: '23.9.0'
 
       - name: Install Dependencies
-        if: ${{ hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' && hashFiles('package.json') != '' }}
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -41,6 +82,7 @@ jobs:
 
       - name: Detect Test Plan
         id: detect-tests
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' }}
         run: |
           set -euo pipefail
 
@@ -107,20 +149,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Unit Tests
-        if: ${{ steps.detect-tests.outputs.unit_cmd != '' }}
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' && steps.detect-tests.outputs.unit_cmd != '' }}
         run: |
           set -euo pipefail
           echo "Running unit tests with: ${{ steps.detect-tests.outputs.unit_cmd }}"
           ${{ steps.detect-tests.outputs.unit_cmd }}
 
       - name: Run E2E/Integration Tests
-        if: ${{ steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' && steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
         run: |
           set -euo pipefail
           echo "Running integration tests with: ${{ steps.detect-tests.outputs.integration_cmd }}"
           ${{ steps.detect-tests.outputs.integration_cmd }}
 
       - name: No Tests Declared
-        if: ${{ steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no') }}
+        if: ${{ steps.change-scope.outputs.process_only != 'yes' && (steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no')) }}
         run: |
           echo "No package-managed tests detected for this repository state."
