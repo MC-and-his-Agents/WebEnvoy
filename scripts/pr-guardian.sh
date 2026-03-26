@@ -15,7 +15,7 @@ usage() {
 
 说明:
   review         本机执行 Codex 审查并打印结论
-  merge-if-safe  审查通过且必需检查通过时，执行 squash merge
+  merge-if-safe  自动回写 review（可兼容传 --post-review）；审查通过且必需检查通过时，执行 squash merge
 EOF
 }
 
@@ -228,13 +228,13 @@ head_has_expected_review_state() {
   local expected_state="$4"
   local reviews_file="${TMP_DIR}/reviews.json"
 
-  gh api "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
 
   jq -e \
     --arg reviewer "${reviewer}" \
     --arg head_sha "${head_sha}" \
     --arg expected_state "${expected_state}" \
-    'any(.[];
+    'any(.[][];
       (.user.login // "") == $reviewer
       and (.commit_id // "") == $head_sha
       and (.state // "") == $expected_state
@@ -428,6 +428,7 @@ main() {
   local mode="${1:-}"
   local pr_number="${2:-}"
   local post_review_flag=0
+  local should_post_review=0
   local delete_branch_flag=0
 
   [[ -n "${mode}" ]] || { usage; exit 1; }
@@ -463,7 +464,13 @@ main() {
   run_codex_review "${pr_number}"
   print_summary
 
-  if [[ "${post_review_flag}" == "1" ]]; then
+  if [[ "${mode}" == "merge-if-safe" ]]; then
+    should_post_review=1
+  else
+    should_post_review="${post_review_flag}"
+  fi
+
+  if [[ "${should_post_review}" == "1" ]]; then
     post_review "${pr_number}"
     echo "已回写 PR review。"
   fi
