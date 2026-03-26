@@ -352,6 +352,23 @@ test_merge_if_safe_retries_until_review_state_is_visible() {
   fi
 }
 
+test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head() {
+  setup_merge_if_safe_fixture \
+    "merge-review-state-regression-same-head" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '[[{"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED"},{"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"CHANGES_REQUESTED"}]]' > "${MOCK_GH_REVIEWS_JSON}"
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "期望状态: APPROVED"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -367,6 +384,7 @@ main() {
   test_merge_if_safe_treats_behind_as_retryable_wait_state
   test_merge_if_safe_treats_unknown_as_retryable_wait_state
   test_merge_if_safe_retries_until_review_state_is_visible
+  test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head
 
   echo "pr-guardian merge-guard semantics test passed."
 }

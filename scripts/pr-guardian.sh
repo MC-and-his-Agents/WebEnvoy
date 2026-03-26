@@ -234,11 +234,19 @@ head_has_expected_review_state() {
     --arg reviewer "${reviewer}" \
     --arg head_sha "${head_sha}" \
     --arg expected_state "${expected_state}" \
-    'any(.[][];
-      (.user.login // "") == $reviewer
-      and (.commit_id // "") == $head_sha
-      and (.state // "") == $expected_state
-    )' "${reviews_file}" >/dev/null 2>&1
+    '
+      [
+        .[][]
+        | select((.user.login // "") == $reviewer)
+        | select((.commit_id // "") == $head_sha)
+        | select((.state // "") | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED"))
+      ]
+      | if length == 0 then
+          false
+        else
+          (last | (.state // "") == $expected_state)
+        end
+    ' "${reviews_file}" >/dev/null 2>&1
 }
 
 wait_for_expected_review_state() {
