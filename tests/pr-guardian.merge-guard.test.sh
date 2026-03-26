@@ -42,6 +42,13 @@ pop_sequence_response_line() {
 }
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "checks" ]]; then
+  if [[ "${MOCK_GH_CHECKS_EXIT_CODE:-0}" != "0" ]]; then
+    if [[ -n "${MOCK_GH_CHECKS_STDERR:-}" ]]; then
+      printf '%s\n' "${MOCK_GH_CHECKS_STDERR}" >&2
+    fi
+    exit "${MOCK_GH_CHECKS_EXIT_CODE}"
+  fi
+
   cat "${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}"
   exit 0
 fi
@@ -60,6 +67,11 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "review" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "pr" && "${2:-}" == "comment" ]]; then
+  echo "$*" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
+  exit 0
+fi
+
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
   echo "$*" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
   exit 0
@@ -72,7 +84,7 @@ if [[ "${1:-}" == "api" ]]; then
     if [[ "${arg}" == "--paginate" ]]; then
       has_paginate=1
     fi
-    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews ]]; then
+    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews || "${arg}" == repos/:owner/:repo/issues/*/comments ]]; then
       endpoint="${arg}"
     fi
   done
@@ -97,6 +109,11 @@ if [[ "${1:-}" == "api" ]]; then
     else
       cat "${MOCK_GH_REVIEWS_JSON:?missing MOCK_GH_REVIEWS_JSON}"
     fi
+    exit 0
+  fi
+
+  if [[ "${endpoint}" == repos/:owner/:repo/issues/*/comments ]]; then
+    cat "${MOCK_GH_PR_COMMENTS_JSON:?missing MOCK_GH_PR_COMMENTS_JSON}"
     exit 0
   fi
 fi
@@ -171,9 +188,28 @@ run_all_checks_pass_with_payload() {
   local payload="$1"
   setup_case_dir "checks"
 
+  MOCK_GH_CHECKS_EXIT_CODE=0
+  unset MOCK_GH_CHECKS_STDERR || true
+  export MOCK_GH_CHECKS_EXIT_CODE
+
   MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
   export MOCK_GH_CHECKS_JSON
   printf '%s\n' "${payload}" > "${MOCK_GH_CHECKS_JSON}"
+
+  all_required_checks_pass 123 >/dev/null 2>&1
+}
+
+run_all_checks_pass_without_required_checks_reported() {
+  setup_case_dir "checks-no-required"
+
+  MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
+  export MOCK_GH_CHECKS_JSON
+  printf '%s\n' '[]' > "${MOCK_GH_CHECKS_JSON}"
+
+  MOCK_GH_CHECKS_EXIT_CODE=1
+  MOCK_GH_CHECKS_STDERR="no required checks reported"
+  export MOCK_GH_CHECKS_EXIT_CODE
+  export MOCK_GH_CHECKS_STDERR
 
   all_required_checks_pass 123 >/dev/null 2>&1
 }
@@ -212,6 +248,10 @@ setup_merge_if_safe_fixture() {
   MOCK_GH_REVIEWS_JSON="${TEST_TMP_DIR}/${case_name}/mock/reviews.json"
   printf '[[{"user":{"login":"%s"},"commit_id":"%s","state":"%s"}]]\n' "${reviewer}" "${review_commit}" "${review_state}" > "${MOCK_GH_REVIEWS_JSON}"
   export MOCK_GH_REVIEWS_JSON
+
+  MOCK_GH_PR_COMMENTS_JSON="${TEST_TMP_DIR}/${case_name}/mock/pr-comments.json"
+  printf '%s\n' '[[]]' > "${MOCK_GH_PR_COMMENTS_JSON}"
+  export MOCK_GH_PR_COMMENTS_JSON
 
   if [[ "${require_paginate}" == "1" ]]; then
     MOCK_GH_REVIEWS_REQUIRE_PAGINATE=1
@@ -369,6 +409,23 @@ test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
+test_merge_if_safe_self_review_allows_comment_fallback_for_same_head() {
+  setup_merge_if_safe_fixture \
+    "merge-self-review-comment-fallback" \
+    "review-bot" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '[[{"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED"}]]' > "${MOCK_GH_REVIEWS_JSON}"
+  printf '%s\n' '[[{"user":{"login":"review-bot"},"body":"review body\n<!-- pr-guardian-self-review-head:head-sha-123 -->"}]]' > "${MOCK_GH_PR_COMMENTS_JSON}"
+
+  assert_pass merge_if_safe 274 0
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/issues/274/comments"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -376,8 +433,10 @@ main() {
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"fail","state":"FAILURE","link":"https://example.test/tests"}]'
+  assert_fail run_all_checks_pass_without_required_checks_reported
 
   test_merge_if_safe_without_post_review_respects_comment_contract
+  test_merge_if_safe_self_review_allows_comment_fallback_for_same_head
   test_merge_if_safe_finds_head_review_across_paginated_reviews
   test_post_review_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot
