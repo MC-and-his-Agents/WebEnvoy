@@ -397,8 +397,10 @@ print_summary() {
 
 all_required_checks_pass() {
   local pr_number="$1"
-  local checks_file="${TMP_DIR}/checks.json"
-  local checks_error_file="${TMP_DIR}/checks.err"
+  local checks_file="${TMP_DIR}/checks.required.json"
+  local checks_error_file="${TMP_DIR}/checks.required.err"
+  local all_checks_file="${TMP_DIR}/checks.all.json"
+  local all_checks_error_file="${TMP_DIR}/checks.all.err"
   local using_required_checks="1"
 
   if ! gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
@@ -425,7 +427,21 @@ all_required_checks_pass() {
     return 1
   fi
 
-  jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
+  if ! jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! gh pr checks "${pr_number}" --json name,bucket,state,link > "${all_checks_file}" 2>"${all_checks_error_file}"; then
+    sed 's/^/  /' "${all_checks_error_file}" >&2 || true
+    return 1
+  fi
+
+  if [[ "$(jq 'length' "${all_checks_file}")" -eq 0 ]]; then
+    echo "GitHub checks 列表为空，拒绝视为通过。" >&2
+    return 1
+  fi
+
+  jq -e 'all(.[]; .bucket == "pass")' "${all_checks_file}" >/dev/null 2>&1
 }
 
 load_merge_gate_meta() {
