@@ -12,7 +12,7 @@
 - 持久身份边界：稳定 `extension_id`、Native Messaging Host 名称、host manifest 的 `allowed_origins`、profile 内已安装扩展事实
 - 单次运行上下文：本次 run/session 需要的 runtime bootstrap 输入
 
-后者统一抽象为 `runtime_bootstrap_envelope` 一类对象。它在概念上会覆盖本次 run/session 所需的标识与上下文，例如 `run_id`、`session_id`、`profile`、运行时指纹与 main-world trust 相关输入，但这些字段的正式 transport contract 不在本次架构冻结里直接定稿。
+后者统一抽象为 `runtime_bootstrap_envelope` 一类对象。它在概念上会覆盖本次 run/session 所需的标识与上下文，例如 `run_id`、`runtime_context_id`、`profile`、运行时指纹与 main-world trust 相关输入，但这些字段的正式 transport contract 不在本次架构冻结里直接定稿。
 
 冻结要求：
 

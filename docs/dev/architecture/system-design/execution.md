@@ -45,7 +45,7 @@ L1 AI 视觉漫游（VLM + 物理点击）
 这里必须明确区分两层资产：
 
 - **静态扩展资产**：扩展代码、权限、content script、background、Native Messaging 权限与其他与单次 run 无关的内容
-- **运行时上下文**：`run_id`、`session_id`、`profile`、`fingerprint_runtime`、`fingerprint_patch_manifest`、`main_world_secret` 等 run/session 级输入，统一归入 `runtime_bootstrap_envelope` 一类对象
+- **运行时上下文**：`run_id`、`runtime_context_id`、`profile`、`fingerprint_runtime`、`fingerprint_patch_manifest`、`main_world_secret` 等 run/session 级输入，统一归入 `runtime_bootstrap_envelope` 一类对象
 
 额外边界：
 

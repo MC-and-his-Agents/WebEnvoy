@@ -36,7 +36,7 @@ profiles/
 
 同时明确：
 
-- `runtime_bootstrap_envelope` 及其承载的 `run_id`、`session_id`、`fingerprint_runtime`、`main_world_secret` 等对象属于 run/session 级输入
+- `runtime_bootstrap_envelope` 及其承载的 `run_id`、`runtime_context_id`、`fingerprint_runtime`、`main_world_secret` 等对象属于 run/session 级输入
 - 上述 run/session 级对象不属于 profile 永久元数据，不应通过 per-run staged extension 文件注入
 - 稳定 `extension_id`、安装渠道、扩展版本、Native Host 名称等持久扩展绑定事实属于 `#279` 冻结的 identity 边界，但不要求作为 FR-0003 当前阶段的最小持久化字段写入 `__webenvoy_meta.json`
 
