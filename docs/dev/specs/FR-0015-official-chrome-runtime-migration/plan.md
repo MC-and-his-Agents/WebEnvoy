@@ -62,6 +62,42 @@
   - bootstrap ack 成功 / 超时 / stale ack / identity mismatch
   - 断连后同 run 重试与幂等 bootstrap
   - `runtime.status` 对 identity / bootstrap readiness 的状态回读
+  - 控制进程死 / 浏览器活
+  - 锁仍持有但控制链断开
+  - ready marker 陈旧
+  - 同一 profile 的并发争抢
+
+### 状态型 runtime 健康矩阵
+
+- `healthy`
+  - `identityBindingState=bound`
+  - `transportState=ready`
+  - `bootstrapState=ready`
+- `recoverable`
+  - identity 仍正确
+  - transport 暂时断开或 bootstrap timeout
+  - 允许同 run 幂等重试或显式 stop/start 恢复
+- `blocked`
+  - identity mismatch
+  - stale ack / ready marker
+  - 任何不允许继续执行业务命令的 stop-ship 情况
+- `unknown`
+  - 多信号冲突，无法确认当前 run readiness 归属
+
+### 恢复路径
+
+- 控制进程死 / 浏览器活：
+  - 不得沿用旧控制面 ready 判定
+  - 必须重新验证 lock、transport 与 bootstrap ack 归属
+- 锁仍持有但控制链断开：
+  - 必须先判定为 `recoverable` 或 `blocked`
+  - 不得直接放行业务命令
+- ready marker 陈旧：
+  - 直接判为 `blocked`
+  - 必须重新 bootstrap，不得复用旧 marker
+- 并发争抢同一 profile：
+  - 必须保持 FR-0003 独占锁基线
+  - 第二个竞争者不得以 bootstrap 成功绕过锁约束
 
 ## TDD 范围
 

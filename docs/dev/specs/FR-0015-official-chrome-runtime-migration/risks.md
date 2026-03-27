@@ -86,11 +86,27 @@
 
 - transport 暂时断开
 - bootstrap ack timeout，但 identity binding 仍正确且当前 run 未变
+- 控制进程死 / 浏览器活，但 lock 与当前 run 归属仍可重新确认
 
 ### unknown
 
 - transport ready 但 bootstrap 信号与 identity 信号冲突
 - ready marker 与当前 run 无法确定对应关系
+
+## 最小恢复路径
+
+- 控制进程死 / 浏览器活：
+  - 不得直接复用旧 ready
+  - 必须重新验证 lock、transport 与 bootstrap ack 归属
+- 锁仍持有但控制链断开：
+  - 先判 `recoverable` 或 `blocked`
+  - 明确 stop/start 或人工恢复入口
+- ready marker 陈旧：
+  - 直接进入 `blocked`
+  - 重新 bootstrap 后才可回到 `pending|ready`
+- 并发争抢同一 profile：
+  - 继续服从 FR-0003 独占锁
+  - 不允许第二个竞争者通过 bootstrap 绕过锁
 
 ## stop-ship 条件
 
