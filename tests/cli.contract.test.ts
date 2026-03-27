@@ -48,6 +48,29 @@ const createRuntimeCwd = async (): Promise<string> => {
   return dir;
 };
 
+const createNativeHostManifest = async (input: {
+  nativeHostName?: string;
+  allowedOrigins: string[];
+}): Promise<string> => {
+  const dir = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-manifest-"));
+  tempDirs.push(dir);
+  const manifestPath = path.join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        name: input.nativeHostName ?? "com.webenvoy.host",
+        path: "/mock/webenvoy-host",
+        type: "stdio",
+        allowed_origins: input.allowedOrigins
+      },
+      null,
+      2
+    )}\n`
+  );
+  return manifestPath;
+};
+
 const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   NODE_ENV: "test",
   WEBENVOY_BROWSER_PATH: mockBrowserPath,
@@ -2768,6 +2791,228 @@ process.stdin.on("data", (chunk) => {
         browserState: "ready",
         proxyUrl: "http://127.0.0.1:8080/",
         lockHeld: true
+      }
+    });
+  });
+
+  it("returns machine-readable identity mismatch for official Chrome persistent extension preflight", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+    });
+
+    const result = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_mismatch_profile",
+        "--run-id",
+        "run-contract-identity-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-identity-001",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_MISMATCH",
+        details: {
+          ability_id: "runtime.identity_preflight",
+          identity_binding_state: "mismatch",
+          expected_origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+          manifest_path: manifestPath
+        }
+      }
+    });
+  });
+
+  it("does not surface identity-not-bound before official Chrome first start/login", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = {
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    };
+
+    const start = runCli(
+      ["runtime.start", "--profile", "identity_not_bound_start_profile", "--run-id", "run-contract-identity-001a"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      run_id: "run-contract-identity-001a",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_BROWSER_LAUNCH_FAILED"
+      }
+    });
+
+    const login = runCli(
+      ["runtime.login", "--profile", "identity_not_bound_login_profile", "--run-id", "run-contract-identity-001b"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(login.status).toBe(5);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      run_id: "run-contract-identity-001b",
+      command: "runtime.login",
+      status: "error",
+      error: {
+        code: "ERR_BROWSER_LAUNCH_FAILED"
+      }
+    });
+  });
+
+  it("surfaces bound identity preflight via runtime.status without bootstrap-pending contract", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bound_profile",
+        "--run-id",
+        "run-contract-identity-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_BROWSER_LAUNCH_FAILED"
+      }
+    });
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "identity_bound_profile",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension",
+          manifestPath,
+          expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+        }
+      }
+    });
+  });
+
+  it("does not reuse manifestPath after launcher failure when runtime.status omits manifest_path", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--run-id",
+        "run-contract-identity-003",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_BROWSER_LAUNCH_FAILED"
+      }
+    });
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "mismatch",
+        identityPreflight: {
+          failureReason: "IDENTITY_MANIFEST_MISSING"
+        }
       }
     });
   });

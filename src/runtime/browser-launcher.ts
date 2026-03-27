@@ -427,7 +427,7 @@ const readBrowserVersionOutput = async (executablePath: string): Promise<string 
   });
 };
 
-const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
+export const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
   if (!versionOutput) {
     return false;
   }
@@ -443,7 +443,10 @@ const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): 
   return Number.isInteger(major) && major >= 137;
 };
 
-const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
+const resolveExecutablePath = async (
+  params: JsonObject,
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
+): Promise<string> => {
   const explicitFromParams = parseOptionalString(params.browserPath);
   if (explicitFromParams !== null) {
     throw new BrowserLaunchError(
@@ -473,6 +476,9 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
 
     const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
     if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+      if (options?.allowUnsupportedExtensionBrowser) {
+        return resolvedCandidate;
+      }
       brandedChromeRejected = true;
       if (explicitFromEnv && candidate === explicitFromEnv) {
         throw new BrowserLaunchError(
@@ -517,14 +523,82 @@ export interface BrowserVersionTruthSource {
   browserVersion: string | null;
 }
 
-export const resolveBrowserVersionTruthSource = async (
-  params: JsonObject = {}
-): Promise<BrowserVersionTruthSource> => {
-  const executablePath = await resolveExecutablePath(params);
+interface ResolvedExecutableCandidate {
+  executablePath: string;
+  browserVersion: string | null;
+}
+
+const resolveExecutableCandidate = async (
+  candidate: string
+): Promise<ResolvedExecutableCandidate | null> => {
+  let executablePath: string | null = null;
+  if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+    if (await pathExists(candidate)) {
+      executablePath = candidate;
+    }
+  } else {
+    executablePath = await resolveCommandFromPath(candidate);
+  }
+  if (executablePath === null) {
+    return null;
+  }
   return {
     executablePath,
     browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
   };
+};
+
+export const resolveBrowserVersionTruthSource = async (
+  params: JsonObject = {},
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
+): Promise<BrowserVersionTruthSource> => {
+  const executablePath = await resolveExecutablePath(params, options);
+  return {
+    executablePath,
+    browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+  };
+};
+
+export const resolvePreferredBrowserVersionTruthSource = async (
+  params: JsonObject = {}
+): Promise<BrowserVersionTruthSource> => {
+  const explicitFromParams = parseOptionalString(params.browserPath);
+  if (explicitFromParams !== null) {
+    throw new BrowserLaunchError(
+      "BROWSER_INVALID_ARGUMENT",
+      "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH"
+    );
+  }
+
+  const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
+  const candidates = [
+    explicitFromEnv,
+    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
+  ].filter((item): item is string => item !== null);
+  let brandedChromeFallback: ResolvedExecutableCandidate | null = null;
+
+  for (const candidate of candidates) {
+    const resolved = await resolveExecutableCandidate(candidate);
+    if (resolved === null) {
+      continue;
+    }
+
+    if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
+      brandedChromeFallback ??= resolved;
+      if (explicitFromEnv && candidate === explicitFromEnv) {
+        return resolved;
+      }
+      continue;
+    }
+
+    return resolved;
+  }
+
+  if (brandedChromeFallback) {
+    return brandedChromeFallback;
+  }
+
+  return resolveBrowserVersionTruthSource(params);
 };
 
 const resolveSupervisorScriptPath = async (): Promise<string> => {

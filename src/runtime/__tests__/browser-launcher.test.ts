@@ -12,6 +12,7 @@ import {
   BROWSER_STATE_FILENAME,
   BrowserLaunchError,
   launchBrowser,
+  resolvePreferredBrowserVersionTruthSource,
   resolveBrowserVersionOutputForFingerprint,
   shutdownBrowserSession
 } from "../browser-launcher.js";
@@ -24,7 +25,8 @@ const originalBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
 const originalRealChromeBin = process.env.WEBENVOY_REAL_CHROME_BIN;
 const originalRealBrowserPath = process.env.WEBENVOY_REAL_BROWSER_PATH;
 const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
-
+const originalPath = process.env.PATH;
+const originalPlatform = process.platform;
 const restoreEnv = (
   key:
     | "WEBENVOY_BROWSER_PATH"
@@ -111,6 +113,28 @@ setInterval(() => {}, 1000);
   );
   await chmod(scriptPath, 0o755);
   return scriptPath;
+};
+
+const createVersionCommand = async (
+  commandName: string,
+  versionOutput: string
+): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-command-"));
+  tempDirs.push(dir);
+  const commandPath = join(dir, commandName);
+  await writeFile(
+    commandPath,
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo ${JSON.stringify(versionOutput)}
+  exit 0
+fi
+while true; do sleep 1; done
+`,
+    "utf8"
+  );
+  await chmod(commandPath, 0o755);
+  return dir;
 };
 
 const waitForLaunchLog = async (logPath: string): Promise<string> => {
@@ -210,6 +234,12 @@ afterEach(async () => {
   restoreEnv("WEBENVOY_REAL_CHROME_BIN", originalRealChromeBin);
   restoreEnv("WEBENVOY_REAL_BROWSER_PATH", originalRealBrowserPath);
   restoreEnv("WEBENVOY_BROWSER_VERSION", originalBrowserVersion);
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
+  }
+  Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {

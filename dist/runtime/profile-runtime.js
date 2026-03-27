@@ -4,6 +4,7 @@ import { CliError } from "../core/errors.js";
 import { BROWSER_CONTROL_FILENAME, BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
 import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
+import { buildIdentityPreflightError, runIdentityPreflight } from "./persistent-extension-identity.js";
 import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
@@ -147,24 +148,25 @@ const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime) => (
     session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime
 });
+const isTransientBackfilledFingerprintBundle = (bundle) => {
+    if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
+        return false;
+    }
+    const legacyMigration = bundle.legacy_migration;
+    return (typeof legacyMigration === "object" &&
+        legacyMigration !== null &&
+        !Array.isArray(legacyMigration) &&
+        legacyMigration.status === "backfilled_from_legacy");
+};
+const shouldBlockSessionEntryOnIdentityPreflight = (preflight) => preflight.blocking && preflight.failureReason !== "IDENTITY_BINDING_MISSING";
 const shouldPersistFingerprintBundle = (currentMeta, fingerprintRuntime) => {
     const currentBundle = currentMeta.fingerprintProfileBundle;
     const nextBundle = fingerprintRuntime.fingerprint_profile_bundle;
-    const isLegacyBackfilledBundle = (bundle) => {
-        if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
-            return false;
-        }
-        const legacyMigration = bundle.legacy_migration;
-        return (typeof legacyMigration === "object" &&
-            legacyMigration !== null &&
-            !Array.isArray(legacyMigration) &&
-            legacyMigration.status === "backfilled_from_legacy");
-    };
     if (!nextBundle) {
         return currentBundle ?? null;
     }
-    const isTransientLegacyBackfill = isLegacyBackfilledBundle(nextBundle) &&
-        (!currentBundle || isLegacyBackfilledBundle(currentBundle));
+    const isTransientLegacyBackfill = isTransientBackfilledFingerprintBundle(nextBundle) &&
+        (!currentBundle || isTransientBackfilledFingerprintBundle(currentBundle));
     if (isTransientLegacyBackfill) {
         return null;
     }
@@ -250,13 +252,33 @@ export class ProfileRuntimeService {
         let startSucceeded = false;
         let launchedControllerPid = null;
         try {
-            let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso, readFingerprintMetaMode(input.params));
+            let existingMeta = await this.#readMeta(store, input.profile, {
+                mode: readFingerprintMetaMode(input.params)
+            });
+            const identityPreflight = await this.#runIdentityPreflight({
+                input,
+                meta: existingMeta
+            });
+            const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
+            if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
+                throw buildIdentityPreflightError(identityPreflight);
+            }
+            if (!existingMeta) {
+                existingMeta = usesPersistentIdentityMode
+                    ? this.#buildMinimalProfileMeta({
+                        profile: input.profile,
+                        profileDir,
+                        nowIso
+                    })
+                    : await store.initializeMeta(input.profile, nowIso);
+            }
             const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
                     profileName: input.profile,
                     profileDir,
                     profileState: "disconnected",
                     proxyBinding: existingMeta.proxyBinding,
+                    persistentExtensionBinding: existingMeta.persistentExtensionBinding,
                     fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
                     updatedAt: nowIso,
                     lastDisconnectedAt: nowIso
@@ -267,16 +289,16 @@ export class ProfileRuntimeService {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
             }
             let session = buildRuntimeSession(input.profile, recoveredMeta);
-            const requestedExecutionMode = readRequestedExecutionMode(input.params);
-            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-                requestedExecutionMode
-            });
-            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = applyProfileProxyBinding(session, {
                 requested: parseProxyUrl(input.params),
                 nowIso,
                 source: "runtime.start"
             });
+            const requestedExecutionMode = readRequestedExecutionMode(input.params);
+            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+                requestedExecutionMode
+            });
+            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = beginStartSession(session, {
                 runId: input.runId,
                 nowIso
@@ -297,6 +319,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
@@ -349,13 +372,33 @@ export class ProfileRuntimeService {
         let keepLockOnFailure = false;
         let launchedControllerPid = null;
         try {
-            let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso, readFingerprintMetaMode(input.params));
+            let existingMeta = await this.#readMeta(store, input.profile, {
+                mode: readFingerprintMetaMode(input.params)
+            });
+            const identityPreflight = await this.#runIdentityPreflight({
+                input,
+                meta: existingMeta
+            });
+            const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
+            if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
+                throw buildIdentityPreflightError(identityPreflight);
+            }
+            if (!existingMeta) {
+                existingMeta = usesPersistentIdentityMode
+                    ? this.#buildMinimalProfileMeta({
+                        profile: input.profile,
+                        profileDir,
+                        nowIso
+                    })
+                    : await store.initializeMeta(input.profile, nowIso);
+            }
             const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
                     profileName: input.profile,
                     profileDir,
                     profileState: "disconnected",
                     proxyBinding: existingMeta.proxyBinding,
+                    persistentExtensionBinding: existingMeta.persistentExtensionBinding,
                     fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
                     updatedAt: nowIso,
                     lastDisconnectedAt: nowIso
@@ -385,16 +428,16 @@ export class ProfileRuntimeService {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", "runtime.login --confirm 前检测到登录浏览器已断开，请重新执行 runtime.login", { retryable: true });
             }
             let session = buildRuntimeSession(input.profile, recoveredMeta);
-            const requestedExecutionMode = readRequestedExecutionMode(input.params);
-            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-                requestedExecutionMode
-            });
-            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = applyProfileProxyBinding(session, {
                 requested: parseProxyUrl(input.params),
                 nowIso,
                 source: "runtime.login"
             });
+            const requestedExecutionMode = readRequestedExecutionMode(input.params);
+            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+                requestedExecutionMode
+            });
+            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = beginLoginSession(session, {
                 runId: input.runId,
                 nowIso
@@ -416,6 +459,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso
             }));
@@ -442,6 +486,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastLoginAt: nowIso,
@@ -489,6 +534,10 @@ export class ProfileRuntimeService {
         const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
             requestedExecutionMode
         });
+        const identityPreflight = await runIdentityPreflight({
+            params: input.params,
+            meta
+        });
         return {
             profile: input.profile,
             profileState,
@@ -496,6 +545,18 @@ export class ProfileRuntimeService {
             profileDir,
             proxyUrl: meta?.proxyBinding?.url ?? null,
             lockHeld,
+            identityBindingState: identityPreflight.identityBindingState,
+            identityPreflight: {
+                mode: identityPreflight.mode,
+                binding: identityPreflight.binding,
+                manifestPath: identityPreflight.manifestPath,
+                expectedOrigin: identityPreflight.expectedOrigin,
+                allowedOrigins: identityPreflight.allowedOrigins,
+                browserPath: identityPreflight.browserPath,
+                browserVersion: identityPreflight.browserVersion,
+                blocking: identityPreflight.blocking,
+                failureReason: identityPreflight.failureReason
+            },
             lockOwnerPid: lock?.ownerPid ?? null,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
@@ -858,6 +919,9 @@ export class ProfileRuntimeService {
             profileDir: patch.profileDir,
             profileState: patch.profileState,
             proxyBinding: patch.proxyBinding,
+            persistentExtensionBinding: patch.persistentExtensionBinding === undefined
+                ? current.persistentExtensionBinding
+                : patch.persistentExtensionBinding,
             fingerprintProfileBundle: patch.fingerprintProfileBundle === null
                 ? undefined
                 : patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,
@@ -867,6 +931,32 @@ export class ProfileRuntimeService {
             lastLoginAt: patch.lastLoginAt ?? current.lastLoginAt,
             lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt,
             lastDisconnectedAt: patch.lastDisconnectedAt ?? current.lastDisconnectedAt
+        };
+    }
+    async #runIdentityPreflight(input) {
+        return runIdentityPreflight({
+            params: input.input.params,
+            meta: input.meta
+        });
+    }
+    #buildMinimalProfileMeta(input) {
+        return {
+            schemaVersion: 1,
+            profileName: input.profile,
+            profileDir: input.profileDir,
+            profileState: "uninitialized",
+            proxyBinding: null,
+            fingerprintSeeds: {
+                audioNoiseSeed: `${input.profile}-audio-seed`,
+                canvasNoiseSeed: `${input.profile}-canvas-seed`
+            },
+            localStorageSnapshots: [],
+            createdAt: input.nowIso,
+            updatedAt: input.nowIso,
+            lastStartedAt: null,
+            lastLoginAt: null,
+            lastStoppedAt: null,
+            lastDisconnectedAt: null
         };
     }
 }

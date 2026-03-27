@@ -34,12 +34,20 @@ export interface LocalStorageSnapshot {
   entries: LocalStorageSnapshotEntry[];
 }
 
+export interface PersistentExtensionBinding {
+  extensionId: string;
+  nativeHostName: string;
+  browserChannel: "chrome" | "chrome_beta" | "chromium" | "brave" | "edge";
+  manifestPath: string | null;
+}
+
 export interface ProfileMeta {
   schemaVersion: number;
   profileName: string;
   profileDir: string;
   profileState: ProfileState;
   proxyBinding: ProxyBinding | null;
+  persistentExtensionBinding?: PersistentExtensionBinding;
   fingerprintSeeds: FingerprintSeeds;
   fingerprintProfileBundle?: FingerprintProfileBundle;
   localStorageSnapshots: LocalStorageSnapshot[];
@@ -216,6 +224,32 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
       !PROXY_BINDING_SOURCES.includes(value.proxyBinding.source as (typeof PROXY_BINDING_SOURCES)[number])
     ) {
       throw new Error("Invalid profile meta structure: proxyBinding.source");
+    }
+  }
+
+  if (value.persistentExtensionBinding !== undefined) {
+    if (!isObjectRecord(value.persistentExtensionBinding)) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding");
+    }
+    if (typeof value.persistentExtensionBinding.extensionId !== "string") {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.extensionId");
+    }
+    if (typeof value.persistentExtensionBinding.nativeHostName !== "string") {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.nativeHostName");
+    }
+    if (
+      typeof value.persistentExtensionBinding.browserChannel !== "string" ||
+      !["chrome", "chrome_beta", "chromium", "brave", "edge"].includes(
+        value.persistentExtensionBinding.browserChannel
+      )
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.browserChannel");
+    }
+    if (
+      value.persistentExtensionBinding.manifestPath !== null &&
+      typeof value.persistentExtensionBinding.manifestPath !== "string"
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.manifestPath");
     }
   }
 
