@@ -727,12 +727,19 @@ class ChromeBackgroundBridge {
         if (!canPrimeFromBootstrap) {
             return;
         }
+        // Runtime bootstrap readiness should be promoted by execution-surface attestation,
+        // regardless of whether an XHS-specific target binding is present.
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, asNonEmptyString(request.params.run_id), null);
         const sourceBinding = this.#resolveRequestTargetBinding(request);
+        if (!sourceBinding) {
+            return;
+        }
         this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, {
-            sourceTabId: sourceBinding?.tabId ?? null,
-            sourceDomain: sourceBinding?.domain ?? null
+            sourceTabId: sourceBinding.tabId,
+            sourceDomain: sourceBinding.domain,
+            runId: bootstrap?.runId ?? null,
+            runtimeContextId: bootstrap?.runtimeContextId ?? null
         });
-        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime);
     }
     async #resolveStartupTrustSenderBinding(sender) {
         const tabId = asInteger(sender.tab?.id);
@@ -807,15 +814,18 @@ class ChromeBackgroundBridge {
         if (!explicitSessionId || explicitSessionId !== this.#sessionId) {
             return;
         }
+        // Startup trust can attest runtime bootstrap readiness in a runtime-generic way.
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime, asNonEmptyString(startupTrust.run_id ?? null), asNonEmptyString(startupTrust.runtime_context_id ?? null));
         const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
         if (!senderBinding) {
             return;
         }
         this.#upsertTrustedFingerprintContext(profile, explicitSessionId, fingerprintRuntime, {
             sourceTabId: senderBinding.tabId,
-            sourceDomain: senderBinding.domain
+            sourceDomain: senderBinding.domain,
+            runId: asNonEmptyString(startupTrust.run_id ?? null),
+            runtimeContextId: asNonEmptyString(startupTrust.runtime_context_id ?? null)
         });
-        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime);
     }
     #normalizeTrustedFingerprintRuntime(fingerprintRuntime) {
         return {
@@ -837,9 +847,13 @@ class ChromeBackgroundBridge {
         const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
         const sourceTabId = source?.sourceTabId ?? null;
         const sourceDomain = source?.sourceDomain ?? null;
+        const runId = source?.runId ?? null;
+        const runtimeContextId = source?.runtimeContextId ?? null;
         const existing = this.#trustedFingerprintContexts.get(key);
         const shouldRotate = !!existing &&
             (existing.sessionId !== sessionId ||
+                existing.runId !== runId ||
+                existing.runtimeContextId !== runtimeContextId ||
                 existing.serializedFingerprintRuntime !== serializedFingerprintRuntime ||
                 existing.sourceTabId !== sourceTabId ||
                 existing.sourceDomain !== sourceDomain);
@@ -848,6 +862,8 @@ class ChromeBackgroundBridge {
         }
         this.#trustedFingerprintContexts.set(key, {
             sessionId,
+            runId,
+            runtimeContextId,
             fingerprintRuntime: normalized,
             serializedFingerprintRuntime,
             sourceTabId,
@@ -861,12 +877,18 @@ class ChromeBackgroundBridge {
             this.#trustedFingerprintContexts.delete(oldestKey);
         }
     }
-    #promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime) {
+    #promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, signalRunId, signalRuntimeContextId) {
         const bootstrap = this.#runtimeBootstrapStates.get(profile);
         if (!bootstrap) {
             return;
         }
         if (bootstrap.sessionId !== sessionId || bootstrap.status !== "pending") {
+            return;
+        }
+        if (!signalRunId || bootstrap.runId !== signalRunId) {
+            return;
+        }
+        if (signalRuntimeContextId && bootstrap.runtimeContextId !== signalRuntimeContextId) {
             return;
         }
         if (bootstrap.serializedFingerprintRuntime !== serializeFingerprintRuntimeContext(fingerprintRuntime)) {
@@ -1080,10 +1102,22 @@ class ChromeBackgroundBridge {
             });
             return;
         }
+        const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(fingerprintRuntime);
+        const currentBootstrapState = this.#runtimeBootstrapStates.get(profile);
+        const bootstrapReadyFromState = !!currentBootstrapState &&
+            currentBootstrapState.sessionId === requestSessionId &&
+            currentBootstrapState.status === "ready" &&
+            currentBootstrapState.version === version &&
+            currentBootstrapState.runId === runId &&
+            currentBootstrapState.runtimeContextId === runtimeContextId &&
+            currentBootstrapState.serializedFingerprintRuntime === serializedFingerprintRuntime;
         const trusted = this.#trustedFingerprintContexts.get(buildTrustedFingerprintContextKey(profile, requestSessionId));
-        const bootstrapReady = !!trusted &&
+        const bootstrapReadyFromTrusted = !!trusted &&
             trusted.sessionId === requestSessionId &&
-            trusted.serializedFingerprintRuntime === serializeFingerprintRuntimeContext(fingerprintRuntime);
+            trusted.runId === runId &&
+            trusted.runtimeContextId === runtimeContextId &&
+            trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
+        const bootstrapReady = bootstrapReadyFromState || bootstrapReadyFromTrusted;
         const status = bootstrapReady ? "ready" : "pending";
         this.#runtimeBootstrapStates.set(profile, {
             version,
@@ -1092,7 +1126,7 @@ class ChromeBackgroundBridge {
             profile,
             sessionId: requestSessionId,
             status,
-            serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
+            serializedFingerprintRuntime,
             updatedAt: new Date().toISOString()
         });
         if (!bootstrapReady) {

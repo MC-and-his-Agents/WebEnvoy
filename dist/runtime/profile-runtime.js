@@ -220,7 +220,7 @@ const buildRuntimeReadiness = (input) => {
         return "recoverable";
     }
     if (input.bootstrapState === "stale") {
-        return "unknown";
+        return "blocked";
     }
     return "unknown";
 };
@@ -265,7 +265,7 @@ const mapBootstrapCliErrorToReadiness = (error, identityBindingState = "bound") 
                 identityBindingState,
                 transportState: "ready",
                 bootstrapState: "stale",
-                runtimeReadiness: "unknown",
+                runtimeReadiness: "blocked",
                 details
             };
         case "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH":
@@ -1232,7 +1232,7 @@ export class ProfileRuntimeService {
                 ? "disconnected"
                 : payload?.transport_state === "ready"
                     ? "ready"
-                    : "ready";
+                    : "not_connected";
             const bootstrapStateValue = payload?.bootstrap_state === "not_started" ||
                 payload?.bootstrap_state === "pending" ||
                 payload?.bootstrap_state === "ready" ||

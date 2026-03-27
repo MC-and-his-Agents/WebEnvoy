@@ -3089,7 +3089,7 @@ process.stdin.on("data", (chunk) => {
         identityBindingState: "bound",
         transportState: "ready",
         bootstrapState: "stale",
-        runtimeReadiness: "unknown"
+        runtimeReadiness: "blocked"
       }
     });
   });

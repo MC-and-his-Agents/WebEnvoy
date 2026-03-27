@@ -75,7 +75,7 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input) => {
         ? "disconnected"
         : payload?.transport_state === "ready"
             ? "ready"
-            : "ready";
+            : "not_connected";
     const bootstrapState = payload?.bootstrap_state === "not_started" ||
         payload?.bootstrap_state === "pending" ||
         payload?.bootstrap_state === "ready" ||
@@ -304,6 +304,8 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     if (identityPreflight?.mode !== "official_chrome_persistent_extension") {
         return;
     }
+    const profileState = typeof status.profileState === "string" ? status.profileState : "uninitialized";
+    const confirmationRequired = status.confirmationRequired === true;
     const attemptExecutionBootstrap = async () => {
         const pingResult = await bridge.runCommand({
             runId: context.run_id,
@@ -336,6 +338,25 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     let identityBindingState = typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
     let bootstrapState = typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
     let transportState = typeof status.transportState === "string" ? status.transportState : "not_connected";
+    const buildBaseDetails = () => ({
+        ability_id: ability.id,
+        stage: "execution",
+        runtime_readiness: runtimeReadiness,
+        identity_binding_state: identityBindingState,
+        bootstrap_state: bootstrapState,
+        transport_state: transportState,
+        profile_state: profileState,
+        confirmation_required: confirmationRequired
+    });
+    if (profileState === "logging_in" || confirmationRequired) {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "official Chrome runtime 登录确认未完成", {
+            details: {
+                ...buildBaseDetails(),
+                reason: "ERR_RUNTIME_LOGIN_CONFIRMATION_REQUIRED"
+            },
+            retryable: false
+        });
+    }
     if (identityBindingState === "bound" &&
         transportState === "ready" &&
         (bootstrapState === "not_started" || bootstrapState === "pending")) {
@@ -357,18 +378,10 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
             return;
         }
     }
-    const baseDetails = {
-        ability_id: ability.id,
-        stage: "execution",
-        runtime_readiness: runtimeReadiness,
-        identity_binding_state: identityBindingState,
-        bootstrap_state: bootstrapState,
-        transport_state: transportState
-    };
     if (identityBindingState === "missing") {
         throw new CliError("ERR_RUNTIME_IDENTITY_NOT_BOUND", "official Chrome runtime identity 未绑定", {
             details: {
-                ...baseDetails,
+                ...buildBaseDetails(),
                 reason: "ERR_RUNTIME_IDENTITY_NOT_BOUND"
             }
         });
@@ -376,7 +389,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     if (identityBindingState === "mismatch") {
         throw new CliError("ERR_RUNTIME_IDENTITY_MISMATCH", "official Chrome runtime identity 不一致", {
             details: {
-                ...baseDetails,
+                ...buildBaseDetails(),
                 reason: "ERR_RUNTIME_IDENTITY_MISMATCH"
             }
         });
@@ -384,7 +397,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     if (bootstrapState === "stale") {
         throw new CliError("ERR_RUNTIME_BOOTSTRAP_ACK_STALE", "official Chrome runtime bootstrap 上下文已陈旧", {
             details: {
-                ...baseDetails,
+                ...buildBaseDetails(),
                 reason: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
             },
             retryable: true
@@ -393,7 +406,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     if (bootstrapState === "not_started" || bootstrapState === "pending") {
         throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未就绪", {
             details: {
-                ...baseDetails,
+                ...buildBaseDetails(),
                 reason: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
             },
             retryable: true
@@ -401,7 +414,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     }
     throw new CliError("ERR_RUNTIME_UNAVAILABLE", "official Chrome runtime 未就绪", {
         details: {
-            ...baseDetails,
+            ...buildBaseDetails(),
             reason: "ERR_RUNTIME_NOT_READY"
         },
         retryable: true
