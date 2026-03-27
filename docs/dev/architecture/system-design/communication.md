@@ -12,25 +12,13 @@
 - 持久身份边界：稳定 `extension_id`、Native Messaging Host 名称、host manifest 的 `allowed_origins`、profile 内已安装扩展事实
 - 单次运行上下文：本次 run/session 需要的 runtime bootstrap 输入
 
-后者统一抽象为 `runtime_bootstrap_envelope` 一类对象，至少承载以下字段：
-
-```json
-{
-  "run_id": "run-20260327-001",
-  "session_id": "session-abc123",
-  "profile": "xhs_account_001",
-  "extension_id": "<stable-extension-id>",
-  "fingerprint_runtime": {},
-  "fingerprint_patch_manifest": {},
-  "main_world_secret": "<ephemeral-secret>"
-}
-```
+后者统一抽象为 `runtime_bootstrap_envelope` 一类对象。它在概念上会覆盖本次 run/session 所需的标识与上下文，例如 `run_id`、`session_id`、`profile`、运行时指纹与 main-world trust 相关输入，但这些字段的正式 transport contract 不在本次架构冻结里直接定稿。
 
 冻结要求：
 
 - `runtime_bootstrap_envelope` 属于 run/session 级输入，不属于扩展静态文件内容
-- Background 必须把该 envelope 绑定到当前 `(profile, extension_id, session_id, run_id)`，再向 content script / main world 暴露最小必要上下文
 - Content Script 不再把扩展包内 per-run JSON 文件视为正式主路径输入
+- 它与持久 identity 边界存在关联，但具体消息格式、字段级校验、确认时机与失败面留给后续正式 spec 收口
 - 本文档只冻结输入边界，不展开实现细节或安装器设计
 
 ---
