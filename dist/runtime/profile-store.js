@@ -56,9 +56,7 @@ const resolveBrowserVersionFromResolvedExecutable = async () => {
     }
 };
 const resolveRequiredBrowserVersionFromResolvedExecutable = async () => {
-    const browserVersion = await resolveBrowserVersionTruthSource({}, {
-        allowUnsupportedExtensionBrowser: true
-    });
+    const browserVersion = await resolveBrowserVersionTruthSource();
     if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
         throw new Error("Browser version truth-source unavailable");
     }
