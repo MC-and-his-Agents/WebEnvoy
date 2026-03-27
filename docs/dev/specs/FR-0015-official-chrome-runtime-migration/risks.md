@@ -24,6 +24,7 @@
   - stale context 污染当前 run
 - 缓解：
   - readiness 必须至少联合 identity、transport、bootstrap 三类信号
+  - `runtime.status` 必须通过 formal contract 暴露 readiness 分层，而不是继续只输出单一 `browserState=ready`
   - 信号冲突时进入 `blocked` 或 `unknown`
 - 回滚：
   - 降回 bootstrap pending / blocked，不继续执行业务命令

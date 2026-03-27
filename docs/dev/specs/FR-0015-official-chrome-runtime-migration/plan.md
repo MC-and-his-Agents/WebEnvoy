@@ -20,10 +20,12 @@
 
 - 产出：
   - `contracts/runtime-bootstrap.md`
+  - `contracts/runtime-readiness-status.md`
+  - `data-model.md`
   - `risks.md`
 - 目标：
   - 冻结 `runtime_bootstrap_envelope` 的独立 transport contract。
-  - 冻结 identity binding、bootstrap ack、runtime readiness 的最小状态与失败面。
+  - 冻结 identity binding、bootstrap ack、`runtime.status` readiness 的最小状态、兼容关系与失败面。
 
 ### 阶段 3：冻结推荐实现切片与状态型 runtime 收口要求
 
@@ -53,7 +55,7 @@
   - `bash scripts/spec-guard.sh`
 2. 套件完整性检查：
   - formal spec 是否补齐 `spec.md`、`plan.md`、`TODO.md`
-  - 高风险 runtime 套件是否补齐 `contracts/` 与 `risks.md`
+  - 高风险 runtime 套件是否补齐 `contracts/`、`data-model.md` 与 `risks.md`
 3. 后续实现 PR 最小验证矩阵要求：
   - identity preflight 成功 / 失败
   - Native Messaging ready 但 bootstrap pending
@@ -95,7 +97,7 @@
 ## 进入实现前条件
 
 1. FR-0015 的 spec review 通过，且 reviewer 明确认可其足以支撑 `#281` implementation-prep。
-2. `contracts/runtime-bootstrap.md` 与 `risks.md` 被 reviewer 认可，能解释 bootstrap / identity / readiness 的共享边界。
+2. `contracts/runtime-bootstrap.md`、`contracts/runtime-readiness-status.md`、`data-model.md` 与 `risks.md` 被 reviewer 认可，能解释 bootstrap / identity / readiness 的共享边界。
 3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，使用 `Refs #281`，不混入 `#239`、安装器产品化或 candidate 分发产品化。
 4. 后续实现 PR 预先声明 stop-ship 条件、回滚入口与最小验证矩阵。
 5. 在这些条件满足前，禁止把 `#281` 视为已闭环，也禁止使用 `Fixes #281`。
