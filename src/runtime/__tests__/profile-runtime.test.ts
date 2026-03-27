@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
 import type { BrowserLaunchInput } from "../browser-launcher.js";
+import { NativeMessagingTransportError } from "../native-messaging/bridge.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
@@ -577,6 +578,237 @@ describe("profile-runtime identity preflight", () => {
       identityBindingState: "bound",
       transportState: "ready",
       bootstrapState: "failed",
+      runtimeReadiness: "unknown"
+    });
+  });
+
+  it("maps runtime.bootstrap transport timeout to recoverable readiness", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-timeout-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async () => {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "mock timeout");
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ack_timeout_profile",
+      runId: "run-runtime-bootstrap-timeout-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "pending",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("maps stale runtime.bootstrap ack to stale bootstrap state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "stale"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ack_stale_profile",
+      runId: "run-runtime-bootstrap-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "unknown"
+    });
+  });
+
+  it("maps runtime.bootstrap ready-signal conflict to failed bootstrap state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-conflict-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async ({ command, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: "runtime-context-mismatch",
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ready_signal_conflict_profile",
+      runId: "run-runtime-bootstrap-conflict-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "unknown"
+    });
+  });
+
+  it("marks readiness recoverable when runtime.bootstrap ack times out", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-timeout-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: false as const,
+              error: {
+                code: "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT",
+                message: "runtime bootstrap ack 超时"
+              }
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_timeout_profile",
+      runId: "run-runtime-bootstrap-timeout-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "pending",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("marks readiness unknown when runtime.bootstrap returns a stale ack", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "stale"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_stale_profile",
+      runId: "run-runtime-bootstrap-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
       runtimeReadiness: "unknown"
     });
   });

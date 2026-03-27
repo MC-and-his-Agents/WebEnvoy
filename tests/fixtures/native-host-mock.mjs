@@ -30,6 +30,21 @@ const success = (request, extra = {}) => ({
   error: null
 });
 
+const bootstrapAck = (request, result) => ({
+  id: request.id,
+  status: "success",
+  summary: {
+    session_id: String(request.params?.session_id ?? "nm-session-001"),
+    run_id: String(request.params?.run_id ?? request.id),
+    command: String(request.params?.command ?? "runtime.bootstrap"),
+    relay_path: "host>background>content-script>background>host"
+  },
+  payload: {
+    result
+  },
+  error: null
+});
+
 const onRequest = (request) => {
   if (request.method === "bridge.open") {
     if (mode === "drop-open") {
@@ -101,6 +116,64 @@ const onRequest = (request) => {
     if (mode === "drop-forward") {
       setTimeout(() => process.exit(0), 300);
       return;
+    }
+
+    const command = String(request.params?.command ?? "runtime.ping");
+    const commandParams =
+      request.params?.command_params &&
+      typeof request.params.command_params === "object" &&
+      !Array.isArray(request.params.command_params)
+        ? request.params.command_params
+        : {};
+
+    if (command === "runtime.bootstrap") {
+      if (mode === "bootstrap-ack-timeout-error") {
+        writeMessage({
+          id: request.id,
+          status: "error",
+          summary: {
+            session_id: String(request.params?.session_id ?? "nm-session-001"),
+            run_id: String(request.params?.run_id ?? request.id),
+            command,
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {},
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT",
+            message: "mock bootstrap ack timeout"
+          }
+        });
+        process.exit(0);
+        return;
+      }
+
+      if (mode === "bootstrap-stale") {
+        writeMessage(
+          bootstrapAck(request, {
+            version: String(commandParams.version ?? "v1"),
+            run_id: String(commandParams.run_id ?? request.id),
+            runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
+            profile: request.profile ?? null,
+            status: "stale"
+          })
+        );
+        process.exit(0);
+        return;
+      }
+
+      if (mode === "bootstrap-ready-signal-conflict") {
+        writeMessage(
+          bootstrapAck(request, {
+            version: String(commandParams.version ?? "v1"),
+            run_id: String(commandParams.run_id ?? request.id),
+            runtime_context_id: "unexpected-runtime-context",
+            profile: request.profile ?? null,
+            status: "ready"
+          })
+        );
+        process.exit(0);
+        return;
+      }
     }
 
     writeMessage(success(request));

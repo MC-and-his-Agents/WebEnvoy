@@ -11,7 +11,7 @@
     "build": "npm run build:runtime && npm run build:extension",
     "build:runtime": "tsc -p tsconfig.json",
     "build:extension": "tsc -p tsconfig.extension.json",
-    "test": "npm run build && vitest run",
+    "test": "npm run build && vitest run && bash tests/pr-guardian.merge-guard.test.sh",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck:runtime && npm run typecheck:extension",
     "typecheck:runtime": "tsc -p tsconfig.json --noEmit",

@@ -120,17 +120,25 @@ prepare_pr_workspace() {
 hydrate_worktree_dependencies() {
   local source_node_modules="${REPO_ROOT}/node_modules"
   local target_node_modules="${WORKTREE_DIR}/node_modules"
+  local target_lockfile="${WORKTREE_DIR}/package-lock.json"
 
-  if [[ ! -d "${source_node_modules}" ]]; then
+  if [[ -d "${target_node_modules}" && ! -L "${target_node_modules}" ]]; then
     return
   fi
 
-  if [[ -e "${target_node_modules}" && ! -L "${target_node_modules}" ]]; then
+  rm -rf "${target_node_modules}"
+
+  if [[ -f "${target_lockfile}" ]]; then
+    (
+      cd "${WORKTREE_DIR}"
+      npm ci --silent >/dev/null
+    )
     return
   fi
 
-  rm -f "${target_node_modules}"
-  ln -s "${source_node_modules}" "${target_node_modules}"
+  if [[ -d "${source_node_modules}" ]]; then
+    ln -s "${source_node_modules}" "${target_node_modules}"
+  fi
 }
 
 normalize_review_path() {

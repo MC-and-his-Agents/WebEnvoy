@@ -12,6 +12,7 @@ import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-sto
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
+const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -70,6 +71,7 @@ const createNativeHostManifest = async (input: {
   );
   return manifestPath;
 };
+
 
 const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   NODE_ENV: "test",
@@ -3006,6 +3008,135 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("surfaces bootstrap ack timeout as recoverable readiness during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_timeout_profile",
+        "--run-id",
+        "run-contract-bootstrap-timeout-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "recoverable"
+      }
+    });
+  });
+
+  it("surfaces stale bootstrap ack during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_stale_profile",
+        "--run-id",
+        "run-contract-bootstrap-stale-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-stale"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "stale",
+        runtimeReadiness: "unknown"
+      }
+    });
+  });
+
+  it("surfaces bootstrap ready-signal conflict during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_conflict_profile",
+        "--run-id",
+        "run-contract-bootstrap-conflict-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ready-signal-conflict"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "failed",
+        runtimeReadiness: "unknown"
+      }
+    });
+  });
+
   it("reuses persisted manifestPath after pending bootstrap start when runtime.status omits manifest_path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
@@ -3344,26 +3475,24 @@ process.stdin.on("data", (chunk) => {
       const statuses = [first.status, second.status];
       const successCount = statuses.filter((status) => status === 0).length;
       const failureCount = statuses.filter((status) => status === 5).length;
-      expect(successCount).toBeLessThanOrEqual(1);
-      expect(failureCount).toBeLessThanOrEqual(2);
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
 
-      const failures = [first, second].filter((result) => result.status === 5);
-      for (const failed of failures) {
-        const failedBody = parseSingleJsonLine(failed.stdout);
-        expect(failedBody).toMatchObject({
-          command: "runtime.start",
-          status: "error"
-        });
-        const error = asRecord(failedBody.error);
-        expect(["ERR_PROFILE_LOCKED", "ERR_RUNTIME_UNAVAILABLE"]).toContain(error?.code);
-      }
+      const failed = [first, second].find((result) => result.status === 5);
+      expect(failed).toBeDefined();
+      const failedBody = parseSingleJsonLine(failed!.stdout);
+      expect(failedBody).toMatchObject({
+        command: "runtime.start",
+        status: "error",
+        error: {
+          code: "ERR_PROFILE_LOCKED"
+        }
+      });
 
-      if (successCount === 1) {
-        return;
-      }
+      return;
     }
 
-    throw new Error("concurrent runtime.start race did not produce a winner within 3 attempts");
+    throw new Error("concurrent runtime.start race did not preserve a single winner contract");
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
