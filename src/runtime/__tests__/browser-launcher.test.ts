@@ -27,7 +27,6 @@ const originalRealBrowserPath = process.env.WEBENVOY_REAL_BROWSER_PATH;
 const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
 const originalPath = process.env.PATH;
 const originalPlatform = process.platform;
-
 const restoreEnv = (
   key:
     | "WEBENVOY_BROWSER_PATH"
