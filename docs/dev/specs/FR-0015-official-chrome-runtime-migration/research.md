@@ -41,7 +41,7 @@
 当前仍需在本 FR 内继续冻结、才能进入实现的内容：
 
 - bootstrap transport contract
-- readiness 状态语义
+- readiness / `runtime.status` 契约
 - stop-ship / rollback 边界
 
 ## 未解决问题
