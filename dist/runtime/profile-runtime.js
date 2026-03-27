@@ -158,6 +158,7 @@ const isTransientBackfilledFingerprintBundle = (bundle) => {
         !Array.isArray(legacyMigration) &&
         legacyMigration.status === "backfilled_from_legacy");
 };
+const shouldBlockSessionEntryOnIdentityPreflight = (preflight) => preflight.blocking && preflight.failureReason !== "IDENTITY_BINDING_MISSING";
 const shouldPersistFingerprintBundle = (currentMeta, fingerprintRuntime) => {
     const currentBundle = currentMeta.fingerprintProfileBundle;
     const nextBundle = fingerprintRuntime.fingerprint_profile_bundle;
@@ -258,12 +259,12 @@ export class ProfileRuntimeService {
                 input,
                 meta: existingMeta
             });
-            const requiresPersistentIdentityBootstrap = identityPreflight.mode === "official_chrome_persistent_extension";
-            if (identityPreflight.blocking) {
+            const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
+            if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
                 throw buildIdentityPreflightError(identityPreflight);
             }
             if (!existingMeta) {
-                existingMeta = requiresPersistentIdentityBootstrap
+                existingMeta = usesPersistentIdentityMode
                     ? this.#buildMinimalProfileMeta({
                         profile: input.profile,
                         profileDir,
@@ -293,17 +294,6 @@ export class ProfileRuntimeService {
                 nowIso,
                 source: "runtime.start"
             });
-            if (requiresPersistentIdentityBootstrap) {
-                await this.#persistIdentityBinding({
-                    store,
-                    profile: input.profile,
-                    profileDir,
-                    nowIso,
-                    meta: recoveredMeta,
-                    binding: identityPreflight.binding
-                });
-                throw buildIdentityPreflightError(identityPreflight);
-            }
             const requestedExecutionMode = readRequestedExecutionMode(input.params);
             const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
                 requestedExecutionMode
@@ -329,6 +319,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
@@ -388,12 +379,12 @@ export class ProfileRuntimeService {
                 input,
                 meta: existingMeta
             });
-            const requiresPersistentIdentityBootstrap = identityPreflight.mode === "official_chrome_persistent_extension";
-            if (identityPreflight.blocking) {
+            const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
+            if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
                 throw buildIdentityPreflightError(identityPreflight);
             }
             if (!existingMeta) {
-                existingMeta = requiresPersistentIdentityBootstrap
+                existingMeta = usesPersistentIdentityMode
                     ? this.#buildMinimalProfileMeta({
                         profile: input.profile,
                         profileDir,
@@ -442,17 +433,6 @@ export class ProfileRuntimeService {
                 nowIso,
                 source: "runtime.login"
             });
-            if (requiresPersistentIdentityBootstrap) {
-                await this.#persistIdentityBinding({
-                    store,
-                    profile: input.profile,
-                    profileDir,
-                    nowIso,
-                    meta: recoveredMeta,
-                    binding: identityPreflight.binding
-                });
-                throw buildIdentityPreflightError(identityPreflight);
-            }
             const requestedExecutionMode = readRequestedExecutionMode(input.params);
             const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
                 requestedExecutionMode
@@ -479,6 +459,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso
             }));
@@ -505,6 +486,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastLoginAt: nowIso,
@@ -956,32 +938,6 @@ export class ProfileRuntimeService {
             params: input.input.params,
             meta: input.meta
         });
-    }
-    async #persistIdentityBinding(input) {
-        if (!input.binding) {
-            return input.meta;
-        }
-        const currentBinding = input.meta.persistentExtensionBinding;
-        const bindingChanged = currentBinding?.extensionId !== input.binding.extensionId ||
-            currentBinding?.nativeHostName !== input.binding.nativeHostName ||
-            currentBinding?.browserChannel !== input.binding.browserChannel ||
-            currentBinding?.manifestPath !== input.binding.manifestPath;
-        if (!bindingChanged) {
-            return input.meta;
-        }
-        const nextMeta = this.#patchMeta(input.meta, {
-            profileName: input.profile,
-            profileDir: input.profileDir,
-            profileState: input.meta.profileState,
-            proxyBinding: input.meta.proxyBinding,
-            persistentExtensionBinding: input.binding,
-            fingerprintProfileBundle: isTransientBackfilledFingerprintBundle(input.meta.fingerprintProfileBundle)
-                ? null
-                : input.meta.fingerprintProfileBundle,
-            updatedAt: input.nowIso
-        });
-        await input.store.writeMeta(input.profile, nextMeta);
-        return nextMeta;
     }
     #buildMinimalProfileMeta(input) {
         return {

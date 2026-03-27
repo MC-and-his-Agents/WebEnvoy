@@ -331,10 +331,60 @@ describe("profile-runtime identity preflight", () => {
       identityBindingState: "missing",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
-        blocking: true,
         failureReason: "IDENTITY_BINDING_MISSING"
       }
     });
+  });
+
+  it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_missing_start_profile",
+        runId: "run-runtime-identity-entry-001",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_missing_login_profile",
+        runId: "run-runtime-identity-entry-002",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      confirmationRequired: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("blocks runtime.start when allowed_origins mismatches bound extension identity", async () => {
@@ -396,7 +446,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("persists bound identity and returns bootstrap pending before launcher for official Chrome", async () => {
+  it("persists bound identity and continues runtime.start for official Chrome", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-bound-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -432,11 +482,14 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profile: "identity_bound_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
     });
 
-    expect(launchSpy).not.toHaveBeenCalled();
+    expect(launchSpy).toHaveBeenCalledTimes(1);
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_bound_profile");
@@ -458,14 +511,13 @@ describe("profile-runtime identity preflight", () => {
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
         blocking: false,
-        failureReason: "BOOTSTRAP_PENDING",
         manifestPath,
         expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
       }
     });
   });
 
-  it("returns bootstrap pending before live-mode fingerprint gating on official Chrome first run", async () => {
+  it("surfaces later live-mode fingerprint gating after identity preflight succeeds", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-live-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -503,20 +555,17 @@ describe("profile-runtime identity preflight", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+      code: "ERR_PROFILE_INVALID"
     });
 
     expect(launchSpy).not.toHaveBeenCalled();
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_live_profile");
-    expect(meta?.persistentExtensionBinding).toMatchObject({
-      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      manifestPath
-    });
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
   });
 
-  it("persists bound identity and returns bootstrap pending before launcher for official Chrome login", async () => {
+  it("persists bound identity and continues runtime.login for official Chrome", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-login-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -552,11 +601,15 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profile: "identity_login_profile",
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      confirmationRequired: true
     });
 
-    expect(launchSpy).not.toHaveBeenCalled();
+    expect(launchSpy).toHaveBeenCalledTimes(1);
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_login_profile");
@@ -566,7 +619,7 @@ describe("profile-runtime identity preflight", () => {
       browserChannel: "chrome",
       manifestPath
     });
-    expect(meta?.profileState).toBe("uninitialized");
+    expect(meta?.profileState).toBe("logging_in");
   });
 
   it("reuses persisted manifest path when later calls omit manifest_path", async () => {
@@ -590,8 +643,8 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profileState: "ready"
     });
 
     const status = await service.status({
@@ -608,8 +661,7 @@ describe("profile-runtime identity preflight", () => {
     expect(status).toMatchObject({
       identityBindingState: "bound",
       identityPreflight: {
-        manifestPath,
-        failureReason: "BOOTSTRAP_PENDING"
+        manifestPath
       }
     });
   });
@@ -638,8 +690,20 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profileState: "ready"
+    });
+
+    await expect(
+      service.stop({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-001",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "stopped",
+      lockHeld: false
     });
 
     await expect(
@@ -654,8 +718,8 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profileState: "ready"
     });
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
@@ -688,8 +752,8 @@ describe("profile-runtime identity preflight", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profileState: "ready"
     });
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
@@ -1844,8 +1908,11 @@ describe("profile-runtime fingerprint runtime contract", () => {
           }
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    ).resolves.toMatchObject({
+      profile: "legacy_identity_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
     });
 
     const storedMetaRaw = await readFile(store.getMetaPath("legacy_identity_profile"), "utf8");

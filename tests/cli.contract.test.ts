@@ -2840,7 +2840,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("returns machine-readable identity not bound for official Chrome persistent extension preflight", async () => {
+  it("does not surface identity-not-bound before official Chrome first start/login", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const runtimeEnv = {
       WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
@@ -2858,12 +2858,7 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.start",
       status: "error",
       error: {
-        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
-        details: {
-          ability_id: "runtime.identity_preflight",
-          identity_binding_state: "missing",
-          reason: "IDENTITY_BINDING_MISSING"
-        }
+        code: "ERR_BROWSER_LAUNCH_FAILED"
       }
     });
 
@@ -2879,17 +2874,12 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.login",
       status: "error",
       error: {
-        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
-        details: {
-          ability_id: "runtime.identity_preflight",
-          identity_binding_state: "missing",
-          reason: "IDENTITY_BINDING_MISSING"
-        }
+        code: "ERR_BROWSER_LAUNCH_FAILED"
       }
     });
   });
 
-  it("surfaces bound identity preflight via runtime.status after bootstrap-pending start", async () => {
+  it("surfaces bound identity preflight via runtime.status without bootstrap-pending contract", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -2922,15 +2912,23 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.start",
       status: "error",
       error: {
-        code: "ERR_RUNTIME_BOOTSTRAP_PENDING",
-        details: {
-          identity_binding_state: "bound"
-        }
+        code: "ERR_BROWSER_LAUNCH_FAILED"
       }
     });
 
     const status = runCli(
-      ["runtime.status", "--profile", "identity_bound_profile"],
+      [
+        "runtime.status",
+        "--profile",
+        "identity_bound_profile",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
       runtimeCwd,
       {
         WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
@@ -2945,7 +2943,6 @@ process.stdin.on("data", (chunk) => {
         identityBindingState: "bound",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
-          failureReason: "BOOTSTRAP_PENDING",
           manifestPath,
           expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
         }
@@ -2953,7 +2950,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("keeps persisted manifestPath when later runtime.status omits manifest_path", async () => {
+  it("does not reuse manifestPath after launcher failure when runtime.status omits manifest_path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -2980,6 +2977,14 @@ process.stdin.on("data", (chunk) => {
       }
     );
     expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_BROWSER_LAUNCH_FAILED"
+      }
+    });
 
     const status = runCli(
       [
@@ -3004,9 +3009,9 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.status",
       status: "success",
       summary: {
-        identityBindingState: "bound",
+        identityBindingState: "mismatch",
         identityPreflight: {
-          manifestPath
+          failureReason: "IDENTITY_MANIFEST_MISSING"
         }
       }
     });
