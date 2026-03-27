@@ -2840,6 +2840,55 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("returns machine-readable identity not bound for official Chrome persistent extension preflight", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = {
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    };
+
+    const start = runCli(
+      ["runtime.start", "--profile", "identity_not_bound_start_profile", "--run-id", "run-contract-identity-001a"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      run_id: "run-contract-identity-001a",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
+        details: {
+          ability_id: "runtime.identity_preflight",
+          identity_binding_state: "missing",
+          reason: "IDENTITY_BINDING_MISSING"
+        }
+      }
+    });
+
+    const login = runCli(
+      ["runtime.login", "--profile", "identity_not_bound_login_profile", "--run-id", "run-contract-identity-001b"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(login.status).toBe(5);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      run_id: "run-contract-identity-001b",
+      command: "runtime.login",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
+        details: {
+          ability_id: "runtime.identity_preflight",
+          identity_binding_state: "missing",
+          reason: "IDENTITY_BINDING_MISSING"
+        }
+      }
+    });
+  });
+
   it("surfaces bound identity preflight via runtime.status after bootstrap-pending start", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({

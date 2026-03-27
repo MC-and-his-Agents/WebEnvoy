@@ -476,6 +476,59 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("persists bound identity and returns bootstrap pending before launcher for official Chrome login", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-login-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_login_profile",
+        runId: "run-runtime-identity-login-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    expect(launchSpy).not.toHaveBeenCalled();
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_login_profile");
+    expect(meta?.persistentExtensionBinding).toMatchObject({
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com.webenvoy.host",
+      browserChannel: "chrome",
+      manifestPath
+    });
+    expect(meta?.profileState).toBe("uninitialized");
+  });
+
   it("reuses persisted manifest path when later calls omit manifest_path", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-reuse-"));
     tempDirs.push(baseDir);
