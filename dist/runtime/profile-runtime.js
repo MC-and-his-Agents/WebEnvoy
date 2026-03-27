@@ -288,11 +288,6 @@ export class ProfileRuntimeService {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
             }
             let session = buildRuntimeSession(input.profile, recoveredMeta);
-            const requestedExecutionMode = readRequestedExecutionMode(input.params);
-            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-                requestedExecutionMode
-            });
-            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = applyProfileProxyBinding(session, {
                 requested: parseProxyUrl(input.params),
                 nowIso,
@@ -309,6 +304,11 @@ export class ProfileRuntimeService {
                 });
                 throw buildIdentityPreflightError(identityPreflight);
             }
+            const requestedExecutionMode = readRequestedExecutionMode(input.params);
+            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+                requestedExecutionMode
+            });
+            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = beginStartSession(session, {
                 runId: input.runId,
                 nowIso
@@ -437,11 +437,6 @@ export class ProfileRuntimeService {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", "runtime.login --confirm 前检测到登录浏览器已断开，请重新执行 runtime.login", { retryable: true });
             }
             let session = buildRuntimeSession(input.profile, recoveredMeta);
-            const requestedExecutionMode = readRequestedExecutionMode(input.params);
-            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-                requestedExecutionMode
-            });
-            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = applyProfileProxyBinding(session, {
                 requested: parseProxyUrl(input.params),
                 nowIso,
@@ -458,6 +453,11 @@ export class ProfileRuntimeService {
                 });
                 throw buildIdentityPreflightError(identityPreflight);
             }
+            const requestedExecutionMode = readRequestedExecutionMode(input.params);
+            const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+                requestedExecutionMode
+            });
+            ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             session = beginLoginSession(session, {
                 runId: input.runId,
                 nowIso

@@ -453,11 +453,6 @@ export class ProfileRuntimeService {
         );
       }
       let session = buildRuntimeSession(input.profile, recoveredMeta);
-      const requestedExecutionMode = readRequestedExecutionMode(input.params);
-      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-        requestedExecutionMode
-      });
-      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -474,6 +469,11 @@ export class ProfileRuntimeService {
         });
         throw buildIdentityPreflightError(identityPreflight);
       }
+      const requestedExecutionMode = readRequestedExecutionMode(input.params);
+      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+        requestedExecutionMode
+      });
+      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = beginStartSession(session, {
         runId: input.runId,
         nowIso
@@ -633,11 +633,6 @@ export class ProfileRuntimeService {
       }
 
       let session = buildRuntimeSession(input.profile, recoveredMeta);
-      const requestedExecutionMode = readRequestedExecutionMode(input.params);
-      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
-        requestedExecutionMode
-      });
-      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -654,6 +649,11 @@ export class ProfileRuntimeService {
         });
         throw buildIdentityPreflightError(identityPreflight);
       }
+      const requestedExecutionMode = readRequestedExecutionMode(input.params);
+      const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
+        requestedExecutionMode
+      });
+      ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       session = beginLoginSession(session, {
         runId: input.runId,
         nowIso
