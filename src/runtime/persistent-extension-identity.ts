@@ -285,8 +285,7 @@ export const runIdentityPreflight = async (input: {
     const sameBinding =
       mergedBindingFromParams.extensionId === bindingFromMeta.extensionId &&
       mergedBindingFromParams.nativeHostName === bindingFromMeta.nativeHostName &&
-      mergedBindingFromParams.browserChannel === bindingFromMeta.browserChannel &&
-      mergedBindingFromParams.manifestPath === bindingFromMeta.manifestPath;
+      mergedBindingFromParams.browserChannel === bindingFromMeta.browserChannel;
     if (!sameBinding) {
       return buildBlockingResult({
         mode: "official_chrome_persistent_extension",

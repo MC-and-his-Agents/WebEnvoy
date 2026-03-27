@@ -469,6 +469,97 @@ describe("profile-runtime identity preflight", () => {
       }
     });
   });
+
+  it("accepts relocated manifest path when stable identity still matches", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-relocate-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const originalManifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const relocatedManifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: originalManifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-002",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: relocatedManifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_relocated_profile");
+    expect(meta?.persistentExtensionBinding?.manifestPath).toBe(relocatedManifestPath);
+  });
+
+  it("does not persist identity binding when later runtime.start gates reject the profile", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-gate-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const existingMeta = await profileStore.initializeMeta("identity_gate_profile", "2026-03-27T00:00:00.000Z");
+    await profileStore.writeMeta("identity_gate_profile", {
+      ...existingMeta,
+      proxyBinding: {
+        url: "http://127.0.0.1:8080/",
+        boundAt: "2026-03-27T00:00:00.000Z",
+        source: "runtime.start"
+      },
+      updatedAt: "2026-03-27T00:00:01.000Z"
+    });
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_gate_profile",
+        runId: "run-runtime-identity-gate-001",
+        params: {
+          proxyUrl: "http://127.0.0.1:9090/",
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_PROXY_CONFLICT"
+    });
+
+    const meta = await profileStore.readMeta("identity_gate_profile");
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
+  });
 });
 
 describe("profile-runtime stop rollback", () => {
