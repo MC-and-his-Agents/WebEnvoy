@@ -1,11 +1,14 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
-import { isUnsupportedBrandedChromeForExtensions, resolveBrowserVersionTruthSource } from "./browser-launcher.js";
+import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"];
+const execFileAsync = promisify(execFile);
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -37,6 +40,55 @@ const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
         return join(localAppData, "WebEnvoy", `${nativeHostName}.json`);
     }
     return join(homedir(), `${nativeHostName}.json`);
+};
+const resolveWindowsRegistryKeyForChannel = (browserChannel, nativeHostName) => {
+    if (process.platform !== "win32") {
+        return null;
+    }
+    const keyByChannel = {
+        chrome: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
+        chrome_beta: "HKCU\\Software\\Google\\Chrome Beta\\NativeMessagingHosts",
+        chromium: "HKCU\\Software\\Chromium\\NativeMessagingHosts",
+        brave: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
+        edge: "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"
+    };
+    return `${keyByChannel[browserChannel]}\\${nativeHostName}`;
+};
+const expandWindowsEnvVariables = (value) => value.replace(/%([^%]+)%/g, (_match, name) => process.env[name] ?? `%${name}%`);
+const parseWindowsRegistryDefaultValue = (stdout) => {
+    const lines = stdout.split(/\r?\n/);
+    for (const line of lines) {
+        const match = line.match(/^\s*\(Default\)\s+REG_\w+\s+(.+?)\s*$/);
+        if (match) {
+            return expandWindowsEnvVariables(match[1].trim());
+        }
+    }
+    return null;
+};
+const resolveManifestPathForBinding = async (binding) => {
+    if (binding.manifestPath) {
+        return binding.manifestPath;
+    }
+    if (process.platform === "win32") {
+        const registryKey = resolveWindowsRegistryKeyForChannel(binding.browserChannel, binding.nativeHostName);
+        if (registryKey) {
+            try {
+                const { stdout } = await execFileAsync("reg", ["query", registryKey, "/ve"], {
+                    encoding: "utf8"
+                });
+                const manifestPath = parseWindowsRegistryDefaultValue(stdout);
+                if (manifestPath) {
+                    return manifestPath;
+                }
+            }
+            catch {
+                // Windows Native Messaging discovery is registry-based; without a registered key
+                // there is no stable manifest path we can trust as the official install.
+            }
+        }
+        return null;
+    }
+    return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
 };
 const parsePersistentExtensionBindingFromParams = (params) => {
     const raw = asRecord(params.persistent_extension_identity) ??
@@ -135,13 +187,25 @@ export const runIdentityPreflight = async (input) => {
     let browserPath = null;
     let browserVersion = null;
     try {
-        const truth = await resolveBrowserVersionTruthSource(input.params, {
-            allowUnsupportedExtensionBrowser: true
-        });
+        const truth = await resolvePreferredBrowserVersionTruthSource(input.params);
         browserPath = truth.executablePath;
         browserVersion = truth.browserVersion;
     }
-    catch {
+    catch (error) {
+        if (!(error instanceof BrowserLaunchError)) {
+            return {
+                mode: "load_extension",
+                browserPath: null,
+                browserVersion: null,
+                identityBindingState: "not_applicable",
+                binding: null,
+                manifestPath: null,
+                expectedOrigin: null,
+                allowedOrigins: [],
+                blocking: false,
+                failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
+            };
+        }
         return {
             mode: "load_extension",
             browserPath: null,
@@ -210,8 +274,20 @@ export const runIdentityPreflight = async (input) => {
         });
     }
     const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
-    const manifestPath = binding.manifestPath ??
-        resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
+    const manifestPath = await resolveManifestPathForBinding(binding);
+    if (manifestPath === null) {
+        return buildBlockingResult({
+            mode: "official_chrome_persistent_extension",
+            browserPath,
+            browserVersion,
+            identityBindingState: "mismatch",
+            binding,
+            manifestPath: null,
+            expectedOrigin,
+            allowedOrigins: [],
+            failureReason: "IDENTITY_MANIFEST_MISSING"
+        });
+    }
     const manifest = await readNativeHostManifest(manifestPath);
     if (!manifest) {
         return buildBlockingResult({

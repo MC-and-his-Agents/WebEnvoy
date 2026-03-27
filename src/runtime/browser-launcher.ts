@@ -523,6 +523,31 @@ export interface BrowserVersionTruthSource {
   browserVersion: string | null;
 }
 
+interface ResolvedExecutableCandidate {
+  executablePath: string;
+  browserVersion: string | null;
+}
+
+const resolveExecutableCandidate = async (
+  candidate: string
+): Promise<ResolvedExecutableCandidate | null> => {
+  let executablePath: string | null = null;
+  if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+    if (await pathExists(candidate)) {
+      executablePath = candidate;
+    }
+  } else {
+    executablePath = await resolveCommandFromPath(candidate);
+  }
+  if (executablePath === null) {
+    return null;
+  }
+  return {
+    executablePath,
+    browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+  };
+};
+
 export const resolveBrowserVersionTruthSource = async (
   params: JsonObject = {},
   options?: { allowUnsupportedExtensionBrowser?: boolean }
@@ -532,6 +557,48 @@ export const resolveBrowserVersionTruthSource = async (
     executablePath,
     browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
   };
+};
+
+export const resolvePreferredBrowserVersionTruthSource = async (
+  params: JsonObject = {}
+): Promise<BrowserVersionTruthSource> => {
+  const explicitFromParams = parseOptionalString(params.browserPath);
+  if (explicitFromParams !== null) {
+    throw new BrowserLaunchError(
+      "BROWSER_INVALID_ARGUMENT",
+      "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH"
+    );
+  }
+
+  const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
+  const candidates = [
+    explicitFromEnv,
+    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
+  ].filter((item): item is string => item !== null);
+  let brandedChromeFallback: ResolvedExecutableCandidate | null = null;
+
+  for (const candidate of candidates) {
+    const resolved = await resolveExecutableCandidate(candidate);
+    if (resolved === null) {
+      continue;
+    }
+
+    if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
+      brandedChromeFallback ??= resolved;
+      if (explicitFromEnv && candidate === explicitFromEnv) {
+        return resolved;
+      }
+      continue;
+    }
+
+    return resolved;
+  }
+
+  if (brandedChromeFallback) {
+    return brandedChromeFallback;
+  }
+
+  return resolveBrowserVersionTruthSource(params);
 };
 
 const resolveSupervisorScriptPath = async (): Promise<string> => {

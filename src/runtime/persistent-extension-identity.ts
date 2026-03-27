@@ -1,12 +1,15 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import {
+  BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
-  resolveBrowserVersionTruthSource
+  resolvePreferredBrowserVersionTruthSource
 } from "./browser-launcher.js";
 import type { ProfileMeta, PersistentExtensionBinding } from "./profile-store.js";
 
@@ -43,6 +46,36 @@ const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"] as const;
 type BrowserChannel = (typeof BROWSER_CHANNELS)[number];
+const execFileAsync = promisify(execFile);
+
+interface IdentityPreflightAdapters {
+  resolvePreferredBrowserVersionTruthSource: typeof resolvePreferredBrowserVersionTruthSource;
+  isUnsupportedBrandedChromeForExtensions: typeof isUnsupportedBrandedChromeForExtensions;
+  execFile: typeof execFileAsync;
+  platform: () => NodeJS.Platform;
+}
+
+const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS: IdentityPreflightAdapters = {
+  resolvePreferredBrowserVersionTruthSource,
+  isUnsupportedBrandedChromeForExtensions,
+  execFile: execFileAsync,
+  platform: () => process.platform
+};
+
+let identityPreflightAdapters: IdentityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
+
+export const setIdentityPreflightAdaptersForTests = (
+  overrides: Partial<IdentityPreflightAdapters>
+): void => {
+  identityPreflightAdapters = {
+    ...DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS,
+    ...overrides
+  };
+};
+
+export const resetIdentityPreflightAdaptersForTests = (): void => {
+  identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
+};
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -59,7 +92,8 @@ const resolveManifestPathForChannel = (
   browserChannel: BrowserChannel,
   nativeHostName: string
 ): string => {
-  if (process.platform === "darwin") {
+  const platform = identityPreflightAdapters.platform();
+  if (platform === "darwin") {
     const baseByChannel: Record<BrowserChannel, string> = {
       chrome: join(homedir(), "Library", "Application Support", "Google", "Chrome"),
       chrome_beta: join(homedir(), "Library", "Application Support", "Google", "Chrome Beta"),
@@ -76,7 +110,7 @@ const resolveManifestPathForChannel = (
     return join(baseByChannel[browserChannel], "NativeMessagingHosts", `${nativeHostName}.json`);
   }
 
-  if (process.platform === "linux") {
+  if (platform === "linux") {
     const baseByChannel: Record<BrowserChannel, string> = {
       chrome: join(homedir(), ".config", "google-chrome"),
       chrome_beta: join(homedir(), ".config", "google-chrome-beta"),
@@ -87,12 +121,69 @@ const resolveManifestPathForChannel = (
     return join(baseByChannel[browserChannel], "NativeMessagingHosts", `${nativeHostName}.json`);
   }
 
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA ?? process.env.APPDATA ?? homedir();
-    return join(localAppData, "WebEnvoy", `${nativeHostName}.json`);
+  return join(homedir(), `${nativeHostName}.json`);
+};
+
+const resolveWindowsRegistryKeyForChannel = (
+  browserChannel: BrowserChannel,
+  nativeHostName: string
+): string | null => {
+  if (identityPreflightAdapters.platform() !== "win32") {
+    return null;
   }
 
-  return join(homedir(), `${nativeHostName}.json`);
+  const keyByChannel: Record<BrowserChannel, string> = {
+    chrome: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
+    chrome_beta: "HKCU\\Software\\Google\\Chrome Beta\\NativeMessagingHosts",
+    chromium: "HKCU\\Software\\Chromium\\NativeMessagingHosts",
+    brave: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
+    edge: "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"
+  };
+  return `${keyByChannel[browserChannel]}\\${nativeHostName}`;
+};
+
+const expandWindowsEnvVariables = (value: string): string =>
+  value.replace(/%([^%]+)%/g, (_match, name: string) => process.env[name] ?? `%${name}%`);
+
+const parseWindowsRegistryDefaultValue = (stdout: string): string | null => {
+  const lines = stdout.split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/^\s*\(Default\)\s+REG_\w+\s+(.+?)\s*$/);
+    if (match) {
+      const expanded = expandWindowsEnvVariables(match[1].trim());
+      return isAbsolute(expanded) ? expanded : resolve(expanded);
+    }
+  }
+  return null;
+};
+
+const resolveManifestPathForBinding = async (
+  binding: PersistentExtensionBinding
+): Promise<string | null> => {
+  if (binding.manifestPath) {
+    return binding.manifestPath;
+  }
+
+  if (identityPreflightAdapters.platform() === "win32") {
+    const registryKey = resolveWindowsRegistryKeyForChannel(binding.browserChannel, binding.nativeHostName);
+    if (registryKey) {
+      try {
+        const { stdout } = await identityPreflightAdapters.execFile("reg", ["query", registryKey, "/ve"], {
+          encoding: "utf8"
+        });
+        const manifestPath = parseWindowsRegistryDefaultValue(stdout);
+        if (manifestPath) {
+          return manifestPath;
+        }
+      } catch {
+        // Windows Native Messaging discovery is registry-based; without a registered key
+        // there is no stable manifest path we can trust as the official install.
+      }
+    }
+    return null;
+  }
+
+  return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
 };
 
 const parsePersistentExtensionBindingFromParams = (
@@ -237,12 +328,24 @@ export const runIdentityPreflight = async (input: {
   let browserVersion: string | null = null;
 
   try {
-    const truth = await resolveBrowserVersionTruthSource(input.params, {
-      allowUnsupportedExtensionBrowser: true
-    });
+    const truth = await identityPreflightAdapters.resolvePreferredBrowserVersionTruthSource(input.params);
     browserPath = truth.executablePath;
     browserVersion = truth.browserVersion;
-  } catch {
+  } catch (error) {
+    if (!(error instanceof BrowserLaunchError)) {
+      return {
+        mode: "load_extension",
+        browserPath: null,
+        browserVersion: null,
+        identityBindingState: "not_applicable",
+        binding: null,
+        manifestPath: null,
+        expectedOrigin: null,
+        allowedOrigins: [],
+        blocking: false,
+        failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
+      };
+    }
     return {
       mode: "load_extension",
       browserPath: null,
@@ -257,7 +360,7 @@ export const runIdentityPreflight = async (input: {
     };
   }
 
-  if (!isUnsupportedBrandedChromeForExtensions(browserVersion)) {
+  if (!identityPreflightAdapters.isUnsupportedBrandedChromeForExtensions(browserVersion)) {
     return {
       mode: "load_extension",
       browserPath,
@@ -317,9 +420,20 @@ export const runIdentityPreflight = async (input: {
   }
 
   const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
-  const manifestPath =
-    binding.manifestPath ??
-    resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
+  const manifestPath = await resolveManifestPathForBinding(binding);
+  if (manifestPath === null) {
+    return buildBlockingResult({
+      mode: "official_chrome_persistent_extension",
+      browserPath,
+      browserVersion,
+      identityBindingState: "mismatch",
+      binding,
+      manifestPath: null,
+      expectedOrigin,
+      allowedOrigins: [],
+      failureReason: "IDENTITY_MANIFEST_MISSING"
+    });
+  }
   const manifest = await readNativeHostManifest(manifestPath);
   if (!manifest) {
     return buildBlockingResult({

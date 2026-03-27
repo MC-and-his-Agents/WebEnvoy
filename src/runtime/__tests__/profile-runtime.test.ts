@@ -13,6 +13,10 @@ import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
 const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+const originalPath = process.env.PATH;
+const originalLocalAppData = process.env.LOCALAPPDATA;
+const originalAppData = process.env.APPDATA;
+const originalPlatform = process.platform;
 
 const createMockBrowserExecutable = async (
   versionOutput: string = "Chromium 146.0.0.0"
@@ -70,6 +74,26 @@ const createNativeHostManifest = async (input: {
   return manifestPath;
 };
 
+const createMockRegExecutable = async (manifestPath: string): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-reg-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "reg");
+  await writeFile(
+    scriptPath,
+    `#!/bin/sh
+if [ "$1" = "query" ]; then
+  printf '%s\\n' "$2"
+  printf '    (Default)    REG_SZ    %s\\n' ${JSON.stringify(manifestPath)}
+  exit 0
+fi
+exit 1
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return dir;
+};
+
 const createTestService = (
   options?: ConstructorParameters<typeof ProfileRuntimeService>[0]
 ): ProfileRuntimeService =>
@@ -110,6 +134,22 @@ afterEach(async () => {
   } else {
     process.env.WEBENVOY_BROWSER_VERSION = originalBrowserVersion;
   }
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
+  }
+  if (originalLocalAppData === undefined) {
+    delete process.env.LOCALAPPDATA;
+  } else {
+    process.env.LOCALAPPDATA = originalLocalAppData;
+  }
+  if (originalAppData === undefined) {
+    delete process.env.APPDATA;
+  } else {
+    process.env.APPDATA = originalAppData;
+  }
+  Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -621,6 +661,40 @@ describe("profile-runtime identity preflight", () => {
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_relocated_profile");
     expect(meta?.persistentExtensionBinding?.manifestPath).toBe(relocatedManifestPath);
+  });
+
+  it("resolves win32 native host manifest path from registry before local app data fallback", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-win32-"));
+    tempDirs.push(baseDir);
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const regBinDir = await createMockRegExecutable(manifestPath);
+    delete process.env.WEBENVOY_BROWSER_PATH;
+    process.env.PATH = `${regBinDir}:${originalPath ?? ""}`;
+    process.env.LOCALAPPDATA = join(baseDir, "local-app-data");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_win32_profile",
+        runId: "run-runtime-identity-win32-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_win32_profile");
+    expect(meta?.persistentExtensionBinding?.manifestPath).toBe(manifestPath);
   });
 
   it("does not persist identity binding when later runtime.start gates reject the profile", async () => {

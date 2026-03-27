@@ -400,12 +400,60 @@ export const resolveBrowserVersionOutputForFingerprint = async (executablePath) 
         return null;
     }
 };
+const resolveExecutableCandidate = async (candidate) => {
+    let executablePath = null;
+    if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+        if (await pathExists(candidate)) {
+            executablePath = candidate;
+        }
+    }
+    else {
+        executablePath = await resolveCommandFromPath(candidate);
+    }
+    if (executablePath === null) {
+        return null;
+    }
+    return {
+        executablePath,
+        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+    };
+};
 export const resolveBrowserVersionTruthSource = async (params = {}, options) => {
     const executablePath = await resolveExecutablePath(params, options);
     return {
         executablePath,
         browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
     };
+};
+export const resolvePreferredBrowserVersionTruthSource = async (params = {}) => {
+    const explicitFromParams = parseOptionalString(params.browserPath);
+    if (explicitFromParams !== null) {
+        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
+    }
+    const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
+    const candidates = [
+        explicitFromEnv,
+        ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
+    ].filter((item) => item !== null);
+    let brandedChromeFallback = null;
+    for (const candidate of candidates) {
+        const resolved = await resolveExecutableCandidate(candidate);
+        if (resolved === null) {
+            continue;
+        }
+        if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
+            brandedChromeFallback ??= resolved;
+            if (explicitFromEnv && candidate === explicitFromEnv) {
+                return resolved;
+            }
+            continue;
+        }
+        return resolved;
+    }
+    if (brandedChromeFallback) {
+        return brandedChromeFallback;
+    }
+    return resolveBrowserVersionTruthSource(params);
 };
 const resolveSupervisorScriptPath = async () => {
     const moduleDir = dirname(fileURLToPath(import.meta.url));
