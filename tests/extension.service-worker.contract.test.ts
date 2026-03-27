@@ -459,6 +459,130 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("allows runtime bootstrap readiness promotion without xhs-specific target binding", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-generic-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-generic-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-generic-001",
+          runtime_context_id: "ctx-bootstrap-generic-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-generic-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-generic-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-generic-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 77,
+      tabUrl: "https://example.com/runtime-readiness"
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-generic-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-generic-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-generic-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          run_id: "run-bootstrap-generic-001",
+          runtime_context_id: "ctx-bootstrap-generic-001",
+          transport_state: "ready"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-generic-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-generic-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-generic-001",
+          runtime_context_id: "ctx-bootstrap-generic-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-generic-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-generic-002",
+        status: "success",
+        payload: expect.objectContaining({
+          method: "runtime.bootstrap.ack",
+          result: expect.objectContaining({
+            status: "ready",
+            profile: "profile-a",
+            run_id: "run-bootstrap-generic-001",
+            runtime_context_id: "ctx-bootstrap-generic-001"
+          })
+        })
+      })
+    );
+  });
+
   it("forwards fingerprint_context without dropping fields", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
