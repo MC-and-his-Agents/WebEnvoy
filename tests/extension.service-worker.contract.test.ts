@@ -421,7 +421,13 @@ describe("extension service worker recovery contract", () => {
         })
       })
     );
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-bootstrap-001",
+        command: "runtime.bootstrap"
+      })
+    );
 
     await primeTrustedFingerprintContext({
       runtimeMessageListeners,
@@ -769,7 +775,14 @@ describe("extension service worker recovery contract", () => {
         id: "run-ping-promote-001",
         ok: true,
         payload: {
-          fingerprint_runtime: fingerprintContext,
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: true,
+              required_patches: ["audio_context"],
+              missing_required_patches: []
+            }
+          },
           summary: {
             capability_result: {
               outcome: "success"
@@ -809,6 +822,240 @@ describe("extension service worker recovery contract", () => {
           bootstrap_state: "ready",
           run_id: "run-bootstrap-ping-promote-001",
           runtime_context_id: "ctx-bootstrap-ping-promote-001",
+          transport_state: "ready"
+        })
+      })
+    );
+  });
+
+  it("keeps bootstrap pending when runtime.ping attestation reports main-world injection unavailable", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-main-world-fail-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-main-world-fail-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-main-world-fail-001",
+          runtime_context_id: "ctx-bootstrap-main-world-fail-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-main-world-fail-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-main-world-fail-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-main-world-fail-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-main-world-fail-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-ping-main-world-fail-001",
+        ok: true,
+        payload: {
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: false,
+              required_patches: ["audio_context"],
+              missing_required_patches: ["audio_context"],
+              error: "main world event channel unavailable"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 77
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-main-world-fail-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-main-world-fail-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-main-world-fail-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "pending",
+          run_id: "run-bootstrap-main-world-fail-001",
+          runtime_context_id: "ctx-bootstrap-main-world-fail-001",
+          transport_state: "ready"
+        })
+      })
+    );
+  });
+
+  it("keeps bootstrap pending when runtime.ping attestation reports missing required patches", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-missing-patch-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-missing-patch-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-missing-patch-001",
+          runtime_context_id: "ctx-bootstrap-missing-patch-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-missing-patch-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-missing-patch-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-missing-patch-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-missing-patch-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-ping-missing-patch-001",
+        ok: true,
+        payload: {
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: false,
+              required_patches: ["audio_context", "battery"],
+              missing_required_patches: ["battery"],
+              error: "fingerprint required patches missing for live execution"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 77
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-missing-patch-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-missing-patch-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-missing-patch-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "pending",
+          run_id: "run-bootstrap-missing-patch-001",
+          runtime_context_id: "ctx-bootstrap-missing-patch-001",
           transport_state: "ready"
         })
       })

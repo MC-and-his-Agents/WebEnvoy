@@ -86,8 +86,36 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveFingerprintContext = (commandParams) => {
-    const context = ensureFingerprintRuntimeContext(commandParams.fingerprint_context);
+    const direct = ensureFingerprintRuntimeContext(commandParams.fingerprint_context) ??
+        resolveAttestedFingerprintRuntimeContext(commandParams.fingerprint_runtime);
+    const context = direct;
     return context ? { ...context } : null;
+};
+const resolveAttestedFingerprintRuntimeContext = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const direct = ensureFingerprintRuntimeContext(record);
+    const sanitized = { ...record };
+    delete sanitized.injection;
+    const normalized = ensureFingerprintRuntimeContext(sanitized);
+    if (normalized) {
+        return { ...normalized };
+    }
+    return direct ? { ...direct } : null;
+};
+const hasSuccessfulExecutionAttestation = (payload) => {
+    const startupTrust = asRecord(payload.startup_fingerprint_trust);
+    if (startupTrust?.bootstrap_attested === true) {
+        return true;
+    }
+    const fingerprintRuntime = asRecord(payload.fingerprint_runtime);
+    const injection = asRecord(fingerprintRuntime?.injection);
+    if (!injection || injection.installed !== true) {
+        return false;
+    }
+    return asStringArray(injection.missing_required_patches).length === 0;
 };
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
@@ -710,7 +738,10 @@ class ChromeBackgroundBridge {
         if (!profile) {
             return;
         }
-        const fingerprintRuntime = ensureFingerprintRuntimeContext(payload.fingerprint_runtime ?? null);
+        if (!hasSuccessfulExecutionAttestation(payload)) {
+            return;
+        }
+        const fingerprintRuntime = resolveAttestedFingerprintRuntimeContext(payload.fingerprint_runtime ?? null);
         if (!fingerprintRuntime) {
             return;
         }
@@ -1003,24 +1034,18 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        if (this.#handleRuntimeInternalCommand(request)) {
+        const command = String(request.params.command ?? "");
+        if (command === "runtime.bootstrap") {
+            await this.#handleRuntimeBootstrap(request);
+            return;
+        }
+        if (command === "runtime.readiness") {
+            this.#handleRuntimeReadiness(request);
             return;
         }
         await this.#dispatchForward(request);
     }
-    #handleRuntimeInternalCommand(request) {
-        const command = String(request.params.command ?? "");
-        if (command === "runtime.bootstrap") {
-            this.#handleRuntimeBootstrap(request);
-            return true;
-        }
-        if (command === "runtime.readiness") {
-            this.#handleRuntimeReadiness(request);
-            return true;
-        }
-        return false;
-    }
-    #handleRuntimeBootstrap(request) {
+    async #handleRuntimeBootstrap(request) {
         const commandParams = asRecord(request.params.command_params) ?? {};
         const version = asNonEmptyString(commandParams.version);
         const runId = asNonEmptyString(commandParams.run_id);
@@ -1117,53 +1142,54 @@ class ChromeBackgroundBridge {
             trusted.runId === runId &&
             trusted.runtimeContextId === runtimeContextId &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
-        const bootstrapReady = bootstrapReadyFromState || bootstrapReadyFromTrusted;
-        const status = bootstrapReady ? "ready" : "pending";
+        if (bootstrapReadyFromState || bootstrapReadyFromTrusted) {
+            this.#emit({
+                id: request.id,
+                status: "success",
+                summary: {
+                    session_id: this.#sessionId,
+                    run_id: requestRunId ?? request.id,
+                    command: "runtime.bootstrap",
+                    profile,
+                    relay_path: "host>background"
+                },
+                payload: {
+                    method: "runtime.bootstrap.ack",
+                    result: {
+                        version,
+                        run_id: runId,
+                        runtime_context_id: runtimeContextId,
+                        profile,
+                        status: "ready"
+                    }
+                },
+                error: null
+            });
+            return;
+        }
         this.#runtimeBootstrapStates.set(profile, {
             version,
             runId,
             runtimeContextId,
             profile,
             sessionId: requestSessionId,
-            status,
+            status: "pending",
             serializedFingerprintRuntime,
             updatedAt: new Date().toISOString()
         });
-        if (!bootstrapReady) {
-            this.#emit({
-                id: request.id,
-                status: "error",
-                summary: {
-                    relay_path: "host>background"
-                },
-                error: {
-                    code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
-                    message: "runtime bootstrap 尚未获得执行面确认"
-                }
-            });
-            return;
-        }
+        // runtime.bootstrap must be delivered to the execution surface; host response stays pending
+        // until explicit attestation is observed from content-script / MAIN world.
+        void this.#dispatchForward(request, undefined, { suppressHostResponse: true });
         this.#emit({
             id: request.id,
-            status: "success",
+            status: "error",
             summary: {
-                session_id: this.#sessionId,
-                run_id: requestRunId ?? request.id,
-                command: "runtime.bootstrap",
-                profile,
                 relay_path: "host>background"
             },
-            payload: {
-                method: "runtime.bootstrap.ack",
-                result: {
-                    version,
-                    run_id: runId,
-                    runtime_context_id: runtimeContextId,
-                    profile,
-                    status: "ready"
-                }
-            },
-            error: null
+            error: {
+                code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                message: "runtime bootstrap 尚未获得执行面确认"
+            }
         });
     }
     #handleRuntimeReadiness(request) {
@@ -1192,6 +1218,127 @@ class ChromeBackgroundBridge {
                 version: bootstrap?.version ?? null,
                 transport_state: "ready"
             },
+            error: null
+        });
+    }
+    #handleRuntimeBootstrapForwardResult(input) {
+        const profile = asNonEmptyString(input.request.profile);
+        const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
+        const ackResult = asRecord(input.payload.result);
+        const ackVersion = asNonEmptyString(ackResult?.version);
+        const ackRunId = asNonEmptyString(ackResult?.run_id);
+        const ackRuntimeContextId = asNonEmptyString(ackResult?.runtime_context_id);
+        const ackProfile = asNonEmptyString(ackResult?.profile);
+        const ackStatus = asNonEmptyString(ackResult?.status);
+        if (input.result.ok !== true) {
+            if (bootstrap && profile) {
+                bootstrap.status = "pending";
+                bootstrap.updatedAt = new Date().toISOString();
+                this.#runtimeBootstrapStates.set(profile, bootstrap);
+            }
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: input.result.error ?? {
+                    code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                    message: "runtime bootstrap 尚未获得执行面确认"
+                }
+            });
+            return;
+        }
+        if (!bootstrap || !profile || !ackVersion || !ackRunId || !ackRuntimeContextId || !ackProfile || !ackStatus) {
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: {
+                    code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+                    message: "runtime bootstrap ack 与当前运行上下文不一致"
+                }
+            });
+            return;
+        }
+        const isContextMatch = ackVersion === bootstrap.version &&
+            ackRunId === bootstrap.runId &&
+            ackRuntimeContextId === bootstrap.runtimeContextId &&
+            ackProfile === bootstrap.profile;
+        if (ackStatus === "stale" && isContextMatch) {
+            bootstrap.status = "stale";
+            bootstrap.updatedAt = new Date().toISOString();
+            this.#runtimeBootstrapStates.set(profile, bootstrap);
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "success",
+                summary: {
+                    session_id: String(input.request.params.session_id ?? "nm-session-001"),
+                    run_id: String(input.request.params.run_id ?? input.request.id),
+                    command: String(input.request.params.command ?? "runtime.bootstrap"),
+                    profile,
+                    cwd: String(input.request.params.cwd ?? ""),
+                    tab_id: input.sender.tab?.id ?? null,
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: null
+            });
+            return;
+        }
+        if (ackStatus !== "ready" || !isContextMatch || !hasSuccessfulExecutionAttestation(input.payload)) {
+            bootstrap.status = "failed";
+            bootstrap.updatedAt = new Date().toISOString();
+            this.#runtimeBootstrapStates.set(profile, bootstrap);
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: {
+                    code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+                    message: "runtime bootstrap ack 与当前运行上下文不一致"
+                }
+            });
+            return;
+        }
+        bootstrap.status = "ready";
+        bootstrap.updatedAt = new Date().toISOString();
+        this.#runtimeBootstrapStates.set(profile, bootstrap);
+        if (input.suppressHostResponse) {
+            return;
+        }
+        this.#emit({
+            id: input.request.id,
+            status: "success",
+            summary: {
+                session_id: String(input.request.params.session_id ?? "nm-session-001"),
+                run_id: String(input.request.params.run_id ?? input.request.id),
+                command: String(input.request.params.command ?? "runtime.bootstrap"),
+                profile,
+                cwd: String(input.request.params.cwd ?? ""),
+                tab_id: input.sender.tab?.id ?? null,
+                relay_path: "host>background>content-script>background>host"
+            },
+            payload: input.payload,
             error: null
         });
     }
@@ -1307,8 +1454,9 @@ class ChromeBackgroundBridge {
         }
         this.#recoveryQueue = keep;
     }
-    async #dispatchForward(request, deadlineMs) {
+    async #dispatchForward(request, deadlineMs, options) {
         const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
+        const suppressHostResponse = options?.suppressHostResponse === true;
         const command = String(request.params.command ?? "");
         this.#invalidateTrustedFingerprintContextForCommand(request, command);
         const commandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
@@ -1370,6 +1518,9 @@ class ChromeBackgroundBridge {
             tabId = await this.#resolveTargetTabId(request);
         }
         if (!tabId) {
+            if (suppressHostResponse) {
+                return;
+            }
             this.#emit({
                 id: request.id,
                 status: "error",
@@ -1385,6 +1536,9 @@ class ChromeBackgroundBridge {
         }
         const timeoutMs = requestDeadlineMs - Date.now();
         if (timeoutMs <= 0) {
+            if (suppressHostResponse) {
+                return;
+            }
             this.#emit({
                 id: request.id,
                 status: "error",
@@ -1405,7 +1559,13 @@ class ChromeBackgroundBridge {
                 message: "content script forward timed out"
             });
         }, forwardTimeoutMs);
-        this.#pending.set(request.id, { request, timeout, consumerGateResult, gatePayload });
+        this.#pending.set(request.id, {
+            request,
+            timeout,
+            consumerGateResult,
+            gatePayload,
+            suppressHostResponse
+        });
         const forward = {
             kind: "forward",
             id: request.id,
@@ -1999,6 +2159,18 @@ class ChromeBackgroundBridge {
         clearTimeout(pending.timeout);
         this.#pending.delete(result.id);
         const request = pending.request;
+        const suppressHostResponse = pending.suppressHostResponse === true;
+        const command = String(request.params.command ?? "");
+        if (command === "runtime.bootstrap") {
+            this.#handleRuntimeBootstrapForwardResult({
+                request,
+                result,
+                payload,
+                sender,
+                suppressHostResponse
+            });
+            return;
+        }
         this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
         const backfilledExecutionFailure = pending.gatePayload
             ? this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload)
@@ -2044,6 +2216,9 @@ class ChromeBackgroundBridge {
             payload.consumer_gate_result = pending.consumerGateResult;
         }
         if (result.ok !== true) {
+            if (suppressHostResponse) {
+                return;
+            }
             this.#emit({
                 id: request.id,
                 status: "error",
@@ -2056,6 +2231,9 @@ class ChromeBackgroundBridge {
                     message: "content script failed"
                 }
             });
+            return;
+        }
+        if (suppressHostResponse) {
             return;
         }
         this.#emit({
@@ -2123,6 +2301,9 @@ class ChromeBackgroundBridge {
         }
         clearTimeout(pending.timeout);
         this.#pending.delete(id);
+        if (pending.suppressHostResponse) {
+            return;
+        }
         this.#emit({
             id,
             status: "error",
