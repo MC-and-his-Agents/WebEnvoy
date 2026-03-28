@@ -7,12 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
 import type { BrowserLaunchInput } from "../browser-launcher.js";
+import { NativeMessagingTransportError } from "../native-messaging/bridge.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
+import { buildRuntimeBootstrapContextId } from "../runtime-bootstrap.js";
 
 const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
 const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+const originalPath = process.env.PATH;
+const originalLocalAppData = process.env.LOCALAPPDATA;
+const originalAppData = process.env.APPDATA;
+const originalPlatform = process.platform;
+const PERSISTENT_EXTENSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const createMockBrowserExecutable = async (
   versionOutput: string = "Chromium 146.0.0.0"
@@ -46,11 +53,127 @@ const createMockBrowserLauncher = () => ({
   shutdown: async () => undefined
 });
 
+const createReadyRuntimeBridge = () => ({
+  runCommand: async ({
+    command,
+    params,
+    profile,
+    runId
+  }: {
+    command: string;
+    params: Record<string, unknown>;
+    profile: string | null;
+    runId: string;
+  }) => {
+    if (command === "runtime.bootstrap") {
+      return {
+        ok: true as const,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: runId,
+            runtime_context_id: String(params.runtime_context_id),
+            profile,
+            status: "ready"
+          }
+        },
+        relay_path: "host>background"
+      };
+    }
+    if (command === "runtime.readiness") {
+      return {
+        ok: true as const,
+        payload: {
+          bootstrap_state: "ready",
+          transport_state: "ready"
+        },
+        relay_path: "host>background"
+      };
+    }
+    throw new Error(`unexpected bridge command: ${command}`);
+  }
+});
+
+const createNativeHostManifest = async (input: {
+  nativeHostName?: string;
+  allowedOrigins: string[];
+}): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-"));
+  tempDirs.push(dir);
+  const manifestPath = join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        name: input.nativeHostName ?? "com.webenvoy.host",
+        path: "/mock/webenvoy-host",
+        type: "stdio",
+        allowed_origins: input.allowedOrigins
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  return manifestPath;
+};
+
+const seedInstalledPersistentExtension = async (input: {
+  baseDir: string;
+  profile: string;
+  extensionId?: string;
+  enabled?: boolean;
+}): Promise<void> => {
+  const extensionId = input.extensionId ?? PERSISTENT_EXTENSION_ID;
+  const profileDir = join(input.baseDir, ".webenvoy", "profiles", input.profile, "Default");
+  const extensionDir = join(profileDir, "Extensions", extensionId, "1.0.0");
+  await mkdir(extensionDir, { recursive: true });
+  await writeFile(join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n", "utf8");
+  await writeFile(
+    join(profileDir, "Preferences"),
+    `${JSON.stringify(
+      {
+        extensions: {
+          settings: {
+            [extensionId]: {
+              state: input.enabled === false ? 0 : 1
+            }
+          }
+        }
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+};
+
+const createMockRegExecutable = async (manifestPath: string): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-reg-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "reg");
+  await writeFile(
+    scriptPath,
+    `#!/bin/sh
+if [ "$1" = "query" ]; then
+  printf '%s\\n' "$2"
+  printf '    (Default)    REG_SZ    %s\\n' ${JSON.stringify(manifestPath)}
+  exit 0
+fi
+exit 1
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return dir;
+};
+
 const createTestService = (
   options?: ConstructorParameters<typeof ProfileRuntimeService>[0]
 ): ProfileRuntimeService =>
   new ProfileRuntimeService({
     ...options,
+    bridgeFactory: options?.bridgeFactory ?? (() => createReadyRuntimeBridge()),
     isProcessAlive:
       options?.isProcessAlive ??
       ((pid: number) => {
@@ -86,6 +209,22 @@ afterEach(async () => {
   } else {
     process.env.WEBENVOY_BROWSER_VERSION = originalBrowserVersion;
   }
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
+  }
+  if (originalLocalAppData === undefined) {
+    delete process.env.LOCALAPPDATA;
+  } else {
+    process.env.LOCALAPPDATA = originalLocalAppData;
+  }
+  if (originalAppData === undefined) {
+    delete process.env.APPDATA;
+  } else {
+    process.env.APPDATA = originalAppData;
+  }
+  Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -244,6 +383,1323 @@ describe("profile-runtime start rollback", () => {
     await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+});
+
+describe("profile-runtime identity preflight", () => {
+  it("reports missing identity binding in runtime.status for official Chrome persistent path", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_missing_profile",
+      runId: "run-runtime-identity-status-001",
+      params: {}
+    });
+
+    expect(status).toMatchObject({
+      profileState: "uninitialized",
+      lockHeld: false,
+      identityBindingState: "missing",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        failureReason: "IDENTITY_BINDING_MISSING"
+      }
+    });
+  });
+
+  it("reports missing identity binding in runtime.status for a fresh profile when params provide binding but the extension is absent", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService();
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_missing_fresh_status_profile",
+      runId: "run-runtime-identity-status-fresh-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "uninitialized",
+      lockHeld: false,
+      identityBindingState: "missing",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        failureReason: "IDENTITY_BINDING_MISSING",
+        manifestPath
+      }
+    });
+  });
+
+  it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_missing_start_profile",
+        runId: "run-runtime-identity-entry-001",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_missing_login_profile",
+        runId: "run-runtime-identity-entry-002",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      runtimeReadiness: "blocked",
+      confirmationRequired: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(2);
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+  });
+
+  it("keeps fresh runtime.start/login blocked-from-ready when params provide binding but the extension is absent", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-fresh-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_missing_bound_start_profile",
+        runId: "run-runtime-identity-entry-fresh-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true,
+      identityBindingState: "missing",
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_missing_bound_login_profile",
+        runId: "run-runtime-identity-entry-fresh-002",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      identityBindingState: "missing",
+      runtimeReadiness: "blocked",
+      confirmationRequired: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(2);
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+  });
+
+  it("keeps bound official Chrome start pending until bootstrap is attested by execution surface", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-pending-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ready_profile"
+    });
+    const launchSpy = vi.fn();
+    const bridgeRunCommand = vi.fn(async ({ command }) => {
+      if (command === "runtime.bootstrap") {
+        return {
+          ok: false as const,
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认"
+          }
+        };
+      }
+      if (command === "runtime.readiness") {
+        return {
+          ok: true as const,
+          payload: {
+            bootstrap_state: "pending"
+          },
+          relay_path: "host>background"
+        };
+      }
+      throw new Error(`unexpected bridge command: ${command}`);
+    });
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      },
+      bridgeFactory: () => ({
+        runCommand: bridgeRunCommand
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ready_profile",
+      runId: "run-runtime-bootstrap-ready-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "pending",
+      runtimeReadiness: "pending"
+    });
+    expect(launchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(bridgeRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        profile: "identity_bound_ready_profile"
+      })
+    );
+  });
+
+  it("keeps readiness conservative when runtime.readiness omits transport_state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-readiness-transport-missing-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_transport_missing_profile"
+    });
+    const readinessContextIds: string[] = [];
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            readinessContextIds.push(String((params as { runtime_context_id?: unknown }).runtime_context_id));
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "ready"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_transport_missing_profile",
+      runId: "run-runtime-readiness-transport-missing-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_transport_missing_profile",
+      runId: "run-runtime-readiness-transport-missing-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "ready",
+      runtimeReadiness: "unknown"
+    });
+    expect(readinessContextIds).toEqual([
+      buildRuntimeBootstrapContextId(
+        "identity_bound_transport_missing_profile",
+        "run-runtime-readiness-transport-missing-001"
+      )
+    ]);
+  });
+
+  it("marks runtime.status as blocked when runtime.readiness reports stale bootstrap", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-readiness-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_readiness_stale_profile"
+    });
+    const readinessContextIds: string[] = [];
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            readinessContextIds.push(String((params as { runtime_context_id?: unknown }).runtime_context_id));
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "stale",
+                transport_state: "ready"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_readiness_stale_profile",
+      runId: "run-runtime-readiness-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_readiness_stale_profile",
+      runId: "run-runtime-readiness-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked"
+    });
+    expect(readinessContextIds).toEqual([
+      buildRuntimeBootstrapContextId(
+        "identity_bound_readiness_stale_profile",
+        "run-runtime-readiness-stale-001"
+      )
+    ]);
+  });
+
+  it("marks readiness unknown when runtime.bootstrap ack version conflicts with the request", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-version-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_version_conflict_profile"
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v0",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_version_conflict_profile",
+      runId: "run-runtime-bootstrap-version-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "unknown"
+    });
+  });
+
+  it("keeps transport failures distinct from bootstrap readiness during runtime.start", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-timeout-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ack_timeout_profile"
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async () => {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "mock timeout");
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ack_timeout_profile",
+      runId: "run-runtime-bootstrap-timeout-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "disconnected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("maps runtime.bootstrap handshake failure to transport-not-connected readiness", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-handshake-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_handshake_failure_profile"
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async () => {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", "mock handshake failed");
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_handshake_failure_profile",
+      runId: "run-runtime-bootstrap-handshake-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("maps stale runtime.bootstrap ack to blocked readiness", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ack_stale_profile"
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "stale"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ack_stale_profile",
+      runId: "run-runtime-bootstrap-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked"
+    });
+  });
+
+  it("maps runtime.bootstrap ready-signal conflict to failed bootstrap state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-conflict-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ready_signal_conflict_profile"
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async ({ command, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: "runtime-context-mismatch",
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ready_signal_conflict_profile",
+      runId: "run-runtime-bootstrap-conflict-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "unknown"
+    });
+  });
+
+  it("marks readiness recoverable when runtime.bootstrap ack times out", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-timeout-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_timeout_profile"
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: false as const,
+              error: {
+                code: "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT",
+                message: "runtime bootstrap ack 超时"
+              }
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_timeout_profile",
+      runId: "run-runtime-bootstrap-timeout-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "pending",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("marks readiness blocked when runtime.bootstrap returns a stale ack", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_stale_profile"
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "stale"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_stale_profile",
+      runId: "run-runtime-bootstrap-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked"
+    });
+  });
+
+  it("blocks runtime.start when allowed_origins mismatches bound extension identity", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-mismatch-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_mismatch_profile"
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_mismatch_profile",
+        runId: "run-runtime-identity-mismatch-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_IDENTITY_MISMATCH"
+    });
+
+    expect(launchSpy).not.toHaveBeenCalled();
+    await expect(
+      readFile(
+        join(baseDir, ".webenvoy", "profiles", "identity_mismatch_profile", "__webenvoy_lock.json"),
+        "utf8"
+      )
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(
+      readFile(
+        join(baseDir, ".webenvoy", "profiles", "identity_mismatch_profile", "__webenvoy_meta.json"),
+        "utf8"
+      )
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("keeps profile lock visible to later run_id in runtime.status after runtime.start", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-bound-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_profile"
+    });
+    const launchSpy = vi.fn();
+    const ownerRuntimeContextId = buildRuntimeBootstrapContextId(
+      "identity_bound_profile",
+      "run-runtime-identity-bound-001"
+    );
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      },
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "ready",
+                bootstrap_state:
+                  String(params.runtime_context_id) === ownerRuntimeContextId ? "ready" : "stale"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_bound_profile",
+        runId: "run-runtime-identity-bound-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profile: "identity_bound_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(1);
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_bound_profile");
+    expect(meta).not.toHaveProperty("persistentExtensionBinding");
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_profile",
+      runId: "run-runtime-identity-bound-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+    expect(status).toMatchObject({
+      lockHeld: true,
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        blocking: false,
+        manifestPath,
+        expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+      }
+    });
+  });
+
+  it("surfaces later live-mode fingerprint gating after identity preflight succeeds", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-live-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_live_profile"
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_live_profile",
+        runId: "run-runtime-identity-live-001",
+        params: {
+          requested_execution_mode: "live_read_high_risk",
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID"
+    });
+
+    expect(launchSpy).not.toHaveBeenCalled();
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_live_profile");
+    expect(meta).toBeNull();
+
+  });
+
+  it("keeps runtime.login available without persisting identity binding into profile meta", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-login-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_login_profile"
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_login_profile",
+        runId: "run-runtime-identity-login-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profile: "identity_login_profile",
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      confirmationRequired: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(1);
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_login_profile");
+    expect(meta?.profileState).toBe("logging_in");
+    expect(meta).not.toHaveProperty("persistentExtensionBinding");
+  });
+
+  it("keeps identity preflight bound when later calls provide identity params", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-reuse-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://cccccccccccccccccccccccccccccccc/"]
+    });
+    const extensionId = "cccccccccccccccccccccccccccccccc";
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_reuse_profile",
+      extensionId
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_reuse_profile",
+        runId: "run-runtime-identity-reuse-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: extensionId,
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready"
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_reuse_profile",
+      runId: "run-runtime-identity-reuse-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: extensionId,
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status.identityBindingState).toBe("bound");
+    expect(status.identityPreflight).toMatchObject({
+      manifestPath,
+      expectedOrigin: "chrome-extension://cccccccccccccccccccccccccccccccc/"
+    });
+  });
+
+  it("accepts relocated manifest path when stable identity still matches", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-relocate-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const originalManifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const relocatedManifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_relocated_profile"
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: originalManifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready"
+    });
+
+    await expect(
+      service.stop({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-001",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      profileState: "stopped",
+      lockHeld: false
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_relocated_profile",
+        runId: "run-runtime-identity-relocate-002",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: relocatedManifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready"
+    });
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_relocated_profile");
+    expect(meta).not.toHaveProperty("persistentExtensionBinding");
+  });
+
+  it("resolves win32 native host manifest path from registry before local app data fallback", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-win32-"));
+    tempDirs.push(baseDir);
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const regBinDir = await createMockRegExecutable(manifestPath);
+    delete process.env.WEBENVOY_BROWSER_PATH;
+    process.env.PATH = `${regBinDir}:${originalPath ?? ""}`;
+    process.env.LOCALAPPDATA = join(baseDir, "local-app-data");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_win32_profile"
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_win32_profile",
+        runId: "run-runtime-identity-win32-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready"
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_win32_profile",
+      runId: "run-runtime-identity-win32-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    });
+    expect(status).toMatchObject({
+      identityBindingState: "bound",
+      identityPreflight: {
+        manifestPath,
+        expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+      }
+    });
+  });
+
+  it("does not persist identity binding when later runtime.start gates reject the profile", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-gate-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const existingMeta = await profileStore.initializeMeta("identity_gate_profile", "2026-03-27T00:00:00.000Z");
+    await profileStore.writeMeta("identity_gate_profile", {
+      ...existingMeta,
+      proxyBinding: {
+        url: "http://127.0.0.1:8080/",
+        boundAt: "2026-03-27T00:00:00.000Z",
+        source: "runtime.start"
+      },
+      updatedAt: "2026-03-27T00:00:01.000Z"
+    });
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_gate_profile"
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_gate_profile",
+        runId: "run-runtime-identity-gate-001",
+        params: {
+          proxyUrl: "http://127.0.0.1:9090/",
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_PROXY_CONFLICT"
+    });
+
+    const meta = await profileStore.readMeta("identity_gate_profile");
+    expect(meta).not.toHaveProperty("persistentExtensionBinding");
   });
 });
 
@@ -920,6 +2376,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
     const startLaunch = launchInputs[0];
     expect(startLaunch.command).toBe("runtime.start");
+    expect(startLaunch.launchMode).toBe("load_extension");
     expect(startLaunch.extensionBootstrap).toMatchObject({
       run_id: "run-runtime-test-fingerprint-bootstrap-001",
       session_id: "nm-session-001",
@@ -937,6 +2394,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
     const loginLaunch = launchInputs[1];
     expect(loginLaunch.command).toBe("runtime.login");
+    expect(loginLaunch.launchMode).toBe("load_extension");
     expect(loginLaunch.extensionBootstrap).toMatchObject({
       run_id: "run-runtime-test-fingerprint-bootstrap-002",
       session_id: "nm-session-001",
@@ -1299,5 +2757,72 @@ describe("profile-runtime fingerprint runtime contract", () => {
         reason: "LEGACY_PROFILE_BUNDLE_MIGRATED"
       }
     });
+  });
+
+  it("does not persist transient legacy backfill bundle during official Chrome identity bootstrap", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-legacy-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "legacy_identity_profile"
+    });
+    const service = createTestService();
+
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await store.ensureProfileDir("legacy_identity_profile");
+    await writeFile(
+      store.getMetaPath("legacy_identity_profile"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy_identity_profile",
+          profileDir: store.getProfileDir("legacy_identity_profile"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "legacy_identity_profile",
+        runId: "run-runtime-test-fingerprint-legacy-identity",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profile: "legacy_identity_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+
+    const storedMetaRaw = await readFile(store.getMetaPath("legacy_identity_profile"), "utf8");
+    const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
+    expect(storedMeta).not.toHaveProperty("persistentExtensionBinding");
+    expect(storedMeta.fingerprintProfileBundle).toBeUndefined();
   });
 });

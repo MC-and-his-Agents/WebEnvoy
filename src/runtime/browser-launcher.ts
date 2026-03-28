@@ -14,9 +14,9 @@ type BrowserLaunchErrorCode =
 
 const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
   darwin: [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
   ],
   linux: [
     "/usr/bin/google-chrome-stable",
@@ -47,6 +47,14 @@ const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
 
 const hasPathSegment = (value: string): boolean => /[\\/]/.test(value);
 
+export const resolvePreferredBrowserCandidates = (
+  platform: NodeJS.Platform,
+  explicitFromEnv: string | null
+): string[] =>
+  [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter(
+    (item): item is string => item !== null
+  );
+
 export class BrowserLaunchError extends Error {
   readonly code: BrowserLaunchErrorCode;
 
@@ -62,6 +70,7 @@ export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
 export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
 export const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 export const EXTENSION_BOOTSTRAP_SCRIPT_FILENAME = "__webenvoy_fingerprint_bootstrap.js";
+export type BrowserLaunchMode = "load_extension" | "official_chrome_persistent_extension";
 
 export interface BrowserLaunchInput {
   command: "runtime.start" | "runtime.login";
@@ -69,6 +78,7 @@ export interface BrowserLaunchInput {
   proxyUrl: string | null;
   runId: string;
   params: JsonObject;
+  launchMode?: BrowserLaunchMode;
   extensionBootstrap?: JsonObject | null;
 }
 
@@ -427,7 +437,7 @@ const readBrowserVersionOutput = async (executablePath: string): Promise<string 
   });
 };
 
-const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
+export const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
   if (!versionOutput) {
     return false;
   }
@@ -443,7 +453,10 @@ const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): 
   return Number.isInteger(major) && major >= 137;
 };
 
-const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
+const resolveExecutablePath = async (
+  params: JsonObject,
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
+): Promise<string> => {
   const explicitFromParams = parseOptionalString(params.browserPath);
   if (explicitFromParams !== null) {
     throw new BrowserLaunchError(
@@ -452,10 +465,7 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
     );
   }
   const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-  const candidates = [
-    explicitFromEnv,
-    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-  ].filter((item): item is string => item !== null);
+  const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
   let brandedChromeRejected = false;
 
   for (const candidate of candidates) {
@@ -473,6 +483,9 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
 
     const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
     if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+      if (options?.allowUnsupportedExtensionBrowser) {
+        return resolvedCandidate;
+      }
       brandedChromeRejected = true;
       if (explicitFromEnv && candidate === explicitFromEnv) {
         throw new BrowserLaunchError(
@@ -517,14 +530,88 @@ export interface BrowserVersionTruthSource {
   browserVersion: string | null;
 }
 
-export const resolveBrowserVersionTruthSource = async (
-  params: JsonObject = {}
-): Promise<BrowserVersionTruthSource> => {
-  const executablePath = await resolveExecutablePath(params);
+interface ResolvedExecutableCandidate {
+  executablePath: string;
+  browserVersion: string | null;
+}
+
+const resolveExecutableCandidate = async (
+  candidate: string
+): Promise<ResolvedExecutableCandidate | null> => {
+  let executablePath: string | null = null;
+  if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+    if (await pathExists(candidate)) {
+      executablePath = candidate;
+    }
+  } else {
+    executablePath = await resolveCommandFromPath(candidate);
+  }
+  if (executablePath === null) {
+    return null;
+  }
   return {
     executablePath,
     browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
   };
+};
+
+export const resolveBrowserVersionTruthSource = async (
+  params: JsonObject = {},
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
+): Promise<BrowserVersionTruthSource> => {
+  const executablePath = await resolveExecutablePath(params, options);
+  return {
+    executablePath,
+    browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+  };
+};
+
+export const resolvePreferredBrowserVersionTruthSource = async (
+  params: JsonObject = {}
+): Promise<BrowserVersionTruthSource> => {
+  const explicitFromParams = parseOptionalString(params.browserPath);
+  if (explicitFromParams !== null) {
+    throw new BrowserLaunchError(
+      "BROWSER_INVALID_ARGUMENT",
+      "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH"
+    );
+  }
+
+  const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
+  const candidates = [
+    explicitFromEnv,
+    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
+  ].filter((item): item is string => item !== null);
+  let officialChromePreferred: ResolvedExecutableCandidate | null = null;
+  let fallbackCandidate: ResolvedExecutableCandidate | null = null;
+
+  for (const candidate of candidates) {
+    const resolved = await resolveExecutableCandidate(candidate);
+    if (resolved === null) {
+      continue;
+    }
+
+    if (explicitFromEnv && candidate === explicitFromEnv) {
+      return resolved;
+    }
+
+    if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
+      officialChromePreferred ??= resolved;
+      continue;
+    }
+
+    fallbackCandidate ??= resolved;
+  }
+
+  if (officialChromePreferred) {
+    return officialChromePreferred;
+  }
+
+  if (fallbackCandidate) {
+    return fallbackCandidate;
+  }
+
+  return resolveBrowserVersionTruthSource(params);
 };
 
 const resolveSupervisorScriptPath = async (): Promise<string> => {
@@ -1197,24 +1284,31 @@ const launchProcess = async (
 };
 
 export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserLaunchResult> => {
-  const executablePath = await resolveExecutablePath(input.params);
+  const launchMode = input.launchMode ?? "load_extension";
+  const executablePath = await resolveExecutablePath(input.params, {
+    allowUnsupportedExtensionBrowser: launchMode === "official_chrome_persistent_extension"
+  });
   const supervisorScriptPath = await resolveSupervisorScriptPath();
   const startUrl = parseStartUrl(input.params);
-  const extensionBootstrap = resolveExtensionBootstrapPayload(input);
-  const extensionStaging = await stageExtensionForRun({
-    profileDir: input.profileDir,
-    runId: input.runId,
-    extensionBootstrap
-  });
   const launchArgs = [
     `--user-data-dir=${input.profileDir}`,
     "--profile-directory=Default",
     "--new-window",
     "--no-first-run",
-    "--no-default-browser-check",
-    `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
-    `--load-extension=${extensionStaging.stagedExtensionDir}`
+    "--no-default-browser-check"
   ];
+  if (launchMode === "load_extension") {
+    const extensionBootstrap = resolveExtensionBootstrapPayload(input);
+    const extensionStaging = await stageExtensionForRun({
+      profileDir: input.profileDir,
+      runId: input.runId,
+      extensionBootstrap
+    });
+    launchArgs.push(
+      `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
+      `--load-extension=${extensionStaging.stagedExtensionDir}`
+    );
+  }
   if (input.proxyUrl !== null) {
     launchArgs.push(`--proxy-server=${input.proxyUrl}`);
   }
@@ -1271,7 +1365,7 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
       cause: error
     });
   } finally {
-    if (!launchSucceeded) {
+    if (!launchSucceeded && launchMode === "load_extension") {
       await cleanupStagedExtensions(input.profileDir);
     }
   }

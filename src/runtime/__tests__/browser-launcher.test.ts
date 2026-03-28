@@ -12,6 +12,8 @@ import {
   BROWSER_STATE_FILENAME,
   BrowserLaunchError,
   launchBrowser,
+  resolvePreferredBrowserCandidates,
+  resolvePreferredBrowserVersionTruthSource,
   resolveBrowserVersionOutputForFingerprint,
   shutdownBrowserSession
 } from "../browser-launcher.js";
@@ -24,7 +26,8 @@ const originalBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
 const originalRealChromeBin = process.env.WEBENVOY_REAL_CHROME_BIN;
 const originalRealBrowserPath = process.env.WEBENVOY_REAL_BROWSER_PATH;
 const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
-
+const originalPath = process.env.PATH;
+const originalPlatform = process.platform;
 const restoreEnv = (
   key:
     | "WEBENVOY_BROWSER_PATH"
@@ -111,6 +114,28 @@ setInterval(() => {}, 1000);
   );
   await chmod(scriptPath, 0o755);
   return scriptPath;
+};
+
+const createVersionCommand = async (
+  commandName: string,
+  versionOutput: string
+): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-command-"));
+  tempDirs.push(dir);
+  const commandPath = join(dir, commandName);
+  await writeFile(
+    commandPath,
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo ${JSON.stringify(versionOutput)}
+  exit 0
+fi
+while true; do sleep 1; done
+`,
+    "utf8"
+  );
+  await chmod(commandPath, 0o755);
+  return dir;
 };
 
 const waitForLaunchLog = async (logPath: string): Promise<string> => {
@@ -210,6 +235,12 @@ afterEach(async () => {
   restoreEnv("WEBENVOY_REAL_CHROME_BIN", originalRealChromeBin);
   restoreEnv("WEBENVOY_REAL_BROWSER_PATH", originalRealBrowserPath);
   restoreEnv("WEBENVOY_BROWSER_VERSION", originalBrowserVersion);
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
+  }
+  Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -219,6 +250,14 @@ afterEach(async () => {
 });
 
 describe("browser-launcher", () => {
+  it("prefers official Chrome over CFT and Chromium on darwin when no explicit browser path is set", () => {
+    expect(resolvePreferredBrowserCandidates("darwin", null)).toEqual([
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium"
+    ]);
+  });
+
   it("binds fingerprint browser version probe to the resolved executable path", async () => {
     const resolvedExecutable = await createFixedVersionBrowserExecutable("Chromium 146.0.0.0");
     const unrelatedExecutable = await createFixedVersionBrowserExecutable("Chromium 999.0.0.0");
@@ -278,6 +317,34 @@ describe("browser-launcher", () => {
       stat(join(profileDir, EXTENSION_STAGING_DIRNAME))
     ).rejects.toMatchObject({
       code: "ENOENT"
+    });
+  });
+
+  it("launches official Chrome persistent mode without staged extension flags", async () => {
+    const { scriptPath, logPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-official-persistent-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Google Chrome 146.0.7680.154";
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-official-persistent-001",
+      params: {},
+      launchMode: "official_chrome_persistent_extension"
+    });
+
+    const launchArgs = parseLaunchArgs(await waitForLaunchLog(logPath));
+    expect(findArgValue(launchArgs, "--disable-extensions-except=")).toBeNull();
+    expect(findArgValue(launchArgs, "--load-extension=")).toBeNull();
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-official-persistent-001"
     });
   });
 

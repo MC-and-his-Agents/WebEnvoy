@@ -6,9 +6,9 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        "/Applications/Chromium.app/Contents/MacOS/Chromium"
     ],
     linux: [
         "/usr/bin/google-chrome-stable",
@@ -37,6 +37,7 @@ const KNOWN_BROWSER_CANDIDATES = {
     cygwin: []
 };
 const hasPathSegment = (value) => /[\\/]/.test(value);
+export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
 export class BrowserLaunchError extends Error {
     code;
     constructor(code, message, options) {
@@ -331,7 +332,7 @@ const readBrowserVersionOutput = async (executablePath) => {
         });
     });
 };
-const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
+export const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
     if (!versionOutput) {
         return false;
     }
@@ -346,16 +347,13 @@ const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
     const major = Number.parseInt(match[1], 10);
     return Number.isInteger(major) && major >= 137;
 };
-const resolveExecutablePath = async (params) => {
+const resolveExecutablePath = async (params, options) => {
     const explicitFromParams = parseOptionalString(params.browserPath);
     if (explicitFromParams !== null) {
         throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
     }
     const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-    const candidates = [
-        explicitFromEnv,
-        ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-    ].filter((item) => item !== null);
+    const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
     let brandedChromeRejected = false;
     for (const candidate of candidates) {
         let resolvedCandidate = null;
@@ -372,6 +370,9 @@ const resolveExecutablePath = async (params) => {
         }
         const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
         if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+            if (options?.allowUnsupportedExtensionBrowser) {
+                return resolvedCandidate;
+            }
             brandedChromeRejected = true;
             if (explicitFromEnv && candidate === explicitFromEnv) {
                 throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "Google Chrome 137+ 已禁用命令行 --load-extension；请改用 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向受支持浏览器");
@@ -397,12 +398,64 @@ export const resolveBrowserVersionOutputForFingerprint = async (executablePath) 
         return null;
     }
 };
-export const resolveBrowserVersionTruthSource = async (params = {}) => {
-    const executablePath = await resolveExecutablePath(params);
+const resolveExecutableCandidate = async (candidate) => {
+    let executablePath = null;
+    if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+        if (await pathExists(candidate)) {
+            executablePath = candidate;
+        }
+    }
+    else {
+        executablePath = await resolveCommandFromPath(candidate);
+    }
+    if (executablePath === null) {
+        return null;
+    }
     return {
         executablePath,
         browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
     };
+};
+export const resolveBrowserVersionTruthSource = async (params = {}, options) => {
+    const executablePath = await resolveExecutablePath(params, options);
+    return {
+        executablePath,
+        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+    };
+};
+export const resolvePreferredBrowserVersionTruthSource = async (params = {}) => {
+    const explicitFromParams = parseOptionalString(params.browserPath);
+    if (explicitFromParams !== null) {
+        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
+    }
+    const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
+    const candidates = [
+        explicitFromEnv,
+        ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
+    ].filter((item) => item !== null);
+    let officialChromePreferred = null;
+    let fallbackCandidate = null;
+    for (const candidate of candidates) {
+        const resolved = await resolveExecutableCandidate(candidate);
+        if (resolved === null) {
+            continue;
+        }
+        if (explicitFromEnv && candidate === explicitFromEnv) {
+            return resolved;
+        }
+        if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
+            officialChromePreferred ??= resolved;
+            continue;
+        }
+        fallbackCandidate ??= resolved;
+    }
+    if (officialChromePreferred) {
+        return officialChromePreferred;
+    }
+    if (fallbackCandidate) {
+        return fallbackCandidate;
+    }
+    return resolveBrowserVersionTruthSource(params);
 };
 const resolveSupervisorScriptPath = async () => {
     const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -921,24 +974,28 @@ const launchProcess = async (supervisorScriptPath, executablePath, args, input) 
     };
 };
 export const launchBrowser = async (input) => {
-    const executablePath = await resolveExecutablePath(input.params);
+    const launchMode = input.launchMode ?? "load_extension";
+    const executablePath = await resolveExecutablePath(input.params, {
+        allowUnsupportedExtensionBrowser: launchMode === "official_chrome_persistent_extension"
+    });
     const supervisorScriptPath = await resolveSupervisorScriptPath();
     const startUrl = parseStartUrl(input.params);
-    const extensionBootstrap = resolveExtensionBootstrapPayload(input);
-    const extensionStaging = await stageExtensionForRun({
-        profileDir: input.profileDir,
-        runId: input.runId,
-        extensionBootstrap
-    });
     const launchArgs = [
         `--user-data-dir=${input.profileDir}`,
         "--profile-directory=Default",
         "--new-window",
         "--no-first-run",
-        "--no-default-browser-check",
-        `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
-        `--load-extension=${extensionStaging.stagedExtensionDir}`
+        "--no-default-browser-check"
     ];
+    if (launchMode === "load_extension") {
+        const extensionBootstrap = resolveExtensionBootstrapPayload(input);
+        const extensionStaging = await stageExtensionForRun({
+            profileDir: input.profileDir,
+            runId: input.runId,
+            extensionBootstrap
+        });
+        launchArgs.push(`--disable-extensions-except=${extensionStaging.stagedExtensionDir}`, `--load-extension=${extensionStaging.stagedExtensionDir}`);
+    }
     if (input.proxyUrl !== null) {
         launchArgs.push(`--proxy-server=${input.proxyUrl}`);
     }
@@ -996,7 +1053,7 @@ export const launchBrowser = async (input) => {
         });
     }
     finally {
-        if (!launchSucceeded) {
+        if (!launchSucceeded && launchMode === "load_extension") {
             await cleanupStagedExtensions(input.profileDir);
         }
     }

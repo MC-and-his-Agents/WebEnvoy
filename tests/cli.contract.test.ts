@@ -12,6 +12,7 @@ import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-sto
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
+const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -47,6 +48,59 @@ const createRuntimeCwd = async (): Promise<string> => {
   tempDirs.push(dir);
   return dir;
 };
+
+const createNativeHostManifest = async (input: {
+  nativeHostName?: string;
+  allowedOrigins: string[];
+}): Promise<string> => {
+  const dir = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-manifest-"));
+  tempDirs.push(dir);
+  const manifestPath = path.join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        name: input.nativeHostName ?? "com.webenvoy.host",
+        path: "/mock/webenvoy-host",
+        type: "stdio",
+        allowed_origins: input.allowedOrigins
+      },
+      null,
+      2
+    )}\n`
+  );
+  return manifestPath;
+};
+
+const seedInstalledPersistentExtension = async (input: {
+  cwd: string;
+  profile: string;
+  extensionId?: string;
+  enabled?: boolean;
+}): Promise<void> => {
+  const extensionId = input.extensionId ?? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile, "Default");
+  const extensionDir = path.join(profileDir, "Extensions", extensionId, "1.0.0");
+  await mkdir(extensionDir, { recursive: true });
+  await writeFile(path.join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n");
+  await writeFile(
+    path.join(profileDir, "Preferences"),
+    `${JSON.stringify(
+      {
+        extensions: {
+          settings: {
+            [extensionId]: {
+              state: input.enabled === false ? 0 : 1
+            }
+          }
+        }
+      },
+      null,
+      2
+    )}\n`
+  );
+};
+
 
 const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   NODE_ENV: "test",
@@ -428,6 +482,48 @@ describe("webenvoy cli contract", () => {
           .gate_reasons as string[]
       )
     ).toEqual(["DEFAULT_MODE_DRY_RUN"]);
+  });
+
+  it("blocks xhs.search before execution when official Chrome runtime readiness is not ready", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_official_not_ready_profile",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedXhsGateOptions,
+          action_type: "read",
+          simulate_result: "success"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback",
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    });
+
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          runtime_readiness: "blocked",
+          identity_binding_state: "missing"
+        }
+      }
+    });
   });
 
   it("blocks live_read_high_risk when approval is missing", () => {
@@ -1387,18 +1483,69 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("sends live xhs.search directly without hidden runtime.ping prewarm on native transport", async () => {
+  it("recovers official Chrome xhs.search with hidden runtime.bootstrap after runtime.start leaves bootstrap pending", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const profile = "xhs_official_bootstrap_recovery_profile";
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-xhs-bootstrap-start-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
+      }
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile,
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "recoverable"
+      }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile
+    });
+
     const nativeHostPath = path.join(runtimeCwd, "native-host-live-prewarm.cjs");
     const tracePath = path.join(runtimeCwd, "native-host-live-prewarm-trace.json");
     await writeFile(
       nativeHostPath,
       `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
+let bootstrapReady = false;
 const forwards = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
+let idleTimer = null;
 
 const emit = (message) => {
   const payload = Buffer.from(JSON.stringify(message), "utf8");
@@ -1411,7 +1558,23 @@ const writeTrace = () => {
   if (!tracePath) {
     return;
   }
-  writeFileSync(tracePath, JSON.stringify({ forwards }), "utf8");
+  const existing = existsSync(tracePath)
+    ? JSON.parse(readFileSync(tracePath, "utf8"))
+    : { forwards: [] };
+  const mergedForwards = Array.isArray(existing.forwards)
+    ? [...existing.forwards, ...forwards]
+    : [...forwards];
+  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
+};
+
+const scheduleIdleExit = () => {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+  }
+  idleTimer = setTimeout(() => {
+    writeTrace();
+    process.exit(0);
+  }, 200);
 };
 
 const success = (request, payload = { message: "pong" }) => ({
@@ -1440,6 +1603,7 @@ const onRequest = (request) => {
       },
       error: null
     });
+    scheduleIdleExit();
     return;
   }
 
@@ -1450,6 +1614,7 @@ const onRequest = (request) => {
       summary: { session_id: "nm-session-001" },
       error: null
     });
+    scheduleIdleExit();
     return;
   }
 
@@ -1473,6 +1638,35 @@ const onRequest = (request) => {
     run_id: runId,
     profile
   });
+
+  if (command === "runtime.bootstrap") {
+    const commandParams = request.params?.command_params ?? {};
+    bootstrapReady = true;
+    emit(
+      success(request, {
+        result: {
+          version: String(commandParams.version ?? "v1"),
+          run_id: String(commandParams.run_id ?? runId),
+          runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
+          profile,
+          status: "ready"
+        }
+      })
+    );
+    scheduleIdleExit();
+    return;
+  }
+
+  if (command === "runtime.readiness") {
+    emit(
+      success(request, {
+        transport_state: "ready",
+        bootstrap_state: bootstrapReady ? "ready" : "pending"
+      })
+    );
+    scheduleIdleExit();
+    return;
+  }
 
   if (command === "xhs.search") {
     const fingerprintContext = request.params?.command_params?.fingerprint_context ?? null;
@@ -1541,8 +1735,7 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-live-direct-001";
-    const profile = "xhs_account_001";
+    const runId = "run-contract-xhs-bootstrap-search-002";
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -1551,6 +1744,10 @@ process.stdin.on("data", (chunk) => {
       runId,
       "--params",
       JSON.stringify({
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        },
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1580,7 +1777,8 @@ process.stdin.on("data", (chunk) => {
     ], runtimeCwd, {
       WEBENVOY_NATIVE_TRANSPORT: "native",
       WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath),
-      WEBENVOY_TEST_TRACE_PATH: tracePath
+      WEBENVOY_TEST_TRACE_PATH: tracePath,
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
     });
 
     expect(result.status).toBe(0);
@@ -1601,13 +1799,28 @@ process.stdin.on("data", (chunk) => {
     const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
       forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
     };
-    expect(trace.forwards).toEqual([
-      {
-        command: "xhs.search",
-        run_id: runId,
-        profile
-      }
-    ]);
+    expect(trace.forwards).toBeDefined();
+    expect(trace.forwards).toEqual(
+      expect.arrayContaining([
+        {
+          command: "runtime.bootstrap",
+          run_id: runId,
+          profile
+        },
+        {
+          command: "xhs.search",
+          run_id: runId,
+          profile
+        }
+      ])
+    );
+    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
+    const bootstrapIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
+    const searchIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
+    expect(searchIndex).toBeGreaterThan(bootstrapIndex);
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
@@ -2756,7 +2969,7 @@ process.stdin.on("data", (chunk) => {
       }
     });
 
-    const status = runCli(["runtime.status", "--profile", "default"], runtimeCwd);
+    const status = runCli(["runtime.status", "--profile", "default", "--run-id", "run-contract-100"], runtimeCwd);
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -2768,6 +2981,398 @@ process.stdin.on("data", (chunk) => {
         browserState: "ready",
         proxyUrl: "http://127.0.0.1:8080/",
         lockHeld: true
+      }
+    });
+  });
+
+  it("returns machine-readable identity mismatch for official Chrome persistent extension preflight", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+    });
+
+    const result = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_mismatch_profile",
+        "--run-id",
+        "run-contract-identity-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-identity-001",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_MISMATCH",
+        details: {
+          ability_id: "runtime.identity_preflight",
+          identity_binding_state: "mismatch",
+          expected_origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+          manifest_path: manifestPath
+        }
+      }
+    });
+  });
+
+  it("does not surface identity-not-bound before official Chrome first start/login", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = {
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    };
+
+    const start = runCli(
+      ["runtime.start", "--profile", "identity_not_bound_start_profile", "--run-id", "run-contract-identity-001a"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      run_id: "run-contract-identity-001a",
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile: "identity_not_bound_start_profile",
+        browserState: "ready",
+        identityBindingState: "missing",
+        bootstrapState: "not_started",
+        runtimeReadiness: "blocked"
+      }
+    });
+
+    const login = runCli(
+      ["runtime.login", "--profile", "identity_not_bound_login_profile", "--run-id", "run-contract-identity-001b"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(login.status).toBe(0);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      run_id: "run-contract-identity-001b",
+      command: "runtime.login",
+      status: "success",
+      summary: {
+        profile: "identity_not_bound_login_profile",
+        browserState: "logging_in",
+        identityBindingState: "missing",
+        bootstrapState: "not_started",
+        runtimeReadiness: "blocked"
+      }
+    });
+  });
+
+  it("surfaces bound identity preflight via runtime.status after recoverable transport failure during runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bound_profile"
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bound_profile",
+        "--run-id",
+        "run-contract-identity-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
+      }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bound_profile"
+    });
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "identity_bound_profile",
+        "--run-id",
+        "run-contract-identity-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable",
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension",
+          manifestPath,
+          expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+        }
+      }
+    });
+  });
+
+  it("surfaces bootstrap ack timeout as recoverable readiness during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_timeout_profile"
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_timeout_profile",
+        "--run-id",
+        "run-contract-bootstrap-timeout-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "recoverable"
+      }
+    });
+  });
+
+  it("surfaces stale bootstrap ack during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_stale_profile"
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_stale_profile",
+        "--run-id",
+        "run-contract-bootstrap-stale-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-stale"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "stale",
+        runtimeReadiness: "blocked"
+      }
+    });
+  });
+
+  it("surfaces bootstrap ready-signal conflict during official Chrome runtime.start", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_conflict_profile"
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_bootstrap_conflict_profile",
+        "--run-id",
+        "run-contract-bootstrap-conflict-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ready-signal-conflict"
+      }
+    );
+
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "failed",
+        runtimeReadiness: "unknown"
+      }
+    });
+  });
+
+  it("does not report bound identity preflight when runtime.status omits identity input", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_manifest_reuse_profile"
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--run-id",
+        "run-contract-identity-003",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
+      }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_manifest_reuse_profile"
+    });
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--run-id",
+        "run-contract-identity-003"
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "missing",
+        runtimeReadiness: "blocked"
       }
     });
   });
@@ -2795,7 +3400,11 @@ process.stdin.on("data", (chunk) => {
       }
     });
 
-    const status = runCli(["runtime.status", "--profile", "fixture_version_profile"], runtimeCwd, runtimeEnv);
+    const status = runCli(
+      ["runtime.status", "--profile", "fixture_version_profile", "--run-id", "run-contract-fixture-001"],
+      runtimeCwd,
+      runtimeEnv
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -2854,7 +3463,10 @@ process.stdin.on("data", (chunk) => {
     const lastLaunch = JSON.parse(launchLogLines[launchLogLines.length - 1]) as { args: string };
     expect(lastLaunch.args).not.toContain("--headless=new");
 
-    const statusBeforeConfirm = runCli(["runtime.status", "--profile", "login_profile"], runtimeCwd);
+    const statusBeforeConfirm = runCli(
+      ["runtime.status", "--profile", "login_profile", "--run-id", "run-contract-151"],
+      runtimeCwd
+    );
     expect(statusBeforeConfirm.status).toBe(0);
     const statusBeforeConfirmBody = parseSingleJsonLine(statusBeforeConfirm.stdout);
     expect(statusBeforeConfirmBody).toMatchObject({
@@ -3025,33 +3637,39 @@ process.stdin.on("data", (chunk) => {
 
   it("allows only one successful runtime.start under concurrent race", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [first, second] = await Promise.all([
+        runCliAsync(
+          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-211-${attempt}`],
+          runtimeCwd
+        ),
+        runCliAsync(
+          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-212-${attempt}`],
+          runtimeCwd
+        )
+      ]);
 
-    const [first, second] = await Promise.all([
-      runCliAsync(
-        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-211"],
-        runtimeCwd
-      ),
-      runCliAsync(
-        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-212"],
-        runtimeCwd
-      )
-    ]);
+      const statuses = [first.status, second.status];
+      const successCount = statuses.filter((status) => status === 0).length;
+      const failureCount = statuses.filter((status) => status === 5).length;
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
 
-    const statuses = [first.status, second.status];
-    const successCount = statuses.filter((status) => status === 0).length;
-    const failureCount = statuses.filter((status) => status === 5).length;
-    expect(successCount).toBeGreaterThanOrEqual(1);
-    expect(failureCount).toBeLessThanOrEqual(1);
-
-    const failed = first.status === 5 ? first : second.status === 5 ? second : null;
-    if (failed) {
-      const failedBody = parseSingleJsonLine(failed.stdout);
+      const failed = [first, second].find((result) => result.status === 5);
+      expect(failed).toBeDefined();
+      const failedBody = parseSingleJsonLine(failed!.stdout);
       expect(failedBody).toMatchObject({
         command: "runtime.start",
         status: "error",
-        error: { code: "ERR_PROFILE_LOCKED" }
+        error: {
+          code: "ERR_PROFILE_LOCKED"
+        }
       });
+
+      return;
     }
+
+    throw new Error("concurrent runtime.start race did not preserve a single winner contract");
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
@@ -3190,7 +3808,10 @@ process.stdin.on("data", (chunk) => {
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-    const status = runCli(["runtime.status", "--profile", "recover_stop_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3246,7 +3867,10 @@ process.stdin.on("data", (chunk) => {
     lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-    const status = runCli(["runtime.status", "--profile", "live_owner_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "live_owner_profile", "--run-id", "run-contract-511"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3289,7 +3913,10 @@ process.stdin.on("data", (chunk) => {
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     expect(lock.ownerRunId).toBe("run-contract-521");
 
-    const status = runCli(["runtime.status", "--profile", "same_run_retry_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "same_run_retry_profile", "--run-id", "run-contract-521"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({

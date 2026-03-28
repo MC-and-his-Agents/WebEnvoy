@@ -197,6 +197,42 @@ setup_case_dir() {
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
+setup_mock_npm() {
+  local mock_bin="${TEST_TMP_DIR}/bin"
+
+  cat > "${mock_bin}/npm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "$*" >> "${MOCK_NPM_CALLS_LOG:?missing MOCK_NPM_CALLS_LOG}"
+
+if [[ "${1:-}" == "ci" ]]; then
+  has_ignore_scripts=0
+  for arg in "$@"; do
+    if [[ "${arg}" == "--ignore-scripts" ]]; then
+      has_ignore_scripts=1
+      break
+    fi
+  done
+  if [[ "${has_ignore_scripts}" != "1" ]]; then
+    echo "npm ci must include --ignore-scripts" >&2
+    exit 65
+  fi
+  if [[ "${MOCK_NPM_FORCE_CI_FAIL:-0}" == "1" ]]; then
+    echo "mock npm ci failure" >&2
+    exit 66
+  fi
+  mkdir -p node_modules
+  exit 0
+fi
+
+echo "unexpected npm call: $*" >&2
+exit 64
+EOF
+
+  chmod +x "${mock_bin}/npm"
+}
+
 run_all_checks_pass_with_payload() {
   local payload="$1"
   setup_case_dir "checks"
@@ -265,6 +301,145 @@ run_all_checks_pass_when_all_checks_list_is_empty() {
   export MOCK_GH_CHECKS_EXIT_CODE
 
   all_required_checks_pass 123 >/dev/null 2>&1
+}
+
+setup_hydrate_fixture() {
+  local case_name="$1"
+  setup_case_dir "${case_name}"
+
+  local fixture_root="${TEST_TMP_DIR}/${case_name}/hydrate"
+  local source_root="${fixture_root}/repo"
+  local worktree_root="${fixture_root}/worktree"
+  mkdir -p "${source_root}" "${worktree_root}"
+
+  REPO_ROOT="${source_root}"
+  WORKTREE_DIR="${worktree_root}"
+  export REPO_ROOT
+  export WORKTREE_DIR
+
+  MOCK_NPM_CALLS_LOG="${TEST_TMP_DIR}/${case_name}/mock/npm.calls.log"
+  : > "${MOCK_NPM_CALLS_LOG}"
+  export MOCK_NPM_CALLS_LOG
+}
+
+test_hydrate_dependencies_skips_when_target_node_modules_is_directory() {
+  setup_hydrate_fixture "hydrate-skip-existing-directory"
+
+  mkdir -p "${REPO_ROOT}/node_modules"
+  mkdir -p "${WORKTREE_DIR}/node_modules"
+  printf '%s\n' '{}' > "${WORKTREE_DIR}/package-lock.json"
+
+  assert_pass hydrate_worktree_dependencies
+  [[ -d "${WORKTREE_DIR}/node_modules" ]] || {
+    echo "expected node_modules directory to remain" >&2
+    exit 1
+  }
+  if [[ -L "${WORKTREE_DIR}/node_modules" ]]; then
+    echo "did not expect node_modules to become symlink" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
+}
+
+test_hydrate_dependencies_links_repo_node_modules_when_lockfile_exists() {
+  setup_hydrate_fixture "hydrate-lockfile-link-source-node-modules"
+
+  mkdir -p "${REPO_ROOT}/node_modules"
+  printf '%s\n' '{}' > "${WORKTREE_DIR}/package-lock.json"
+
+  assert_pass hydrate_worktree_dependencies
+  [[ -L "${WORKTREE_DIR}/node_modules" ]] || {
+    echo "expected node_modules symlink fallback when lockfile exists" >&2
+    exit 1
+  }
+  local linked_path
+  linked_path="$(readlink "${WORKTREE_DIR}/node_modules")"
+  if [[ "${linked_path}" != "${REPO_ROOT}/node_modules" ]]; then
+    echo "unexpected symlink target: ${linked_path}" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
+}
+
+test_hydrate_dependencies_links_repo_node_modules_when_lockfile_missing() {
+  setup_hydrate_fixture "hydrate-link-source-node-modules"
+
+  mkdir -p "${REPO_ROOT}/node_modules"
+
+  assert_pass hydrate_worktree_dependencies
+  [[ -L "${WORKTREE_DIR}/node_modules" ]] || {
+    echo "expected node_modules symlink in worktree" >&2
+    exit 1
+  }
+  local linked_path
+  linked_path="$(readlink "${WORKTREE_DIR}/node_modules")"
+  if [[ "${linked_path}" != "${REPO_ROOT}/node_modules" ]]; then
+    echo "unexpected symlink target: ${linked_path}" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
+}
+
+test_hydrate_dependencies_noop_when_no_lockfile_and_no_source_node_modules() {
+  setup_hydrate_fixture "hydrate-no-source-node-modules"
+
+  assert_pass hydrate_worktree_dependencies
+  if [[ -e "${WORKTREE_DIR}/node_modules" ]]; then
+    echo "did not expect node_modules to exist" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
+}
+
+test_hydrate_dependencies_falls_back_when_npm_missing() {
+  setup_hydrate_fixture "hydrate-lockfile-npm-missing"
+
+  mkdir -p "${REPO_ROOT}/node_modules"
+  printf '%s\n' '{}' > "${WORKTREE_DIR}/package-lock.json"
+
+  local original_path="${PATH}"
+  local no_npm_bin="${TEST_TMP_DIR}/bin-no-npm"
+  mkdir -p "${no_npm_bin}"
+  PATH="${no_npm_bin}:/usr/bin:/bin"
+
+  assert_pass hydrate_worktree_dependencies
+  PATH="${original_path}"
+
+  [[ -L "${WORKTREE_DIR}/node_modules" ]] || {
+    echo "expected node_modules symlink fallback when npm is missing" >&2
+    exit 1
+  }
+  local linked_path
+  linked_path="$(readlink "${WORKTREE_DIR}/node_modules")"
+  if [[ "${linked_path}" != "${REPO_ROOT}/node_modules" ]]; then
+    echo "unexpected symlink target: ${linked_path}" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
+}
+
+test_hydrate_dependencies_falls_back_when_npm_ci_fails() {
+  setup_hydrate_fixture "hydrate-lockfile-npm-ci-fails"
+
+  mkdir -p "${REPO_ROOT}/node_modules"
+  printf '%s\n' '{}' > "${WORKTREE_DIR}/package-lock.json"
+  MOCK_NPM_FORCE_CI_FAIL=1
+  export MOCK_NPM_FORCE_CI_FAIL
+
+  assert_pass hydrate_worktree_dependencies
+  unset MOCK_NPM_FORCE_CI_FAIL || true
+
+  [[ -L "${WORKTREE_DIR}/node_modules" ]] || {
+    echo "expected node_modules symlink fallback when npm ci fails" >&2
+    exit 1
+  }
+  local linked_path
+  linked_path="$(readlink "${WORKTREE_DIR}/node_modules")"
+  if [[ "${linked_path}" != "${REPO_ROOT}/node_modules" ]]; then
+    echo "unexpected symlink target: ${linked_path}" >&2
+    exit 1
+  fi
+  assert_file_empty "${MOCK_NPM_CALLS_LOG}"
 }
 
 setup_merge_if_safe_fixture() {
@@ -552,6 +727,7 @@ test_merge_if_safe_rejects_comment_marker_without_formal_review() {
 
 main() {
   setup_mock_gh
+  setup_mock_npm
   load_guardian_without_main
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
@@ -573,6 +749,12 @@ main() {
   test_merge_if_safe_retries_until_review_state_is_visible
   test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head
   test_merge_if_safe_rejects_comment_marker_without_formal_review
+  test_hydrate_dependencies_skips_when_target_node_modules_is_directory
+  test_hydrate_dependencies_links_repo_node_modules_when_lockfile_exists
+  test_hydrate_dependencies_links_repo_node_modules_when_lockfile_missing
+  test_hydrate_dependencies_noop_when_no_lockfile_and_no_source_node_modules
+  test_hydrate_dependencies_falls_back_when_npm_missing
+  test_hydrate_dependencies_falls_back_when_npm_ci_fails
 
   echo "pr-guardian merge-guard semantics test passed."
 }

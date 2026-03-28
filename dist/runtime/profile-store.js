@@ -180,7 +180,7 @@ const parseMeta = (raw) => {
         throw new Error("Invalid profile meta structure: invalid JSON");
     }
     assertProfileMeta(parsed);
-    return parsed;
+    return { ...parsed };
 };
 const buildLegacyBundleMigration = async (input) => {
     const browserVersion = input.intent === "persistent_upgrade"

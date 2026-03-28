@@ -71,9 +71,27 @@ const resolveFingerprintContextFromMessage = (
   }
 
   const fallback = ensureFingerprintRuntimeContext(
-    asRecord(message.commandParams)?.fingerprint_context ?? null
+    asRecord(message.commandParams)?.fingerprint_context ??
+      asRecord(message.commandParams)?.fingerprint_runtime ??
+      null
   );
   return fallback ?? null;
+};
+
+const buildFailedFingerprintInjectionContext = (
+  fingerprintRuntime: FingerprintRuntimeContext,
+  errorMessage: string
+): Record<string, unknown> => {
+  const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+  return {
+    ...fingerprintRuntime,
+    injection: {
+      installed: false,
+      required_patches: requiredPatches,
+      missing_required_patches: requiredPatches,
+      error: errorMessage
+    }
+  };
 };
 
 const resolveMissingRequiredFingerprintPatches = (
@@ -628,6 +646,11 @@ export class ContentScriptHandler {
       return true;
     }
 
+    if (message.command === "runtime.bootstrap") {
+      void this.#handleRuntimeBootstrap(message);
+      return true;
+    }
+
     if (message.command === "xhs.search") {
       void this.#handleXhsSearch(message);
       return true;
@@ -692,6 +715,96 @@ export class ContentScriptHandler {
         cwd: message.cwd,
         ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
       }
+    });
+  }
+
+  async #handleRuntimeBootstrap(message: BackgroundToContentMessage): Promise<void> {
+    const commandParams = asRecord(message.commandParams) ?? {};
+    const version = asString(commandParams.version);
+    const runId = asString(commandParams.run_id);
+    const runtimeContextId = asString(commandParams.runtime_context_id);
+    const profile = asString(commandParams.profile);
+    const mainWorldSecret = asString(commandParams.main_world_secret);
+    const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+
+    if (
+      version !== "v1" ||
+      !runId ||
+      !runtimeContextId ||
+      !profile ||
+      !mainWorldSecret ||
+      !fingerprintRuntime
+    ) {
+      this.#emit({
+        kind: "result",
+        id: message.id,
+        ok: false,
+        error: {
+          code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+          message: "invalid runtime bootstrap envelope"
+        }
+      });
+      return;
+    }
+    if (fingerprintRuntime.profile !== profile) {
+      this.#emit({
+        kind: "result",
+        id: message.id,
+        ok: false,
+        error: {
+          code: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
+          message: "runtime bootstrap profile 与 fingerprint runtime 不一致"
+        }
+      });
+      return;
+    }
+
+    const channelInstalled = installMainWorldEventChannelSecret(mainWorldSecret);
+    const runtimeWithInjection = channelInstalled
+      ? await this.#installFingerprintIfPresent({
+          ...message,
+          fingerprintContext: fingerprintRuntime
+        })
+      : buildFailedFingerprintInjectionContext(
+          fingerprintRuntime,
+          "main world event channel unavailable"
+        );
+    const injection = asRecord(runtimeWithInjection?.injection);
+    const attested = injection?.installed === true;
+    const ackPayload = {
+      method: "runtime.bootstrap.ack",
+      result: {
+        version,
+        run_id: runId,
+        runtime_context_id: runtimeContextId,
+        profile,
+        status: attested ? "ready" : "pending"
+      },
+      runtime_bootstrap_attested: attested,
+      ...(runtimeWithInjection ? { fingerprint_runtime: runtimeWithInjection } : {})
+    };
+    if (!attested) {
+      this.#emit({
+        kind: "result",
+        id: message.id,
+        ok: false,
+        error: {
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+          message:
+            typeof injection?.error === "string"
+              ? injection.error
+              : "runtime bootstrap 尚未获得执行面确认"
+        },
+        payload: ackPayload
+      });
+      return;
+    }
+
+    this.#emit({
+      kind: "result",
+      id: message.id,
+      ok: true,
+      payload: ackPayload
     });
   }
 

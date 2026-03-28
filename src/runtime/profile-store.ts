@@ -34,6 +34,13 @@ export interface LocalStorageSnapshot {
   entries: LocalStorageSnapshotEntry[];
 }
 
+export interface PersistentExtensionBinding {
+  extensionId: string;
+  nativeHostName: string;
+  browserChannel: "chrome" | "chrome_beta" | "chromium" | "brave" | "edge";
+  manifestPath: string | null;
+}
+
 export interface ProfileMeta {
   schemaVersion: number;
   profileName: string;
@@ -267,7 +274,7 @@ const parseMeta = (raw: string): ProfileMeta => {
     throw new Error("Invalid profile meta structure: invalid JSON");
   }
   assertProfileMeta(parsed);
-  return parsed;
+  return { ...(parsed as ProfileMeta) };
 };
 
 const buildLegacyBundleMigration = async (input: {

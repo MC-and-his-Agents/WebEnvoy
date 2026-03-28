@@ -24,6 +24,10 @@ die() {
   exit 1
 }
 
+warn() {
+  echo "警告: $*" >&2
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
 }
@@ -114,6 +118,27 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
+  hydrate_worktree_dependencies
+}
+
+hydrate_worktree_dependencies() {
+  local source_node_modules="${REPO_ROOT}/node_modules"
+  local target_node_modules="${WORKTREE_DIR}/node_modules"
+
+  if [[ -d "${target_node_modules}" && ! -L "${target_node_modules}" ]]; then
+    return
+  fi
+
+  rm -rf "${target_node_modules}"
+
+  if [[ -d "${source_node_modules}" ]]; then
+    if ! ln -s "${source_node_modules}" "${target_node_modules}"; then
+      warn "依赖回退到仓库 node_modules 软链接失败，继续无依赖审查。"
+    fi
+    return
+  fi
+
+  warn "未检测到可复用的仓库 node_modules，继续无依赖审查。"
 }
 
 normalize_review_path() {
