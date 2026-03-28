@@ -1735,7 +1735,7 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-bootstrap-start-001";
+    const runId = "run-contract-xhs-bootstrap-search-002";
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -3305,7 +3305,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("reuses persisted identity binding after recoverable transport failure when runtime.status omits identity input", async () => {
+  it("does not report bound identity preflight when runtime.status omits identity input", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -3371,12 +3371,8 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.status",
       status: "success",
       summary: {
-        identityBindingState: "bound",
-        runtimeReadiness: "recoverable",
-        identityPreflight: {
-          manifestPath,
-          expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
-        }
+        identityBindingState: "missing",
+        runtimeReadiness: "blocked"
       }
     });
   });

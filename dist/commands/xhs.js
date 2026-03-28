@@ -464,7 +464,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     if (lockHeld &&
         identityBindingState === "bound" &&
         transportState === "ready" &&
-        (bootstrapState === "not_started" || bootstrapState === "pending")) {
+        (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")) {
         await attemptExecutionBootstrap();
         status = await readStatus();
         runtimeReadiness = typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";

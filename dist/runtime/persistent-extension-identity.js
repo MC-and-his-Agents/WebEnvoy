@@ -323,33 +323,7 @@ export const runIdentityPreflight = async (input) => {
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
     }
-    const bindingFromParams = parsePersistentExtensionBindingFromParams(input.params);
-    const bindingFromMeta = input.meta?.persistentExtensionBinding ?? null;
-    const mergedBindingFromParams = bindingFromParams === null
-        ? null
-        : {
-            ...bindingFromParams,
-            manifestPath: bindingFromParams.manifestPath ?? bindingFromMeta?.manifestPath ?? null
-        };
-    if (mergedBindingFromParams && bindingFromMeta) {
-        const sameBinding = mergedBindingFromParams.extensionId === bindingFromMeta.extensionId &&
-            mergedBindingFromParams.nativeHostName === bindingFromMeta.nativeHostName &&
-            mergedBindingFromParams.browserChannel === bindingFromMeta.browserChannel;
-        if (!sameBinding) {
-            return buildBlockingResult({
-                mode: "official_chrome_persistent_extension",
-                browserPath,
-                browserVersion,
-                identityBindingState: "mismatch",
-                binding: bindingFromMeta,
-                manifestPath: mergedBindingFromParams.manifestPath ?? bindingFromMeta.manifestPath ?? null,
-                expectedOrigin: `chrome-extension://${bindingFromMeta.extensionId}/`,
-                allowedOrigins: [],
-                failureReason: "IDENTITY_BINDING_CONFLICT"
-            });
-        }
-    }
-    const binding = mergedBindingFromParams ?? bindingFromMeta;
+    const binding = parsePersistentExtensionBindingFromParams(input.params);
     if (!binding) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",

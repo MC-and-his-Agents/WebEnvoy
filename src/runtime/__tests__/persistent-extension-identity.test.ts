@@ -14,18 +14,12 @@ import type { ProfileMeta } from "../profile-store.js";
 const EXTENSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DEFAULT_TIMESTAMP = "2026-03-27T00:00:00.000Z";
 
-const createProfileMeta = (manifestPath: string | null, profileDir: string): ProfileMeta => ({
+const createProfileMeta = (profileDir: string): ProfileMeta => ({
   schemaVersion: 1,
   profileName: "identity-profile",
   profileDir,
   profileState: "uninitialized",
   proxyBinding: null,
-  persistentExtensionBinding: {
-    extensionId: EXTENSION_ID,
-    nativeHostName: "com.webenvoy.host",
-    browserChannel: "chrome",
-    manifestPath
-  },
   fingerprintSeeds: {
     audioNoiseSeed: "audio-seed",
     canvasNoiseSeed: "canvas-seed"
@@ -153,8 +147,13 @@ describe("runIdentityPreflight", () => {
     });
 
     const result = await runIdentityPreflight({
-      params: {},
-      meta: createProfileMeta(null, profileDir)
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
     });
 
     expect(execFile).toHaveBeenCalledWith(
@@ -189,16 +188,15 @@ describe("runIdentityPreflight", () => {
     });
 
     const result = await runIdentityPreflight({
-      params: {},
-      meta: {
-        ...createProfileMeta("C:\\manifest.json", profileDir),
-        persistentExtensionBinding: {
-          extensionId: EXTENSION_ID,
-          nativeHostName: "com.webenvoy.host",
-          browserChannel: "chromium",
-          manifestPath: "C:\\manifest.json"
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          browser_channel: "chromium",
+          manifest_path: "C:\\manifest.json"
         }
-      }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
     });
 
     expect(result.identityBindingState).toBe("mismatch");
@@ -237,8 +235,14 @@ describe("runIdentityPreflight", () => {
     });
 
     const result = await runIdentityPreflight({
-      params: {},
-      meta: createProfileMeta(manifestPath, profileDir)
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
     });
 
     expect(result.identityBindingState).toBe("missing");
@@ -282,8 +286,14 @@ describe("runIdentityPreflight", () => {
     });
 
     const result = await runIdentityPreflight({
-      params: {},
-      meta: createProfileMeta(manifestPath, profileDir)
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
     });
 
     expect(result.identityBindingState).toBe("missing");

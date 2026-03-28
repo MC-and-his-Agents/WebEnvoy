@@ -114,6 +114,86 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     expect(bootstrapCommand.params.main_world_secret).toEqual(expect.any(String));
   });
 
+  it("re-bootstrap current run when readiness reports stale bootstrap state", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "stale",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-xhs-stale-bootstrap-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_stale_bootstrap_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_stale_bootstrap_profile",
+          run_id: "run-xhs-stale-bootstrap-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).resolves.toBeUndefined();
+
+    expect(readStatus).toHaveBeenCalledTimes(2);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        params: expect.objectContaining({
+          run_id: "run-xhs-stale-bootstrap-001",
+          profile: "official_stale_bootstrap_profile"
+        })
+      })
+    );
+  });
+
   it("reuses the same runtime_context_id across same-run bootstrap retries", async () => {
     const readStatus = vi
       .fn()

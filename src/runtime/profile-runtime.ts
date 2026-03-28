@@ -22,7 +22,6 @@ import {
   type ReadMetaMode,
   type ReadMetaOptions,
   type LocalStorageSnapshot,
-  type PersistentExtensionBinding,
   type ProfileMeta
 } from "./profile-store.js";
 import {
@@ -56,15 +55,6 @@ const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
-
-const isPersistentExtensionBindingEqual = (
-  left: PersistentExtensionBinding | null | undefined,
-  right: PersistentExtensionBinding | null | undefined
-): boolean =>
-  left?.extensionId === right?.extensionId &&
-  left?.nativeHostName === right?.nativeHostName &&
-  left?.browserChannel === right?.browserChannel &&
-  left?.manifestPath === right?.manifestPath;
 
 type BrowserState = "absent" | "starting" | "ready" | "logging_in" | "stopping" | "disconnected";
 type TransportState = "not_connected" | "ready" | "disconnected";
@@ -632,7 +622,6 @@ export class ProfileRuntimeService {
       let existingMeta = await this.#readMeta(store, input.profile, {
         mode: readFingerprintMetaMode(input.params)
       });
-      const hadExistingMeta = existingMeta !== null;
       const identityPreflight = await this.#runIdentityPreflight({
         input,
         meta: existingMeta,
@@ -648,8 +637,7 @@ export class ProfileRuntimeService {
           ? this.#buildMinimalProfileMeta({
               profile: input.profile,
               profileDir,
-              nowIso,
-              persistentExtensionBinding: identityPreflight.binding
+              nowIso
             })
           : await store.initializeMeta(input.profile, nowIso);
       }
@@ -665,25 +653,6 @@ export class ProfileRuntimeService {
               lastDisconnectedAt: nowIso
             })
           : existingMeta;
-      if (
-        identityPreflight.binding &&
-        (!hadExistingMeta ||
-          !isPersistentExtensionBindingEqual(
-            recoveredMeta.persistentExtensionBinding,
-            identityPreflight.binding
-          ))
-      ) {
-        recoveredMeta = this.#patchMeta(recoveredMeta, {
-          profileName: input.profile,
-          profileDir,
-          profileState: recoveredMeta.profileState,
-          proxyBinding: recoveredMeta.proxyBinding,
-          persistentExtensionBinding: identityPreflight.binding,
-          fingerprintProfileBundle: recoveredMeta.fingerprintProfileBundle,
-          updatedAt: nowIso
-        });
-        await store.writeMeta(input.profile, recoveredMeta);
-      }
       const profileState = recoveredMeta.profileState;
       if (!isStartableProfileState(profileState)) {
         throw new CliError(
@@ -743,7 +712,6 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
-        persistentExtensionBinding: identityPreflight.binding,
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastStartedAt: nowIso
@@ -807,7 +775,6 @@ export class ProfileRuntimeService {
       let existingMeta = await this.#readMeta(store, input.profile, {
         mode: readFingerprintMetaMode(input.params)
       });
-      const hadExistingMeta = existingMeta !== null;
       const identityPreflight = await this.#runIdentityPreflight({
         input,
         meta: existingMeta,
@@ -823,8 +790,7 @@ export class ProfileRuntimeService {
           ? this.#buildMinimalProfileMeta({
               profile: input.profile,
               profileDir,
-              nowIso,
-              persistentExtensionBinding: identityPreflight.binding
+              nowIso
             })
           : await store.initializeMeta(input.profile, nowIso);
       }
@@ -842,25 +808,6 @@ export class ProfileRuntimeService {
             lastDisconnectedAt: nowIso
           })
         : existingMeta;
-      if (
-        identityPreflight.binding &&
-        (!hadExistingMeta ||
-          !isPersistentExtensionBindingEqual(
-            recoveredMeta.persistentExtensionBinding,
-            identityPreflight.binding
-          ))
-      ) {
-        recoveredMeta = this.#patchMeta(recoveredMeta, {
-          profileName: input.profile,
-          profileDir,
-          profileState: recoveredMeta.profileState,
-          proxyBinding: recoveredMeta.proxyBinding,
-          persistentExtensionBinding: identityPreflight.binding,
-          fingerprintProfileBundle: recoveredMeta.fingerprintProfileBundle,
-          updatedAt: nowIso
-        });
-        await store.writeMeta(input.profile, recoveredMeta);
-      }
 
       const profileState = recoveredMeta.profileState;
       if (!isLoginableProfileState(profileState)) {
@@ -946,7 +893,6 @@ export class ProfileRuntimeService {
           profileDir,
           profileState: session.profileState,
           proxyBinding: session.proxyBinding,
-          persistentExtensionBinding: identityPreflight.binding,
           fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
           updatedAt: nowIso
         })
@@ -998,7 +944,6 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
-        persistentExtensionBinding: identityPreflight.binding,
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastLoginAt: nowIso,
@@ -1054,7 +999,7 @@ export class ProfileRuntimeService {
     const healthyLock = lockInspection?.blocksReuse ?? false;
     const profileState: ProfileState =
       activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
-    const lockHeld = activeState && healthyLock && lock?.ownerRunId === input.runId;
+    const lockHeld = activeState && healthyLock;
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1514,7 +1459,6 @@ export class ProfileRuntimeService {
       profileDir: string;
       profileState: ProfileState;
       proxyBinding: ProfileMeta["proxyBinding"];
-      persistentExtensionBinding?: ProfileMeta["persistentExtensionBinding"] | null;
       fingerprintProfileBundle?: ProfileMeta["fingerprintProfileBundle"] | null;
       updatedAt: string;
       localStorageSnapshots?: ProfileMeta["localStorageSnapshots"];
@@ -1530,10 +1474,6 @@ export class ProfileRuntimeService {
       profileDir: patch.profileDir,
       profileState: patch.profileState,
       proxyBinding: patch.proxyBinding,
-      persistentExtensionBinding:
-        patch.persistentExtensionBinding === null
-          ? undefined
-          : patch.persistentExtensionBinding ?? current.persistentExtensionBinding,
       fingerprintProfileBundle:
         patch.fingerprintProfileBundle === null
           ? undefined
@@ -1766,7 +1706,6 @@ export class ProfileRuntimeService {
     profile: string;
     profileDir: string;
     nowIso: string;
-    persistentExtensionBinding?: ProfileMeta["persistentExtensionBinding"] | null;
   }): ProfileMeta {
     return {
       schemaVersion: 1,
@@ -1774,9 +1713,6 @@ export class ProfileRuntimeService {
       profileDir: input.profileDir,
       profileState: "uninitialized",
       proxyBinding: null,
-      ...(input.persistentExtensionBinding
-        ? { persistentExtensionBinding: input.persistentExtensionBinding }
-        : {}),
       fingerprintSeeds: {
         audioNoiseSeed: `${input.profile}-audio-seed`,
         canvasNoiseSeed: `${input.profile}-canvas-seed`

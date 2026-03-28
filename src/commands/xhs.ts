@@ -653,7 +653,7 @@ export const ensureOfficialChromeRuntimeReady = async (
     lockHeld &&
     identityBindingState === "bound" &&
     transportState === "ready" &&
-    (bootstrapState === "not_started" || bootstrapState === "pending")
+    (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")
   ) {
     await attemptExecutionBootstrap();
     status = await readStatus();
