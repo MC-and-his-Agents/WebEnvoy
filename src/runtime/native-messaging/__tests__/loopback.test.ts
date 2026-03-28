@@ -22,4 +22,94 @@ describe("native messaging default loopback chain", () => {
     });
     expect(result.message).toBe("pong");
   });
+
+  it("supports runtime.bootstrap and runtime.readiness for the current run context", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    const bootstrap = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-001",
+        runtime_context_id: "runtime-context-001",
+        profile: "profile-a"
+      }
+    });
+
+    expect(bootstrap).toMatchObject({
+      ok: true,
+      payload: {
+        method: "runtime.bootstrap.ack",
+        result: {
+          version: "v1",
+          run_id: "run-loopback-bootstrap-001",
+          runtime_context_id: "runtime-context-001",
+          profile: "profile-a",
+          status: "ready"
+        }
+      }
+    });
+
+    const readiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-001",
+        runtime_context_id: "runtime-context-001"
+      }
+    });
+
+    expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "ready"
+      }
+    });
+  });
+
+  it("marks runtime.readiness stale when the loopback query uses an old run context", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    await bridge.runCommand({
+      runId: "run-loopback-bootstrap-002",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-002",
+        runtime_context_id: "runtime-context-002",
+        profile: "profile-a"
+      }
+    });
+
+    const readiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-003",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-003",
+        runtime_context_id: "runtime-context-003"
+      }
+    });
+
+    expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "stale"
+      }
+    });
+  });
 });
