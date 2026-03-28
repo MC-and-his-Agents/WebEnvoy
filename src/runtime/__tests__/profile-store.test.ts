@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
 import {
@@ -11,8 +11,8 @@ import {
 } from "../../../shared/fingerprint-profile.js";
 
 const tempDirs: string[] = [];
-const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
-const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+let originalBrowserPath: string | undefined;
+let originalBrowserVersion: string | undefined;
 
 const resolveCurrentTimezone = (): string => {
   try {
@@ -21,6 +21,11 @@ const resolveCurrentTimezone = (): string => {
     return "UTC";
   }
 };
+
+beforeEach(() => {
+  originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+  originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+});
 
 afterEach(async () => {
   if (originalBrowserPath === undefined) {
