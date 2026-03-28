@@ -10,6 +10,7 @@ import type { BrowserLaunchInput } from "../browser-launcher.js";
 import { NativeMessagingTransportError } from "../native-messaging/bridge.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
+import { buildRuntimeBootstrapContextId } from "../runtime-bootstrap.js";
 
 const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
@@ -695,6 +696,7 @@ describe("profile-runtime identity preflight", () => {
       baseDir,
       profile: "identity_bound_transport_missing_profile"
     });
+    const readinessContextIds: string[] = [];
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
@@ -715,6 +717,7 @@ describe("profile-runtime identity preflight", () => {
             };
           }
           if (command === "runtime.readiness") {
+            readinessContextIds.push(String((params as { runtime_context_id?: unknown }).runtime_context_id));
             return {
               ok: true as const,
               payload: {
@@ -743,7 +746,7 @@ describe("profile-runtime identity preflight", () => {
     const status = await service.status({
       cwd: baseDir,
       profile: "identity_bound_transport_missing_profile",
-      runId: "run-runtime-readiness-transport-missing-002",
+      runId: "run-runtime-readiness-transport-missing-001",
       params: {
         persistent_extension_identity: {
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -760,6 +763,12 @@ describe("profile-runtime identity preflight", () => {
       bootstrapState: "ready",
       runtimeReadiness: "unknown"
     });
+    expect(readinessContextIds).toEqual([
+      buildRuntimeBootstrapContextId(
+        "identity_bound_transport_missing_profile",
+        "run-runtime-readiness-transport-missing-001"
+      )
+    ]);
   });
 
   it("marks runtime.status as blocked when runtime.readiness reports stale bootstrap", async () => {
@@ -773,6 +782,7 @@ describe("profile-runtime identity preflight", () => {
       baseDir,
       profile: "identity_bound_readiness_stale_profile"
     });
+    const readinessContextIds: string[] = [];
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
@@ -793,6 +803,7 @@ describe("profile-runtime identity preflight", () => {
             };
           }
           if (command === "runtime.readiness") {
+            readinessContextIds.push(String((params as { runtime_context_id?: unknown }).runtime_context_id));
             return {
               ok: true as const,
               payload: {
@@ -822,7 +833,7 @@ describe("profile-runtime identity preflight", () => {
     const status = await service.status({
       cwd: baseDir,
       profile: "identity_bound_readiness_stale_profile",
-      runId: "run-runtime-readiness-stale-002",
+      runId: "run-runtime-readiness-stale-001",
       params: {
         persistent_extension_identity: {
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -839,6 +850,12 @@ describe("profile-runtime identity preflight", () => {
       bootstrapState: "stale",
       runtimeReadiness: "blocked"
     });
+    expect(readinessContextIds).toEqual([
+      buildRuntimeBootstrapContextId(
+        "identity_bound_readiness_stale_profile",
+        "run-runtime-readiness-stale-001"
+      )
+    ]);
   });
 
   it("marks readiness unknown when runtime.bootstrap ack version conflicts with the request", async () => {
@@ -1314,7 +1331,11 @@ describe("profile-runtime identity preflight", () => {
       params: {}
     });
     expect(status).toMatchObject({
+      lockHeld: false,
       identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
         blocking: false,
@@ -2065,7 +2086,7 @@ describe("profile-runtime stale lock reclaim", () => {
       profile: "reclaim_controller_dead_profile",
       profileState: "disconnected",
       browserState: "disconnected",
-      lockHeld: true
+      lockHeld: false
     });
 
     await expect(
@@ -2159,7 +2180,7 @@ describe("profile-runtime stale lock reclaim", () => {
       expect(status).toMatchObject({
         profileState: "disconnected",
         browserState: "disconnected",
-        lockHeld: true
+        lockHeld: false
       });
 
       const stopped = await service.stop({

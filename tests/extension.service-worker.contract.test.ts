@@ -400,9 +400,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-001",
+        run_id: "run-bootstrap-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -445,9 +447,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-002",
+        run_id: "run-bootstrap-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -643,9 +647,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-generic-001",
+        run_id: "run-bootstrap-generic-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-generic-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -805,9 +811,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-ping-promote-001",
+        run_id: "run-bootstrap-ping-promote-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-ping-promote-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -922,9 +930,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-main-world-fail-001",
+        run_id: "run-bootstrap-main-world-fail-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-main-world-fail-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -1039,9 +1049,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-missing-patch-001",
+        run_id: "run-bootstrap-missing-patch-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-missing-patch-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -1193,9 +1205,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-after-stale-trust-001",
+        run_id: "run-bootstrap-new-late-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-new-late-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -1273,9 +1287,11 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-readiness-same-run-old-ctx-001",
+        run_id: "run-bootstrap-same-run-old-ctx-001",
         command: "runtime.readiness",
-        command_params: {},
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-new-001"
+        },
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 50
@@ -1290,6 +1306,140 @@ describe("extension service worker recovery contract", () => {
           bootstrap_state: "pending",
           run_id: "run-bootstrap-same-run-old-ctx-001",
           runtime_context_id: "ctx-bootstrap-new-001",
+          transport_state: "ready"
+        })
+      })
+    );
+  });
+
+  it("marks runtime.readiness stale when run_id or runtime_context_id does not match current bootstrap", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-owner-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-owner-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-owner-001",
+          runtime_context_id: "ctx-bootstrap-owner-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-owner-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-owner-001",
+      runtimeContextId: "ctx-bootstrap-owner-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-owner-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-owner-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-owner-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-owner-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          run_id: "run-bootstrap-owner-001",
+          runtime_context_id: "ctx-bootstrap-owner-001",
+          transport_state: "ready"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-other-run-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-other-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-owner-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-other-run-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "stale",
+          run_id: "run-bootstrap-owner-001",
+          runtime_context_id: "ctx-bootstrap-owner-001",
+          transport_state: "ready"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-other-context-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-owner-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-other-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-other-context-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "stale",
+          run_id: "run-bootstrap-owner-001",
+          runtime_context_id: "ctx-bootstrap-owner-001",
           transport_state: "ready"
         })
       })

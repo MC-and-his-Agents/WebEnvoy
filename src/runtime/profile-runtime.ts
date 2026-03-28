@@ -1054,7 +1054,7 @@ export class ProfileRuntimeService {
     const healthyLock = lockInspection?.blocksReuse ?? false;
     const profileState: ProfileState =
       activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
-    const lockHeld = activeState && healthyLock;
+    const lockHeld = activeState && healthyLock && lock?.ownerRunId === input.runId;
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1670,13 +1670,20 @@ export class ProfileRuntimeService {
     }
 
     const bridge = this.#bridgeFactory();
+    const runtimeContextId = buildRuntimeBootstrapContextId(
+      input.runtimeInput.profile,
+      input.runtimeInput.runId
+    );
     try {
       const result = await bridge.runCommand({
         runId: input.runtimeInput.runId,
         profile: input.runtimeInput.profile,
         cwd: input.runtimeInput.cwd,
         command: "runtime.readiness",
-        params: {} as JsonObject
+        params: {
+          run_id: input.runtimeInput.runId,
+          runtime_context_id: runtimeContextId
+        } as JsonObject
       });
       if (!result.ok) {
         throw this.#buildRuntimeBootstrapCliError(result);

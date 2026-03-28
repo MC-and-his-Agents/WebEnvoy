@@ -1614,10 +1614,18 @@ class ChromeBackgroundBridge {
   #handleRuntimeReadiness(request: BridgeRequest): void {
     const profile = asNonEmptyString(request.profile);
     const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
+    const requestRunId = asNonEmptyString(request.params.run_id);
+    const readinessCommandParams = asRecord(request.params.command_params) ?? {};
+    const requestRuntimeContextId = asNonEmptyString(readinessCommandParams.runtime_context_id);
+    const sessionMatches = !!bootstrap && bootstrap.sessionId === this.#sessionId;
+    const runMatches = !!bootstrap && !!requestRunId && bootstrap.runId === requestRunId;
+    const runtimeContextMatches =
+      !!bootstrap &&
+      (!requestRuntimeContextId || bootstrap.runtimeContextId === requestRuntimeContextId);
     const bootstrapState =
       bootstrap === null
         ? "not_started"
-        : bootstrap.sessionId === this.#sessionId
+        : sessionMatches && runMatches && runtimeContextMatches
           ? bootstrap.status
           : "stale";
 

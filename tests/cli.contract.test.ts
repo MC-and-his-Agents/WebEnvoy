@@ -1735,7 +1735,7 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-live-direct-001";
+    const runId = "run-contract-xhs-bootstrap-start-001";
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -2969,7 +2969,7 @@ process.stdin.on("data", (chunk) => {
       }
     });
 
-    const status = runCli(["runtime.status", "--profile", "default"], runtimeCwd);
+    const status = runCli(["runtime.status", "--profile", "default", "--run-id", "run-contract-100"], runtimeCwd);
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3130,6 +3130,8 @@ process.stdin.on("data", (chunk) => {
         "runtime.status",
         "--profile",
         "identity_bound_profile",
+        "--run-id",
+        "run-contract-identity-002",
         "--params",
         JSON.stringify({
           persistent_extension_identity: {
@@ -3354,7 +3356,9 @@ process.stdin.on("data", (chunk) => {
       [
         "runtime.status",
         "--profile",
-        "identity_manifest_reuse_profile"
+        "identity_manifest_reuse_profile",
+        "--run-id",
+        "run-contract-identity-003"
       ],
       runtimeCwd,
       {
@@ -3400,7 +3404,11 @@ process.stdin.on("data", (chunk) => {
       }
     });
 
-    const status = runCli(["runtime.status", "--profile", "fixture_version_profile"], runtimeCwd, runtimeEnv);
+    const status = runCli(
+      ["runtime.status", "--profile", "fixture_version_profile", "--run-id", "run-contract-fixture-001"],
+      runtimeCwd,
+      runtimeEnv
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3459,7 +3467,10 @@ process.stdin.on("data", (chunk) => {
     const lastLaunch = JSON.parse(launchLogLines[launchLogLines.length - 1]) as { args: string };
     expect(lastLaunch.args).not.toContain("--headless=new");
 
-    const statusBeforeConfirm = runCli(["runtime.status", "--profile", "login_profile"], runtimeCwd);
+    const statusBeforeConfirm = runCli(
+      ["runtime.status", "--profile", "login_profile", "--run-id", "run-contract-151"],
+      runtimeCwd
+    );
     expect(statusBeforeConfirm.status).toBe(0);
     const statusBeforeConfirmBody = parseSingleJsonLine(statusBeforeConfirm.stdout);
     expect(statusBeforeConfirmBody).toMatchObject({
@@ -3801,7 +3812,10 @@ process.stdin.on("data", (chunk) => {
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-    const status = runCli(["runtime.status", "--profile", "recover_stop_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3857,7 +3871,10 @@ process.stdin.on("data", (chunk) => {
     lock.lastHeartbeatAt = "1970-01-01T00:00:00.000Z";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-    const status = runCli(["runtime.status", "--profile", "live_owner_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "live_owner_profile", "--run-id", "run-contract-511"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
@@ -3900,7 +3917,10 @@ process.stdin.on("data", (chunk) => {
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     expect(lock.ownerRunId).toBe("run-contract-521");
 
-    const status = runCli(["runtime.status", "--profile", "same_run_retry_profile"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "same_run_retry_profile", "--run-id", "run-contract-521"],
+      runtimeCwd
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
