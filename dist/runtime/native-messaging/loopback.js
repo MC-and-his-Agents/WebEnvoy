@@ -398,6 +398,7 @@ const createPortPair = () => {
 };
 class InMemoryContentScriptRuntime {
     port;
+    static BOOTSTRAP_ATTEST_DELAY_MS = 10;
     #bootstrapContext = null;
     constructor(port) {
         this.port = port;
@@ -489,6 +490,18 @@ class InMemoryContentScriptRuntime {
                 profile,
                 attested: false
             };
+            setTimeout(() => {
+                const bootstrapContext = this.#bootstrapContext;
+                if (bootstrapContext &&
+                    bootstrapContext.runId === runId &&
+                    bootstrapContext.runtimeContextId === runtimeContextId &&
+                    bootstrapContext.profile === profile) {
+                    this.#bootstrapContext = {
+                        ...bootstrapContext,
+                        attested: true
+                    };
+                }
+            }, InMemoryContentScriptRuntime.BOOTSTRAP_ATTEST_DELAY_MS);
             return {
                 kind: "result",
                 id: message.id,

@@ -1368,8 +1368,8 @@ describe("profile-runtime identity preflight", () => {
     expect(status).toMatchObject({
       lockHeld: false,
       identityBindingState: "bound",
-      transportState: "not_connected",
-      bootstrapState: "not_started",
+      transportState: "ready",
+      bootstrapState: "ready",
       runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
@@ -1586,8 +1586,8 @@ describe("profile-runtime identity preflight", () => {
       profileState: "ready",
       lockHeld: false,
       identityBindingState: "bound",
-      transportState: "not_connected",
-      bootstrapState: "not_started",
+      transportState: "ready",
+      bootstrapState: "ready",
       runtimeReadiness: "blocked"
     });
   });

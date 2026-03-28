@@ -554,6 +554,8 @@ const createPortPair = <TMessage>(): [InMemoryPort<TMessage>, InMemoryPort<TMess
 };
 
 class InMemoryContentScriptRuntime {
+  static readonly BOOTSTRAP_ATTEST_DELAY_MS = 10;
+
   #bootstrapContext: {
     runId: string;
     runtimeContextId: string;
@@ -663,6 +665,20 @@ class InMemoryContentScriptRuntime {
         profile,
         attested: false
       };
+      setTimeout(() => {
+        const bootstrapContext = this.#bootstrapContext;
+        if (
+          bootstrapContext &&
+          bootstrapContext.runId === runId &&
+          bootstrapContext.runtimeContextId === runtimeContextId &&
+          bootstrapContext.profile === profile
+        ) {
+          this.#bootstrapContext = {
+            ...bootstrapContext,
+            attested: true
+          };
+        }
+      }, InMemoryContentScriptRuntime.BOOTSTRAP_ATTEST_DELAY_MS);
 
       return {
         kind: "result",

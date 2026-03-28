@@ -1838,6 +1838,11 @@ process.stdin.on("data", (chunk) => {
     expect(trace.forwards).toEqual(
       expect.arrayContaining([
         {
+          command: "runtime.bootstrap",
+          run_id: runId,
+          profile
+        },
+        {
           command: "runtime.readiness",
           run_id: runId,
           profile
@@ -1849,6 +1854,13 @@ process.stdin.on("data", (chunk) => {
         }
       ])
     );
+    const bootstrapIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
+    const searchIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
+    expect(searchIndex).toBeGreaterThanOrEqual(0);
+    expect(bootstrapIndex).toBeLessThan(searchIndex);
     expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
     expect(trace.attestationEvents).toEqual(
       expect.arrayContaining([
