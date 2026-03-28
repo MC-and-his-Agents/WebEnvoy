@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { CliError } from "../core/errors.js";
@@ -12,6 +12,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
+import { buildRuntimeBootstrapContextId } from "../runtime/runtime-bootstrap.js";
 
 type AbilityLayer = "L3" | "L2" | "L1";
 type AbilityAction = "read" | "write" | "download";
@@ -50,6 +51,8 @@ const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
 ]);
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const profileRuntime = new ProfileRuntimeService();
+const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
+const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -111,15 +114,17 @@ const buildRuntimeBootstrapEnvelope = (input: {
 } => ({
   version: "v1",
   run_id: input.runId,
-  runtime_context_id: `runtime-context-${createHash("sha256")
-    .update(`${input.profile}:${input.runId}`)
-    .digest("hex")
-    .slice(0, 16)}`,
+  runtime_context_id: buildRuntimeBootstrapContextId(input.profile, input.runId),
   profile: input.profile,
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
   main_world_secret: randomUUID()
 });
+
+const sleep = async (ms: number): Promise<void> =>
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
   lockHeld: boolean;
@@ -204,6 +209,40 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
       bootstrapState
     })
   };
+};
+
+const waitForOfficialChromeRuntimeReadinessViaBridge = async (input: {
+  lockHeld: boolean;
+  context: RuntimeContext;
+  bridge: NativeMessagingBridge;
+  abilityId: string;
+  requestedExecutionMode: XhsExecutionMode;
+  gate: ReturnType<typeof normalizeGateOptions>;
+  fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>;
+  identityBindingState: string;
+}): Promise<{
+  identityBindingState: string;
+  transportState: string;
+  bootstrapState: string;
+  runtimeReadiness: string;
+}> => {
+  let readiness = await readOfficialChromeRuntimeReadinessViaBridge(input);
+
+  for (let attempt = 1; attempt < OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS; attempt += 1) {
+    if (readiness.runtimeReadiness === "ready") {
+      return readiness;
+    }
+    if (readiness.identityBindingState !== "bound" || readiness.transportState !== "ready") {
+      return readiness;
+    }
+    if (readiness.bootstrapState !== "pending" && readiness.bootstrapState !== "not_started") {
+      return readiness;
+    }
+    await sleep(OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS);
+    readiness = await readOfficialChromeRuntimeReadinessViaBridge(input);
+  }
+
+  return readiness;
 };
 
 const resolveRuntimeBridge = (): NativeMessagingBridge => {
@@ -524,6 +563,12 @@ export const ensureOfficialChromeRuntimeReady = async (
           retryable: true
         });
       }
+      if (
+        bootstrapResult.error.code === "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED" ||
+        bootstrapResult.error.code === "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT"
+      ) {
+        return;
+      }
       throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未获得执行面确认", {
         details: {
           ability_id: ability.id,
@@ -639,6 +684,22 @@ export const ensureOfficialChromeRuntimeReady = async (
       identityBindingState = bridgedReadiness.identityBindingState;
       bootstrapState = bridgedReadiness.bootstrapState;
       transportState = bridgedReadiness.transportState;
+      if (runtimeReadiness !== "ready" && bootstrapState !== "stale") {
+        const convergedReadiness = await waitForOfficialChromeRuntimeReadinessViaBridge({
+          lockHeld,
+          context,
+          bridge,
+          abilityId: ability.id,
+          requestedExecutionMode,
+          gate,
+          fingerprintContext,
+          identityBindingState
+        });
+        runtimeReadiness = convergedReadiness.runtimeReadiness;
+        identityBindingState = convergedReadiness.identityBindingState;
+        bootstrapState = convergedReadiness.bootstrapState;
+        transportState = convergedReadiness.transportState;
+      }
     }
     if (runtimeReadiness === "ready") {
       return;

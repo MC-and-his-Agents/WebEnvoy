@@ -258,6 +258,105 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     expect(bootstrapContexts[0]).toBe(bootstrapContexts[1]);
   });
 
+  it("waits for bridge readiness when runtime.bootstrap is initially not delivered", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认"
+          }
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          payload: {
+            transport_state: "ready",
+            bootstrap_state: "pending"
+          },
+          error: null
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          payload: {
+            transport_state: "ready",
+            bootstrap_state: "ready"
+          },
+          error: null
+        })
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_first_command_profile",
+          run_id: "run-xhs-first-command-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).resolves.toBeUndefined();
+
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        command: "runtime.readiness"
+      })
+    );
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        command: "runtime.readiness"
+      })
+    );
+  });
+
   it("keeps runtime gated when lock is lost before the final official Chrome gate", async () => {
     const readStatus = vi
       .fn()

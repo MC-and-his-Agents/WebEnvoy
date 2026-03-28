@@ -41,6 +41,7 @@ import {
 } from "./native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
+import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 import {
   applyProfileProxyBinding,
   beginLoginSession,
@@ -1555,7 +1556,7 @@ export class ProfileRuntimeService {
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.profile,
       runId: input.runtimeInput.runId,
-      runtimeContextId: randomUUID(),
+      runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
       fingerprintRuntime: input.fingerprintRuntime,
       mainWorldSecret: randomUUID()
     });

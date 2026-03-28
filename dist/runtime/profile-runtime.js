@@ -10,6 +10,7 @@ import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
+import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
@@ -1165,7 +1166,7 @@ export class ProfileRuntimeService {
         const envelope = buildRuntimeBootstrapEnvelope({
             profile: input.profile,
             runId: input.runtimeInput.runId,
-            runtimeContextId: randomUUID(),
+            runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
             fingerprintRuntime: input.fingerprintRuntime,
             mainWorldSecret: randomUUID()
         });
