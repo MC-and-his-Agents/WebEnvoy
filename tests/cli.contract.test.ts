@@ -1483,18 +1483,69 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("sends live xhs.search directly without hidden runtime.ping prewarm on native transport", async () => {
+  it("recovers official Chrome xhs.search with hidden runtime.bootstrap after runtime.start leaves bootstrap pending", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const profile = "xhs_official_bootstrap_recovery_profile";
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-xhs-bootstrap-start-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
+      }
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile,
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "recoverable"
+      }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile
+    });
+
     const nativeHostPath = path.join(runtimeCwd, "native-host-live-prewarm.cjs");
     const tracePath = path.join(runtimeCwd, "native-host-live-prewarm-trace.json");
     await writeFile(
       nativeHostPath,
       `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
+let bootstrapReady = false;
 const forwards = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
+let idleTimer = null;
 
 const emit = (message) => {
   const payload = Buffer.from(JSON.stringify(message), "utf8");
@@ -1507,7 +1558,23 @@ const writeTrace = () => {
   if (!tracePath) {
     return;
   }
-  writeFileSync(tracePath, JSON.stringify({ forwards }), "utf8");
+  const existing = existsSync(tracePath)
+    ? JSON.parse(readFileSync(tracePath, "utf8"))
+    : { forwards: [] };
+  const mergedForwards = Array.isArray(existing.forwards)
+    ? [...existing.forwards, ...forwards]
+    : [...forwards];
+  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
+};
+
+const scheduleIdleExit = () => {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+  }
+  idleTimer = setTimeout(() => {
+    writeTrace();
+    process.exit(0);
+  }, 200);
 };
 
 const success = (request, payload = { message: "pong" }) => ({
@@ -1536,6 +1603,7 @@ const onRequest = (request) => {
       },
       error: null
     });
+    scheduleIdleExit();
     return;
   }
 
@@ -1546,6 +1614,7 @@ const onRequest = (request) => {
       summary: { session_id: "nm-session-001" },
       error: null
     });
+    scheduleIdleExit();
     return;
   }
 
@@ -1569,6 +1638,35 @@ const onRequest = (request) => {
     run_id: runId,
     profile
   });
+
+  if (command === "runtime.bootstrap") {
+    const commandParams = request.params?.command_params ?? {};
+    bootstrapReady = true;
+    emit(
+      success(request, {
+        result: {
+          version: String(commandParams.version ?? "v1"),
+          run_id: String(commandParams.run_id ?? runId),
+          runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
+          profile,
+          status: "ready"
+        }
+      })
+    );
+    scheduleIdleExit();
+    return;
+  }
+
+  if (command === "runtime.readiness") {
+    emit(
+      success(request, {
+        transport_state: "ready",
+        bootstrap_state: bootstrapReady ? "ready" : "pending"
+      })
+    );
+    scheduleIdleExit();
+    return;
+  }
 
   if (command === "xhs.search") {
     const fingerprintContext = request.params?.command_params?.fingerprint_context ?? null;
@@ -1638,7 +1736,6 @@ process.stdin.on("data", (chunk) => {
     );
 
     const runId = "run-contract-xhs-live-direct-001";
-    const profile = "xhs_account_001";
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -1647,6 +1744,10 @@ process.stdin.on("data", (chunk) => {
       runId,
       "--params",
       JSON.stringify({
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        },
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1676,7 +1777,8 @@ process.stdin.on("data", (chunk) => {
     ], runtimeCwd, {
       WEBENVOY_NATIVE_TRANSPORT: "native",
       WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath),
-      WEBENVOY_TEST_TRACE_PATH: tracePath
+      WEBENVOY_TEST_TRACE_PATH: tracePath,
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
     });
 
     expect(result.status).toBe(0);
@@ -1697,13 +1799,28 @@ process.stdin.on("data", (chunk) => {
     const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
       forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
     };
-    expect(trace.forwards).toEqual([
-      {
-        command: "xhs.search",
-        run_id: runId,
-        profile
-      }
-    ]);
+    expect(trace.forwards).toBeDefined();
+    expect(trace.forwards).toEqual(
+      expect.arrayContaining([
+        {
+          command: "runtime.bootstrap",
+          run_id: runId,
+          profile
+        },
+        {
+          command: "xhs.search",
+          run_id: runId,
+          profile
+        }
+      ])
+    );
+    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
+    const bootstrapIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
+    const searchIndex =
+      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
+    expect(searchIndex).toBeGreaterThan(bootstrapIndex);
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {

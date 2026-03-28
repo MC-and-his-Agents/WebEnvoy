@@ -29,32 +29,43 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     });
   });
 
-  it("reuses the execution bridge session when official Chrome runtime transitions to ready", async () => {
-    const readStatus = vi.fn(async () => ({
-      identityPreflight: {
-        mode: "official_chrome_persistent_extension"
-      },
-      runtimeReadiness: "pending",
-      identityBindingState: "bound",
-      bootstrapState: "pending",
-      transportState: "ready"
-    }));
+  it("delivers runtime.bootstrap before allowing official Chrome execution to proceed", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
     const bridge = {
-      runCommand: vi
-        .fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          payload: {},
-          error: null
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          payload: {
-            transport_state: "ready",
-            bootstrap_state: "ready"
-          },
-          error: null
-        })
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-xhs-ready-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_ready_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
     };
 
     await expect(
@@ -86,46 +97,60 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       )
     ).resolves.toBeUndefined();
 
-    expect(readStatus).toHaveBeenCalledTimes(1);
+    expect(readStatus).toHaveBeenCalledTimes(2);
     expect(bridge.runCommand).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        command: "runtime.ping"
+        command: "runtime.bootstrap",
+        params: expect.objectContaining({
+          version: "v1",
+          run_id: "run-xhs-ready-001",
+          profile: "official_ready_profile"
+        })
       })
     );
-    expect(bridge.runCommand).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        command: "runtime.readiness"
-      })
-    );
+    const bootstrapCommand = bridge.runCommand.mock.calls[0]?.[0];
+    expect(bootstrapCommand.params.runtime_context_id).toEqual(expect.any(String));
+    expect(bootstrapCommand.params.main_world_secret).toEqual(expect.any(String));
   });
 
-  it("keeps runtime gated when readiness payload misses transport_state", async () => {
-    const readStatus = vi.fn(async () => ({
-      identityPreflight: {
-        mode: "official_chrome_persistent_extension"
-      },
-      runtimeReadiness: "pending",
-      identityBindingState: "bound",
-      bootstrapState: "pending",
-      transportState: "ready"
-    }));
+  it("keeps runtime gated when lock is lost before the final official Chrome gate", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: false
+      });
     const bridge = {
-      runCommand: vi
-        .fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          payload: {},
-          error: null
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          payload: {
-            bootstrap_state: "ready"
-          },
-          error: null
-        })
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-xhs-missing-transport-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_missing_transport_state_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
     };
 
     await expect(
@@ -156,12 +181,13 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         readStatus
       )
     ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_UNAVAILABLE",
+      code: "ERR_PROFILE_LOCKED",
       details: expect.objectContaining({
-        runtime_readiness: "recoverable",
+        runtime_readiness: "blocked",
         bootstrap_state: "ready",
-        transport_state: "not_connected",
-        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
+        transport_state: "ready",
+        lock_held: false,
+        reason: "ERR_PROFILE_LOCKED"
       })
     });
   });
@@ -176,7 +202,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       runtimeReadiness: "pending",
       identityBindingState: "bound",
       bootstrapState: "pending",
-      transportState: "ready"
+      transportState: "ready",
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn()
@@ -231,7 +258,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       runtimeReadiness: "pending",
       identityBindingState: "bound",
       bootstrapState: "pending",
-      transportState: "ready"
+      transportState: "ready",
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn()
@@ -286,7 +314,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       runtimeReadiness: "recoverable",
       identityBindingState: "bound",
       bootstrapState: "not_started",
-      transportState: "not_connected"
+      transportState: "not_connected",
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn()
