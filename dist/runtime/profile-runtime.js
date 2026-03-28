@@ -15,6 +15,10 @@ const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
+const isPersistentExtensionBindingEqual = (left, right) => left?.extensionId === right?.extensionId &&
+    left?.nativeHostName === right?.nativeHostName &&
+    left?.browserChannel === right?.browserChannel &&
+    left?.manifestPath === right?.manifestPath;
 const isoNow = () => new Date().toISOString();
 const DEFAULT_LOCK_FILE_ADAPTER = {
     readFile: async (path, encoding) => readFile(path, encoding),
@@ -388,6 +392,7 @@ export class ProfileRuntimeService {
             let existingMeta = await this.#readMeta(store, input.profile, {
                 mode: readFingerprintMetaMode(input.params)
             });
+            const hadExistingMeta = existingMeta !== null;
             const identityPreflight = await this.#runIdentityPreflight({
                 input,
                 meta: existingMeta
@@ -401,11 +406,12 @@ export class ProfileRuntimeService {
                     ? this.#buildMinimalProfileMeta({
                         profile: input.profile,
                         profileDir,
-                        nowIso
+                        nowIso,
+                        persistentExtensionBinding: identityPreflight.binding
                     })
                     : await store.initializeMeta(input.profile, nowIso);
             }
-            const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
+            let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
                     profileName: input.profile,
                     profileDir,
@@ -416,6 +422,20 @@ export class ProfileRuntimeService {
                     lastDisconnectedAt: nowIso
                 })
                 : existingMeta;
+            if (identityPreflight.binding &&
+                (!hadExistingMeta ||
+                    !isPersistentExtensionBindingEqual(recoveredMeta.persistentExtensionBinding, identityPreflight.binding))) {
+                recoveredMeta = this.#patchMeta(recoveredMeta, {
+                    profileName: input.profile,
+                    profileDir,
+                    profileState: recoveredMeta.profileState,
+                    proxyBinding: recoveredMeta.proxyBinding,
+                    persistentExtensionBinding: identityPreflight.binding,
+                    fingerprintProfileBundle: recoveredMeta.fingerprintProfileBundle,
+                    updatedAt: nowIso
+                });
+                await store.writeMeta(input.profile, recoveredMeta);
+            }
             const profileState = recoveredMeta.profileState;
             if (!isStartableProfileState(profileState)) {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
@@ -466,6 +486,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
@@ -525,6 +546,7 @@ export class ProfileRuntimeService {
             let existingMeta = await this.#readMeta(store, input.profile, {
                 mode: readFingerprintMetaMode(input.params)
             });
+            const hadExistingMeta = existingMeta !== null;
             const identityPreflight = await this.#runIdentityPreflight({
                 input,
                 meta: existingMeta
@@ -538,11 +560,12 @@ export class ProfileRuntimeService {
                     ? this.#buildMinimalProfileMeta({
                         profile: input.profile,
                         profileDir,
-                        nowIso
+                        nowIso,
+                        persistentExtensionBinding: identityPreflight.binding
                     })
                     : await store.initializeMeta(input.profile, nowIso);
             }
-            const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
+            let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
                     profileName: input.profile,
                     profileDir,
@@ -553,6 +576,20 @@ export class ProfileRuntimeService {
                     lastDisconnectedAt: nowIso
                 })
                 : existingMeta;
+            if (identityPreflight.binding &&
+                (!hadExistingMeta ||
+                    !isPersistentExtensionBindingEqual(recoveredMeta.persistentExtensionBinding, identityPreflight.binding))) {
+                recoveredMeta = this.#patchMeta(recoveredMeta, {
+                    profileName: input.profile,
+                    profileDir,
+                    profileState: recoveredMeta.profileState,
+                    proxyBinding: recoveredMeta.proxyBinding,
+                    persistentExtensionBinding: identityPreflight.binding,
+                    fingerprintProfileBundle: recoveredMeta.fingerprintProfileBundle,
+                    updatedAt: nowIso
+                });
+                await store.writeMeta(input.profile, recoveredMeta);
+            }
             const profileState = recoveredMeta.profileState;
             if (!isLoginableProfileState(profileState)) {
                 throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 login`);
@@ -611,6 +648,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso
             }));
@@ -659,6 +697,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: identityPreflight.binding,
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastLoginAt: nowIso,
@@ -1104,6 +1143,9 @@ export class ProfileRuntimeService {
             profileDir: patch.profileDir,
             profileState: patch.profileState,
             proxyBinding: patch.proxyBinding,
+            persistentExtensionBinding: patch.persistentExtensionBinding === null
+                ? undefined
+                : patch.persistentExtensionBinding ?? current.persistentExtensionBinding,
             fingerprintProfileBundle: patch.fingerprintProfileBundle === null
                 ? undefined
                 : patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,
@@ -1298,6 +1340,9 @@ export class ProfileRuntimeService {
             profileDir: input.profileDir,
             profileState: "uninitialized",
             proxyBinding: null,
+            ...(input.persistentExtensionBinding
+                ? { persistentExtensionBinding: input.persistentExtensionBinding }
+                : {}),
             fingerprintSeeds: {
                 audioNoiseSeed: `${input.profile}-audio-seed`,
                 canvasNoiseSeed: `${input.profile}-canvas-seed`

@@ -227,6 +227,36 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
     }
   }
 
+  if (value.persistentExtensionBinding !== undefined) {
+    if (!isObjectRecord(value.persistentExtensionBinding)) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding");
+    }
+    if (
+      typeof value.persistentExtensionBinding.extensionId !== "string" ||
+      value.persistentExtensionBinding.extensionId.length === 0
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.extensionId");
+    }
+    if (
+      typeof value.persistentExtensionBinding.nativeHostName !== "string" ||
+      value.persistentExtensionBinding.nativeHostName.length === 0
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.nativeHostName");
+    }
+    if (
+      typeof value.persistentExtensionBinding.browserChannel !== "string" ||
+      value.persistentExtensionBinding.browserChannel.length === 0
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.browserChannel");
+    }
+    if (
+      value.persistentExtensionBinding.manifestPath !== null &&
+      typeof value.persistentExtensionBinding.manifestPath !== "string"
+    ) {
+      throw new Error("Invalid profile meta structure: persistentExtensionBinding.manifestPath");
+    }
+  }
+
   if (!isObjectRecord(value.fingerprintSeeds)) {
     throw new Error("Invalid profile meta structure: fingerprintSeeds");
   }
@@ -275,9 +305,7 @@ const parseMeta = (raw: string): ProfileMeta => {
     throw new Error("Invalid profile meta structure: invalid JSON");
   }
   assertProfileMeta(parsed);
-  const normalized = { ...(parsed as ProfileMeta) } as Record<string, unknown>;
-  delete normalized.persistentExtensionBinding;
-  return normalized as unknown as ProfileMeta;
+  return { ...(parsed as ProfileMeta) };
 };
 
 const buildLegacyBundleMigration = async (input: {
