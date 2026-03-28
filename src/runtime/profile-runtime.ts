@@ -15,6 +15,7 @@ import {
 } from "./browser-launcher.js";
 import {
   createProfileLock,
+  DEFAULT_LOCK_STALE_MS,
   type ProfileLock
 } from "./profile-lock.js";
 import {
@@ -114,6 +115,8 @@ interface ProfileLockInspection {
   controlConnected: boolean;
   browserPid: number | null;
   stateRunId: string | null;
+  lockHeartbeatFresh: boolean;
+  orphanRecoverable: boolean;
 }
 
 interface RuntimeBridgeLike {
@@ -146,6 +149,19 @@ const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
     await writeFile(path, data, options);
   },
   unlink: async (path) => unlink(path)
+};
+
+const isFreshLockHeartbeat = (
+  lastHeartbeatAt: string,
+  nowIso: string,
+  staleAfterMs: number = DEFAULT_LOCK_STALE_MS
+): boolean => {
+  const lastHeartbeatMs = Date.parse(lastHeartbeatAt);
+  const nowMs = Date.parse(nowIso);
+  if (Number.isNaN(lastHeartbeatMs) || Number.isNaN(nowMs)) {
+    return false;
+  }
+  return nowMs - lastHeartbeatMs <= staleAfterMs;
 };
 
 const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
@@ -1057,7 +1073,12 @@ export class ProfileRuntimeService {
       throw new CliError("ERR_PROFILE_STATE_CONFLICT", "profile 当前未持锁或未启动");
     }
 
-    if (lock.ownerRunId !== input.runId) {
+    const lockInspection = await this.#inspectProfileLock(lock, profileDir);
+    const orphanRecovered =
+      lock.ownerRunId !== input.runId && lockInspection.orphanRecoverable;
+    const stopOwnerRunId = orphanRecovered ? lock.ownerRunId : input.runId;
+
+    if (lock.ownerRunId !== input.runId && !orphanRecovered) {
       throw new CliError(
         "ERR_PROFILE_OWNER_CONFLICT",
         "runtime.stop run_id 与 profile 锁所有者不一致",
@@ -1068,7 +1089,7 @@ export class ProfileRuntimeService {
     let session = buildRuntimeSession(input.profile, existingMeta);
     session = {
       ...session,
-      ownerRunId: lock.ownerRunId
+      ownerRunId: stopOwnerRunId
     };
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, existingMeta, {
@@ -1077,7 +1098,7 @@ export class ProfileRuntimeService {
 
     try {
       const stopping = beginStopSession(session, {
-        runId: input.runId,
+        runId: stopOwnerRunId,
         nowIso
       });
       session = markSessionStopped(stopping);
@@ -1092,7 +1113,7 @@ export class ProfileRuntimeService {
       if (
         !controllerAlive &&
         browserState &&
-        browserState.runId === input.runId &&
+        browserState.runId === stopOwnerRunId &&
         this.#isProcessAlive(browserState.browserPid)
       ) {
         await this.#terminateProcess(browserState.browserPid);
@@ -1101,7 +1122,7 @@ export class ProfileRuntimeService {
         await this.#browserLauncher.shutdown({
           profileDir,
           controllerPid: lock.ownerPid,
-          runId: input.runId
+          runId: stopOwnerRunId
         });
       }
       await store.writeMeta(
@@ -1136,6 +1157,7 @@ export class ProfileRuntimeService {
       profileDir,
       proxyUrl: session.proxyBinding?.url ?? null,
       lockHeld: false,
+      orphanRecovered,
       recoverableSession: buildRecoverableSessionSummary(existingMeta),
       fingerprint_runtime: fingerprintRuntime,
       stoppedAt: nowIso
@@ -1417,17 +1439,25 @@ export class ProfileRuntimeService {
   async #inspectProfileLock(lock: ProfileLock, profileDir: string): Promise<ProfileLockInspection> {
     const lockOwnerAlive = this.#isProcessAlive(lock.ownerPid);
     const state = await this.#readBrowserInstanceState(profileDir);
+    const lockHeartbeatFresh = isFreshLockHeartbeat(lock.lastHeartbeatAt, isoNow());
     const controllerAlive =
       lockOwnerAlive ||
       (state !== null &&
         state.controllerPid === lock.ownerPid &&
         this.#isProcessAlive(state.controllerPid));
     const browserAlive = state !== null && this.#isProcessAlive(state.browserPid);
+    const orphanRecoverable =
+      !controllerAlive &&
+      state !== null &&
+      state.runId === lock.ownerRunId &&
+      (browserAlive || !lockHeartbeatFresh);
     return {
       blocksReuse: controllerAlive || browserAlive,
       controlConnected: controllerAlive,
       browserPid: browserAlive ? state?.browserPid ?? null : null,
-      stateRunId: state?.runId ?? null
+      stateRunId: state?.runId ?? null,
+      lockHeartbeatFresh,
+      orphanRecoverable
     };
   }
 

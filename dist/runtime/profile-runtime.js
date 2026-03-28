@@ -3,7 +3,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { BROWSER_CONTROL_FILENAME, BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
-import { createProfileLock } from "./profile-lock.js";
+import { createProfileLock, DEFAULT_LOCK_STALE_MS } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { buildIdentityPreflightError, runIdentityPreflight } from "./persistent-extension-identity.js";
 import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
@@ -27,6 +27,14 @@ const DEFAULT_LOCK_FILE_ADAPTER = {
         await writeFile(path, data, options);
     },
     unlink: async (path) => unlink(path)
+};
+const isFreshLockHeartbeat = (lastHeartbeatAt, nowIso, staleAfterMs = DEFAULT_LOCK_STALE_MS) => {
+    const lastHeartbeatMs = Date.parse(lastHeartbeatAt);
+    const nowMs = Date.parse(nowIso);
+    if (Number.isNaN(lastHeartbeatMs) || Number.isNaN(nowMs)) {
+        return false;
+    }
+    return nowMs - lastHeartbeatMs <= staleAfterMs;
 };
 const browserStateFromProfileState = (profileState, lockHeld) => {
     if (!lockHeld) {
@@ -762,13 +770,16 @@ export class ProfileRuntimeService {
         if (!existingMeta || !lock) {
             throw new CliError("ERR_PROFILE_STATE_CONFLICT", "profile 当前未持锁或未启动");
         }
-        if (lock.ownerRunId !== input.runId) {
+        const lockInspection = await this.#inspectProfileLock(lock, profileDir);
+        const orphanRecovered = lock.ownerRunId !== input.runId && lockInspection.orphanRecoverable;
+        const stopOwnerRunId = orphanRecovered ? lock.ownerRunId : input.runId;
+        if (lock.ownerRunId !== input.runId && !orphanRecovered) {
             throw new CliError("ERR_PROFILE_OWNER_CONFLICT", "runtime.stop run_id 与 profile 锁所有者不一致", { retryable: false });
         }
         let session = buildRuntimeSession(input.profile, existingMeta);
         session = {
             ...session,
-            ownerRunId: lock.ownerRunId
+            ownerRunId: stopOwnerRunId
         };
         const requestedExecutionMode = readRequestedExecutionMode(input.params);
         const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, existingMeta, {
@@ -776,7 +787,7 @@ export class ProfileRuntimeService {
         });
         try {
             const stopping = beginStopSession(session, {
-                runId: input.runId,
+                runId: stopOwnerRunId,
                 nowIso
             });
             session = markSessionStopped(stopping);
@@ -790,7 +801,7 @@ export class ProfileRuntimeService {
             const controllerAlive = this.#isProcessAlive(lock.ownerPid);
             if (!controllerAlive &&
                 browserState &&
-                browserState.runId === input.runId &&
+                browserState.runId === stopOwnerRunId &&
                 this.#isProcessAlive(browserState.browserPid)) {
                 await this.#terminateProcess(browserState.browserPid);
                 await this.#deleteBrowserStateFiles(profileDir);
@@ -799,7 +810,7 @@ export class ProfileRuntimeService {
                 await this.#browserLauncher.shutdown({
                     profileDir,
                     controllerPid: lock.ownerPid,
-                    runId: input.runId
+                    runId: stopOwnerRunId
                 });
             }
             await store.writeMeta(input.profile, this.#patchMeta(existingMeta, {
@@ -832,6 +843,7 @@ export class ProfileRuntimeService {
             profileDir,
             proxyUrl: session.proxyBinding?.url ?? null,
             lockHeld: false,
+            orphanRecovered,
             recoverableSession: buildRecoverableSessionSummary(existingMeta),
             fingerprint_runtime: fingerprintRuntime,
             stoppedAt: nowIso
@@ -1067,16 +1079,23 @@ export class ProfileRuntimeService {
     async #inspectProfileLock(lock, profileDir) {
         const lockOwnerAlive = this.#isProcessAlive(lock.ownerPid);
         const state = await this.#readBrowserInstanceState(profileDir);
+        const lockHeartbeatFresh = isFreshLockHeartbeat(lock.lastHeartbeatAt, isoNow());
         const controllerAlive = lockOwnerAlive ||
             (state !== null &&
                 state.controllerPid === lock.ownerPid &&
                 this.#isProcessAlive(state.controllerPid));
         const browserAlive = state !== null && this.#isProcessAlive(state.browserPid);
+        const orphanRecoverable = !controllerAlive &&
+            state !== null &&
+            state.runId === lock.ownerRunId &&
+            (browserAlive || !lockHeartbeatFresh);
         return {
             blocksReuse: controllerAlive || browserAlive,
             controlConnected: controllerAlive,
             browserPid: browserAlive ? state?.browserPid ?? null : null,
-            stateRunId: state?.runId ?? null
+            stateRunId: state?.runId ?? null,
+            lockHeartbeatFresh,
+            orphanRecoverable
         };
     }
     async #deleteBrowserStateFiles(profileDir) {
