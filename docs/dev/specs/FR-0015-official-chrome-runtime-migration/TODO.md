@@ -1,5 +1,8 @@
 # FR-0015 TODO
 
+> GitHub Issue / PR / Project 是进度真相源。
+> 本文件只保留 FR-0015 formal blocker、实现前条件和实现停点，不承载 `#281` 的本地 closeout 状态账本。
+
 ## 评审阻断项
 
 - [x] 明确写清 `#281` 当前只收口 implementation-prep，不承诺完整实现闭环
@@ -26,12 +29,3 @@
 - [x] 明确 bootstrap 失败后的 stop / retry / recover 边界
 - [x] 为 bootstrap 幂等、stale ready marker、多信号冲突补充失败注入测试
 - [x] 将安装器产品化、candidate 分发路径产品化与 `#239` 验证体系保留到各自后续事项
-
-## 收口状态
-
-- [x] PR `#284` 已补齐 implementation-prep 套件
-- [x] PR `#287` 已把 identity preflight、bootstrap contract 与 readiness/status 主线合入 `main`
-- [x] PR `#289` 已补齐 orphan runtime explicit stop recovery
-- [x] PR `#290` 已把 bootstrap retry/recover 收口为共享 runtime 契约
-- [x] PR `#291` 已收紧 loopback bootstrap attestation，保证共享契约与测试夹具一致
-- [x] `#281` 当前剩余动作仅为 closeout 元数据对齐与最终 closing PR 合并门禁
