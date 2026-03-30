@@ -1,6 +1,6 @@
-import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "../core/errors.js";
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
@@ -10,6 +10,14 @@ const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"];
 export const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const NATIVE_HOST_NAME_PATTERN = /^[a-z0-9_]+(?:\.[a-z0-9_]+)+$/;
 const asAbsolutePath = (cwd, input) => isAbsolute(input) ? input : resolve(cwd, input);
+const nativeHostPathError = (abilityId, reason, details) => new CliError("ERR_CLI_INVALID_ARGS", "安装命令参数不合法", {
+    details: {
+        ability_id: abilityId,
+        stage: "input_validation",
+        reason,
+        ...details
+    }
+});
 const pathExists = async (filePath) => {
     try {
         await access(filePath);
@@ -18,6 +26,25 @@ const pathExists = async (filePath) => {
     catch {
         return false;
     }
+};
+const assertNotSymlink = async (command, field, targetPath) => {
+    try {
+        const stat = await lstat(targetPath);
+        if (!stat.isSymbolicLink()) {
+            return;
+        }
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return;
+        }
+        throw error;
+    }
+    throw nativeHostPathError(command, "INSTALL_PATH_SYMBOLIC_LINK", {
+        field,
+        received_path: targetPath
+    });
 };
 const quoteShellToken = (value) => JSON.stringify(value);
 export const resolveRepoOwnedNativeHostEntryPath = () => fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
@@ -54,14 +81,49 @@ const buildLauncherScript = (hostCommand) => `#!/usr/bin/env bash
 set -euo pipefail
 exec ${hostCommand} "$@"
 `;
+const resolveControlledInstallRoots = (cwd, browserChannel) => {
+    const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
+    return {
+        channelRoot,
+        manifestRoot: join(channelRoot, "manifests"),
+        launcherRoot: join(channelRoot, "bin")
+    };
+};
+const normalizePathForBoundaryCheck = (input) => {
+    const normalized = resolve(input);
+    return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
+};
+const isPathInside = (baseDir, targetPath) => {
+    const normalizedBase = normalizePathForBoundaryCheck(baseDir);
+    const normalizedTarget = normalizePathForBoundaryCheck(targetPath);
+    const rel = relative(normalizedBase, normalizedTarget);
+    return (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)));
+};
 const resolveInstallPaths = (input) => {
+    const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
     const manifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0
         ? asAbsolutePath(input.cwd, input.manifestDir)
         : resolveDefaultManifestDirectory(input.browserChannel);
+    const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
+    if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
+        throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
+            field: "manifest_dir",
+            allowed_root: roots.manifestRoot,
+            received_path: manifestDir
+        });
+    }
     const manifestPath = join(manifestDir, `${input.nativeHostName}.json`);
     const launcherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0
         ? asAbsolutePath(input.cwd, input.launcherPath)
         : join(manifestDir, `${input.nativeHostName}-launcher`);
+    const hasCustomLauncherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0;
+    if (hasCustomLauncherPath && !isPathInside(roots.launcherRoot, launcherPath)) {
+        throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
+            field: "launcher_path",
+            allowed_root: roots.launcherRoot,
+            received_path: launcherPath
+        });
+    }
     return {
         manifestDir,
         manifestPath,
@@ -70,6 +132,7 @@ const resolveInstallPaths = (input) => {
 };
 export const installNativeHost = async (input) => {
     const resolvedPaths = resolveInstallPaths({
+        command: "runtime.install",
         cwd: input.cwd,
         nativeHostName: input.nativeHostName,
         browserChannel: input.browserChannel,
@@ -82,6 +145,8 @@ export const installNativeHost = async (input) => {
         : resolveRepoOwnedNativeHostCommand();
     await mkdir(resolvedPaths.manifestDir, { recursive: true });
     await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
+    await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
+    await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript(hostCommand), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
@@ -109,12 +174,15 @@ export const installNativeHost = async (input) => {
 };
 export const uninstallNativeHost = async (input) => {
     const resolvedPaths = resolveInstallPaths({
+        command: "runtime.uninstall",
         cwd: input.cwd,
         nativeHostName: input.nativeHostName,
         browserChannel: input.browserChannel,
         manifestDir: input.manifestDir,
         launcherPath: input.launcherPath
     });
+    await assertNotSymlink("runtime.uninstall", "manifest_path", resolvedPaths.manifestPath);
+    await assertNotSymlink("runtime.uninstall", "launcher_path", resolvedPaths.launcherPath);
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     await rm(resolvedPaths.manifestPath, { force: true });

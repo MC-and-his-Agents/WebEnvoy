@@ -3249,8 +3249,8 @@ process.stdin.on("data", (chunk) => {
 
   it("creates native host manifest and posix launcher through runtime.install", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    const manifestDir = path.join(runtimeCwd, "native-messaging", "chrome");
-    const launcherPath = path.join(runtimeCwd, "bin", "webenvoy-native-host");
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "webenvoy-native-host");
     const nativeHostEntryPath = path.join(runtimeCwd, "native-host-entry.mjs");
     await writeFile(nativeHostEntryPath, "process.stdin.resume();\n", "utf8");
     const hostCommand = createNativeHostCommand(nativeHostEntryPath);
@@ -3314,8 +3314,15 @@ process.stdin.on("data", (chunk) => {
 
   it("uses repo-owned native host entry as default runtime.install host_command", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    const manifestDir = path.join(runtimeCwd, "native-messaging", "chrome");
-    const launcherPath = path.join(runtimeCwd, "bin", "webenvoy-native-host-default");
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "webenvoy-native-host-default"
+    );
     const defaultHostCommand = createNativeHostCommand(repoOwnedNativeHostEntryPath);
 
     const result = runCli(
@@ -3362,8 +3369,8 @@ process.stdin.on("data", (chunk) => {
 
   it("removes native host manifest and launcher through runtime.uninstall and keeps idempotency", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    const manifestDir = path.join(runtimeCwd, "native-messaging", "chrome");
-    const launcherPath = path.join(runtimeCwd, "bin", "webenvoy-native-host");
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "webenvoy-native-host");
     const nativeHostEntryPath = path.join(runtimeCwd, "native-host-entry.mjs");
     await writeFile(nativeHostEntryPath, "process.stdin.resume();\n", "utf8");
 
@@ -3452,6 +3459,124 @@ process.stdin.on("data", (chunk) => {
         removed: {
           manifest: false,
           launcher: false
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.install when manifest_dir or launcher_path escapes controlled roots", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const installByManifestDir = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-boundary-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          manifest_dir: "/tmp",
+          launcher_path: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "ok")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(installByManifestDir.status).toBe(2);
+    expect(parseSingleJsonLine(installByManifestDir.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "manifest_dir"
+        }
+      }
+    });
+
+    const installByLauncherPath = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-boundary-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          manifest_dir: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests"),
+          launcher_path: "/tmp/webenvoy-escape.sh"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(installByLauncherPath.status).toBe(2);
+    expect(parseSingleJsonLine(installByLauncherPath.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "launcher_path"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.uninstall when manifest_dir or launcher_path escapes controlled roots", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const uninstallByManifestDir = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-boundary-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: "/tmp",
+          launcher_path: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "ok")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstallByManifestDir.status).toBe(2);
+    expect(parseSingleJsonLine(uninstallByManifestDir.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "manifest_dir"
+        }
+      }
+    });
+
+    const uninstallByLauncherPath = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-boundary-002",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests"),
+          launcher_path: "/tmp/webenvoy-escape.sh"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstallByLauncherPath.status).toBe(2);
+    expect(parseSingleJsonLine(uninstallByLauncherPath.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "launcher_path"
         }
       }
     });
