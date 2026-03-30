@@ -9,6 +9,16 @@
 - 平台规避策略细节
 - 完整发布流程实现
 - 账号矩阵调度模型
+- `xhs.editor_input` / `xhs.interact` 的正式命令 schema
+
+## `#208` 命令边界补充
+
+`issue_action_matrix` 中 `issue_208` 使用的 `reversible_interaction_with_approval`，是治理动作类别，不是正式命令接口名。
+
+补充约束：
+- `FR-0008.minimal_action_candidates.action_id=editor_input` 只表示“当前推荐作为 `#208` 正式验证对象的最小页面交互动作”，不等于已冻结 `xhs.editor_input` 命令。
+- 当前 FR 允许实现侧围绕 `issue_208` 暴露 gate-only 验证结果，但不允许借此宣称 `xhs.editor_input` 或 `xhs.interact` 已拥有正式稳定的命令名、输入 schema、输出 schema、错误码或 live 写结果契约。
+- 若后续需要新增 `xhs.editor_input` 或 `xhs.interact`，必须先通过独立正式 contract 冻结命令边界，再进入实现合并。
 
 ## 输出对象
 
@@ -291,6 +301,31 @@
 3. `hard_block_when_paused` 缩减必须经过独立 spec review 说明。
 4. `issue_action_matrix` 不允许为 `#208` 和 `#209` 定义不同状态集合。
 5. `risk_transition_audit.required_fields` 缺失任一字段时，live 放行判定无效。
+
+## `#208` gate-only 可观测性补充
+
+当 `issue_scope=issue_208` 且请求仍处于 gate-only 验证前置阶段时，返回对象必须满足以下最小语义：
+
+```json
+{
+  "observability": {
+    "page_state": {
+      "page_kind": "publish|login|unknown",
+      "url": "normalized_url",
+      "title": "document title",
+      "ready_state": "loading|interactive|complete"
+    },
+    "key_requests": [],
+    "failure_site": null
+  }
+}
+```
+
+补充约束：
+1. gate-only success 必须返回最小 `observability.page_state`；`failure_site` 必须为 `null`；`key_requests` 必须为空数组。
+2. gate blocked 允许返回最小 `observability.page_state`；`key_requests` 仍必须为空数组；`failure_site.component` 必须为 `gate`。
+3. 上述两类场景都不得返回真实页面写入完成信号，不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
+4. `page_state` 最小字段继续复用 `FR-0004` 的正式定义；本 FR 只补充 `#208` gate-only 场景下“必须返回/允许返回”的使用边界，不重定义字段本身。
 
 ## 公开模式与阻断语义补充
 
