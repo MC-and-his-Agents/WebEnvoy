@@ -15,11 +15,13 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
-const writeEnvelope = (envelope: Record<string, unknown>): void => {
+const writeEnvelope = (envelope: Record<string, unknown>, onFlushed?: () => void): void => {
   const payload = Buffer.from(JSON.stringify(envelope), "utf8");
   const header = Buffer.alloc(4);
   header.writeUInt32LE(payload.length, 0);
-  process.stdout.write(Buffer.concat([header, payload]));
+  process.stdout.write(Buffer.concat([header, payload]), () => {
+    onFlushed?.();
+  });
 };
 
 const writeSuccess = (
@@ -27,7 +29,8 @@ const writeSuccess = (
   input: {
     summary: Record<string, unknown>;
     payload?: Record<string, unknown>;
-  }
+  },
+  onFlushed?: () => void
 ): void => {
   writeEnvelope({
     id: request.id,
@@ -35,7 +38,7 @@ const writeSuccess = (
     summary: input.summary,
     ...(input.payload ? { payload: input.payload } : {}),
     error: null
-  });
+  }, onFlushed);
 };
 
 const writeError = (
@@ -131,8 +134,9 @@ const handleBridgeForward = (request: BridgeRequestEnvelope): void => {
       relay_path: RELAY_PATH
     },
     payload: buildForwardPayload(request)
+  }, () => {
+    process.exit(0);
   });
-  process.exit(0);
 };
 
 const handleRequest = (rawRequest: unknown): void => {

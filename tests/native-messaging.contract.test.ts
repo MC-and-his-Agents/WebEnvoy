@@ -91,6 +91,29 @@ describe("native messaging contract", () => {
     });
   });
 
+  it("keeps repo-owned native host responses stable across repeated forward calls", () => {
+    for (let index = 0; index < 8; index += 1) {
+      const result = runCli(
+        ["runtime.ping", "--run-id", `run-nm-repo-owned-repeat-${index}`],
+        withRepoOwnedNativeHost()
+      );
+      expect(result.status).toBe(0);
+
+      const body = parseJson(result.stdout);
+      expect(body).toMatchObject({
+        command: "runtime.ping",
+        status: "success"
+      });
+      expect(body.summary).toMatchObject({
+        message: "pong",
+        transport: {
+          protocol: "webenvoy.native-bridge.v1",
+          relay_path: "host>background>content-script>background>host"
+        }
+      });
+    }
+  });
+
   it("maps transport timeout to runtime unavailable exit code without loopback", () => {
     const result = runCli([
       "runtime.ping",

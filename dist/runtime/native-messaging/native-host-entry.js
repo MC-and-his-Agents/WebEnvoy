@@ -8,20 +8,22 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : {};
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
-const writeEnvelope = (envelope) => {
+const writeEnvelope = (envelope, onFlushed) => {
     const payload = Buffer.from(JSON.stringify(envelope), "utf8");
     const header = Buffer.alloc(4);
     header.writeUInt32LE(payload.length, 0);
-    process.stdout.write(Buffer.concat([header, payload]));
+    process.stdout.write(Buffer.concat([header, payload]), () => {
+        onFlushed?.();
+    });
 };
-const writeSuccess = (request, input) => {
+const writeSuccess = (request, input, onFlushed) => {
     writeEnvelope({
         id: request.id,
         status: "success",
         summary: input.summary,
         ...(input.payload ? { payload: input.payload } : {}),
         error: null
-    });
+    }, onFlushed);
 };
 const writeError = (request, input) => {
     writeEnvelope({
@@ -100,8 +102,9 @@ const handleBridgeForward = (request) => {
             relay_path: RELAY_PATH
         },
         payload: buildForwardPayload(request)
+    }, () => {
+        process.exit(0);
     });
-    process.exit(0);
 };
 const handleRequest = (rawRequest) => {
     try {
