@@ -451,6 +451,130 @@ const resolveTargetPageFromHref = (href) => {
         return null;
     }
 };
+const createDomEvent = (kind, type, init = {}) => {
+    const globalObject = globalThis;
+    const ctorMap = {
+        mouse: globalObject.MouseEvent,
+        focus: globalObject.FocusEvent,
+        input: globalObject.InputEvent,
+        event: globalObject.Event
+    };
+    const ctor = ctorMap[kind];
+    if (typeof ctor === "function") {
+        return new ctor(type, init);
+    }
+    return { type, ...init };
+};
+const dispatchDomEvent = (target, kind, type, init = {}) => {
+    target.dispatchEvent?.(createDomEvent(kind, type, { bubbles: true, ...init }));
+};
+const isEditableElement = (value) => typeof value === "object" && value !== null;
+const isContentEditableElement = (element) => {
+    if (element.isContentEditable === true) {
+        return true;
+    }
+    const attribute = element.getAttribute?.("contenteditable");
+    return attribute === "true" || attribute === "plaintext-only";
+};
+const isValueEditableElement = (element) => typeof element.value === "string";
+const readEditableText = (element) => {
+    if (isValueEditableElement(element)) {
+        return element.value ?? "";
+    }
+    return typeof element.textContent === "string" ? element.textContent : "";
+};
+const writeEditableText = (element, text) => {
+    if (isValueEditableElement(element)) {
+        element.value = text;
+        return;
+    }
+    element.textContent = text;
+};
+const resolveEditorCandidates = (selector) => {
+    if (typeof document === "undefined") {
+        return [];
+    }
+    const doc = document;
+    const candidates = [];
+    const push = (value) => {
+        if (!isEditableElement(value) || candidates.includes(value)) {
+            return;
+        }
+        candidates.push(value);
+    };
+    if (selector && typeof doc.querySelector === "function") {
+        push(doc.querySelector(selector));
+    }
+    push(doc.activeElement);
+    if (typeof doc.querySelectorAll === "function") {
+        for (const query of [
+            "[contenteditable='true']",
+            "[contenteditable='plaintext-only']",
+            "textarea",
+            "input[type='text']",
+            "[role='textbox']"
+        ]) {
+            const values = doc.querySelectorAll(query);
+            for (const element of values) {
+                push(element);
+            }
+        }
+    }
+    return candidates.filter((candidate) => isContentEditableElement(candidate) || isValueEditableElement(candidate));
+};
+const resolveEditorTarget = (selector) => resolveEditorCandidates(selector)[0] ?? null;
+const waitForSettled = async (ms) => {
+    if (ms <= 0) {
+        return;
+    }
+    await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+};
+const parseInteractInput = (message) => {
+    const commandInput = asRecord(message.commandParams.input) ?? {};
+    const options = asRecord(message.commandParams.options) ?? {};
+    const actionId = asString(commandInput.action_id) ?? "editor_input";
+    const text = asString(commandInput.text);
+    if (actionId !== "editor_input" || !text) {
+        throw new Error("xhs.interact requires action_id=editor_input and non-empty text");
+    }
+    return {
+        actionId,
+        text,
+        waitSettledMs: typeof options.wait_settled_ms === "number" && Number.isFinite(options.wait_settled_ms)
+            ? Math.max(0, Math.floor(options.wait_settled_ms))
+            : 50,
+        editorSelector: asString(options.editor_selector)
+    };
+};
+const executeEditorInput = async (message) => {
+    const input = parseInteractInput(message);
+    const target = resolveEditorTarget(input.editorSelector);
+    if (!target) {
+        throw new Error("editor target not found");
+    }
+    dispatchDomEvent(target, "mouse", "mousedown");
+    dispatchDomEvent(target, "mouse", "mouseup");
+    target.focus?.();
+    dispatchDomEvent(target, "focus", "focus");
+    dispatchDomEvent(target, "input", "beforeinput", { data: input.text, inputType: "insertText" });
+    writeEditableText(target, input.text);
+    dispatchDomEvent(target, "input", "input", { data: input.text, inputType: "insertText" });
+    dispatchDomEvent(target, "event", "change");
+    await waitForSettled(input.waitSettledMs);
+    const finalText = readEditableText(target);
+    if (!finalText.includes(input.text)) {
+        throw new Error("editor text was not applied");
+    }
+    return {
+        action_id: input.actionId,
+        text: input.text,
+        text_length: input.text.length,
+        target_kind: isValueEditableElement(target) ? "input" : "contenteditable",
+        final_text: finalText
+    };
+};
 export class ContentScriptHandler {
     #listeners = new Set();
     #reachable = true;
@@ -482,6 +606,10 @@ export class ContentScriptHandler {
         }
         if (message.command === "xhs.search") {
             void this.#handleXhsSearch(message);
+            return true;
+        }
+        if (message.command === "xhs.interact") {
+            void this.#handleXhsInteract(message);
             return true;
         }
         const result = this.#handleForward(message);
@@ -643,6 +771,25 @@ export class ContentScriptHandler {
             }
         };
     }
+    #safeXhsEnvValue(resolver, fallback) {
+        try {
+            return resolver();
+        }
+        catch {
+            return fallback;
+        }
+    }
+    #buildInteractPageState() {
+        const href = this.#safeXhsEnvValue(() => this.#xhsEnv.getLocationHref(), "about:blank");
+        const title = this.#safeXhsEnvValue(() => this.#xhsEnv.getDocumentTitle(), "unknown");
+        const readyState = this.#safeXhsEnvValue(() => this.#xhsEnv.getReadyState(), "unknown");
+        return {
+            page_kind: resolveTargetPageFromHref(href) ?? "unknown",
+            url: href,
+            title,
+            ready_state: readyState
+        };
+    }
     async #handleXhsSearch(message) {
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -762,6 +909,61 @@ export class ContentScriptHandler {
                     message: error instanceof Error ? error.message : String(error)
                 },
                 payload: fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}
+            });
+        }
+    }
+    async #handleXhsInteract(message) {
+        try {
+            const interactionResult = await executeEditorInput(message);
+            const pageState = this.#buildInteractPageState();
+            this.#emit({
+                kind: "result",
+                id: message.id,
+                ok: true,
+                payload: {
+                    summary: {
+                        capability_result: {
+                            ability_id: String(asRecord(message.commandParams.ability)?.id ?? "xhs.interact.editor-input.v1"),
+                            layer: String(asRecord(message.commandParams.ability)?.layer ?? "L3"),
+                            action: String(asRecord(message.commandParams.ability)?.action ?? "write"),
+                            outcome: "success"
+                        },
+                        interaction_result: interactionResult
+                    },
+                    observability: {
+                        page_state: pageState,
+                        key_requests: [],
+                        failure_site: null
+                    }
+                }
+            });
+        }
+        catch (error) {
+            const pageState = this.#buildInteractPageState();
+            this.#emit({
+                kind: "result",
+                id: message.id,
+                ok: false,
+                error: {
+                    code: "ERR_EXECUTION_FAILED",
+                    message: error instanceof Error ? error.message : String(error)
+                },
+                payload: {
+                    details: {
+                        stage: "execution",
+                        reason: "EDITOR_INPUT_FAILED"
+                    },
+                    observability: {
+                        page_state: pageState,
+                        key_requests: [],
+                        failure_site: {
+                            stage: "execution",
+                            component: "page",
+                            target: "editor_input",
+                            summary: error instanceof Error ? error.message : String(error)
+                        }
+                    }
+                }
             });
         }
     }

@@ -1211,6 +1211,133 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
+  it("returns structured interaction_result for xhs.editor_input under issue_208 approval", () => {
+    const result = runCli([
+      "xhs.editor_input",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          action_id: "editor_input",
+          text: "最小正式验证"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    const summary = asRecord(body.summary) ?? {};
+    const interactionResult = asRecord(summary.interaction_result);
+    const consumerGateResult = asRecord(summary.consumer_gate_result);
+    const observability = asRecord(body.observability);
+    const pageState = asRecord(observability?.page_state);
+    expect(summary.capability_result).toMatchObject({
+      ability_id: "xhs.interact.editor-input.v1",
+      action: "write",
+      outcome: "success"
+    });
+    expect(interactionResult).toMatchObject({
+      action_id: "editor_input",
+      text: "最小正式验证",
+      text_length: "最小正式验证".length
+    });
+    expect(typeof interactionResult?.final_text).toBe("string");
+    expect((interactionResult?.final_text as string) || "").toContain("最小正式验证");
+    expect(consumerGateResult).toMatchObject({
+      issue_scope: "issue_208",
+      action_type: "write",
+      gate_decision: "allowed"
+    });
+    expect(pageState).toMatchObject({
+      page_kind: "creator_publish_tab"
+    });
+  });
+
+  it("keeps consumer_gate_result on blocked xhs.editor_input requests", () => {
+    const result = runCli([
+      "xhs.editor_input",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          action_id: "editor_input",
+          text: "最小正式验证"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    expect(consumerGateResult).toMatchObject({
+      issue_scope: "issue_208",
+      action_type: "write",
+      gate_decision: "blocked"
+    });
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["RISK_STATE_PAUSED", "ISSUE_ACTION_MATRIX_BLOCKED"])
+    );
+  });
+
   it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
     const result = runCli([
       "xhs.search",

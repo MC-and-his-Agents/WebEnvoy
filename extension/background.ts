@@ -1927,14 +1927,14 @@ class ChromeBackgroundBridge {
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
     const requestedFingerprintContext = resolveFingerprintContext(commandParams);
     const trustedFingerprintContext =
-      command === "xhs.search" && requestedLiveMode
+      (command === "xhs.search" || command === "xhs.interact") && requestedLiveMode
         ? this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext)
         : null;
     const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
-    if (command === "xhs.search") {
+    if (command === "xhs.search" || command === "xhs.interact") {
       const gateResult = await this.#evaluateXhsTargetGate(request);
       consumerGateResult = gateResult.consumerGateResult;
       gatePayload = gateResult.gatePayload;
@@ -1953,7 +1953,7 @@ class ChromeBackgroundBridge {
         });
         return;
       }
-      if (gateResult.gateOnly) {
+      if (gateResult.gateOnly && command === "xhs.search") {
         this.#emit({
           id: request.id,
           status: "success",
@@ -2821,7 +2821,7 @@ class ChromeBackgroundBridge {
     }
 
     const command = String(request.params.command ?? "");
-    if (command === "xhs.search") {
+    if (command === "xhs.search" || command === "xhs.interact") {
       const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
       const xhsTabs = await this.chromeApi.tabs.query({
         currentWindow: true,

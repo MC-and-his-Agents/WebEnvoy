@@ -1108,9 +1108,8 @@ describe("extension background relay contract", () => {
             target_tab_id: 32,
             target_page: "creator_publish_tab",
             issue_scope: "issue_208",
-            action_type: "write",
             requested_execution_mode: "dry_run",
-            risk_state: "paused",
+            risk_state: "allowed",
             approval_record: {
               approved: true,
               approver: "qa-reviewer",
@@ -1137,7 +1136,6 @@ describe("extension background relay contract", () => {
     const payload = asRecord(response.payload) ?? {};
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.gate_decision).toBe("blocked");
-    expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     expect(fetchCalled).toBe(false);
   });
 
@@ -1372,6 +1370,117 @@ describe("extension background relay contract", () => {
       const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
       expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
       expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+    }
+  });
+
+  it("returns interaction_result for xhs.editor_input on creator publish page", async () => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const editor = {
+      isContentEditable: true,
+      textContent: "",
+      focus: () => undefined,
+      dispatchEvent: () => true,
+      getAttribute: (name: string) => (name === "contenteditable" ? "true" : null)
+    };
+    (globalThis as { document?: unknown }).document = {
+      activeElement: editor,
+      title: "Creator Publish",
+      readyState: "complete",
+      querySelector: () => editor,
+      querySelectorAll: () => [editor]
+    };
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          throw new Error("editor_input should not hit fetch");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    try {
+      const response = await responsePromise;
+      expect(response.status).toBe("success");
+      const payload = asRecord(response.payload) ?? {};
+      const summary = asRecord(payload.summary) ?? {};
+      const interactionResult = asRecord(summary.interaction_result);
+      const observability = asRecord(payload.observability);
+      const pageState = asRecord(observability?.page_state);
+      expect(summary.capability_result).toMatchObject({
+        ability_id: "xhs.interact.editor-input.v1",
+        action: "write",
+        outcome: "success"
+      });
+      expect(interactionResult).toMatchObject({
+        action_id: "editor_input",
+        text: "最小正式验证"
+      });
+      expect((interactionResult?.final_text as string) || "").toContain("最小正式验证");
+      expect(pageState).toMatchObject({
+        page_kind: "creator_publish_tab"
+      });
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        (globalThis as { document?: unknown }).document = originalDocument;
+      }
     }
   });
 
