@@ -1275,6 +1275,113 @@ describe("webenvoy cli contract", () => {
     expect(pageState).toBeNull();
   });
 
+  it("rejects disguised read-style xhs.editor_input requests before they reach the bridge", () => {
+    const cases = [
+      {
+        label: "ability.action=read",
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "read"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run"
+        },
+        reason: "EDITOR_ABILITY_ACTION_INVALID"
+      },
+      {
+        label: "options.action_type=read",
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "write"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "read",
+          requested_execution_mode: "dry_run"
+        },
+        reason: "EDITOR_ACTION_TYPE_INVALID"
+      },
+      {
+        label: "requested_execution_mode=live_read_limited",
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "write"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "live_read_limited"
+        },
+        reason: "EDITOR_EXECUTION_MODE_INVALID"
+      },
+      {
+        label: "target_domain=www.xiaohongshu.com",
+        ability: {
+          id: "xhs.interact.editor-input.v1",
+          layer: "L3",
+          action: "write"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run"
+        },
+        reason: "EDITOR_TARGET_DOMAIN_INVALID"
+      }
+    ] as const;
+
+    for (const testCase of cases) {
+      const result = runCli([
+        "xhs.editor_input",
+        "--profile",
+        "xhs_account_001",
+        "--params",
+        JSON.stringify({
+          ability: testCase.ability,
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证"
+          },
+          options: testCase.options
+        })
+      ], repoRoot, {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      });
+
+      expect(result.status, testCase.label).toBe(2);
+      const body = parseSingleJsonLine(result.stdout);
+      expect(body).toMatchObject({
+        command: "xhs.editor_input",
+        status: "error",
+        error: {
+          code: "ERR_CLI_INVALID_ARGS",
+          details: {
+            ability_id: "xhs.interact.editor-input.v1",
+            stage: "input_validation",
+            reason: testCase.reason
+          }
+        }
+      });
+    }
+  });
+
   it("keeps consumer_gate_result on blocked xhs.editor_input requests", () => {
     const result = runCli([
       "xhs.editor_input",

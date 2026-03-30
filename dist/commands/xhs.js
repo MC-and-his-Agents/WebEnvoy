@@ -168,6 +168,32 @@ const normalizeGateOptions = (options, abilityId) => {
         }
     };
 };
+const normalizeEditorInputGate = (envelope, gate) => {
+    if (envelope.ability.action !== "write") {
+        throw invalidAbilityInput("EDITOR_ABILITY_ACTION_INVALID", envelope.ability.id);
+    }
+    if (gate.requestedExecutionMode === "live_read_limited" ||
+        gate.requestedExecutionMode === "live_read_high_risk") {
+        throw invalidAbilityInput("EDITOR_EXECUTION_MODE_INVALID", envelope.ability.id);
+    }
+    const rawActionType = gate.options.action_type;
+    if (rawActionType !== undefined && rawActionType !== "write") {
+        throw invalidAbilityInput("EDITOR_ACTION_TYPE_INVALID", envelope.ability.id);
+    }
+    if (gate.targetDomain !== "creator.xiaohongshu.com") {
+        throw invalidAbilityInput("EDITOR_TARGET_DOMAIN_INVALID", envelope.ability.id);
+    }
+    if (gate.targetPage !== "creator_publish_tab") {
+        throw invalidAbilityInput("EDITOR_TARGET_PAGE_INVALID", envelope.ability.id);
+    }
+    return {
+        ...gate,
+        options: {
+            ...gate.options,
+            action_type: "write"
+        }
+    };
+};
 const buildCapabilityResult = (ability, summary) => ({
     capability_result: {
         ability_id: ability.id,
@@ -336,7 +362,7 @@ const xhsSearch = async (context) => {
 };
 const xhsEditorInput = async (context) => {
     const envelope = parseAbilityEnvelope(context.params);
-    const gate = normalizeGateOptions(envelope.options, envelope.ability.id);
+    const gate = normalizeEditorInputGate(envelope, normalizeGateOptions(envelope.options, envelope.ability.id));
     const parsedInput = parseEditorInput(envelope.input, envelope.ability.id);
     const bridge = resolveRuntimeBridge();
     const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
@@ -351,7 +377,11 @@ const xhsEditorInput = async (context) => {
             target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
-            ability: envelope.ability,
+            action_type: "write",
+            ability: {
+                ...envelope.ability,
+                action: "write"
+            },
             input: parsedInput,
             options: gate.options
         }, fingerprintContext);
