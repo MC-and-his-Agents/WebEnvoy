@@ -52,16 +52,82 @@
 - 必须明确“真实交互优先”与“合成事件回退”的使用边界。
 - 必须明确上传注入相关路径（`DataTransfer` 等）在本阶段默认不放行为 live。
 - 必须明确 `issue_208` 当前冻结的是治理动作类别 `reversible_interaction_with_approval`，而不是正式命令名。
-- 必须明确在本次 formal contract freeze 中，`issue_208` 仍只冻结 gate-only 前置与最小可观测性边界；`reversible_interaction_with_approval` 不得在当前 FR 中被放行为真实页面交互。
-- 必须明确 `FR-0008` 中 `editor_input` 只是正式验证候选动作，不得被实现 PR 视为已冻结 command/API contract。
+- 必须明确在本次 formal contract freeze 中，`issue_208` 冻结的是“进入真实最小可逆交互验证的前置条件与边界”，而不是正式稳定命令接口。
+- 必须明确 `issue_208` 当前唯一正式验证动作是 `editor_input`：仅限 `creator.xiaohongshu.com/publish` 页面上的“聚焦并输入少量文本”。
+- 必须明确 `reversible_interaction_with_approval` 在 `issue_208` 上只允许作为单动作正式验证的受控 live 范围，不得扩张到上传、提交、发布确认或完整写链路。
+- 必须明确 `FR-0008` 中 `editor_input` 只是上游推荐输入，不得被实现 PR 视为已冻结 command/API contract。
 - 必须明确后续若要引入 `xhs.editor_input` 或 `xhs.interact`，必须通过独立正式 command contract 冻结命令名、输入、输出、错误码、observability 与 gate-only 语义。
 
-### 4. `#208` gate-only 可观测性边界
+### 4. `#208` gate-only 前置与真实验证最小边界
 
 - 必须冻结 `#208` 在 gate-only success 与 gate blocked 两种场景下的最小 `observability.page_state` 语义。
 - 必须明确上述两种场景都允许返回最小 `page_state`，且 `key_requests=[]`。
 - 必须明确 gate-only success 时 `failure_site=null`，gate blocked 时 `failure_site.component="gate"`。
 - 必须明确 gate-only 结果可返回页面观测信息，但不得发起真实写请求或返回真实 `interaction_result`。
+- 必须明确当 `issue_208` 已满足 `allowed + approval + audit` 前置时，可进入 `editor_input` 单动作真实验证。
+- 必须明确真实验证场景至少记录 `success_signals`、`failure_signals`、`minimum_replay` 与受限的 `interaction_result`，但这些验证态结果不等于正式稳定命令输出壳。
+- 必须明确上述真实验证继续复用 `FR-0010` 已冻结的 `action_type=write` 与 `requested_execution_mode|effective_execution_mode=live_write` 作为唯一门禁机器承载，不得为 `#208` 新增私有 mode 或平行 gate result。
+
+#### 4.1 唯一正式验证动作
+
+- `#208` 当前唯一正式验证动作固定为 `editor_input`。
+- 动作页面固定为 `creator.xiaohongshu.com/publish`。
+- 动作语义固定为“在富文本编辑器上聚焦并输入少量文本”的一次真实、可逆页面交互。
+- `editor_input` 在本 FR 中表示正式验证对象，不等于已冻结稳定命令名。
+
+#### 4.2 正式验证范围
+
+- 只验证以下范围：
+  - 页面已进入目标发布页
+  - 富文本编辑器可被定位并获得焦点
+  - 输入少量文本后，页面出现稳定可见文本结果
+  - 输入结果在最小失焦或重新观测后仍保留
+- 明确不验证以下范围：
+  - 图片上传
+  - 提交、发布、确认弹窗或其他不可逆动作
+  - 草稿保存、发布 API、上传 API 或其他 fallback 写链路
+  - Phase 2 能力封装、L2 通用层或上传能力
+
+#### 4.3 成功与失败信号
+
+- 成功信号至少同时包含：
+  - 编辑器成功获得焦点，且输入动作发生在目标编辑区域
+  - 少量文本在页面上可见，未被即时清空或回滚
+  - 一次最小失焦或重新观测后文本仍保留
+  - 未触发上传、提交、发布确认或其他不可逆副作用
+- 失败信号至少覆盖：
+  - 请求仍停留在 gate-only，未发生真实页面交互
+  - 门禁或审批未满足，执行被阻断
+  - 编辑器未获得焦点，或输入落在错误节点
+  - 输入后文本未出现、立即丢失、失焦后回空，或页面框架状态未同步
+  - 风控提示、账号异常、验证码或其他需中止风险信号
+  - DOM 结构漂移导致无法证明当前页面仍满足正式验证口径
+  - 误触发上传、提交、发布确认或其他超范围动作
+
+#### 4.4 最小复现实验与证据要求
+
+- 最小 live 实验固定为：
+  1. 打开已登录的 `creator.xiaohongshu.com/publish` 页面
+  2. 确认编辑器处于可输入前状态，且页面不存在待提交副作用
+  3. 对目标编辑器执行一次聚焦
+  4. 输入少量测试文本
+  5. 读取页面可见结果，并执行一次最小失焦或重新观测
+  6. 确认文本仍保留，且未触发上传、提交、发布确认
+- 最小 replay 要求：
+  - 后续实现 PR 至少提供一次按上述步骤重新执行的复现实验
+  - replay 仍只允许围绕 `editor_input` 单动作，不得扩成上传或提交链路
+- 用于关闭 `#208` 的后续实现 PR，至少需要提交：
+  - 引用本 FR 作为唯一正式验证口径
+  - 一组真实执行证据，证明已从 gate-only 进入真实页面交互
+  - 一组最小 replay 证据，证明不是单次偶然成功
+  - 对成功信号与失败信号的逐项对照说明
+  - 对“未触发上传/提交/发布确认/完整写链路”的边界说明
+
+#### 4.5 关闭语义
+
+- 当前 FR 及其规约 PR 只允许使用 `Refs #208`。
+- 只有后续实现 PR 同时满足“真实交互已发生 + 最小 replay 已完成 + 证据齐备 + 未越出范围”时，才可 `Fixes #208`。
+- gate-only 观测、contract test、候选动作整理、上传/提交流程研究或正式命令 contract 冻结，均不得关闭 `#208`。
 
 ### 5. 最小 session 节律/冷却/恢复
 
@@ -82,7 +148,7 @@
 - 必须定义 `#208/#209` 在三态下的差异化阻断边界：
   - `paused`：`#208` 与 `#209` 均只允许 `dry_run|recon`，禁止任何 live。
   - `limited`：`#209` 仅允许受控读 live；`#208` 仍只允许 `dry_run|recon` 与 gate-only 观测返回，不得放行真实可逆交互。
-  - `allowed`：`#209` 可进入已审批范围；`#208` 在当前 FR 中仍只冻结 gate-only 前置与可观测性边界，是否放行真实交互留待后续独立 command contract 与实现评审决定。
+  - `allowed`：`#209` 可进入已审批范围；`#208` 可在已审批范围内进入单一 `editor_input` 真实验证，该路径在门禁字段上仍表现为 `action_type=write` + `requested_execution_mode|effective_execution_mode=live_write`，但不因此获得稳定命令接口或完整写链路放行。
 - 必须定义状态变更审计与回滚动作，至少包含变更前后状态、触发原因、run/session 关联；任何依赖人工审批或扩大 live 范围的迁移还必须包含审批人。
 
 ## GWT 验收场景
@@ -108,7 +174,8 @@ Given `#208` 尚未完成正式验证
 When 检查写路径交互规则
 Then 能看到动作分级与默认阻断规则
 And 高风险/不可逆写动作在门禁前置未满足时不会被放行
-And `editor_input` 仅作为 `#208` 正式验证候选动作存在，不等于正式命令已冻结
+And `editor_input` 仅作为 `#208` 的单动作正式验证对象存在，不等于正式命令已冻结
+And 上传、提交、发布确认不会被混入 `#208`
 
 ### 场景 4：状态机与节律规则可被消费
 
@@ -124,13 +191,15 @@ When 评审者检查 FR-0011 输出对象
 Then 两条链路使用同一三态状态机与恢复条件
 And 不存在“`#208` 与 `#209` 使用不同阻断矩阵”的口径分叉
 
-### 场景 6：`#208` gate-only 可观测性边界可验证
+### 场景 6：`#208` gate-only 与真实验证边界可验证
 
-Given `#208` 仍停留在 gate-only 验证前置阶段
-When 插件层返回 gate-only success 或 gate blocked
+Given `#208` 处于 gate-only 前置或真实验证准备阶段
+When 插件层返回 gate-only success、gate blocked 或已审批的真实验证结果
 Then 返回对象允许包含最小 `observability.page_state`
-And `key_requests` 必须为空数组
-And 不得返回真实页面写入结果
+And gate-only 场景下 `key_requests` 必须为空数组
+And 真实验证场景下只允许返回受限的 `interaction_result`
+And 不得把验证态结果宣称为正式稳定命令输出
+And 关闭语义仍保持“当前 FR 用 `Refs #208`，后续实现闭环才可 `Fixes #208`”
 
 ### 场景 7：阻断时的生效模式语义不失真
 
@@ -150,6 +219,7 @@ And 不得在 `gate_decision=blocked` 时对外暴露未实际执行的 `live_re
 6. 状态审计缺失：若状态变更缺少审计记录，则该变更视为无效并回退到 `paused`。
 7. 命令契约偷渡：若实现 PR 把 `editor_input` 候选动作直接宣称为正式命令接口，视为阻断性违规。
 8. gate-only 写入越界：若 gate-only 结果触发真实编辑器写入或返回真实 `interaction_result`，视为阻断性违规。
+9. 范围漂移：若 `#208` 的真实验证扩张到上传、提交、发布确认或完整写链路，视为阻断性违规。
 
 ## 验收标准
 
@@ -159,8 +229,8 @@ And 不得在 `gate_decision=blocked` 时对外暴露未实际执行的 `live_re
 4. `#208/#209` 可直接引用 FR-0011 输出作为进入 live 的前置。
 5. `live_read_limited` 的公开模式语义、审批前置与审计要求已被正式冻结。
 6. `effective_execution_mode` 在 `blocked` 场景下的语义已冻结为“真实未继续 live 的降级模式”，不会对外暴露未实际执行的 `live_*`。
-7. `#208` 的 gate-only `page_state`、`key_requests=[]` 与 `failure_site` 最小语义已冻结。
-8. FR-0011 已明确 `editor_input` 只是验证候选动作，不等于已冻结的正式命令接口。
+7. `#208` 的 gate-only `page_state`、`key_requests=[]` 与 `failure_site` 最小语义已冻结，且真实验证场景的最小记录字段已冻结。
+8. FR-0011 已明确 `editor_input` 是 `#208` 的唯一正式验证对象，但不等于已冻结的正式命令接口。
 9. 本 FR 不混入实现代码，保持在规约审查路径。
 
 ## 依赖与前置条件
