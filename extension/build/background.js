@@ -497,14 +497,51 @@ export class BackgroundRelay {
             return null;
         }
         const commandParams = asRecord(request.params.command_params) ?? {};
+        const ability = asRecord(commandParams.ability) ?? {};
         const requestedExecutionMode = parseRequestedExecutionMode(readXhsGateParam(commandParams, "requested_execution_mode"));
-        if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
-            return null;
-        }
-        const actionType = parseActionType(readXhsGateParam(commandParams, "action_type"));
+        const requestedActionType = parseActionType(readXhsGateParam(commandParams, "action_type"));
+        const abilityActionType = parseActionType(ability.action);
+        const actionType = requestedActionType ?? abilityActionType;
         const issueScope = resolveIssueScope(readXhsGateParam(commandParams, "issue_scope"));
         if (issueScope !== "issue_208" || actionType === null) {
-            return null;
+            const fallbackActionType = actionType ?? "write";
+            const writeActionMatrixDecisions = getWriteActionMatrixDecisions(issueScope, fallbackActionType, requestedExecutionMode);
+            const gateReasons = [
+                actionType === null ? "ACTION_TYPE_NOT_EXPLICIT" : "ISSUE_ACTION_MATRIX_BLOCKED"
+            ];
+            const blockedActionType = actionType ?? fallbackActionType;
+            return {
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background"
+                },
+                payload: {
+                    consumer_gate_result: {
+                        risk_state: resolveRiskState(readXhsGateParam(commandParams, "risk_state")),
+                        issue_scope: issueScope,
+                        target_domain: asNonEmptyString(readXhsGateParam(commandParams, "target_domain")),
+                        target_tab_id: asInteger(readXhsGateParam(commandParams, "target_tab_id")),
+                        target_page: asNonEmptyString(readXhsGateParam(commandParams, "target_page")),
+                        action_type: blockedActionType,
+                        requested_execution_mode: requestedExecutionMode,
+                        effective_execution_mode: requestedExecutionMode === "recon" ? "recon" : "dry_run",
+                        gate_decision: "blocked",
+                        gate_reasons: gateReasons,
+                        fingerprint_gate_decision: "allowed",
+                        fingerprint_reason_codes: [],
+                        write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
+                    },
+                    write_interaction_tier: WRITE_INTERACTION_TIER,
+                    write_action_matrix_decisions: writeActionMatrixDecisions
+                },
+                error: {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: actionType === null
+                        ? "xhs.interact action_type must stay on the write path"
+                        : xhsGateReasonMessage("ISSUE_ACTION_MATRIX_BLOCKED")
+                }
+            };
         }
         const targetDomain = asNonEmptyString(readXhsGateParam(commandParams, "target_domain"));
         const targetTabId = asInteger(readXhsGateParam(commandParams, "target_tab_id"));
@@ -546,8 +583,13 @@ export class BackgroundRelay {
                 }
             };
         }
-        if (writeActionMatrixDecisions.write_interaction_tier === "observe_only") {
-            return null;
+        if (actionType !== "write") {
+            gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+        }
+        if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
+            if (requestedExecutionMode !== "live_write") {
+                gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+            }
         }
         const writeApprovalRequirements = writeMatrixDecision.requires.length > 0
             ? writeMatrixDecision.requires
@@ -582,7 +624,7 @@ export class BackgroundRelay {
             target_page: targetPage,
             action_type: actionType,
             requested_execution_mode: requestedExecutionMode,
-            effective_execution_mode: requestedExecutionMode,
+            effective_execution_mode: requestedExecutionMode === "recon" ? "recon" : "dry_run",
             gate_decision: allowed ? "allowed" : "blocked",
             gate_reasons: gateReasons,
             fingerprint_gate_decision: "allowed",
@@ -618,7 +660,7 @@ export class BackgroundRelay {
                 }
             };
         }
-        const { ability, actionId, text } = resolveXhsInteractInput(commandParams);
+        const { ability: resolvedAbility, actionId, text } = resolveXhsInteractInput(commandParams);
         if (actionId !== "editor_input" || text.length === 0) {
             return {
                 id: request.id,
@@ -626,7 +668,7 @@ export class BackgroundRelay {
                 summary: {
                     relay_path: "host>background"
                 },
-                payload: createXhsInteractInputErrorPayload(ability, consumerGateResult, writeActionMatrixDecisions),
+                payload: createXhsInteractInputErrorPayload(resolvedAbility, consumerGateResult, writeActionMatrixDecisions),
                 error: {
                     code: "ERR_EXECUTION_FAILED",
                     message: "xhs.interact requires action_id=editor_input and non-empty text"
@@ -648,8 +690,8 @@ export class BackgroundRelay {
             payload: {
                 summary: {
                     capability_result: {
-                        ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-                        layer: String(ability.layer ?? "L3"),
+                        ability_id: String(resolvedAbility.id ?? "xhs.interact.editor-input.v1"),
+                        layer: String(resolvedAbility.layer ?? "L3"),
                         action: actionType,
                         outcome: "partial",
                         data_ref: {

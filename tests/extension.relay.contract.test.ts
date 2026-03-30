@@ -1717,6 +1717,191 @@ describe("extension background relay contract", () => {
     ).toEqual(expect.arrayContaining(["TARGET_SCOPE_NOT_EXPLICIT"]));
   });
 
+  it("blocks xhs.interact disguised as read without forwarding to the editor", async () => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const editor = {
+      textContent: "",
+      value: "",
+      focus: () => {},
+      dispatchEvent: () => true,
+      setSelectionRange: () => {},
+      getAttribute: (name: string) => (name === "contenteditable" ? "true" : null)
+    };
+    (globalThis as { document?: unknown }).document = {
+      activeElement: editor,
+      title: "Creator Publish",
+      readyState: "complete",
+      querySelector: () => editor,
+      querySelectorAll: () => [editor]
+    };
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-disguised-read-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-disguised-read-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "不应写入页面"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "read",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    try {
+      const response = await responsePromise;
+      expect(response.status).toBe("error");
+      expect(response.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+      const payload = asRecord(response.payload) ?? {};
+      const consumerGateResult = asRecord(payload.consumer_gate_result);
+      expect(consumerGateResult).toMatchObject({
+        issue_scope: "issue_208",
+        action_type: "read",
+        requested_execution_mode: "dry_run",
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked"
+      });
+      expect(
+        (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+      ).toEqual(expect.arrayContaining(["ACTION_TYPE_MODE_MISMATCH"]));
+      expect(editor.textContent).toBe("");
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        (globalThis as { document?: unknown }).document = originalDocument;
+      }
+    }
+  });
+
+  it("keeps xhs.interact live_write gate-only when issue_208 approval downgrades execution", async () => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const editor = {
+      textContent: "",
+      value: "",
+      focus: () => {},
+      dispatchEvent: () => true,
+      setSelectionRange: () => {},
+      getAttribute: (name: string) => (name === "contenteditable" ? "true" : null)
+    };
+    (globalThis as { document?: unknown }).document = {
+      activeElement: editor,
+      title: "Creator Publish",
+      readyState: "complete",
+      querySelector: () => editor,
+      querySelectorAll: () => [editor]
+    };
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-live-write-gate-only-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-live-write-gate-only-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "仍应停留在 gate-only"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "live_write",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    try {
+      const response = await responsePromise;
+      expect(response.status).toBe("success");
+      const payload = asRecord(response.payload) ?? {};
+      const summary = asRecord(payload.summary) ?? {};
+      const consumerGateResult = asRecord(summary.consumer_gate_result);
+      expect(consumerGateResult).toMatchObject({
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        effective_execution_mode: "dry_run",
+        gate_decision: "allowed"
+      });
+      expect(
+        (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+      ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
+      expect(asRecord(summary.interaction_result)).toBeNull();
+      expect(editor.textContent).toBe("");
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        (globalThis as { document?: unknown }).document = originalDocument;
+      }
+    }
+  });
+
   it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
