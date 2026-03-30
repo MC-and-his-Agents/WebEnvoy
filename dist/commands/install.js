@@ -27,14 +27,11 @@ const runtimeInstall = async (context) => {
     if (!extensionId || !isValidExtensionId(extensionId)) {
         throw invalidInstallInput("runtime.install", "EXTENSION_ID_INVALID");
     }
-    const hostCommand = asString(context.params.host_command);
-    if (!hostCommand) {
-        throw invalidInstallInput("runtime.install", "HOST_COMMAND_INVALID");
-    }
     const nativeHostName = resolveNativeHostName("runtime.install", context.params.native_host_name);
     const browserChannel = resolveBrowserChannel("runtime.install", context.params.browser_channel);
     const manifestDir = asString(context.params.manifest_dir) ?? undefined;
     const launcherPath = asString(context.params.launcher_path) ?? undefined;
+    const hostCommand = asString(context.params.host_command) ?? undefined;
     return installNativeHost({
         cwd: context.cwd,
         extensionId,

@@ -1,6 +1,7 @@
 import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { CliError } from "../core/errors.js";
 
@@ -25,6 +26,14 @@ const pathExists = async (filePath: string): Promise<boolean> => {
     return false;
   }
 };
+
+const quoteShellToken = (value: string): string => JSON.stringify(value);
+
+export const resolveRepoOwnedNativeHostEntryPath = (): string =>
+  fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
+
+export const resolveRepoOwnedNativeHostCommand = (): string =>
+  `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 
 export const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);
@@ -105,7 +114,7 @@ export interface InstallNativeHostInput {
   extensionId: string;
   nativeHostName: string;
   browserChannel: BrowserChannel;
-  hostCommand: string;
+  hostCommand?: string;
   manifestDir?: string;
   launcherPath?: string;
 }
@@ -127,10 +136,14 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     launcherPath: input.launcherPath
   });
   const allowedOrigin = `chrome-extension://${input.extensionId}/`;
+  const hostCommand =
+    typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
+      ? input.hostCommand.trim()
+      : resolveRepoOwnedNativeHostCommand();
 
   await mkdir(resolvedPaths.manifestDir, { recursive: true });
   await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
-  await writeFile(resolvedPaths.launcherPath, buildLauncherScript(input.hostCommand), "utf8");
+  await writeFile(resolvedPaths.launcherPath, buildLauncherScript(hostCommand), "utf8");
   await chmod(resolvedPaths.launcherPath, 0o755);
 
   const manifest = {
@@ -149,7 +162,7 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     extension_id: input.extensionId,
     manifest_path: resolvedPaths.manifestPath,
     launcher_path: resolvedPaths.launcherPath,
-    host_command: input.hostCommand,
+    host_command: hostCommand,
     allowed_origins: [allowedOrigin],
     created: {
       manifest: true,

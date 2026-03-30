@@ -14,6 +14,13 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
 const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
+const repoOwnedNativeHostEntryPath = path.join(
+  repoRoot,
+  "dist",
+  "runtime",
+  "native-messaging",
+  "native-host-entry.js"
+);
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -3303,6 +3310,54 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(`exec ${hostCommand} "$@"`);
     const launcherMode = (await stat(launcherPath)).mode & 0o777;
     expect(launcherMode).toBe(0o755);
+  });
+
+  it("uses repo-owned native host entry as default runtime.install host_command", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, "native-messaging", "chrome");
+    const launcherPath = path.join(runtimeCwd, "bin", "webenvoy-native-host-default");
+    const defaultHostCommand = createNativeHostCommand(repoOwnedNativeHostEntryPath);
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-default-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath
+        })
+      ],
+      runtimeCwd
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-install-default-001",
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        operation: "install",
+        native_host_name: "com.webenvoy.host",
+        browser_channel: "chrome",
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
+        launcher_path: launcherPath,
+        host_command: defaultHostCommand,
+        allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
+        created: {
+          manifest: true,
+          launcher: true
+        }
+      }
+    });
+
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    expect(launcherRaw).toContain(`exec ${defaultHostCommand} "$@"`);
   });
 
   it("removes native host manifest and launcher through runtime.uninstall and keeps idempotency", async () => {

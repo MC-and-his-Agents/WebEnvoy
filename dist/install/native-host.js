@@ -1,6 +1,7 @@
 import { access, chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CliError } from "../core/errors.js";
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
@@ -18,6 +19,9 @@ const pathExists = async (filePath) => {
         return false;
     }
 };
+const quoteShellToken = (value) => JSON.stringify(value);
+export const resolveRepoOwnedNativeHostEntryPath = () => fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
+export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 export const isBrowserChannel = (value) => BROWSER_CHANNELS.includes(value);
 export const isValidExtensionId = (value) => EXTENSION_ID_PATTERN.test(value);
 export const isValidNativeHostName = (value) => NATIVE_HOST_NAME_PATTERN.test(value);
@@ -73,9 +77,12 @@ export const installNativeHost = async (input) => {
         launcherPath: input.launcherPath
     });
     const allowedOrigin = `chrome-extension://${input.extensionId}/`;
+    const hostCommand = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
+        ? input.hostCommand.trim()
+        : resolveRepoOwnedNativeHostCommand();
     await mkdir(resolvedPaths.manifestDir, { recursive: true });
     await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
-    await writeFile(resolvedPaths.launcherPath, buildLauncherScript(input.hostCommand), "utf8");
+    await writeFile(resolvedPaths.launcherPath, buildLauncherScript(hostCommand), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
         name: input.nativeHostName,
@@ -92,7 +99,7 @@ export const installNativeHost = async (input) => {
         extension_id: input.extensionId,
         manifest_path: resolvedPaths.manifestPath,
         launcher_path: resolvedPaths.launcherPath,
-        host_command: input.hostCommand,
+        host_command: hostCommand,
         allowed_origins: [allowedOrigin],
         created: {
             manifest: true,
