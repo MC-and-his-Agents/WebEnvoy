@@ -198,6 +198,10 @@ const shouldPersistFingerprintBundle = (currentMeta, fingerprintRuntime) => {
     }
     return nextBundle;
 };
+const resolvePersistentExtensionBindingForMeta = (input) => input.identityPreflight.mode === "official_chrome_persistent_extension" &&
+    input.identityPreflight.binding
+    ? input.identityPreflight.binding
+    : (input.currentMeta.persistentExtensionBinding ?? null);
 const buildRuntimeReadiness = (input) => {
     if (input.identityBindingState === "mismatch" || input.identityBindingState === "missing") {
         return "blocked";
@@ -468,6 +472,10 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+                    currentMeta: recoveredMeta,
+                    identityPreflight
+                }),
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
@@ -614,6 +622,10 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+                    currentMeta: recoveredMeta,
+                    identityPreflight
+                }),
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso
             }));
@@ -662,6 +674,10 @@ export class ProfileRuntimeService {
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
+                persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+                    currentMeta: recoveredMeta,
+                    identityPreflight
+                }),
                 fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
                 updatedAt: nowIso,
                 lastLoginAt: nowIso,
@@ -1121,6 +1137,9 @@ export class ProfileRuntimeService {
             profileDir: patch.profileDir,
             profileState: patch.profileState,
             proxyBinding: patch.proxyBinding,
+            persistentExtensionBinding: patch.persistentExtensionBinding === null
+                ? undefined
+                : patch.persistentExtensionBinding ?? current.persistentExtensionBinding,
             fingerprintProfileBundle: patch.fingerprintProfileBundle === null
                 ? undefined
                 : patch.fingerprintProfileBundle ?? current.fingerprintProfileBundle,

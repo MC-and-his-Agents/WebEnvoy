@@ -162,6 +162,12 @@ describe("profile-store", () => {
         boundAt: "2026-03-19T10:01:00.000Z",
         source: "runtime.start"
       },
+      persistentExtensionBinding: {
+        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        nativeHostName: "com.webenvoy.host",
+        browserChannel: "chrome",
+        manifestPath: "/tmp/native-host.json"
+      },
       fingerprintSeeds: {
         audioNoiseSeed: "seed-a-001",
         canvasNoiseSeed: "seed-c-001"
@@ -184,6 +190,12 @@ describe("profile-store", () => {
     const meta = await store.readMeta("default");
     expect(meta?.profileState).toBe("ready");
     expect(meta?.proxyBinding?.url).toBe("http://127.0.0.1:8080/");
+    expect(meta?.persistentExtensionBinding).toMatchObject({
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com.webenvoy.host",
+      browserChannel: "chrome",
+      manifestPath: "/tmp/native-host.json"
+    });
     expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
     expect(meta?.fingerprintProfileBundle).toEqual(expectedBundle);
     expect(meta?.localStorageSnapshots).toHaveLength(1);

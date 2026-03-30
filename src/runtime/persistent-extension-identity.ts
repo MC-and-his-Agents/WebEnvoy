@@ -279,6 +279,39 @@ const parsePersistentExtensionBindingFromParams = (
   };
 };
 
+const parsePersistentExtensionBindingFromMeta = (
+  meta: ProfileMeta | null
+): PersistentExtensionBinding | null => {
+  const raw = meta?.persistentExtensionBinding;
+  if (!raw) {
+    return null;
+  }
+  if (
+    typeof raw.extensionId !== "string" ||
+    !EXTENSION_ID_PATTERN.test(raw.extensionId) ||
+    typeof raw.nativeHostName !== "string" ||
+    raw.nativeHostName.trim().length === 0 ||
+    typeof raw.browserChannel !== "string" ||
+    !isBrowserChannel(raw.browserChannel)
+  ) {
+    return null;
+  }
+  if (raw.manifestPath !== null && typeof raw.manifestPath !== "string") {
+    return null;
+  }
+  return {
+    extensionId: raw.extensionId,
+    nativeHostName: raw.nativeHostName,
+    browserChannel: raw.browserChannel,
+    manifestPath:
+      raw.manifestPath === null
+        ? null
+        : isAbsolute(raw.manifestPath)
+          ? raw.manifestPath
+          : resolve(raw.manifestPath)
+  };
+};
+
 const readNativeHostManifest = async (manifestPath: string): Promise<NativeHostManifest | null> => {
   try {
     const raw = await readFile(manifestPath, "utf8");
@@ -471,7 +504,9 @@ export const runIdentityPreflight = async (input: {
     };
   }
 
-  const binding = parsePersistentExtensionBindingFromParams(input.params);
+  const binding =
+    parsePersistentExtensionBindingFromParams(input.params) ??
+    parsePersistentExtensionBindingFromMeta(input.meta);
   if (!binding) {
     return buildBlockingResult({
       mode: "official_chrome_persistent_extension",
