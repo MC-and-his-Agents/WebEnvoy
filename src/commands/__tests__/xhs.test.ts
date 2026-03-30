@@ -802,7 +802,7 @@ describe("xhs.editor_input", () => {
     });
   });
 
-  it("returns structured interaction result on loopback success", async () => {
+  it("keeps xhs.editor_input gate-only on loopback dry_run", async () => {
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
     const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
@@ -836,23 +836,16 @@ describe("xhs.editor_input", () => {
         capability_result: {
           ability_id: "xhs.interact.editor-input.v1",
           action: "write",
-          outcome: "success"
-        },
-        interaction_result: {
-          action_id: "editor_input",
-          text: "最小正式验证",
-          text_length: "最小正式验证".length
+          outcome: "partial"
         },
         consumer_gate_result: {
           issue_scope: "issue_208",
-          action_type: "write",
-          gate_decision: "allowed"
+          action_type: "write"
         }
       });
+      expect(execution.summary.interaction_result).toBeUndefined();
       expect(execution.observability).toMatchObject({
-        page_state: {
-          page_kind: "creator_publish_tab"
-        }
+        page_state: null
       });
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;

@@ -1211,7 +1211,7 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
-  it("returns structured interaction_result for xhs.editor_input under issue_208 approval", () => {
+  it("keeps xhs.editor_input gate-only under issue_208 approval", () => {
     const result = runCli([
       "xhs.editor_input",
       "--profile",
@@ -1263,23 +1263,16 @@ describe("webenvoy cli contract", () => {
     expect(summary.capability_result).toMatchObject({
       ability_id: "xhs.interact.editor-input.v1",
       action: "write",
-      outcome: "success"
+      outcome: "partial"
     });
-    expect(interactionResult).toMatchObject({
-      action_id: "editor_input",
-      text: "最小正式验证",
-      text_length: "最小正式验证".length
-    });
-    expect(typeof interactionResult?.final_text).toBe("string");
-    expect((interactionResult?.final_text as string) || "").toContain("最小正式验证");
+    expect(interactionResult).toBeNull();
     expect(consumerGateResult).toMatchObject({
       issue_scope: "issue_208",
       action_type: "write",
-      gate_decision: "allowed"
+      gate_decision: "allowed",
+      effective_execution_mode: "dry_run"
     });
-    expect(pageState).toMatchObject({
-      page_kind: "creator_publish_tab"
-    });
+    expect(pageState).toBeNull();
   });
 
   it("keeps consumer_gate_result on blocked xhs.editor_input requests", () => {
