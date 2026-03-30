@@ -30,12 +30,12 @@
 ## 范围
 
 - 受影响模块 / 文件
-  - [src/runtime/native-messaging/host.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/native-messaging/host.ts)
-  - [src/runtime/native-messaging/bridge.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/native-messaging/bridge.ts)
-  - [extension/background.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/extension/background.ts)
-  - [src/runtime/persistent-extension-identity.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/persistent-extension-identity.ts)
-  - [docs/dev/architecture/system-design/communication.md](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/docs/dev/architecture/system-design/communication.md)
-  - [docs/dev/specs/FR-0015-official-chrome-runtime-migration/spec.md](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/docs/dev/specs/FR-0015-official-chrome-runtime-migration/spec.md)
+  - `src/runtime/native-messaging/host.ts`
+  - `src/runtime/native-messaging/bridge.ts`
+  - `extension/background.ts`
+  - `src/runtime/persistent-extension-identity.ts`
+  - `docs/dev/architecture/system-design/communication.md`
+  - `docs/dev/specs/FR-0015-official-chrome-runtime-migration/spec.md`
 - 受影响命令 / 页面 / 流程
   - `runtime.start`
   - `runtime.login`
@@ -47,8 +47,8 @@
 
 - 已确认主 blocker：
   - 当前仓库没有生产可用的 Chrome Native Messaging host 可执行入口。
-  - 现有 [src/runtime/native-messaging/host.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/native-messaging/host.ts) 是 CLI 侧 transport/client，只会读取 `WEBENVOY_NATIVE_HOST_CMD` 后 `spawn` 外部进程并通过 stdio 收发消息。
-  - 仓库里唯一具备 host server 形态的脚本是测试 mock [tests/fixtures/native-host-mock.mjs](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/tests/fixtures/native-host-mock.mjs)。
+  - 现有 `src/runtime/native-messaging/host.ts` 是 CLI 侧 transport/client，只会读取 `WEBENVOY_NATIVE_HOST_CMD` 后 `spawn` 外部进程并通过 stdio 收发消息。
+  - 仓库里唯一具备 host server 形态的脚本是测试 mock `tests/fixtures/native-host-mock.mjs`。
 - 为什么必须单独拆出：
   - `#300` 的目标是 `editor_input` 最小真实交互验证，不应承接 official Chrome runtime 主路径缺口。
   - 即使人工把 unpacked extension 装进 official Chrome，也仍无法形成满足 `FR-0011` 的 `CLI <-> host <-> background <-> content-script` 真实正式闭环。
@@ -62,13 +62,13 @@
 ## 主 blocker 证据
 
 - official Chrome persistent path 要求持久 identity 边界与 Native Messaging `allowed_origins` 一致：
-  - [docs/dev/architecture/system-design/communication.md](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/docs/dev/architecture/system-design/communication.md)
-  - [src/runtime/persistent-extension-identity.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/persistent-extension-identity.ts)
+  - `docs/dev/architecture/system-design/communication.md`
+  - `src/runtime/persistent-extension-identity.ts`
 - 当前 CLI 侧只具备 “连接一个外部 native host” 的 transport/client 能力，而不具备“作为 native host 被 Chrome 注册并调用”的正式 server 入口：
-  - [src/runtime/native-messaging/host.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/native-messaging/host.ts)
-  - [src/runtime/native-messaging/bridge.ts](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/src/runtime/native-messaging/bridge.ts)
+  - `src/runtime/native-messaging/host.ts`
+  - `src/runtime/native-messaging/bridge.ts`
 - 仓库里现成的 host server 形态仅存在于测试 mock：
-  - [tests/fixtures/native-host-mock.mjs](/Users/mc/dev/worktrees/WebEnvoy-runtime-blocker-audit/tests/fixtures/native-host-mock.mjs)
+  - `tests/fixtures/native-host-mock.mjs`
 
 ## 除主 blocker 外仍需二次核查的潜在 blocker
 
