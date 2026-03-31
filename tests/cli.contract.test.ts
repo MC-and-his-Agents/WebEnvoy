@@ -3404,7 +3404,7 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
-  it("uses browser-level NativeMessagingHosts defaults without hardcoding profile binding into shared launcher", async () => {
+  it("uses browser-level NativeMessagingHosts defaults and binds launcher to the explicit profile", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const fakeHome = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-home-"));
     tempDirs.push(fakeHome);
@@ -3464,10 +3464,11 @@ process.stdin.on("data", (chunk) => {
     });
 
     const launcherRaw = await readFile(launcherPath, "utf8");
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+    expect(launcherRaw).toContain("export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=");
+    expect(launcherRaw).toContain(".webenvoy/profiles/xhs_208_probe");
   });
 
-  it("keeps browser-level shared launcher stable across multiple profile installs", async () => {
+  it("rejects browser-level shared launcher overwrite when another profile is already bound", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const fakeHome = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-home-"));
     tempDirs.push(fakeHome);
@@ -3512,21 +3513,23 @@ process.stdin.on("data", (chunk) => {
     const firstLauncherRaw = await readFile(firstLauncherPath, "utf8");
 
     const secondInstall = runInstall("xhs_profile_b", "run-contract-install-profile-shared-002");
-    expect(secondInstall.status).toBe(0);
+    expect(secondInstall.status).toBe(2);
     const secondBody = parseSingleJsonLine(secondInstall.stdout);
-    const secondSummary = secondBody.summary as Record<string, unknown>;
-    const secondLauncherPath = String(secondSummary.launcher_path ?? "");
-    const secondManifestPath = String(secondSummary.manifest_path ?? "");
-    const secondLauncherRaw = await readFile(secondLauncherPath, "utf8");
+    const secondLauncherRaw = await readFile(firstLauncherPath, "utf8");
 
     const expectedManifestPath = path.join(expectedManifestDir, "com.webenvoy.host.json");
     const expectedLauncherPath = path.join(expectedManifestDir, "com.webenvoy.host-launcher");
     expect(await realpath(firstManifestPath)).toBe(await realpath(expectedManifestPath));
-    expect(await realpath(secondManifestPath)).toBe(await realpath(expectedManifestPath));
     expect(await realpath(firstLauncherPath)).toBe(await realpath(expectedLauncherPath));
-    expect(await realpath(secondLauncherPath)).toBe(await realpath(expectedLauncherPath));
     expect(firstLauncherRaw).toBe(secondLauncherRaw);
-    expect(secondLauncherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+    expect(secondBody).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
+      }
+    });
+    expect(String((secondBody.error as Record<string, unknown>).message)).toContain("安装命令参数不合法");
   });
 
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {

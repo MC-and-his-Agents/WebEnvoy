@@ -4462,12 +4462,9 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await waitForBridgeTurn();
-    if (chromeApi.tabs.sendMessage.mock.calls.length === 0) {
-      const failedMessage = firstPort.postMessage.mock.calls
-        .map((call) => call[0] as { id?: string; payload?: Record<string, unknown>; error?: Record<string, unknown> })
-        .find((message) => message.id === "run-xhs-issue-208-editor-input-allowed-001");
-      throw new Error(`missing forward call: ${JSON.stringify(failedMessage)}`);
-    }
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalled();
+    });
 
     const proactiveContentScriptInject = executeScript.mock.calls.find(
       (call) =>

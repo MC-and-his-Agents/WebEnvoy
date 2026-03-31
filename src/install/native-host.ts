@@ -1,4 +1,4 @@
-import { access, chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -311,6 +311,23 @@ const resolveProfileDirForLauncher = (cwd: string, manifestDir: string): string 
   return join(normalizedProfileRoot, segments[0]);
 };
 
+const resolveExplicitProfileDir = (cwd: string, profile: string | undefined): string | undefined => {
+  if (typeof profile !== "string" || profile.trim().length === 0) {
+    return undefined;
+  }
+  return resolve(cwd, ".webenvoy", "profiles", profile.trim());
+};
+
+const extractLauncherProfileDir = (launcherRaw: string): string | null => {
+  const match = launcherRaw.match(
+    /^export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=(?:"([^"]+)"|'([^']+)')$/m
+  );
+  if (!match) {
+    return null;
+  }
+  return match[1] ?? match[2] ?? null;
+};
+
 const normalizePathForBoundaryCheck = (input: string): string => {
   const normalized = resolve(input);
   return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -431,12 +448,34 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
   await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
   await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
+  const profileDirForLauncher =
+    resolveExplicitProfileDir(input.cwd, input.profile) ??
+    resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir);
+  if (profileDirForLauncher && !resolvedPaths.hasCustomLauncherPath) {
+    try {
+      const existingLauncher = await readFile(resolvedPaths.launcherPath, "utf8");
+      const existingProfileDir = extractLauncherProfileDir(existingLauncher);
+      if (existingProfileDir && existingProfileDir !== profileDirForLauncher) {
+        throw nativeHostPathError("runtime.install", "BROWSER_LEVEL_PROFILE_CONFLICT", {
+          field: "launcher_path",
+          received_path: resolvedPaths.launcherPath,
+          requested_profile_dir: profileDirForLauncher,
+          existing_profile_dir: existingProfileDir
+        });
+      }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
   await writeFile(
     resolvedPaths.launcherPath,
     buildLauncherScript({
       command: "runtime.install",
       hostCommand,
-      profileDir: resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
+      profileDir: profileDirForLauncher
     }),
     "utf8"
   );
