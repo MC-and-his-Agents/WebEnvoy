@@ -6,6 +6,13 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockNativeHostPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
+const repoOwnedNativeHostPath = path.join(
+  repoRoot,
+  "dist",
+  "runtime",
+  "native-messaging",
+  "native-host-entry.js"
+);
 
 const runCli = (args: string[], env?: Record<string, string>) =>
   spawnSync(process.execPath, [binPath, ...args], {
@@ -18,9 +25,14 @@ const runCli = (args: string[], env?: Record<string, string>) =>
   });
 
 const parseJson = (stdout: string) => JSON.parse(stdout.trim()) as Record<string, unknown>;
+const createNativeHostCommand = (entryPath: string): string =>
+  `"${process.execPath}" "${entryPath}"`;
 const withNativeHost = (mode: string): Record<string, string> => ({
-  WEBENVOY_NATIVE_HOST_CMD: `"${process.execPath}" "${mockNativeHostPath}"`,
+  WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(mockNativeHostPath),
   WEBENVOY_NATIVE_HOST_MODE: mode
+});
+const withRepoOwnedNativeHost = (): Record<string, string> => ({
+  WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(repoOwnedNativeHostPath)
 });
 
 describe("native messaging contract", () => {
@@ -56,6 +68,50 @@ describe("native messaging contract", () => {
         relay_path: "host>background>content-script>background>host"
       }
     });
+  });
+
+  it("returns transport metadata on runtime.ping success via repo-owned native host entry", () => {
+    const result = runCli(
+      ["runtime.ping", "--run-id", "run-nm-repo-owned-001"],
+      withRepoOwnedNativeHost()
+    );
+    expect(result.status).toBe(0);
+
+    const body = parseJson(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.ping",
+      status: "success"
+    });
+    expect(body.summary).toMatchObject({
+      message: "pong",
+      transport: {
+        protocol: "webenvoy.native-bridge.v1",
+        relay_path: "host>background>content-script>background>host"
+      }
+    });
+  });
+
+  it("keeps repo-owned native host responses stable across repeated forward calls", () => {
+    for (let index = 0; index < 8; index += 1) {
+      const result = runCli(
+        ["runtime.ping", "--run-id", `run-nm-repo-owned-repeat-${index}`],
+        withRepoOwnedNativeHost()
+      );
+      expect(result.status).toBe(0);
+
+      const body = parseJson(result.stdout);
+      expect(body).toMatchObject({
+        command: "runtime.ping",
+        status: "success"
+      });
+      expect(body.summary).toMatchObject({
+        message: "pong",
+        transport: {
+          protocol: "webenvoy.native-bridge.v1",
+          relay_path: "host>background>content-script>background>host"
+        }
+      });
+    }
   });
 
   it("maps transport timeout to runtime unavailable exit code without loopback", () => {

@@ -316,6 +316,8 @@ const runtimeHelp = async () => ({
   usage: "webenvoy <command> [--params '<json>'] [--profile <profile>] [--run-id <run_id>]",
   commands: [
     "runtime.help",
+    "runtime.install",
+    "runtime.uninstall",
     "runtime.ping",
     "runtime.start",
     "runtime.login",

@@ -162,6 +162,12 @@ describe("profile-store", () => {
         boundAt: "2026-03-19T10:01:00.000Z",
         source: "runtime.start"
       },
+      persistentExtensionBinding: {
+        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        nativeHostName: "com.webenvoy.host",
+        browserChannel: "chrome",
+        manifestPath: "/tmp/native-host.json"
+      },
       fingerprintSeeds: {
         audioNoiseSeed: "seed-a-001",
         canvasNoiseSeed: "seed-c-001"
@@ -184,6 +190,12 @@ describe("profile-store", () => {
     const meta = await store.readMeta("default");
     expect(meta?.profileState).toBe("ready");
     expect(meta?.proxyBinding?.url).toBe("http://127.0.0.1:8080/");
+    expect(meta?.persistentExtensionBinding).toMatchObject({
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com.webenvoy.host",
+      browserChannel: "chrome",
+      manifestPath: "/tmp/native-host.json"
+    });
     expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
     expect(meta?.fingerprintProfileBundle).toEqual(expectedBundle);
     expect(meta?.localStorageSnapshots).toHaveLength(1);
@@ -416,6 +428,48 @@ describe("profile-store", () => {
     );
 
     await expect(store.readMeta("broken")).rejects.toThrow(/invalid profile meta structure/i);
+  });
+
+  it("rejects invalid persistentExtensionBinding.nativeHostName format", async () => {
+    const store = await createStore();
+    await store.ensureProfileDir("broken_binding");
+    const metaPath = store.getMetaPath("broken_binding");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "broken_binding",
+          profileDir: store.getProfileDir("broken_binding"),
+          profileState: "stopped",
+          proxyBinding: null,
+          persistentExtensionBinding: {
+            extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            nativeHostName: "com..invalid",
+            browserChannel: "chrome",
+            manifestPath: "/tmp/native-host.json"
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-a-001",
+            canvasNoiseSeed: "seed-c-001"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(store.readMeta("broken_binding")).rejects.toThrow(
+      /persistentExtensionBinding\.nativeHostName/i
+    );
   });
 
   it("rejects invalid profile name", async () => {

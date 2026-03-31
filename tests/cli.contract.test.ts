@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,6 +14,13 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
 const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
+const repoOwnedNativeHostEntryPath = path.join(
+  repoRoot,
+  "dist",
+  "runtime",
+  "native-messaging",
+  "native-host-entry.js"
+);
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -3240,6 +3247,482 @@ process.stdin.on("data", (chunk) => {
     parseSingleJsonLine(result.stdout);
   });
 
+  it("creates native host manifest and posix launcher through runtime.install", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "webenvoy-native-host");
+    const nativeHostEntryPath = path.join(runtimeCwd, "native-host-entry.mjs");
+    await writeFile(nativeHostEntryPath, "process.stdin.resume();\n", "utf8");
+    const hostCommand = createNativeHostCommand(nativeHostEntryPath);
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath,
+          host_command: hostCommand
+        })
+      ],
+      runtimeCwd
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-install-001",
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        operation: "install",
+        native_host_name: "com.webenvoy.host",
+        browser_channel: "chrome",
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
+        launcher_path: launcherPath,
+        host_command: hostCommand,
+        allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
+        created: {
+          manifest: true,
+          launcher: true
+        }
+      }
+    });
+
+    const manifestRaw = await readFile(path.join(manifestDir, "com.webenvoy.host.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "com.webenvoy.host",
+      description: "WebEnvoy CLI ↔ Extension bridge",
+      path: launcherPath,
+      type: "stdio",
+      allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    expect(launcherRaw).toContain("#!/usr/bin/env bash");
+    expect(launcherRaw).toContain("set -euo pipefail");
+    expect(launcherRaw).toContain('exec ');
+    expect(launcherRaw).toContain(' "$@"');
+    const launcherMode = (await stat(launcherPath)).mode & 0o777;
+    expect(launcherMode).toBe(0o755);
+  });
+
+  it("uses repo-owned native host entry as default runtime.install host_command", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "webenvoy-native-host-default"
+    );
+    const defaultHostCommand = createNativeHostCommand(repoOwnedNativeHostEntryPath);
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-default-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath
+        })
+      ],
+      runtimeCwd
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-install-default-001",
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        operation: "install",
+        native_host_name: "com.webenvoy.host",
+        browser_channel: "chrome",
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
+        launcher_path: launcherPath,
+        host_command: defaultHostCommand,
+        allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
+        created: {
+          manifest: true,
+          launcher: true
+        }
+      }
+    });
+
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    expect(launcherRaw).toContain('exec ');
+    expect(launcherRaw).toContain(' "$@"');
+  });
+
+  it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "webenvoy-native-host-shell-safe"
+    );
+    const markerPath = path.join(runtimeCwd, "marker-created-by-shell");
+    const argvCapturePath = path.join(runtimeCwd, "launcher-argv.json");
+    const hostileEntryPath = path.join(
+      runtimeCwd,
+      "native host $(touch marker-created-by-shell) $HOME.mjs"
+    );
+    await writeFile(
+      hostileEntryPath,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(process.env.WEBENVOY_ARGV_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");\n`,
+      "utf8"
+    );
+    const hostCommand = createNativeHostCommand(hostileEntryPath);
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-shell-safe-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath,
+          host_command: hostCommand
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+
+    const launch = spawnSync(launcherPath, ["--ping"], {
+      cwd: runtimeCwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WEBENVOY_ARGV_CAPTURE_PATH: argvCapturePath
+      }
+    });
+    expect(launch.status).toBe(0);
+    await expect(readFile(markerPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    expect(JSON.parse(await readFile(argvCapturePath, "utf8"))).toEqual(["--ping"]);
+  });
+
+  it("removes native host manifest and launcher through runtime.uninstall and keeps idempotency", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "webenvoy-native-host");
+    const nativeHostEntryPath = path.join(runtimeCwd, "native-host-entry.mjs");
+    await writeFile(nativeHostEntryPath, "process.stdin.resume();\n", "utf8");
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath,
+          host_command: createNativeHostCommand(nativeHostEntryPath)
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(0);
+    const uninstallBody = parseSingleJsonLine(uninstall.stdout);
+    expect(uninstallBody).toMatchObject({
+      run_id: "run-contract-uninstall-001",
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        operation: "uninstall",
+        native_host_name: "com.webenvoy.host",
+        browser_channel: "chrome",
+        manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
+        launcher_path: launcherPath,
+        removed: {
+          manifest: true,
+          launcher: true
+        }
+      }
+    });
+    await expect(readFile(path.join(manifestDir, "com.webenvoy.host.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(launcherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+
+    const uninstallAgain = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-002",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstallAgain.status).toBe(0);
+    const uninstallAgainBody = parseSingleJsonLine(uninstallAgain.stdout);
+    expect(uninstallAgainBody).toMatchObject({
+      run_id: "run-contract-uninstall-002",
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        operation: "uninstall",
+        removed: {
+          manifest: false,
+          launcher: false
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.install when manifest_dir or launcher_path escapes controlled roots", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const installByManifestDir = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-boundary-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          manifest_dir: "/tmp",
+          launcher_path: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "ok")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(installByManifestDir.status).toBe(2);
+    expect(parseSingleJsonLine(installByManifestDir.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "manifest_dir"
+        }
+      }
+    });
+
+    const installByLauncherPath = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-boundary-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          manifest_dir: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests"),
+          launcher_path: "/tmp/webenvoy-escape.sh"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(installByLauncherPath.status).toBe(2);
+    expect(parseSingleJsonLine(installByLauncherPath.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "launcher_path"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.uninstall when manifest_dir or launcher_path escapes controlled roots", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const uninstallByManifestDir = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-boundary-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: "/tmp",
+          launcher_path: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin", "ok")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstallByManifestDir.status).toBe(2);
+    expect(parseSingleJsonLine(uninstallByManifestDir.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "manifest_dir"
+        }
+      }
+    });
+
+    const uninstallByLauncherPath = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-boundary-002",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests"),
+          launcher_path: "/tmp/webenvoy-escape.sh"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstallByLauncherPath.status).toBe(2);
+    expect(parseSingleJsonLine(uninstallByLauncherPath.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "launcher_path"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.install when parent chain under controlled root contains symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const safeLauncherRoot = path.join(channelRoot, "bin");
+    const symlinkedManifestRoot = path.join(channelRoot, "manifests");
+    const externalManifestDir = await mkdtemp(path.join(tmpdir(), "webenvoy-install-symlink-"));
+    tempDirs.push(externalManifestDir);
+    await mkdir(channelRoot, { recursive: true });
+    await mkdir(safeLauncherRoot, { recursive: true });
+    await symlink(externalManifestDir, symlinkedManifestRoot);
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-symlink-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: path.join(symlinkedManifestRoot, "nested"),
+          launcher_path: path.join(safeLauncherRoot, "webenvoy-native-host")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(2);
+    expect(parseSingleJsonLine(install.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
+          field: "manifest_dir"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.uninstall when parent chain under controlled root contains symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const safeManifestRoot = path.join(channelRoot, "manifests");
+    const symlinkedLauncherRoot = path.join(channelRoot, "bin");
+    const externalLauncherDir = await mkdtemp(path.join(tmpdir(), "webenvoy-uninstall-symlink-"));
+    tempDirs.push(externalLauncherDir);
+    await mkdir(channelRoot, { recursive: true });
+    await mkdir(safeManifestRoot, { recursive: true });
+    await symlink(externalLauncherDir, symlinkedLauncherRoot);
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-symlink-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: safeManifestRoot,
+          launcher_path: path.join(symlinkedLauncherRoot, "webenvoy-native-host")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(2);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
+          field: "launcher_path"
+        }
+      }
+    });
+  });
+
   it("supports runtime.start and runtime.status with profile lock and meta state", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
@@ -3604,7 +4087,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("does not report bound identity preflight when runtime.status omits identity input", async () => {
+  it("reports bound identity preflight from persisted binding when runtime.status omits identity input", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -3670,9 +4153,102 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.status",
       status: "success",
       summary: {
-        identityBindingState: "missing",
-        runtimeReadiness: "blocked"
+        identityBindingState: "bound",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable",
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension",
+          manifestPath,
+          expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+        }
       }
+    });
+  });
+
+  it("rejects invalid persisted nativeHostName on runtime.status/runtime.start/runtime.login default paths", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-001"
+      ],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(startSummary.profileDir);
+
+    const stop = runCli(
+      [
+        "runtime.stop",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-001"
+      ],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as Record<string, unknown>;
+    meta.persistentExtensionBinding = {
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com..invalid",
+      browserChannel: "chrome",
+      manifestPath: "/tmp/native-host.json"
+    };
+    await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+
+    const status = runCli(
+      ["runtime.status", "--profile", "invalid_identity_binding_profile"],
+      runtimeCwd
+    );
+    expect(status.status).toBe(5);
+    expect(parseSingleJsonLine(status.stdout)).toMatchObject({
+      command: "runtime.status",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const restart = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-002"
+      ],
+      runtimeCwd
+    );
+    expect(restart.status).toBe(5);
+    expect(parseSingleJsonLine(restart.stdout)).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const login = runCli(
+      [
+        "runtime.login",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-003"
+      ],
+      runtimeCwd
+    );
+    expect(login.status).toBe(5);
+    expect(parseSingleJsonLine(login.stdout)).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
     });
   });
 

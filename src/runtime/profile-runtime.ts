@@ -22,7 +22,8 @@ import {
   type ReadMetaMode,
   type ReadMetaOptions,
   type LocalStorageSnapshot,
-  type ProfileMeta
+  type ProfileMeta,
+  type PersistentExtensionBinding
 } from "./profile-store.js";
 import {
   buildIdentityPreflightError,
@@ -400,6 +401,15 @@ const shouldPersistFingerprintBundle = (
   return nextBundle;
 };
 
+const resolvePersistentExtensionBindingForMeta = (input: {
+  currentMeta: ProfileMeta;
+  identityPreflight: IdentityPreflightResult;
+}): PersistentExtensionBinding | null =>
+  input.identityPreflight.mode === "official_chrome_persistent_extension" &&
+    input.identityPreflight.binding
+    ? input.identityPreflight.binding
+    : (input.currentMeta.persistentExtensionBinding ?? null);
+
 const buildRuntimeReadiness = (input: {
   lockHeld: boolean;
   identityBindingState: IdentityPreflightResult["identityBindingState"];
@@ -713,6 +723,10 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
+        persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+          currentMeta: recoveredMeta,
+          identityPreflight
+        }),
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastStartedAt: nowIso
@@ -894,6 +908,10 @@ export class ProfileRuntimeService {
           profileDir,
           profileState: session.profileState,
           proxyBinding: session.proxyBinding,
+          persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+            currentMeta: recoveredMeta,
+            identityPreflight
+          }),
           fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
           updatedAt: nowIso
         })
@@ -945,6 +963,10 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
+        persistentExtensionBinding: resolvePersistentExtensionBindingForMeta({
+          currentMeta: recoveredMeta,
+          identityPreflight
+        }),
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastLoginAt: nowIso,
@@ -1477,6 +1499,7 @@ export class ProfileRuntimeService {
       profileDir: string;
       profileState: ProfileState;
       proxyBinding: ProfileMeta["proxyBinding"];
+      persistentExtensionBinding?: PersistentExtensionBinding | null;
       fingerprintProfileBundle?: ProfileMeta["fingerprintProfileBundle"] | null;
       updatedAt: string;
       localStorageSnapshots?: ProfileMeta["localStorageSnapshots"];
@@ -1492,6 +1515,10 @@ export class ProfileRuntimeService {
       profileDir: patch.profileDir,
       profileState: patch.profileState,
       proxyBinding: patch.proxyBinding,
+      persistentExtensionBinding:
+        patch.persistentExtensionBinding === null
+          ? undefined
+          : patch.persistentExtensionBinding ?? current.persistentExtensionBinding,
       fingerprintProfileBundle:
         patch.fingerprintProfileBundle === null
           ? undefined
