@@ -2087,7 +2087,7 @@ class ChromeBackgroundBridge {
         else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
             pushReason("TARGET_DOMAIN_OUT_OF_SCOPE");
         }
-        if (targetTabId === null) {
+        if (targetTabId === null && !issue208EditorInputValidation) {
             targetTabId = await this.#resolveTargetTabId({
                 ...request,
                 params: {

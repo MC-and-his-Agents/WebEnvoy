@@ -2261,7 +2261,7 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("auto-resolves missing target_tab_id for issue_208 editor_input forward", async () => {
+  it("keeps target_tab_id explicit for issue_208 editor_input forward", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2316,92 +2316,38 @@ describe("extension service worker recovery contract", () => {
     );
     expect(proactiveContentScriptInject).toBeUndefined();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
       32,
       expect.objectContaining({
         id: "run-xhs-issue-208-editor-input-autotab-001",
-        command: "xhs.search",
-        commandParams: expect.objectContaining({
-          target_tab_id: 32,
-          options: expect.objectContaining({
-            target_tab_id: 32,
-            target_domain: "creator.xiaohongshu.com",
-            target_page: "creator_publish_tab",
-            requested_execution_mode: "live_write",
-            validation_action: "editor_input"
-          })
-        })
+        command: "xhs.search"
       })
     );
 
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: "run-xhs-issue-208-editor-input-autotab-001",
-        ok: true,
-        payload: {
-          summary: {
-            capability_result: {
-              outcome: "success",
-              action: "write"
-            },
-            gate_outcome: {
-              gate_decision: "allowed",
-              effective_execution_mode: "live_write"
-            },
-            consumer_gate_result: {
-              risk_state: "allowed",
-              issue_scope: "issue_208",
-              target_domain: "creator.xiaohongshu.com",
-              target_tab_id: 32,
-              target_page: "creator_publish_tab",
-              action_type: "write",
-              requested_execution_mode: "live_write",
-              effective_execution_mode: "live_write",
-              gate_decision: "allowed",
-              gate_reasons: [
-                "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION",
-                "WRITE_INTERACTION_APPROVED",
-                "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
-              ]
-            },
-            interaction_result: {
-              validation_action: "editor_input",
-              target_page: "creator.xiaohongshu.com/publish",
-              success_signals: [
-                "editor_focused",
-                "text_visible",
-                "text_persisted_after_blur"
-              ],
-              failure_signals: [],
-              minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
-              out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
-            }
+    const blocked = firstPort.postMessage.mock.calls
+      .map(
+        (call) =>
+          call[0] as {
+            id?: string;
+            status?: string;
+            payload?: {
+              consumer_gate_result?: {
+                target_tab_id?: number | null;
+                gate_decision?: string;
+                gate_reasons?: string[];
+              };
+            };
           }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
-
-    const approved = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      )
       .find((message) => message.id === "run-xhs-issue-208-editor-input-autotab-001");
-    expect(approved).toMatchObject({
+    expect(blocked).toMatchObject({
       id: "run-xhs-issue-208-editor-input-autotab-001",
-      status: "success",
+      status: "error",
       payload: {
-        summary: {
-          consumer_gate_result: {
-            target_tab_id: 32,
-            requested_execution_mode: "live_write",
-            effective_execution_mode: "live_write",
-            gate_decision: "allowed"
-          }
+        consumer_gate_result: {
+          target_tab_id: null,
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["TARGET_TAB_NOT_EXPLICIT"])
         }
       }
     });
@@ -2409,37 +2355,19 @@ describe("extension service worker recovery contract", () => {
 
   it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
       if (filter.currentWindow) {
         return [];
       }
       if (filter.url) {
-        return [{ id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }];
+        return [{ id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }];
       }
       return [];
     });
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
-    await primeTrustedFingerprintContext({
-      runtimeMessageListeners,
-      runId: "run-xhs-issue-208-editor-input-globaltab-001",
-      profile: "profile-a",
-      fingerprintContext: createFingerprintRuntimeContext({
-        live_allowed: true,
-        live_decision: "allowed",
-        allowed_execution_modes: [
-          "dry_run",
-          "recon",
-          "live_read_limited",
-          "live_read_high_risk",
-          "live_write"
-        ]
-      }),
-      tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
-    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-issue-208-editor-input-globaltab-001",
@@ -2449,7 +2377,7 @@ describe("extension service worker recovery contract", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-issue-208-editor-input-globaltab-001",
         command: "xhs.search",
-        command_params: createXhsEditorInputCommandParams({
+        command_params: createXhsCommandParams({
           target_tab_id: undefined
         }),
         cwd: "/workspace/WebEnvoy"

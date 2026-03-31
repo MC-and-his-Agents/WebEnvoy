@@ -185,10 +185,6 @@ const normalizeGateOptions = (
   requestedExecutionMode: XhsExecutionMode;
   options: JsonObject;
 } => {
-  const allowMissingTargetTabId =
-    options.issue_scope === "issue_208" &&
-    options.validation_action === "editor_input" &&
-    options.target_page === "creator_publish_tab";
   const targetDomain =
     typeof options.target_domain === "string" && options.target_domain.trim().length > 0
       ? options.target_domain.trim()
@@ -201,7 +197,7 @@ const normalizeGateOptions = (
     typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
       ? options.target_tab_id
       : null;
-  if (targetTabId === null && !allowMissingTargetTabId) {
+  if (targetTabId === null) {
     throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
   }
 

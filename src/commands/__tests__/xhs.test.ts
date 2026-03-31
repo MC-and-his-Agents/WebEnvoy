@@ -861,8 +861,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
 });
 
 describe("normalizeGateOptionsForContract", () => {
-  it("allows issue_208 editor_input to omit target_tab_id for background auto-resolve", () => {
-    expect(
+  it("keeps target_tab_id mandatory for issue_208 editor_input", () => {
+    try {
       normalizeGateOptionsForContract(
         {
           issue_scope: "issue_208",
@@ -872,20 +872,16 @@ describe("normalizeGateOptionsForContract", () => {
           validation_action: "editor_input"
         },
         "xhs.note.search.v1"
-      )
-    ).toMatchObject({
-      targetDomain: "creator.xiaohongshu.com",
-      targetTabId: null,
-      targetPage: "creator_publish_tab",
-      requestedExecutionMode: "live_write",
-      options: {
-        issue_scope: "issue_208",
-        target_domain: "creator.xiaohongshu.com",
-        target_page: "creator_publish_tab",
-        requested_execution_mode: "live_write",
-        validation_action: "editor_input"
-      }
-    });
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_TAB_ID_INVALID"
+        }
+      });
+    }
   });
 
   it("keeps target_tab_id mandatory outside issue_208 editor_input validation", () => {
