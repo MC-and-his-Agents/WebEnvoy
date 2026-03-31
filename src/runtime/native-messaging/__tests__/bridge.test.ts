@@ -468,6 +468,61 @@ describe("native messaging bridge", () => {
     expect(forwardCall).toBe(1);
   });
 
+  it("does not replay runtime.bootstrap after forward disconnect", async () => {
+    let forwardCall = 0;
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        throw new NativeMessagingTransportError(
+          "ERR_TRANSPORT_DISCONNECTED",
+          "forward disconnected"
+        );
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport
+    });
+
+    await expect(
+      bridge.runCommand({
+        runId: "run-no-bootstrap-replay-001",
+        profile: "profile-a",
+        cwd: "/tmp",
+        command: "runtime.bootstrap",
+        params: {
+          target_tab_id: 1362079329,
+          timeout_ms: 10
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+    expect(forwardCall).toBe(1);
+  });
+
   it("retries idempotent runCommand after recoverable forward disconnect", async () => {
     let forwardCall = 0;
     const transport = {
