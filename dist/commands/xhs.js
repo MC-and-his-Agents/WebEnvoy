@@ -115,7 +115,9 @@ const parseSearchInput = (input, abilityId) => {
     return normalized;
 };
 const normalizeGateOptions = (options, abilityId) => {
-    const allowMissingTargetTabId = options.issue_scope === "issue_208" && options.validation_action === "editor_input";
+    const allowMissingTargetTabId = options.issue_scope === "issue_208" &&
+        options.validation_action === "editor_input" &&
+        options.target_page === "creator_publish_tab";
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()
         : null;

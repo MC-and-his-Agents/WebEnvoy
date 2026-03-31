@@ -64,7 +64,8 @@ const completeIssue208ApprovalRecord = {
 
 const createEditorInputValidationResult = (text: string) => ({
   ok: true,
-  mode: "dom_editor_input_validation" as const,
+  mode: "controlled_editor_input_validation" as const,
+  attestation: "controlled_real_interaction" as const,
   editor_locator: "#editor",
   input_text: text,
   before_text: "",

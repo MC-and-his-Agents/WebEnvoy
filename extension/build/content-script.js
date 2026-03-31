@@ -1553,6 +1553,8 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
 const buildEditorInputEvidence = (result) => ({
     validation_action: "editor_input",
     target_page: "creator.xiaohongshu.com/publish",
+    validation_mode: result.mode,
+    validation_attestation: result.attestation,
     editor_locator: result.editor_locator,
     input_text: result.input_text,
     before_text: result.before_text,
@@ -1565,6 +1567,9 @@ const buildEditorInputEvidence = (result) => ({
     minimum_replay: result.minimum_replay,
     out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
 });
+const isTrustedEditorInputValidation = (result) => result.ok &&
+    result.mode === "controlled_editor_input_validation" &&
+    result.attestation === "controlled_real_interaction";
 const createAuditRecord = (context, gate, env) => {
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;
@@ -1830,6 +1835,7 @@ const executeXhsSearch = async (input, env) => {
             : {
                 ok: false,
                 mode: "dom_editor_input_validation",
+                attestation: "dom_self_certified",
                 editor_locator: null,
                 input_text: validationText,
                 before_text: "",
@@ -1841,7 +1847,7 @@ const executeXhsSearch = async (input, env) => {
                 failure_signals: ["dom_variant"],
                 minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"]
             };
-        if (!validationResult.ok) {
+        if (!isTrustedEditorInputValidation(validationResult)) {
             return createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
                 ability_id: input.abilityId,
                 stage: "execution",
@@ -2352,6 +2358,7 @@ const performEditorInputValidation = async (input) => {
         return {
             ok: false,
             mode: "dom_editor_input_validation",
+            attestation: "dom_self_certified",
             editor_locator: null,
             input_text: input.text,
             before_text: "",
@@ -2402,8 +2409,9 @@ const performEditorInputValidation = async (input) => {
             failureSignals.push("risk_prompt");
         }
         const attempt = {
-            ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
+            ok: false,
             mode: "dom_editor_input_validation",
+            attestation: "dom_self_certified",
             editor_locator: buildLocator(editor),
             input_text: input.text,
             before_text: beforeText,
@@ -2425,6 +2433,7 @@ const performEditorInputValidation = async (input) => {
     return (bestAttempt ?? {
         ok: false,
         mode: "dom_editor_input_validation",
+        attestation: "dom_self_certified",
         editor_locator: null,
         input_text: input.text,
         before_text: "",

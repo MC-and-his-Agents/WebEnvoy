@@ -186,7 +186,9 @@ const normalizeGateOptions = (
   options: JsonObject;
 } => {
   const allowMissingTargetTabId =
-    options.issue_scope === "issue_208" && options.validation_action === "editor_input";
+    options.issue_scope === "issue_208" &&
+    options.validation_action === "editor_input" &&
+    options.target_page === "creator_publish_tab";
   const targetDomain =
     typeof options.target_domain === "string" && options.target_domain.trim().length > 0
       ? options.target_domain.trim()

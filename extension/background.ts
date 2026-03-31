@@ -1920,6 +1920,7 @@ class ChromeBackgroundBridge {
 
     const bootstrapTargetTabId = await this.#resolveTargetTabId(request);
     let directInstallResult: Record<string, unknown> | null = null;
+    let bootstrapRequest = request;
     if (bootstrapTargetTabId !== null) {
       await this.#ensureMainWorldEventChannel(bootstrapTargetTabId, mainWorldSecret);
       directInstallResult = await this.#executeFingerprintInstallInMainWorld(
@@ -1931,61 +1932,22 @@ class ChromeBackgroundBridge {
           ...fingerprintRuntime,
           injection: directInstallResult
         };
-        const readyState = {
-          version,
-          runId,
-          runtimeContextId,
-          profile,
-          sessionId: requestSessionId,
-          status: "ready" as const,
-          serializedFingerprintRuntime,
-          updatedAt: new Date().toISOString()
-        };
-        this.#runtimeBootstrapStates.set(profile, readyState);
-        const sourceDomain =
-          (await this.#resolveAllowlistedTabDomain(bootstrapTargetTabId)) ?? null;
-        this.#upsertTrustedFingerprintContext(
-          profile,
-          requestSessionId,
-          attestedFingerprintRuntime,
-          {
-            sourceTabId: bootstrapTargetTabId,
-            sourceDomain,
-            runId,
-            runtimeContextId
+        bootstrapRequest = {
+          ...request,
+          params: {
+            ...request.params,
+            command_params: {
+              ...(asRecord(request.params.command_params) ?? {}),
+              fingerprint_runtime: attestedFingerprintRuntime
+            }
           }
-        );
-        this.#emit({
-          id: request.id,
-          status: "success",
-          summary: {
-            session_id: this.#sessionId,
-            run_id: requestRunId ?? request.id,
-            command: "runtime.bootstrap",
-            profile,
-            relay_path: "host>background>main-world>host"
-          },
-          payload: {
-            method: "runtime.bootstrap.ack",
-            result: {
-              version,
-              run_id: runId,
-              runtime_context_id: runtimeContextId,
-              profile,
-              status: "ready"
-            },
-            runtime_bootstrap_attested: true,
-            fingerprint_runtime: attestedFingerprintRuntime
-          },
-          error: null
-        });
-        return;
+        };
       }
     }
 
     // Keep the request pending until the execution surface returns an explicit bootstrap ack
     // or the normal forward timeout resolves it.
-    void this.#dispatchForward(request);
+    void this.#dispatchForward(bootstrapRequest);
     return;
   }
 

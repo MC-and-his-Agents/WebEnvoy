@@ -222,6 +222,7 @@ export const performEditorInputValidation = async (input) => {
         return {
             ok: false,
             mode: "dom_editor_input_validation",
+            attestation: "dom_self_certified",
             editor_locator: null,
             input_text: input.text,
             before_text: "",
@@ -272,8 +273,9 @@ export const performEditorInputValidation = async (input) => {
             failureSignals.push("risk_prompt");
         }
         const attempt = {
-            ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
+            ok: false,
             mode: "dom_editor_input_validation",
+            attestation: "dom_self_certified",
             editor_locator: buildLocator(editor),
             input_text: input.text,
             before_text: beforeText,
@@ -295,6 +297,7 @@ export const performEditorInputValidation = async (input) => {
     return (bestAttempt ?? {
         ok: false,
         mode: "dom_editor_input_validation",
+        attestation: "dom_self_certified",
         editor_locator: null,
         input_text: input.text,
         before_text: "",

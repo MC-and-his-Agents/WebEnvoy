@@ -1088,7 +1088,19 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        command: "xhs.search"
+      })
+    );
   });
 
   it("promotes pending bootstrap to ready through runtime.ping then runtime.readiness", async () => {

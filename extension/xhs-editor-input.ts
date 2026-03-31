@@ -4,7 +4,8 @@ export interface EditorInputValidationInput {
 
 export interface EditorInputValidationResult {
   ok: boolean;
-  mode: "dom_editor_input_validation";
+  mode: "dom_editor_input_validation" | "controlled_editor_input_validation";
+  attestation: "dom_self_certified" | "controlled_real_interaction";
   editor_locator: string | null;
   input_text: string;
   before_text: string;
@@ -277,6 +278,7 @@ export const performEditorInputValidation = async (
     return {
       ok: false,
       mode: "dom_editor_input_validation",
+      attestation: "dom_self_certified",
       editor_locator: null,
       input_text: input.text,
       before_text: "",
@@ -327,8 +329,9 @@ export const performEditorInputValidation = async (
     }
 
     const attempt: EditorInputValidationResult = {
-      ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
+      ok: false,
       mode: "dom_editor_input_validation",
+      attestation: "dom_self_certified",
       editor_locator: buildLocator(editor),
       input_text: input.text,
       before_text: beforeText,
@@ -353,6 +356,7 @@ export const performEditorInputValidation = async (
     bestAttempt ?? {
       ok: false,
       mode: "dom_editor_input_validation",
+      attestation: "dom_self_certified",
       editor_locator: null,
       input_text: input.text,
       before_text: "",

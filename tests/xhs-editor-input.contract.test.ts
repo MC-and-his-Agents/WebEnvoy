@@ -181,7 +181,9 @@ describe("xhs editor input contract", () => {
     const result = await performEditorInputValidation({ text: "测试发布文案" });
 
     expect(createButton.clickCount).toBe(1);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("dom_editor_input_validation");
+    expect(result.attestation).toBe("dom_self_certified");
     expect(result.editor_locator).toBe("textarea");
     expect(result.visible_text).toContain("测试发布文案");
     expect(result.success_signals).toEqual([
@@ -215,6 +217,7 @@ describe("xhs editor input contract", () => {
 
     expect(collectionButton.clickCount).toBe(0);
     expect(result.ok).toBe(false);
+    expect(result.attestation).toBe("dom_self_certified");
     expect(result.editor_locator).toBeNull();
     expect(result.failure_signals).toEqual(["editable_state_entry_missing", "dom_variant"]);
   });
@@ -244,6 +247,7 @@ describe("xhs editor input contract", () => {
     const result = await performEditorInputValidation({ text: "测试发布文案" });
 
     expect(result.ok).toBe(false);
+    expect(result.attestation).toBe("dom_self_certified");
     expect(result.editor_locator).toBe("div");
     expect(result.failure_signals).toContain("dom_variant");
     expect(result.success_signals).not.toContain("text_visible");
