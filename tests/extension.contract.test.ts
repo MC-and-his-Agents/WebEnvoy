@@ -63,6 +63,14 @@ describe("extension build contract", () => {
     await expect(import(contentScriptHandlerBuildPath)).resolves.toBeDefined();
   });
 
+  it("emits chrome-loadable classic content-script bundle without top-level esm imports", () => {
+    const contentScriptBuild = fs.readFileSync(contentScriptBuildPath, "utf8");
+    expect(contentScriptBuild).toContain("bootstrapContentScript");
+    expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
+    expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
+    expect(contentScriptBuild).not.toMatch(/^\s*import\s+/m);
+  });
+
   it("keeps background build artifact aligned with xhs gate contract markers", () => {
     const backgroundBuild = fs.readFileSync(backgroundBuildPath, "utf8");
     expect(backgroundBuild).toContain("live_read_limited");

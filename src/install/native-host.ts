@@ -218,6 +218,9 @@ export const resolveRepoOwnedNativeHostEntryPath = (): string =>
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 
+export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string =>
+  join(profileDir, "__webenvoy_native_bridge.sock");
+
 export const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);
 
@@ -263,21 +266,28 @@ const resolveDefaultManifestDirectory = (browserChannel: BrowserChannel): string
 const buildLauncherScript = (input: {
   command: "runtime.install" | "runtime.uninstall";
   hostCommand: string;
+  profileDir?: string;
 }): string => {
   const argv = tokenizeHostCommand(input.command, input.hostCommand)
     .map((token) => quoteShellArgForScript(token))
     .join(" ");
+  const profileDirExport =
+    typeof input.profileDir === "string" && input.profileDir.length > 0
+      ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.profileDir)}\n`
+      : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
-exec ${argv} "$@"
+${profileDirExport}exec ${argv} "$@"
 `;
 };
 
 const resolveControlledInstallRoots = (cwd: string, browserChannel: BrowserChannel) => {
   const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
+  const profileRoot = resolve(cwd, ".webenvoy", "profiles");
   return {
     channelRoot,
+    profileRoot,
     manifestRoot: join(channelRoot, "manifests"),
     launcherRoot: join(channelRoot, "bin")
   };
@@ -311,7 +321,11 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
       ? asAbsolutePath(input.cwd, input.manifestDir)
       : resolveDefaultManifestDirectory(input.browserChannel);
   const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-  if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
+  if (
+    hasCustomManifestDir &&
+    !isPathInside(roots.manifestRoot, manifestDir) &&
+    !isPathInside(roots.profileRoot, manifestDir)
+  ) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "manifest_dir",
       allowed_root: roots.manifestRoot,
@@ -325,7 +339,11 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
       ? asAbsolutePath(input.cwd, input.launcherPath)
       : join(manifestDir, `${input.nativeHostName}-launcher`);
   const hasCustomLauncherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0;
-  if (hasCustomLauncherPath && !isPathInside(roots.launcherRoot, launcherPath)) {
+  if (
+    hasCustomLauncherPath &&
+    !isPathInside(roots.launcherRoot, launcherPath) &&
+    !isPathInside(roots.profileRoot, launcherPath)
+  ) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "launcher_path",
       allowed_root: roots.launcherRoot,
@@ -398,7 +416,12 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     resolvedPaths.launcherPath,
     buildLauncherScript({
       command: "runtime.install",
-      hostCommand
+      hostCommand,
+      profileDir:
+        resolvedPaths.manifestDir.endsWith("/NativeMessagingHosts") ||
+        resolvedPaths.manifestDir.endsWith("\\NativeMessagingHosts")
+          ? dirname(resolvedPaths.manifestDir)
+          : undefined
     }),
     "utf8"
   );

@@ -4,6 +4,7 @@ import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions, isIssueScope } f
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
+import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
@@ -16,14 +17,17 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
-const resolveRuntimeBridge = () => {
+const resolveRuntimeBridge = (context) => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
             transport: createLoopbackNativeBridgeTransport()
         });
     }
+    const socketPath = context?.cwd && context.profile
+        ? resolveProfileScopedNativeBridgeSocketPath(join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile))
+        : null;
     return new NativeMessagingBridge({
-        transport: new NativeHostBridgeTransport()
+        transport: new NativeHostBridgeTransport(undefined, { socketPath })
     });
 };
 const profileRuntime = new ProfileRuntimeService();
@@ -116,7 +120,10 @@ const runtimePing = async (context) => {
                 requestedExecutionMode
             }))
             : context.params;
-        const bridge = resolveRuntimeBridge();
+        const bridge = resolveRuntimeBridge({
+            cwd: context.cwd,
+            profile: context.profile
+        });
         return await bridge.runtimePing({
             runId: context.run_id,
             profile: context.profile,

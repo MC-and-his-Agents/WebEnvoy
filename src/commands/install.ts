@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { CliError } from "../core/errors.js";
 import type { CommandDefinition, RuntimeContext } from "../core/types.js";
 import {
@@ -9,6 +11,9 @@ import {
   installNativeHost,
   uninstallNativeHost
 } from "../install/native-host.js";
+import { ProfileStore } from "../runtime/profile-store.js";
+
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -44,6 +49,14 @@ const resolveBrowserChannel = (
   return browserChannel;
 };
 
+const resolveProfileScopedManifestDir = (context: RuntimeContext): string | undefined => {
+  if (!context.profile) {
+    return undefined;
+  }
+  const store = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+  return join(store.getProfileDir(context.profile), "NativeMessagingHosts");
+};
+
 const runtimeInstall = async (context: RuntimeContext) => {
   const extensionId = asString(context.params.extension_id);
   if (!extensionId || !isValidExtensionId(extensionId)) {
@@ -52,7 +65,8 @@ const runtimeInstall = async (context: RuntimeContext) => {
 
   const nativeHostName = resolveNativeHostName("runtime.install", context.params.native_host_name);
   const browserChannel = resolveBrowserChannel("runtime.install", context.params.browser_channel);
-  const manifestDir = asString(context.params.manifest_dir) ?? undefined;
+  const manifestDir =
+    asString(context.params.manifest_dir) ?? resolveProfileScopedManifestDir(context);
   const launcherPath = asString(context.params.launcher_path) ?? undefined;
   const hostCommand = asString(context.params.host_command) ?? undefined;
 
@@ -70,7 +84,8 @@ const runtimeInstall = async (context: RuntimeContext) => {
 const runtimeUninstall = async (context: RuntimeContext) => {
   const nativeHostName = resolveNativeHostName("runtime.uninstall", context.params.native_host_name);
   const browserChannel = resolveBrowserChannel("runtime.uninstall", context.params.browser_channel);
-  const manifestDir = asString(context.params.manifest_dir) ?? undefined;
+  const manifestDir =
+    asString(context.params.manifest_dir) ?? resolveProfileScopedManifestDir(context);
   const launcherPath = asString(context.params.launcher_path) ?? undefined;
 
   return uninstallNativeHost({

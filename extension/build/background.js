@@ -1,9 +1,11 @@
+import { resolveMainWorldEventNamesForSecret } from "./content-script-handler.js";
 import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, getWriteActionMatrixDecisions, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
+const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
 const maxRecoveryQueuedForwards = 5;
 const readTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -77,6 +79,19 @@ const scoreXhsTab = (tab) => {
         return 1;
     }
     if (url.includes("/user/profile/")) {
+        return 2;
+    }
+    return 3;
+};
+const scoreXhsRuntimeSurfaceTab = (tab) => {
+    const url = typeof tab.url === "string" ? tab.url : "";
+    if (url.includes("creator.xiaohongshu.com/publish/publish")) {
+        return 0;
+    }
+    if (url.includes("creator.xiaohongshu.com/")) {
+        return 1;
+    }
+    if (url.includes("www.xiaohongshu.com/")) {
         return 2;
     }
     return 3;
@@ -252,6 +267,43 @@ const readXhsGateParam = (commandParams, key) => {
         return commandParams[key];
     }
     return asRecord(commandParams.options)?.[key];
+};
+const XHS_FORWARD_OPTION_KEYS = [
+    "issue_scope",
+    "target_domain",
+    "target_tab_id",
+    "target_page",
+    "action_type",
+    "requested_execution_mode",
+    "risk_state",
+    "validation_action",
+    "validation_text",
+    "approval_record",
+    "approval",
+    "timeout_ms",
+    "simulate_result",
+    "x_s_common"
+];
+const normalizeXhsSearchCommandParams = (commandParams, resolvedTargetTabId) => {
+    const normalized = {
+        ...commandParams
+    };
+    const optionParams = asRecord(commandParams.options);
+    const normalizedOptions = optionParams ? { ...optionParams } : {};
+    for (const key of XHS_FORWARD_OPTION_KEYS) {
+        if (!Object.prototype.hasOwnProperty.call(normalizedOptions, key) &&
+            Object.prototype.hasOwnProperty.call(commandParams, key)) {
+            normalizedOptions[key] = commandParams[key];
+        }
+    }
+    if (typeof resolvedTargetTabId === "number" && Number.isInteger(resolvedTargetTabId)) {
+        normalized.target_tab_id = resolvedTargetTabId;
+        normalizedOptions.target_tab_id = resolvedTargetTabId;
+    }
+    if (Object.keys(normalizedOptions).length > 0) {
+        normalized.options = normalizedOptions;
+    }
+    return normalized;
 };
 const resolveGateOnlyPageState = (gateInput, scopeContext) => {
     const targetPage = asNonEmptyString(gateInput.target_page);
@@ -1337,6 +1389,10 @@ class ChromeBackgroundBridge {
             serializedFingerprintRuntime,
             updatedAt: new Date().toISOString()
         });
+        const bootstrapTargetTabId = await this.#resolveTargetTabId(request);
+        if (bootstrapTargetTabId !== null) {
+            await this.#ensureMainWorldEventChannel(bootstrapTargetTabId, mainWorldSecret);
+        }
         // runtime.bootstrap must be delivered to the execution surface; host response stays pending
         // until explicit attestation is observed from content-script / MAIN world.
         void this.#dispatchForward(request, undefined, { suppressHostResponse: true });
@@ -1638,24 +1694,30 @@ class ChromeBackgroundBridge {
             return;
         }
         this.#invalidateTrustedFingerprintContextForCommand(request, command);
-        const commandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
+        const rawCommandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
             ? request.params.command_params
             : {};
+        let commandParams = command === "xhs.search"
+            ? normalizeXhsSearchCommandParams(rawCommandParams)
+            : rawCommandParams;
         const optionParams = asRecord(commandParams.options);
         const requestedExecutionMode = parseRequestedExecutionMode(Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
             ? commandParams.requested_execution_mode
             : optionParams?.requested_execution_mode);
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         const requestedFingerprintContext = resolveFingerprintContext(commandParams);
-        const trustedFingerprintContext = command === "xhs.search" && requestedLiveMode
-            ? this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext)
-            : null;
-        const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
+        let forwardFingerprintContext = command === "xhs.search" ? requestedFingerprintContext : requestedFingerprintContext;
         let tabId;
         let consumerGateResult;
         let gatePayload;
         if (command === "xhs.search") {
-            const gateResult = await this.#evaluateXhsTargetGate(request);
+            const gateResult = await this.#evaluateXhsTargetGate({
+                ...request,
+                params: {
+                    ...request.params,
+                    command_params: commandParams
+                }
+            });
             consumerGateResult = gateResult.consumerGateResult;
             gatePayload = gateResult.gatePayload;
             if (!gateResult.allowed || (!gateResult.targetTabId && !gateResult.gateOnly)) {
@@ -1692,6 +1754,17 @@ class ChromeBackgroundBridge {
                 return;
             }
             tabId = gateResult.targetTabId;
+            commandParams = normalizeXhsSearchCommandParams(commandParams, tabId);
+            forwardFingerprintContext =
+                requestedLiveMode
+                    ? this.#resolveValidatedTrustedFingerprintContext({
+                        ...request,
+                        params: {
+                            ...request.params,
+                            command_params: commandParams
+                        }
+                    }, requestedFingerprintContext) ?? requestedFingerprintContext
+                    : requestedFingerprintContext;
         }
         else {
             tabId = await this.#resolveTargetTabId(request);
@@ -1761,12 +1834,12 @@ class ChromeBackgroundBridge {
             fingerprintContext: forwardFingerprintContext
         };
         try {
-            await this.chromeApi.tabs.sendMessage(tabId, forward);
+            await this.#sendMessageWithContentScriptRecovery(tabId, forward);
         }
-        catch {
+        catch (error) {
             this.#failPending(request.id, {
                 code: "ERR_TRANSPORT_FORWARD_FAILED",
-                message: "content script dispatch failed"
+                message: error instanceof Error ? error.message : "content script dispatch failed"
             });
         }
     }
@@ -1857,7 +1930,7 @@ class ChromeBackgroundBridge {
         return true;
     }
     async #evaluateXhsTargetGate(request) {
-        const commandParams = asRecord(request.params.command_params) ?? {};
+        const commandParams = normalizeXhsSearchCommandParams(asRecord(request.params.command_params) ?? {});
         const abilityParams = asRecord(commandParams.ability);
         const optionParams = asRecord(commandParams.options);
         const readGateParam = (key) => {
@@ -1880,7 +1953,7 @@ class ChromeBackgroundBridge {
         let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
         let fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
         const targetDomain = asNonEmptyString(rawTargetDomain);
-        const targetTabId = asInteger(rawTargetTabId);
+        let targetTabId = asInteger(rawTargetTabId);
         const targetPage = asNonEmptyString(rawTargetPage);
         const issueScope = resolveIssueScope(rawIssueScope);
         const riskState = resolveRiskState(rawRiskState);
@@ -1927,6 +2000,15 @@ class ChromeBackgroundBridge {
         }
         else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
             pushReason("TARGET_DOMAIN_OUT_OF_SCOPE");
+        }
+        if (targetTabId === null) {
+            targetTabId = await this.#resolveTargetTabId({
+                ...request,
+                params: {
+                    ...request.params,
+                    command_params: commandParams
+                }
+            });
         }
         if (targetTabId === null) {
             pushReason("TARGET_TAB_NOT_EXPLICIT");
@@ -2048,7 +2130,14 @@ class ChromeBackgroundBridge {
             (!issue208WriteGateOnly || writeGateOnlyEligible) &&
             gateReasons.length === 0;
         if (shouldEvaluateTrustedFingerprintGate) {
-            const trustedFingerprintContext = this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext);
+            const trustedGateRequest = {
+                ...request,
+                params: {
+                    ...request.params,
+                    command_params: normalizeXhsSearchCommandParams(commandParams, targetTabId)
+                }
+            };
+            const trustedFingerprintContext = this.#resolveValidatedTrustedFingerprintContext(trustedGateRequest, requestedFingerprintContext);
             fingerprintExecution = trustedFingerprintContext?.execution ?? null;
             fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
             if (fingerprintExecution === null) {
@@ -2418,6 +2507,10 @@ class ChromeBackgroundBridge {
         const commandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
             ? request.params.command_params
             : {};
+        if (typeof commandParams.target_tab_id === "number" &&
+            Number.isInteger(commandParams.target_tab_id)) {
+            return commandParams.target_tab_id;
+        }
         const options = typeof commandParams.options === "object" && commandParams.options !== null
             ? commandParams.options
             : {};
@@ -2425,12 +2518,36 @@ class ChromeBackgroundBridge {
             return options.target_tab_id;
         }
         const command = String(request.params.command ?? "");
+        if (command === "runtime.ping" || command === "runtime.bootstrap") {
+            const runtimeSurfaceTabs = await this.chromeApi.tabs.query({
+                url: ["*://creator.xiaohongshu.com/*", "*://www.xiaohongshu.com/*"]
+            });
+            const ranked = runtimeSurfaceTabs
+                .filter((tab) => typeof tab.id === "number")
+                .sort((left, right) => {
+                const scoreDiff = scoreXhsRuntimeSurfaceTab(left) - scoreXhsRuntimeSurfaceTab(right);
+                if (scoreDiff !== 0) {
+                    return scoreDiff;
+                }
+                if (left.active === right.active) {
+                    return 0;
+                }
+                return left.active ? -1 : 1;
+            });
+            const candidate = ranked[0];
+            return typeof candidate?.id === "number" ? candidate.id : null;
+        }
         if (command === "xhs.search") {
             const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
-            const xhsTabs = await this.chromeApi.tabs.query({
+            const currentWindowTabs = await this.chromeApi.tabs.query({
                 currentWindow: true,
                 url: xhsUrlPatterns
             });
+            const xhsTabs = currentWindowTabs.length > 0
+                ? currentWindowTabs
+                : await this.chromeApi.tabs.query({
+                    url: xhsUrlPatterns
+                });
             const ranked = xhsTabs
                 .filter((tab) => typeof tab.id === "number")
                 .sort((left, right) => {
@@ -2475,6 +2592,127 @@ class ChromeBackgroundBridge {
     #failAllPending(error) {
         for (const [id] of this.#pending.entries()) {
             this.#failPending(id, error);
+        }
+    }
+    async #attachMainWorldEventChannel(tabId, secret) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            return false;
+        }
+        const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(secret);
+        const results = await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: (hookKey, requestEventName, resultEventName) => {
+                const host = window;
+                const hook = typeof hookKey === "string" ? host[hookKey] : undefined;
+                if (typeof hook !== "function") {
+                    return false;
+                }
+                return hook(requestEventName, resultEventName) === true;
+            },
+            args: [MAIN_WORLD_ATTACH_HOOK_KEY, requestEvent, resultEvent]
+        });
+        return results.some((result) => result?.result === true);
+    }
+    async #ensureMainWorldBridgeInjected(tabId) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            return;
+        }
+        await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            files: ["build/main-world-bridge.js"]
+        });
+    }
+    async #ensureMainWorldBridgeInjectedViaDom(tabId) {
+        if (!this.chromeApi.scripting?.executeScript || !this.chromeApi.runtime?.getURL) {
+            return false;
+        }
+        const bridgeUrl = this.chromeApi.runtime.getURL("build/main-world-bridge.js");
+        const results = await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: async (url) => {
+                if (typeof window
+                    .__webenvoy_attachMainWorldEventChannel__ === "function") {
+                    return true;
+                }
+                if (typeof document === "undefined" || typeof url !== "string" || url.length === 0) {
+                    return false;
+                }
+                const existing = document.querySelector('script[data-webenvoy-main-world-bridge="1"]');
+                if (existing) {
+                    await new Promise((resolve) => setTimeout(resolve, 0));
+                    return (typeof window
+                        .__webenvoy_attachMainWorldEventChannel__ ===
+                        "function");
+                }
+                const script = document.createElement("script");
+                script.setAttribute("data-webenvoy-main-world-bridge", "1");
+                script.src = url;
+                const loaded = await new Promise((resolve) => {
+                    script.addEventListener("load", () => resolve(true), { once: true });
+                    script.addEventListener("error", () => resolve(false), { once: true });
+                    (document.documentElement ?? document.head ?? document.body)?.appendChild(script);
+                });
+                return (loaded &&
+                    typeof window
+                        .__webenvoy_attachMainWorldEventChannel__ ===
+                        "function");
+            },
+            args: [bridgeUrl]
+        });
+        return results.some((result) => result?.result === true);
+    }
+    async #ensureMainWorldEventChannel(tabId, secret) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            return;
+        }
+        try {
+            const attached = await this.#attachMainWorldEventChannel(tabId, secret);
+            if (attached) {
+                return;
+            }
+            await this.#ensureMainWorldBridgeInjected(tabId);
+            const attachedAfterFileInjection = await this.#attachMainWorldEventChannel(tabId, secret);
+            if (attachedAfterFileInjection) {
+                return;
+            }
+            const domInjected = await this.#ensureMainWorldBridgeInjectedViaDom(tabId);
+            if (!domInjected) {
+                return;
+            }
+            await this.#attachMainWorldEventChannel(tabId, secret);
+        }
+        catch {
+            // Keep runtime.bootstrap compatible with staged injection fallback.
+        }
+    }
+    async #ensureContentScriptInjected(tabId) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            return;
+        }
+        await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "ISOLATED",
+            files: ["build/content-script.js"]
+        });
+    }
+    async #sendMessageWithContentScriptRecovery(tabId, forward) {
+        try {
+            await this.chromeApi.tabs.sendMessage(tabId, forward);
+            return;
+        }
+        catch (initialError) {
+            try {
+                await this.#ensureContentScriptInjected(tabId);
+            }
+            catch (recoveryError) {
+                const initialMessage = initialError instanceof Error ? initialError.message : String(initialError);
+                const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+                throw new Error(`content script recovery failed: ${recoveryMessage}; initial dispatch error: ${initialMessage}`);
+            }
+            await this.chromeApi.tabs.sendMessage(tabId, forward);
         }
     }
     #emit(message) {

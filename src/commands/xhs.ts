@@ -13,6 +13,7 @@ import { ProfileStore } from "../runtime/profile-store.js";
 import {
   prepareOfficialChromeRuntime
 } from "../runtime/official-chrome-runtime.js";
+import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 
@@ -66,15 +67,21 @@ const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_NOT_READY";
 
 
-const resolveRuntimeBridge = (): NativeMessagingBridge => {
+const resolveRuntimeBridge = (context?: { cwd: string; profile?: string | null }): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
   }
+  const socketPath =
+    context?.cwd && context.profile
+      ? resolveProfileScopedNativeBridgeSocketPath(
+          join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile)
+        )
+      : null;
 
   return new NativeMessagingBridge({
-    transport: new NativeHostBridgeTransport()
+    transport: new NativeHostBridgeTransport(undefined, { socketPath })
   });
 };
 
@@ -135,22 +142,7 @@ const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
   };
 };
 
-const parseSearchInput = (
-  input: JsonObject,
-  abilityId: string,
-  options: JsonObject,
-  abilityAction: AbilityAction
-): JsonObject => {
-  const issue208EditorInputValidation =
-    abilityAction === "write" &&
-    options.issue_scope === "issue_208" &&
-    options.action_type === "write" &&
-    options.requested_execution_mode === "live_write" &&
-    options.validation_action === "editor_input";
-  if (issue208EditorInputValidation) {
-    return {};
-  }
-
+const parseSearchInput = (input: JsonObject, abilityId: string): JsonObject => {
   const query =
     typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
   if (!query) {
@@ -384,7 +376,10 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
     });
   }
 
-  const bridge = resolveRuntimeBridge();
+  const bridge = resolveRuntimeBridge({
+    cwd: context.cwd,
+    profile: context.profile
+  });
   const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
   const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
@@ -407,12 +402,7 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
-        input: parseSearchInput(
-          envelope.input,
-          envelope.ability.id,
-          gate.options,
-          envelope.ability.action
-        ),
+        input: parseSearchInput(envelope.input, envelope.ability.id),
         options: gate.options
       },
       fingerprintContext

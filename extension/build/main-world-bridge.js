@@ -1,6 +1,7 @@
 "use strict";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
@@ -314,6 +315,22 @@ const handleRequest = async (request) => {
     });
 };
 const isValidChannelEventName = (value, prefix) => value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
+const attachMainWorldEventChannelIfValid = (requestEvent, resultEvent) => {
+    if (typeof requestEvent !== "string" || typeof resultEvent !== "string") {
+        return false;
+    }
+    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+        return false;
+    }
+    if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+        return false;
+    }
+    attachMainWorldEventChannel({
+        requestEvent,
+        resultEvent
+    });
+    return true;
+};
 const resolveExpectedMainWorldEventChannel = () => {
     const requestEvent = typeof EXPECTED_MAIN_WORLD_REQUEST_EVENT === "string"
         ? EXPECTED_MAIN_WORLD_REQUEST_EVENT
@@ -341,7 +358,11 @@ const attachMainWorldEventChannel = (channel) => {
             activeMainWorldEventChannel.resultEvent === channel.resultEvent) {
             return;
         }
-        return;
+        if (activeMainWorldRequestListener) {
+            window.removeEventListener(activeMainWorldEventChannel.requestEvent, activeMainWorldRequestListener);
+        }
+        activeMainWorldEventChannel = null;
+        activeMainWorldRequestListener = null;
     }
     activeMainWorldEventChannel = channel;
     activeMainWorldRequestListener = (event) => {
@@ -362,6 +383,12 @@ const attachMainWorldEventChannel = (channel) => {
     };
     window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
 };
+Object.defineProperty(mainWindow, MAIN_WORLD_ATTACH_HOOK_KEY, {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: (requestEvent, resultEvent) => attachMainWorldEventChannelIfValid(requestEvent, resultEvent)
+});
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);

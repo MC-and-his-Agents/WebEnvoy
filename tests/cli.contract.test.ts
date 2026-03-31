@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -3332,6 +3332,55 @@ process.stdin.on("data", (chunk) => {
     const launcherRaw = await readFile(launcherPath, "utf8");
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
+  });
+
+  it("installs native host into the custom profile NativeMessagingHosts directory when --profile is provided", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.install",
+        "--profile",
+        "xhs_208_probe",
+        "--run-id",
+        "run-contract-install-profile-scoped-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    const manifestDir = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "profiles",
+      "xhs_208_probe",
+      "NativeMessagingHosts"
+    );
+    const manifestPath = await realpath(path.join(manifestDir, "com.webenvoy.host.json"));
+    const launcherPath = await realpath(path.join(manifestDir, "com.webenvoy.host-launcher"));
+
+    expect(body).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        manifest_path: manifestPath,
+        launcher_path: launcherPath
+      }
+    });
+
+    const manifestRaw = await readFile(manifestPath, "utf8");
+    const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "com.webenvoy.host",
+      path: launcherPath,
+      allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
   });
 
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {

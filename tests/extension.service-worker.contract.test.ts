@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { startChromeBackgroundBridge } from "../extension/background.js";
+import { resolveMainWorldEventNamesForSecret } from "../extension/content-script-handler.js";
 
 const createMockPort = () => {
   const onMessageListeners: Array<(message: Record<string, unknown>) => void> = [];
@@ -45,6 +46,7 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
         connectIndex += 1;
         return current.port;
       }),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension/${path}`),
       onMessage: {
         addListener: (
           listener: (
@@ -99,6 +101,21 @@ const respondHandshake = (
       state: "ready"
     },
     error: null
+  });
+};
+
+const waitForBridgeTurn = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const waitForPostedMessage = async (
+  spy: ReturnType<typeof vi.fn>,
+  expected: Record<string, unknown>
+): Promise<void> => {
+  await vi.waitFor(() => {
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining(expected));
   });
 };
 
@@ -289,7 +306,8 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort, {
       protocol: "webenvoy.native-bridge.v0"
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-after-bad-open-001",
@@ -304,7 +322,8 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 50
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     const retryHandshakeCall = firstPort.postMessage.mock.calls.findLast(
       (call) => (call[0] as { method?: string }).method === "bridge.open"
@@ -332,7 +351,8 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 50
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -346,6 +366,7 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
     respondHandshake(firstPort);
+    await waitForBridgeTurn();
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
@@ -364,6 +385,8 @@ describe("extension service worker recovery contract", () => {
 
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({
@@ -372,13 +395,56 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("injects the classic content-script bundle and retries when target tab has no receiver", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
+      .mockResolvedValueOnce(undefined);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-retry-inject-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-retry-inject-001",
+        command: "runtime.ping",
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "ISOLATED",
+      files: ["build/content-script.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(2);
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-retry-inject-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_TRANSPORT_TIMEOUT"
+      })
+    });
+  });
+
   it("keeps runtime.readiness pending until bootstrap receives execution-surface trust", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
+    await Promise.resolve();
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
@@ -406,15 +472,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-001",
@@ -450,6 +514,17 @@ describe("extension service worker recovery contract", () => {
       expect.objectContaining({
         id: "run-bootstrap-001",
         command: "runtime.bootstrap"
+      })
+    );
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        args: [
+          "__webenvoy_attachMainWorldEventChannel__",
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-001").requestEvent,
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-001").resultEvent
+        ]
       })
     );
 
@@ -494,6 +569,139 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("pins runtime.bootstrap to creator publish tab instead of a generic active xhs tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+      { id: 52, active: false, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image" }
+    ]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-tab-pick-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-tab-pick-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-tab-pick-001",
+          runtime_context_id: "ctx-bootstrap-tab-pick-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-tab-pick-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 52 },
+        world: "MAIN"
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      52,
+      expect.objectContaining({
+        id: "run-bootstrap-tab-pick-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("injects main-world bridge and retries attach when runtime.bootstrap hook is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    executeScript
+      .mockResolvedValueOnce([{ result: false }])
+      .mockResolvedValueOnce([{ result: undefined }])
+      .mockResolvedValueOnce([{ result: true }]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-main-world-recover-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-main-world-recover-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-main-world-recover-001",
+          runtime_context_id: "ctx-bootstrap-main-world-recover-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-main-world-recover-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        args: [
+          "__webenvoy_attachMainWorldEventChannel__",
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
+            .requestEvent,
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
+        ]
+      })
+    );
+    expect(executeScript).toHaveBeenNthCalledWith(2, {
+      target: { tabId: 11 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(executeScript).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        args: [
+          "__webenvoy_attachMainWorldEventChannel__",
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
+            .requestEvent,
+          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
+        ]
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-bootstrap-main-world-recover-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("promotes pending runtime.bootstrap to ready from content-script startup trust payload shape", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -528,15 +736,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-startup-trust-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-startup-trust-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     runtimeMessageListeners[0]?.(
       {
@@ -642,15 +848,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-generic-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-generic-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     await primeTrustedFingerprintContext({
       runtimeMessageListeners,
@@ -769,15 +973,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-ping-promote-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-ping-promote-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-promote-001",
@@ -892,15 +1094,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-main-world-fail-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-main-world-fail-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-main-world-fail-001",
@@ -1011,15 +1211,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-missing-patch-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-missing-patch-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-missing-patch-001",
@@ -1165,15 +1363,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-new-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-new-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
   });
 
   it("keeps new runtime.bootstrap pending when a stale trusted context arrives later", async () => {
@@ -1844,6 +2040,8 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as {
@@ -1880,22 +2078,43 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("blocks xhs.search when target_tab_id is missing", async () => {
+  it("auto-resolves missing target_tab_id for issue_208 editor_input forward", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-autotab-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+    });
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-missing-tab-001",
+      id: "run-xhs-issue-208-editor-input-autotab-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-missing-tab-001",
+        run_id: "run-xhs-issue-208-editor-input-autotab-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createXhsEditorInputCommandParams({
           target_tab_id: undefined
         }),
         cwd: "/workspace/WebEnvoy"
@@ -1903,32 +2122,160 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const blocked = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as {
-        id?: string;
-        status?: string;
-        payload?: {
-          consumer_gate_result?: {
-            requested_execution_mode?: string;
-            effective_execution_mode?: string;
-            gate_reasons?: string[];
-          };
-        };
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-issue-208-editor-input-autotab-001",
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          target_tab_id: 32,
+          options: expect.objectContaining({
+            target_tab_id: 32,
+            target_domain: "creator.xiaohongshu.com",
+            target_page: "creator_publish_tab",
+            requested_execution_mode: "live_write",
+            validation_action: "editor_input"
+          })
+        })
       })
-      .find((message) => message.id === "run-xhs-missing-tab-001");
-    expect(blocked).toMatchObject({
-      id: "run-xhs-missing-tab-001",
-      status: "error",
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-issue-208-editor-input-autotab-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "write"
+            },
+            gate_outcome: {
+              gate_decision: "allowed",
+              effective_execution_mode: "live_write"
+            },
+            consumer_gate_result: {
+              risk_state: "allowed",
+              issue_scope: "issue_208",
+              target_domain: "creator.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "creator_publish_tab",
+              action_type: "write",
+              requested_execution_mode: "live_write",
+              effective_execution_mode: "live_write",
+              gate_decision: "allowed",
+              gate_reasons: [
+                "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION",
+                "WRITE_INTERACTION_APPROVED",
+                "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+              ]
+            },
+            interaction_result: {
+              validation_action: "editor_input",
+              target_page: "creator.xiaohongshu.com/publish",
+              success_signals: [
+                "editor_focused",
+                "text_visible",
+                "text_persisted_after_blur"
+              ],
+              failure_signals: [],
+              minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+              out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const approved = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-autotab-001");
+    expect(approved).toMatchObject({
+      id: "run-xhs-issue-208-editor-input-autotab-001",
+      status: "success",
       payload: {
-        consumer_gate_result: {
-          requested_execution_mode: "dry_run",
-          effective_execution_mode: "dry_run",
-          gate_reasons: ["TARGET_TAB_NOT_EXPLICIT"]
+        summary: {
+          consumer_gate_result: {
+            target_tab_id: 32,
+            requested_execution_mode: "live_write",
+            effective_execution_mode: "live_write",
+            gate_decision: "allowed"
+          }
         }
       }
     });
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+      if (filter.currentWindow) {
+        return [];
+      }
+      if (filter.url) {
+        return [{ id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }];
+      }
+      return [];
+    });
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-globaltab-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-globaltab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-globaltab-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          target_tab_id: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-issue-208-editor-input-globaltab-001",
+        command: "xhs.search"
+      })
+    );
   });
 
   it("blocks xhs.search when requested_execution_mode is missing", async () => {

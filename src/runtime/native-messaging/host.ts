@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { connect as connectSocket, type Socket } from "node:net";
+import { access } from "node:fs/promises";
 
 import {
   DEFAULT_TRANSPORT_TIMEOUT_MS,
@@ -7,6 +9,7 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
+import { resolveRepoOwnedNativeHostCommand } from "../../install/native-host.js";
 
 type TransportCodedError = Error & {
   transportCode?:
@@ -127,13 +130,18 @@ interface PendingMessage {
 export class NativeHostBridgeTransport implements NativeBridgeTransport {
   readonly #hostCommand: string | null;
   readonly #hostSpec: { file: string; args: string[] } | null;
+  readonly #socketPath: string | null;
   #child: ChildProcessWithoutNullStreams | null = null;
   #stdoutBuffer = Buffer.alloc(0);
   #pending = new Map<string, PendingMessage>();
 
-  constructor(hostCommand: string | null = readNativeHostCommand()) {
+  constructor(
+    hostCommand: string | null = readNativeHostCommand() ?? resolveRepoOwnedNativeHostCommand(),
+    options?: { socketPath?: string | null }
+  ) {
     this.#hostCommand = hostCommand;
     this.#hostSpec = parseNativeHostCommand(hostCommand);
+    this.#socketPath = options?.socketPath ?? null;
   }
 
   open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
@@ -151,6 +159,27 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     ensureBridgeRequestEnvelope(request);
 
+    if (this.#socketPath) {
+      return this.#sendViaSocket(phase, request).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        const socketUnavailable =
+          /socket is unavailable/i.test(message) ||
+          /ENOENT/i.test(message) ||
+          /ECONNREFUSED/i.test(message);
+        if (socketUnavailable && this.#hostCommand && this.#hostSpec) {
+          return this.#sendViaSpawn(phase, request);
+        }
+        throw error;
+      });
+    }
+
+    return this.#sendViaSpawn(phase, request);
+  }
+
+  #sendViaSpawn(
+    phase: TransportPhase,
+    request: BridgeRequestEnvelope
+  ): Promise<BridgeResponseEnvelope> {
     if (!this.#hostCommand || !this.#hostSpec) {
       const code =
         phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
@@ -197,6 +226,87 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
           phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
         reject(asTransportError(error, code));
       }
+    });
+  }
+
+  async #sendViaSocket(
+    phase: TransportPhase,
+    request: BridgeRequestEnvelope
+  ): Promise<BridgeResponseEnvelope> {
+    const socketPath = this.#socketPath;
+    if (!socketPath) {
+      throw withTransportCode(new Error("native bridge socket is not configured"), "ERR_TRANSPORT_DISCONNECTED");
+    }
+
+    try {
+      await access(socketPath);
+    } catch {
+      const code =
+        phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
+      throw withTransportCode(new Error("native bridge socket is unavailable"), code);
+    }
+
+    return await new Promise((resolve, reject) => {
+      const socket: Socket = connectSocket(socketPath);
+      let buffer = Buffer.alloc(0);
+      let settled = false;
+      const timeoutMs = request.timeout_ms ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+      const timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        socket.destroy();
+        reject(withTransportCode(new Error("native bridge socket timeout"), "ERR_TRANSPORT_TIMEOUT"));
+      }, timeoutMs);
+
+      const settleReject = (error: Error, code: TransportCodedError["transportCode"]) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        reject(withTransportCode(error, code));
+      };
+
+      socket.once("error", (error) => {
+        settleReject(
+          error instanceof Error ? error : new Error(String(error)),
+          phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED"
+        );
+      });
+
+      socket.on("data", (chunk: Buffer) => {
+        if (settled) {
+          return;
+        }
+        buffer = Buffer.concat([buffer, chunk]);
+        if (buffer.length < 4) {
+          return;
+        }
+        const frameLength = buffer.readUInt32LE(0);
+        const frameEnd = 4 + frameLength;
+        if (buffer.length < frameEnd) {
+          return;
+        }
+        try {
+          const response = JSON.parse(buffer.subarray(4, frameEnd).toString("utf8")) as BridgeResponseEnvelope;
+          settled = true;
+          clearTimeout(timeout);
+          socket.end();
+          resolve(response);
+        } catch (error) {
+          settleReject(asTransportError(error, "ERR_TRANSPORT_FORWARD_FAILED"), "ERR_TRANSPORT_FORWARD_FAILED");
+        }
+      });
+
+      socket.once("connect", () => {
+        try {
+          socket.write(encodeNativeMessage(JSON.stringify(request)));
+        } catch (error) {
+          settleReject(asTransportError(error, "ERR_TRANSPORT_DISCONNECTED"), "ERR_TRANSPORT_DISCONNECTED");
+        }
+      });
     });
   }
 

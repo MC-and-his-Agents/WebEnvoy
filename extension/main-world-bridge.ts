@@ -24,6 +24,7 @@ type MainWorldEventChannel = {
 
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -412,6 +413,23 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
 const isValidChannelEventName = (value: string, prefix: string): boolean =>
   value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
 
+const attachMainWorldEventChannelIfValid = (requestEvent: unknown, resultEvent: unknown): boolean => {
+  if (typeof requestEvent !== "string" || typeof resultEvent !== "string") {
+    return false;
+  }
+  if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+    return false;
+  }
+  if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+    return false;
+  }
+  attachMainWorldEventChannel({
+    requestEvent,
+    resultEvent
+  });
+  return true;
+};
+
 const resolveExpectedMainWorldEventChannel = (): MainWorldEventChannel | null => {
   const requestEvent =
     typeof EXPECTED_MAIN_WORLD_REQUEST_EVENT === "string"
@@ -444,7 +462,14 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
     ) {
       return;
     }
-    return;
+    if (activeMainWorldRequestListener) {
+      window.removeEventListener(
+        activeMainWorldEventChannel.requestEvent,
+        activeMainWorldRequestListener as EventListener
+      );
+    }
+    activeMainWorldEventChannel = null;
+    activeMainWorldRequestListener = null;
   }
   activeMainWorldEventChannel = channel;
   activeMainWorldRequestListener = (event: Event) => {
@@ -465,6 +490,14 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   };
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
+
+Object.defineProperty(mainWindow, MAIN_WORLD_ATTACH_HOOK_KEY, {
+  configurable: true,
+  enumerable: false,
+  writable: false,
+  value: (requestEvent: unknown, resultEvent: unknown) =>
+    attachMainWorldEventChannelIfValid(requestEvent, resultEvent)
+});
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {

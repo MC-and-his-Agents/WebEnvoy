@@ -6,6 +6,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
+import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
@@ -30,14 +31,17 @@ const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILE
     code === "ERR_TRANSPORT_DISCONNECTED" ||
     code === "ERR_TRANSPORT_FORWARD_FAILED" ||
     code === "ERR_TRANSPORT_NOT_READY";
-const resolveRuntimeBridge = () => {
+const resolveRuntimeBridge = (context) => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
             transport: createLoopbackNativeBridgeTransport()
         });
     }
+    const socketPath = context?.cwd && context.profile
+        ? resolveProfileScopedNativeBridgeSocketPath(join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile))
+        : null;
     return new NativeMessagingBridge({
-        transport: new NativeHostBridgeTransport()
+        transport: new NativeHostBridgeTransport(undefined, { socketPath })
     });
 };
 const invalidAbilityInput = (reason, abilityId = "unknown") => new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
@@ -84,15 +88,7 @@ const parseAbilityEnvelope = (params) => {
         options
     };
 };
-const parseSearchInput = (input, abilityId, options, abilityAction) => {
-    const issue208EditorInputValidation = abilityAction === "write" &&
-        options.issue_scope === "issue_208" &&
-        options.action_type === "write" &&
-        options.requested_execution_mode === "live_write" &&
-        options.validation_action === "editor_input";
-    if (issue208EditorInputValidation) {
-        return {};
-    }
+const parseSearchInput = (input, abilityId) => {
     const query = typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
     if (!query) {
         throw invalidAbilityInput("QUERY_MISSING", abilityId);
@@ -270,7 +266,10 @@ const xhsSearch = async (context) => {
             }
         });
     }
-    const bridge = resolveRuntimeBridge();
+    const bridge = resolveRuntimeBridge({
+        cwd: context.cwd,
+        profile: context.profile
+    });
     const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
@@ -284,7 +283,7 @@ const xhsSearch = async (context) => {
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
-            input: parseSearchInput(envelope.input, envelope.ability.id, gate.options, envelope.ability.action),
+            input: parseSearchInput(envelope.input, envelope.ability.id),
             options: gate.options
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({

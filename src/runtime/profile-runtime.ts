@@ -42,6 +42,7 @@ import {
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
+import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 import {
   applyProfileProxyBinding,
   beginLoginSession,
@@ -351,14 +352,18 @@ const buildRuntimeBootstrapEnvelope = (input: {
   main_world_secret: input.mainWorldSecret
 });
 
-const resolveDefaultRuntimeBridge = (): RuntimeBridgeLike => {
+const resolveDefaultRuntimeBridge = (input?: { cwd: string; profile: string }): RuntimeBridgeLike => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
   }
+  const socketPath =
+    input?.profile && input.cwd
+      ? resolveProfileScopedNativeBridgeSocketPath(join(input.cwd, ...PROFILE_ROOT_SEGMENTS, input.profile))
+      : null;
   return new NativeMessagingBridge({
-    transport: new NativeHostBridgeTransport()
+    transport: new NativeHostBridgeTransport(undefined, { socketPath })
   });
 };
 
@@ -575,14 +580,14 @@ export class ProfileRuntimeService {
   readonly #lockFileAdapter: LockFileAdapter;
   readonly #isProcessAlive: (pid: number) => boolean;
   readonly #browserLauncher: BrowserLauncherLike;
-  readonly #bridgeFactory: () => RuntimeBridgeLike;
+  readonly #bridgeFactory: (input?: { cwd: string; profile: string }) => RuntimeBridgeLike;
 
   constructor(options?: {
     storeFactory?: (cwd: string) => ProfileStoreLike;
     lockFileAdapter?: LockFileAdapter;
     isProcessAlive?: (pid: number) => boolean;
     browserLauncher?: BrowserLauncherLike;
-    bridgeFactory?: () => RuntimeBridgeLike;
+    bridgeFactory?: (input?: { cwd: string; profile: string }) => RuntimeBridgeLike;
   }) {
     this.#storeFactory =
       options?.storeFactory ??
@@ -607,7 +612,7 @@ export class ProfileRuntimeService {
       launch: launchBrowser,
       shutdown: shutdownBrowserSession
     };
-    this.#bridgeFactory = options?.bridgeFactory ?? (() => resolveDefaultRuntimeBridge());
+    this.#bridgeFactory = options?.bridgeFactory ?? ((input) => resolveDefaultRuntimeBridge(input));
   }
 
   async start(input: RuntimeActionInput): Promise<JsonObject> {
@@ -1537,7 +1542,10 @@ export class ProfileRuntimeService {
     profile: string;
     fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
   }): Promise<RuntimeReadinessSnapshot> {
-    const bridge = this.#bridgeFactory();
+    const bridge = this.#bridgeFactory({
+      cwd: input.runtimeInput.cwd,
+      profile: input.profile
+    });
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.profile,
       runId: input.runtimeInput.runId,
@@ -1674,7 +1682,10 @@ export class ProfileRuntimeService {
       };
     }
 
-    const bridge = this.#bridgeFactory();
+    const bridge = this.#bridgeFactory({
+      cwd: input.runtimeInput.cwd,
+      profile: input.runtimeInput.profile
+    });
     const runtimeContextId = buildRuntimeBootstrapContextId(
       input.runtimeInput.profile,
       input.runtimeInput.runId
