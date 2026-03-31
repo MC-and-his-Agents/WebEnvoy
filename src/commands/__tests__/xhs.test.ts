@@ -927,4 +927,28 @@ describe("normalizeGateOptionsForContract", () => {
       });
     }
   });
+
+  it("rejects issue_208 editor_input when explicit target_tab_id is paired with a non-publish target_page", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_write",
+          validation_action: "editor_input"
+        },
+        "xhs.note.search.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_PAGE_INVALID"
+        }
+      });
+    }
+  });
 });

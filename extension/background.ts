@@ -3003,6 +3003,7 @@ class ChromeBackgroundBridge {
       writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
     const issue208EditorInputValidation =
       issue208WriteGateOnly &&
+      targetPage === "creator_publish_tab" &&
       requestedExecutionMode === "live_write" &&
       validationAction === "editor_input";
     const requestedLiveMode =

@@ -219,6 +219,22 @@ const normalizeGateOptions = (
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
   }
 
+  const issueScope =
+    typeof options.issue_scope === "string" && options.issue_scope.trim().length > 0
+      ? options.issue_scope.trim()
+      : null;
+  const validationAction =
+    typeof options.validation_action === "string" && options.validation_action.trim().length > 0
+      ? options.validation_action.trim()
+      : null;
+  if (
+    issueScope === "issue_208" &&
+    validationAction === "editor_input" &&
+    targetPage !== "creator_publish_tab"
+  ) {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+
   const requestedExecutionMode =
     typeof options.requested_execution_mode === "string" &&
     XHS_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode)

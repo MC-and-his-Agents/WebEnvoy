@@ -311,6 +311,13 @@ const resolveProfileDirForLauncher = (cwd: string, manifestDir: string): string 
   return join(normalizedProfileRoot, segments[0]);
 };
 
+const resolveExplicitProfileDir = (cwd: string, profile: string | undefined): string | undefined => {
+  if (typeof profile !== "string" || profile.trim().length === 0) {
+    return undefined;
+  }
+  return resolve(cwd, ".webenvoy", "profiles", profile.trim());
+};
+
 const normalizePathForBoundaryCheck = (input: string): string => {
   const normalized = resolve(input);
   return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -383,6 +390,7 @@ export interface InstallNativeHostInput {
   extensionId: string;
   nativeHostName: string;
   browserChannel: BrowserChannel;
+  profile?: string;
   hostCommand?: string;
   manifestDir?: string;
   launcherPath?: string;
@@ -435,7 +443,9 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     buildLauncherScript({
       command: "runtime.install",
       hostCommand,
-      profileDir: resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
+      profileDir:
+        resolveExplicitProfileDir(input.cwd, input.profile) ??
+        resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
     }),
     "utf8"
   );

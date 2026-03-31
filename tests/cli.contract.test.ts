@@ -3462,6 +3462,10 @@ process.stdin.on("data", (chunk) => {
       path: launcherPath,
       allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    expect(launcherRaw).toContain("export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=");
+    expect(launcherRaw).toContain(".webenvoy/profiles/xhs_208_probe");
   });
 
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {

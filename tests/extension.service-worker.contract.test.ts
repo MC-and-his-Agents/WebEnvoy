@@ -4627,6 +4627,67 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
+  it("blocks issue_208 editor_input when explicit target_tab_id points at a non-publish target_page", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/creator/home", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-non-publish-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/creator/home"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-non-publish-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-non-publish-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          target_page: "search_result_tab"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-non-publish-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "EDITOR_INPUT_VALIDATION_REQUIRED",
+        "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
+      ])
+    );
+  });
+
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
