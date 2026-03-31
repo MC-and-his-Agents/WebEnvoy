@@ -36,22 +36,20 @@ const withRepoOwnedNativeHost = (): Record<string, string> => ({
 });
 
 describe("native messaging contract", () => {
-  it("falls back to repo-owned native host on default transport", () => {
+  it("fails runtime.ping on default transport when no native host command is configured", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-nm-default-001"]);
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(5);
 
     const body = parseJson(result.stdout);
     expect(body).toMatchObject({
-      command: "runtime.ping",
-      status: "success",
-      summary: {
-        message: "pong",
-        transport: {
-          protocol: "webenvoy.native-bridge.v1",
-          relay_path: "host>background>content-script>background>host"
-        }
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE"
       }
     });
+    expect(String((body.error as Record<string, unknown>).message)).toContain(
+      "ERR_TRANSPORT_HANDSHAKE_FAILED"
+    );
   });
 
   it("returns transport metadata on runtime.ping success via native host stdio bridge", () => {

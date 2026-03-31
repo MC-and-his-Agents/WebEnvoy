@@ -189,6 +189,16 @@ const classifyXhsPage = (url, domain) => {
     }
     return "creator_home_tab";
 };
+const isCreatorArticlePublishPage = (url, domain) => {
+    if (domain !== XHS_WRITE_DOMAIN) {
+        return false;
+    }
+    const parsed = parseUrl(url);
+    if (!parsed || !parsed.pathname.includes("/publish")) {
+        return false;
+    }
+    return parsed.searchParams.get("target") === "article";
+};
 const xhsGateReasonMessage = (reason) => {
     const mapping = {
         REQUESTED_EXECUTION_MODE_NOT_EXPLICIT: "requested_execution_mode must be explicit",
@@ -202,6 +212,7 @@ const xhsGateReasonMessage = (reason) => {
         ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
         EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs.search",
         EDITOR_INPUT_VALIDATION_REQUIRED: "issue_208 live_write requires editor_input validation scope",
+        TARGET_PAGE_ARTICLE_REQUIRED: "issue_208 editor_input only supports article publish target",
         WRITE_EXECUTION_GATE_ONLY: "write gate approved but execution remains gate-only",
         RISK_STATE_PAUSED: "risk state paused blocks live read",
         RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
@@ -2529,6 +2540,10 @@ class ChromeBackgroundBridge {
                     const actualPage = classifyXhsPage(tabUrl, targetDomain);
                     if (actualPage !== targetPage) {
                         pushReason("TARGET_PAGE_MISMATCH");
+                    }
+                    if (issue208EditorInputValidation &&
+                        !isCreatorArticlePublishPage(tabUrl, targetDomain)) {
+                        pushReason("TARGET_PAGE_ARTICLE_REQUIRED");
                     }
                 }
             }

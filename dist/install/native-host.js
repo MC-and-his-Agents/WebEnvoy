@@ -239,12 +239,6 @@ const resolveProfileDirForLauncher = (cwd, manifestDir) => {
     }
     return join(normalizedProfileRoot, segments[0]);
 };
-const resolveExplicitProfileDir = (cwd, profile) => {
-    if (typeof profile !== "string" || profile.trim().length === 0) {
-        return undefined;
-    }
-    return resolve(cwd, ".webenvoy", "profiles", profile.trim());
-};
 const normalizePathForBoundaryCheck = (input) => {
     const normalized = resolve(input);
     return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -328,8 +322,7 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileDir: resolveExplicitProfileDir(input.cwd, input.profile) ??
-            resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
+        profileDir: resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {

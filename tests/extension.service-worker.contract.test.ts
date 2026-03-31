@@ -1028,7 +1028,11 @@ describe("extension service worker recovery contract", () => {
       ]
     });
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     executeScript.mockImplementation(async (input: Record<string, unknown>) => {
       const args = Array.isArray(input.args) ? input.args : [];
@@ -1105,8 +1109,12 @@ describe("extension service worker recovery contract", () => {
       profile: "profile-a",
       fingerprintContext,
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
+
+    if (firstPort.onMessageListeners.length === 0) {
+      throw new Error("missing native onMessage listener");
+    }
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-editor-after-bootstrap-001",
@@ -2688,7 +2696,11 @@ describe("extension service worker recovery contract", () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -2837,7 +2849,11 @@ describe("extension service worker recovery contract", () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -3800,7 +3816,7 @@ describe("extension service worker recovery contract", () => {
       profile,
       fingerprintContext,
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -4404,7 +4420,11 @@ describe("extension service worker recovery contract", () => {
       }
     );
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -4425,7 +4445,7 @@ describe("extension service worker recovery contract", () => {
         ]
       }),
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
 
     firstPort.onMessageListeners[0]?.({
@@ -4442,9 +4462,12 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await waitForBridgeTurn();
-    await vi.waitFor(() => {
-      expect(chromeApi.tabs.sendMessage).toHaveBeenCalled();
-    });
+    if (chromeApi.tabs.sendMessage.mock.calls.length === 0) {
+      const failedMessage = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as { id?: string; payload?: Record<string, unknown>; error?: Record<string, unknown> })
+        .find((message) => message.id === "run-xhs-issue-208-editor-input-allowed-001");
+      throw new Error(`missing forward call: ${JSON.stringify(failedMessage)}`);
+    }
 
     const proactiveContentScriptInject = executeScript.mock.calls.find(
       (call) =>
@@ -4521,7 +4544,7 @@ describe("extension service worker recovery contract", () => {
       {
         tab: {
           id: 32,
-          url: "https://creator.xiaohongshu.com/publish/publish"
+          url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
         }
       }
     );
@@ -4569,7 +4592,11 @@ describe("extension service worker recovery contract", () => {
     const { chromeApi, runtimeMessageListeners, debuggerAttach } = createChromeApi([firstPort]);
     debuggerAttach.mockRejectedValueOnce(new Error("debugger attach denied"));
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -4590,7 +4617,7 @@ describe("extension service worker recovery contract", () => {
         ]
       }),
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
 
     firstPort.onMessageListeners[0]?.({
@@ -4627,18 +4654,22 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("blocks issue_208 editor_input when explicit target_tab_id points at a non-publish target_page", async () => {
+  it("blocks issue_208 editor_input when explicit target_tab_id points at non-article publish page", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/creator/home", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
     await primeTrustedFingerprintContext({
       runtimeMessageListeners,
-      runId: "run-xhs-issue-208-editor-input-non-publish-001",
+      runId: "run-xhs-issue-208-editor-input-non-article-001",
       profile: "profile-a",
       fingerprintContext: createFingerprintRuntimeContext({
         live_allowed: true,
@@ -4652,20 +4683,18 @@ describe("extension service worker recovery contract", () => {
         ]
       }),
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/creator/home"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image"
     });
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-issue-208-editor-input-non-publish-001",
+      id: "run-xhs-issue-208-editor-input-non-article-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-issue-208-editor-input-non-publish-001",
+        run_id: "run-xhs-issue-208-editor-input-non-article-001",
         command: "xhs.search",
-        command_params: createXhsEditorInputCommandParams({
-          target_page: "search_result_tab"
-        }),
+        command_params: createXhsEditorInputCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
@@ -4675,14 +4704,14 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
-      .find((message) => message.id === "run-xhs-issue-208-editor-input-non-publish-001");
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-non-article-001");
     expect(blocked?.status).toBe("error");
     const payload = asRecord(blocked?.payload) ?? {};
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.gate_decision).toBe("blocked");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "EDITOR_INPUT_VALIDATION_REQUIRED",
+        "TARGET_PAGE_ARTICLE_REQUIRED",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );

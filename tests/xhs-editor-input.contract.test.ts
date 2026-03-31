@@ -241,6 +241,50 @@ describe("xhs editor input contract", () => {
     ]);
   });
 
+  it("rejects controlled editor input on non-article publish pages", async () => {
+    const document = new MockDocument("图文发布页");
+    const editor = new MockProseMirrorElement(document);
+    document.editors = [editor];
+    attachToBody(document, editor);
+    document.activeElement = editor as unknown as Element;
+
+    (globalThis as { document?: unknown }).document = document;
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        href: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image"
+      },
+      getComputedStyle: () => ({ visibility: "visible", display: "block" }),
+      getSelection: () => null
+    };
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = MockHTMLElement;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElement;
+    (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement = MockHTMLTextAreaElement;
+    (globalThis as { InputEvent?: unknown }).InputEvent = Event;
+    (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
+
+    const result = await performEditorInputValidation({
+      text: "测试发布文案",
+      focusAttestation: {
+        source: "chrome_debugger",
+        target_tab_id: 32,
+        editable_state: "already_ready",
+        focus_confirmed: true,
+        entry_button_locator: null,
+        entry_button_target_key: null,
+        editor_locator: "div.tiptap.ProseMirror",
+        editor_target_key: "body > div:nth-of-type(1)",
+        failure_reason: null
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attestation).toBe("dom_self_certified");
+    expect(result.failure_signals).toEqual([
+      "target_page_article_required",
+      "dom_variant"
+    ]);
+  });
+
   it("does not treat 新建长文合集 as editor entry", async () => {
     const document = new MockDocument("长文落地页");
     const collectionButton = new MockButtonElement(document, "新建长文合集");

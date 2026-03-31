@@ -9,7 +9,6 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
-import { resolveRepoOwnedNativeHostCommand } from "../../install/native-host.js";
 
 type TransportCodedError = Error & {
   transportCode?:
@@ -137,7 +136,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   #closePromise: Promise<void> | null = null;
 
   constructor(
-    hostCommand: string | null = readNativeHostCommand() ?? resolveRepoOwnedNativeHostCommand(),
+    hostCommand: string | null = readNativeHostCommand(),
     options?: { socketPath?: string | null }
   ) {
     this.#hostCommand = hostCommand;

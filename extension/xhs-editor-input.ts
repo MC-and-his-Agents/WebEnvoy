@@ -348,6 +348,25 @@ export const performEditorInputValidation = async (
     : await enterEditableStateIfNeeded();
   const editors = findEditorElements();
   const minimumReplay = buildMinimumReplay(activation);
+  if (isTargetPage() && !isArticleTargetPage()) {
+    return {
+      ok: false,
+      mode: "dom_editor_input_validation",
+      attestation: "dom_self_certified",
+      editor_locator: null,
+      input_text: input.text,
+      before_text: "",
+      visible_text: "",
+      post_blur_text: "",
+      focus_confirmed: false,
+      focus_attestation_source: focusAttestation?.source ?? null,
+      focus_attestation_reason: focusAttestation?.failure_reason ?? null,
+      preserved_after_blur: false,
+      success_signals: [],
+      failure_signals: ["target_page_article_required", "dom_variant"],
+      minimum_replay: minimumReplay
+    };
+  }
 
   if (editors.length === 0) {
     const failureSignals =

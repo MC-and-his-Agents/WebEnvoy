@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { connect as connectSocket } from "node:net";
 import { access } from "node:fs/promises";
 import { DEFAULT_TRANSPORT_TIMEOUT_MS, ensureBridgeRequestEnvelope } from "./protocol.js";
-import { resolveRepoOwnedNativeHostCommand } from "../../install/native-host.js";
 const withTransportCode = (error, code) => Object.assign(error, { transportCode: code });
 const readNativeHostCommand = () => {
     const value = process.env.WEBENVOY_NATIVE_HOST_CMD;
@@ -89,7 +88,7 @@ export class NativeHostBridgeTransport {
     #stdoutBuffer = Buffer.alloc(0);
     #pending = new Map();
     #closePromise = null;
-    constructor(hostCommand = readNativeHostCommand() ?? resolveRepoOwnedNativeHostCommand(), options) {
+    constructor(hostCommand = readNativeHostCommand(), options) {
         this.#hostCommand = hostCommand;
         this.#hostSpec = parseNativeHostCommand(hostCommand);
         this.#socketPath = options?.socketPath ?? null;
