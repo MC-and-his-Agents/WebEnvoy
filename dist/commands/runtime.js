@@ -17,13 +17,14 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+export const shouldUseProfileSocketBridge = (status) => asObject(status?.identityPreflight)?.mode === "official_chrome_persistent_extension";
 const resolveRuntimeBridge = (context) => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
             transport: createLoopbackNativeBridgeTransport()
         });
     }
-    const socketPath = context?.cwd && context.profile
+    const socketPath = context?.requireProfileSocket && context.cwd && context.profile
         ? resolveProfileScopedNativeBridgeSocketPath(join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile))
         : null;
     return new NativeMessagingBridge({
@@ -109,9 +110,18 @@ const runtimePing = async (context) => {
     if (asBoolean(context.params.force_fail)) {
         throw new Error("forced execution failure");
     }
+    const runtimeStatus = context.profile
+        ? await profileRuntime.status({
+            cwd: context.cwd,
+            profile: context.profile,
+            runId: context.run_id,
+            params: context.params
+        })
+        : null;
     const bridge = resolveRuntimeBridge({
         cwd: context.cwd,
-        profile: context.profile
+        profile: context.profile,
+        requireProfileSocket: shouldUseProfileSocketBridge(runtimeStatus)
     });
     try {
         const requestedExecutionMode = typeof context.params.requested_execution_mode === "string"

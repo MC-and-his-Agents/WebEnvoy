@@ -353,14 +353,20 @@ const buildRuntimeBootstrapEnvelope = (input: {
   main_world_secret: input.mainWorldSecret
 });
 
-const resolveDefaultRuntimeBridge = (input?: { cwd: string; profile: string }): RuntimeBridgeLike => {
+type RuntimeBridgeFactoryInput = {
+  cwd: string;
+  profile: string;
+  requireProfileSocket?: boolean;
+};
+
+const resolveDefaultRuntimeBridge = (input?: RuntimeBridgeFactoryInput): RuntimeBridgeLike => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
   }
   const socketPath =
-    input?.profile && input.cwd
+    input?.requireProfileSocket && input.profile && input.cwd
       ? resolveProfileScopedNativeBridgeSocketPath(join(input.cwd, ...PROFILE_ROOT_SEGMENTS, input.profile))
       : null;
   return new NativeMessagingBridge({
@@ -581,14 +587,14 @@ export class ProfileRuntimeService {
   readonly #lockFileAdapter: LockFileAdapter;
   readonly #isProcessAlive: (pid: number) => boolean;
   readonly #browserLauncher: BrowserLauncherLike;
-  readonly #bridgeFactory: (input?: { cwd: string; profile: string }) => RuntimeBridgeLike;
+  readonly #bridgeFactory: (input?: RuntimeBridgeFactoryInput) => RuntimeBridgeLike;
 
   constructor(options?: {
     storeFactory?: (cwd: string) => ProfileStoreLike;
     lockFileAdapter?: LockFileAdapter;
     isProcessAlive?: (pid: number) => boolean;
     browserLauncher?: BrowserLauncherLike;
-    bridgeFactory?: (input?: { cwd: string; profile: string }) => RuntimeBridgeLike;
+    bridgeFactory?: (input?: RuntimeBridgeFactoryInput) => RuntimeBridgeLike;
   }) {
     this.#storeFactory =
       options?.storeFactory ??
@@ -1545,7 +1551,8 @@ export class ProfileRuntimeService {
   }): Promise<RuntimeReadinessSnapshot> {
     const bridge = this.#bridgeFactory({
       cwd: input.runtimeInput.cwd,
-      profile: input.profile
+      profile: input.profile,
+      requireProfileSocket: true
     });
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.profile,
@@ -1687,7 +1694,8 @@ export class ProfileRuntimeService {
 
     const bridge = this.#bridgeFactory({
       cwd: input.runtimeInput.cwd,
-      profile: input.runtimeInput.profile
+      profile: input.runtimeInput.profile,
+      requireProfileSocket: true
     });
     const runtimeContextId = buildRuntimeBootstrapContextId(
       input.runtimeInput.profile,

@@ -5,8 +5,9 @@ import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
-import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
+import { buildOfficialChromeRuntimeStatusParams, prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
+import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
@@ -23,9 +24,11 @@ const XHS_LIVE_EXECUTION_MODES = new Set([
     "live_write"
 ]);
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
+const profileRuntime = new ProfileRuntimeService();
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+export const shouldUseProfileSocketBridge = (status) => asObject(status?.identityPreflight)?.mode === "official_chrome_persistent_extension";
 const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
     code === "ERR_TRANSPORT_TIMEOUT" ||
     code === "ERR_TRANSPORT_DISCONNECTED" ||
@@ -37,7 +40,7 @@ const resolveRuntimeBridge = (context) => {
             transport: createLoopbackNativeBridgeTransport()
         });
     }
-    const socketPath = context?.cwd && context.profile
+    const socketPath = context?.requireProfileSocket && context.cwd && context.profile
         ? resolveProfileScopedNativeBridgeSocketPath(join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile))
         : null;
     return new NativeMessagingBridge({
@@ -282,17 +285,42 @@ const xhsSearch = async (context) => {
             }
         });
     }
-    const bridge = resolveRuntimeBridge({
-        cwd: context.cwd,
-        profile: context.profile
-    });
     const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
         requestedExecutionMode: gate.requestedExecutionMode
     });
+    const runtimeStatusParams = buildOfficialChromeRuntimeStatusParams(context, gate.requestedExecutionMode);
+    let cachedRuntimeStatus = context.profile
+        ? await profileRuntime.status({
+            cwd: context.cwd,
+            profile: context.profile,
+            runId: context.run_id,
+            params: runtimeStatusParams
+        })
+        : null;
+    const bridge = resolveRuntimeBridge({
+        cwd: context.cwd,
+        profile: context.profile,
+        requireProfileSocket: shouldUseProfileSocketBridge(cachedRuntimeStatus)
+    });
+    const readStatus = context.profile
+        ? async () => {
+            if (cachedRuntimeStatus) {
+                const status = cachedRuntimeStatus;
+                cachedRuntimeStatus = null;
+                return status;
+            }
+            return await profileRuntime.status({
+                cwd: context.cwd,
+                profile: context.profile ?? "",
+                runId: context.run_id,
+                params: runtimeStatusParams
+            });
+        }
+        : undefined;
     try {
-        const executionFingerprintContext = (await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate)) ?? fingerprintContext;
+        const executionFingerprintContext = (await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate, readStatus)) ?? fingerprintContext;
         const commandParams = appendFingerprintContext({
             target_domain: gate.targetDomain,
             target_page: gate.targetPage,

@@ -224,6 +224,21 @@ const resolveControlledInstallRoots = (cwd, browserChannel) => {
         launcherRoot: join(channelRoot, "bin")
     };
 };
+const resolveProfileDirForLauncher = (cwd, manifestDir) => {
+    const { profileRoot } = resolveControlledInstallRoots(cwd, DEFAULT_BROWSER_CHANNEL);
+    const normalizedProfileRoot = normalizePathForBoundaryCheck(profileRoot);
+    const normalizedManifestDir = normalizePathForBoundaryCheck(manifestDir);
+    const rel = relative(normalizedProfileRoot, normalizedManifestDir);
+    const isInside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    if (!isInside) {
+        return undefined;
+    }
+    const segments = rel.split(sep).filter((segment) => segment.length > 0 && segment !== ".");
+    if (segments.length !== 2 || segments[1] !== "NativeMessagingHosts") {
+        return undefined;
+    }
+    return join(normalizedProfileRoot, segments[0]);
+};
 const normalizePathForBoundaryCheck = (input) => {
     const normalized = resolve(input);
     return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -307,10 +322,7 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileDir: resolvedPaths.manifestDir.endsWith("/NativeMessagingHosts") ||
-            resolvedPaths.manifestDir.endsWith("\\NativeMessagingHosts")
-            ? dirname(resolvedPaths.manifestDir)
-            : undefined
+        profileDir: resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir)
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {

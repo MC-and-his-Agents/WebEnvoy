@@ -171,7 +171,7 @@ const resolveDefaultRuntimeBridge = (input) => {
             transport: createLoopbackNativeBridgeTransport()
         });
     }
-    const socketPath = input?.profile && input.cwd
+    const socketPath = input?.requireProfileSocket && input.profile && input.cwd
         ? resolveProfileScopedNativeBridgeSocketPath(join(input.cwd, ...PROFILE_ROOT_SEGMENTS, input.profile))
         : null;
     return new NativeMessagingBridge({
@@ -1158,7 +1158,8 @@ export class ProfileRuntimeService {
     async #deliverRuntimeBootstrap(input) {
         const bridge = this.#bridgeFactory({
             cwd: input.runtimeInput.cwd,
-            profile: input.profile
+            profile: input.profile,
+            requireProfileSocket: true
         });
         const envelope = buildRuntimeBootstrapEnvelope({
             profile: input.profile,
@@ -1283,7 +1284,8 @@ export class ProfileRuntimeService {
         }
         const bridge = this.#bridgeFactory({
             cwd: input.runtimeInput.cwd,
-            profile: input.runtimeInput.profile
+            profile: input.runtimeInput.profile,
+            requireProfileSocket: true
         });
         const runtimeContextId = buildRuntimeBootstrapContextId(input.runtimeInput.profile, input.runtimeInput.runId);
         try {

@@ -111,7 +111,7 @@ const parseWindowsRegistryDefaultValue = (stdout) => {
     }
     return null;
 };
-const resolveManifestPathForBinding = async (binding, profileDir) => {
+const resolveManifestPathForBinding = async (binding, _profileDir) => {
     if (binding.manifestPath) {
         return binding.manifestPath;
     }
@@ -133,9 +133,6 @@ const resolveManifestPathForBinding = async (binding, profileDir) => {
             }
         }
         return null;
-    }
-    if (profileDir) {
-        return join(profileDir, "NativeMessagingHosts", `${binding.nativeHostName}.json`);
     }
     return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
 };

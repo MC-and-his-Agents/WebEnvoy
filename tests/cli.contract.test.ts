@@ -3181,6 +3181,78 @@ process.stdin.on("data", (chunk) => {
     }
   });
 
+  it("keeps runtime.ping on stdio fallback for profile when official socket mode is not required", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.ping",
+        "--profile",
+        "profile_stdio_fallback",
+        "--run-id",
+        "run-contract-profile-stdio-001"
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "success"
+      }
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-profile-stdio-001",
+      command: "runtime.ping",
+      status: "success"
+    });
+  });
+
+  it("keeps dry_run xhs.search on stdio fallback before official socket mode is confirmed", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "xhs.search",
+        "--profile",
+        "profile_stdio_fallback",
+        "--run-id",
+        "run-contract-xhs-stdio-001",
+        "--params",
+        JSON.stringify({
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...scopedXhsGateOptions
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "success"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-xhs-stdio-001",
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "CAPABILITY_RESULT_MISSING"
+        }
+      }
+    });
+  });
+
   it("returns execution failed error with code 6", () => {
     const result = runCli(["runtime.ping", "--params", '{"force_fail":true}']);
     expect(result.status).toBe(6);
@@ -3332,8 +3404,21 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
-  it("installs native host into the custom profile NativeMessagingHosts directory when --profile is provided", async () => {
+  it("uses browser-level NativeMessagingHosts defaults when --profile is provided without manifest_dir", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const fakeHome = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-home-"));
+    tempDirs.push(fakeHome);
+    const expectedManifestDir =
+      process.platform === "darwin"
+        ? path.join(fakeHome, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts")
+        : process.platform === "linux"
+          ? path.join(fakeHome, ".config", "google-chrome", "NativeMessagingHosts")
+          : null;
+
+    if (!expectedManifestDir) {
+      return;
+    }
+
     const result = runCli(
       [
         "runtime.install",
@@ -3348,29 +3433,27 @@ process.stdin.on("data", (chunk) => {
           native_host_name: "com.webenvoy.host"
         })
       ],
-      runtimeCwd
+      runtimeCwd,
+      {
+        HOME: fakeHome
+      }
     );
 
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
-    const manifestDir = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "profiles",
-      "xhs_208_probe",
-      "NativeMessagingHosts"
-    );
-    const manifestPath = await realpath(path.join(manifestDir, "com.webenvoy.host.json"));
-    const launcherPath = await realpath(path.join(manifestDir, "com.webenvoy.host-launcher"));
+    const expectedManifestPath = path.join(expectedManifestDir, "com.webenvoy.host.json");
+    const expectedLauncherPath = path.join(expectedManifestDir, "com.webenvoy.host-launcher");
+    const summary = body.summary as Record<string, unknown>;
+    const manifestPath = String(summary.manifest_path ?? "");
+    const launcherPath = String(summary.launcher_path ?? "");
 
     expect(body).toMatchObject({
       command: "runtime.install",
-      status: "success",
-      summary: {
-        manifest_path: manifestPath,
-        launcher_path: launcherPath
-      }
+      status: "success"
     });
+    expect(await realpath(manifestPath)).toBe(await realpath(expectedManifestPath));
+    expect(await realpath(launcherPath)).toBe(await realpath(expectedLauncherPath));
+    expect(manifestPath.startsWith(path.join(runtimeCwd, ".webenvoy", "profiles"))).toBe(false);
 
     const manifestRaw = await readFile(manifestPath, "utf8");
     const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;

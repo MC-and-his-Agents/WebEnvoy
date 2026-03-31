@@ -14,8 +14,6 @@ import {
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
-import {
-} from "../runtime/official-chrome-runtime.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
@@ -42,14 +40,21 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
-const resolveRuntimeBridge = (context?: { cwd: string; profile?: string | null }): NativeMessagingBridge => {
+export const shouldUseProfileSocketBridge = (status: Record<string, unknown> | null): boolean =>
+  asObject(status?.identityPreflight)?.mode === "official_chrome_persistent_extension";
+
+const resolveRuntimeBridge = (context?: {
+  cwd: string;
+  profile?: string | null;
+  requireProfileSocket?: boolean;
+}): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
   }
   const socketPath =
-    context?.cwd && context.profile
+    context?.requireProfileSocket && context.cwd && context.profile
       ? resolveProfileScopedNativeBridgeSocketPath(
           join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile)
         )
@@ -158,9 +163,19 @@ const runtimePing = async (context: RuntimeContext) => {
     throw new Error("forced execution failure");
   }
 
+  const runtimeStatus =
+    context.profile
+      ? await profileRuntime.status({
+          cwd: context.cwd,
+          profile: context.profile,
+          runId: context.run_id,
+          params: context.params
+        })
+      : null;
   const bridge = resolveRuntimeBridge({
     cwd: context.cwd,
-    profile: context.profile
+    profile: context.profile,
+    requireProfileSocket: shouldUseProfileSocketBridge(runtimeStatus)
   });
   try {
     const requestedExecutionMode =

@@ -208,7 +208,7 @@ const parseWindowsRegistryDefaultValue = (stdout: string): string | null => {
 
 const resolveManifestPathForBinding = async (
   binding: PersistentExtensionBinding,
-  profileDir: string | null
+  _profileDir: string | null
 ): Promise<string | null> => {
   if (binding.manifestPath) {
     return binding.manifestPath;
@@ -231,10 +231,6 @@ const resolveManifestPathForBinding = async (
       }
     }
     return null;
-  }
-
-  if (profileDir) {
-    return join(profileDir, "NativeMessagingHosts", `${binding.nativeHostName}.json`);
   }
 
   return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);

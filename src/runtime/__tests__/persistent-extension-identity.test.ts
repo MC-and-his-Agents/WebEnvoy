@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -382,11 +382,20 @@ describe("runIdentityPreflight", () => {
     expect(result.blocking).toBe(true);
   });
 
-  it("resolves the native host manifest from the custom profile NativeMessagingHosts directory by default", async () => {
+  it("resolves the native host manifest from browser channel defaults when binding omits manifestPath", async () => {
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-scoped-"));
-    const manifestDir = join(profileDir, "NativeMessagingHosts");
-    const manifestPath = join(manifestDir, "com.webenvoy.host.json");
-    await mkdir(manifestDir, { recursive: true });
+    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-"));
+    const manifestPath = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    vi.stubEnv("HOME", fakeHome);
+    await mkdir(dirname(manifestPath), { recursive: true });
     await writeFile(
       manifestPath,
       `${JSON.stringify(
@@ -435,14 +444,24 @@ describe("runIdentityPreflight", () => {
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`,
       allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`]
     });
+    expect(result.manifestPath?.startsWith(profileDir)).toBe(false);
   });
 
   it("treats developer-mode unpacked extension path as enabled when profile Extensions dir is absent", async () => {
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-unpacked-"));
-    const manifestDir = join(profileDir, "NativeMessagingHosts");
-    const manifestPath = join(manifestDir, "com.webenvoy.host.json");
+    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-unpacked-"));
+    const manifestPath = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
     const unpackedDir = await mkdtemp(join(tmpdir(), "webenvoy-unpacked-extension-"));
-    await mkdir(manifestDir, { recursive: true });
+    vi.stubEnv("HOME", fakeHome);
+    await mkdir(dirname(manifestPath), { recursive: true });
     await writeFile(
       manifestPath,
       `${JSON.stringify(
