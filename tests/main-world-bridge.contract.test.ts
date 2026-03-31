@@ -11,12 +11,10 @@ describe("main-world bridge contract", () => {
   });
 
   it("rebinds the active channel when runtime.bootstrap rotates the secret", async () => {
-    const controlEventPrefix = "__mw_ctl__bridge__";
-    const controlSeedAttribute = "data-webenvoy-main-world-bridge-seed";
+    const controlMessageScope = "webenvoy.main_world.bridge.control.v1";
     const added: Array<{ type: string; listener: MockEventListener }> = [];
     const removed: Array<{ type: string; listener: MockEventListener }> = [];
     const listeners = new Map<string, MockEventListener[]>();
-    const documentAttributes = new Map<string, string>();
     const mockWindow = {
       addEventListener: (type: string, listener: MockEventListener) => {
         added.push({ type, listener });
@@ -39,11 +37,7 @@ describe("main-world bridge contract", () => {
     const mockDocument = {
       createElement: () => ({ textContent: "", remove: () => {} }),
       documentElement: {
-        appendChild: (node: unknown) => node,
-        getAttribute: (name: string) => documentAttributes.get(name) ?? null,
-        setAttribute: (name: string, value: string) => {
-          documentAttributes.set(name, value);
-        }
+        appendChild: (node: unknown) => node
       }
     };
 
@@ -61,36 +55,53 @@ describe("main-world bridge contract", () => {
 
     await import("../extension/main-world-bridge.js");
 
-    const controlSeed = documentAttributes.get(controlSeedAttribute);
-    expect(typeof controlSeed).toBe("string");
-    expect(controlSeed?.length).toBeGreaterThan(0);
-    const controlEvent = `${controlEventPrefix}${controlSeed}`;
-
-    const firstControlRequest = new CustomEvent(controlEvent, {
-      detail: {
+    const firstPort = {
+      postMessage: vi.fn(),
+      close: vi.fn()
+    };
+    const secondPort = {
+      postMessage: vi.fn(),
+      close: vi.fn()
+    };
+    const firstControlRequest = {
+      type: "message",
+      source: mockWindow,
+      data: {
+        scope: controlMessageScope,
         kind: "attach-channel",
         requestEvent: "__mw_req__secret_a",
-        resultEvent: "__mw_res__secret_a",
-        attached: false
-      }
-    });
-    const secondControlRequest = new CustomEvent(controlEvent, {
-      detail: {
+        resultEvent: "__mw_res__secret_a"
+      },
+      ports: [firstPort]
+    } as unknown as Event;
+    const secondControlRequest = {
+      type: "message",
+      source: mockWindow,
+      data: {
+        scope: controlMessageScope,
         kind: "attach-channel",
         requestEvent: "__mw_req__secret_b",
-        resultEvent: "__mw_res__secret_b",
-        attached: false
-      }
-    });
+        resultEvent: "__mw_res__secret_b"
+      },
+      ports: [secondPort]
+    } as unknown as Event;
 
     mockWindow.dispatchEvent(firstControlRequest);
     mockWindow.dispatchEvent(secondControlRequest);
 
-    expect(firstControlRequest.detail.attached).toBe(true);
-    expect(secondControlRequest.detail.attached).toBe(true);
+    expect(firstPort.postMessage).toHaveBeenCalledWith({
+      ok: true,
+      attached: true
+    });
+    expect(secondPort.postMessage).toHaveBeenCalledWith({
+      ok: true,
+      attached: true
+    });
+    expect(firstPort.close).toHaveBeenCalledTimes(1);
+    expect(secondPort.close).toHaveBeenCalledTimes(1);
 
     expect(added.map((entry) => entry.type)).toEqual([
-      controlEvent,
+      "message",
       "__mw_req__secret_a",
       "__mw_req__secret_b"
     ]);

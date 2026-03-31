@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { startChromeBackgroundBridge } from "../extension/background.js";
 import { resolveMainWorldEventNamesForSecret } from "../extension/content-script-handler.js";
 
+const mainWorldControlMessageScope = "webenvoy.main_world.bridge.control.v1";
+
 const createMockPort = () => {
   const onMessageListeners: Array<(message: Record<string, unknown>) => void> = [];
   const onDisconnectListeners: Array<() => void> = [];
@@ -636,8 +638,7 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__mw_ctl__bridge__",
-          "data-webenvoy-main-world-bridge-seed",
+          mainWorldControlMessageScope,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-001").requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-001").resultEvent
         ]
@@ -782,8 +783,7 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__mw_ctl__bridge__",
-          "data-webenvoy-main-world-bridge-seed",
+          mainWorldControlMessageScope,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
             .requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
@@ -801,8 +801,7 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__mw_ctl__bridge__",
-          "data-webenvoy-main-world-bridge-seed",
+          mainWorldControlMessageScope,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
             .requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
@@ -1043,18 +1042,16 @@ describe("extension service worker recovery contract", () => {
         return [{ result: createEditorInputProbeResult() }];
       }
       if (
-        args[0] === "__mw_ctl__bridge__" &&
-        args[1] === "data-webenvoy-main-world-bridge-seed" &&
-        args[2] !== undefined &&
-        args[3] !== undefined
+        args[0] === mainWorldControlMessageScope &&
+        args[1] !== undefined &&
+        args[2] !== undefined
       ) {
         return [{ result: true }];
       }
       if (
-        args[0] === "__mw_ctl__bridge__" &&
-        args[1] === "data-webenvoy-main-world-bridge-seed" &&
-        args[2] !== undefined &&
-        args[3] === undefined
+        args[0] === mainWorldControlMessageScope &&
+        typeof args[1] === "object" &&
+        args[1] !== null
       ) {
         return [
           {

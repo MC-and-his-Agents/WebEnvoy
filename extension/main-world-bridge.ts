@@ -24,23 +24,27 @@ type MainWorldEventChannel = {
 
 type MainWorldControlRequest =
   | {
+      scope?: unknown;
       kind: "attach-channel";
       requestEvent?: unknown;
       resultEvent?: unknown;
-      attached?: boolean;
     }
   | {
+      scope?: unknown;
       kind: "fingerprint-install";
       runtime?: unknown;
-      result?: unknown;
-      ok?: boolean;
-      message?: string;
     };
+
+type MainWorldControlResponse = {
+  ok: boolean;
+  attached?: boolean;
+  result?: unknown;
+  message?: string;
+};
 
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
-const MAIN_WORLD_CONTROL_EVENT_PREFIX = "__mw_ctl__bridge__";
-const MAIN_WORLD_CONTROL_SEED_ATTRIBUTE = "data-webenvoy-main-world-bridge-seed";
+const MAIN_WORLD_CONTROL_MESSAGE_SCOPE = "webenvoy.main_world.bridge.control.v1";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -110,40 +114,6 @@ const createWindowEvent = (type: string, detail: unknown): Event => {
     type,
     detail
   } as unknown as Event;
-};
-
-const normalizeNonEmptyString = (value: unknown): string | null =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-
-const createMainWorldControlSeed = (): string => {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID().replaceAll("-", "");
-  }
-  const fallbackRandom = Math.random().toString(36).slice(2, 12);
-  return `${Date.now().toString(36)}${fallbackRandom}`;
-};
-
-const resolveMainWorldControlSeed = (): string => {
-  if (typeof document === "undefined") {
-    return createMainWorldControlSeed();
-  }
-  const documentElement = document.documentElement;
-  if (!documentElement) {
-    return createMainWorldControlSeed();
-  }
-  const existingSeed = normalizeNonEmptyString(
-    typeof documentElement.getAttribute === "function"
-      ? documentElement.getAttribute(MAIN_WORLD_CONTROL_SEED_ATTRIBUTE)
-      : null
-  );
-  if (existingSeed) {
-    return existingSeed;
-  }
-  const createdSeed = createMainWorldControlSeed();
-  if (typeof documentElement.setAttribute === "function") {
-    documentElement.setAttribute(MAIN_WORLD_CONTROL_SEED_ATTRIBUTE, createdSeed);
-  }
-  return createdSeed;
 };
 
 const emitResult = async (resultEvent: string, result: MainWorldResult): Promise<void> => {
@@ -541,28 +511,54 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
 
-const handleControlRequestEvent = (event: Event): void => {
-  const detail = asRecord((event as CustomEvent<unknown>).detail) as MainWorldControlRequest | null;
-  if (!detail || typeof detail.kind !== "string") {
-    return;
-  }
-  if (detail.kind === "attach-channel") {
-    detail.attached = attachMainWorldEventChannelIfValid(detail.requestEvent, detail.resultEvent);
-    return;
-  }
-  if (detail.kind === "fingerprint-install") {
-    try {
-      detail.result = installFingerprintRuntime(asRecord(detail.runtime));
-      detail.ok = true;
-    } catch (error) {
-      detail.ok = false;
-      detail.message = error instanceof Error ? error.message : String(error);
+const emitControlResponse = (port: MessagePort, response: MainWorldControlResponse): void => {
+  try {
+    port.postMessage(response);
+  } finally {
+    if (typeof port.close === "function") {
+      port.close();
     }
   }
 };
 
-const mainWorldControlEvent = `${MAIN_WORLD_CONTROL_EVENT_PREFIX}${resolveMainWorldControlSeed()}`;
-window.addEventListener(mainWorldControlEvent, handleControlRequestEvent as EventListener);
+const handleControlMessageEvent = (event: Event): void => {
+  const messageEvent = event as MessageEvent<unknown>;
+  if (messageEvent.source !== window) {
+    return;
+  }
+  const detail = asRecord(messageEvent.data) as MainWorldControlRequest | null;
+  const port = Array.isArray(messageEvent.ports) ? messageEvent.ports[0] : null;
+  if (
+    !detail ||
+    detail.scope !== MAIN_WORLD_CONTROL_MESSAGE_SCOPE ||
+    typeof detail.kind !== "string" ||
+    !port
+  ) {
+    return;
+  }
+  if (detail.kind === "attach-channel") {
+    emitControlResponse(port, {
+      ok: true,
+      attached: attachMainWorldEventChannelIfValid(detail.requestEvent, detail.resultEvent)
+    });
+    return;
+  }
+  if (detail.kind === "fingerprint-install") {
+    try {
+      emitControlResponse(port, {
+        ok: true,
+        result: installFingerprintRuntime(asRecord(detail.runtime))
+      });
+    } catch (error) {
+      emitControlResponse(port, {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+};
+
+window.addEventListener("message", handleControlMessageEvent as EventListener);
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {

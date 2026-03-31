@@ -73,8 +73,7 @@ const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
-const MAIN_WORLD_CONTROL_EVENT_PREFIX = "__mw_ctl__bridge__";
-const MAIN_WORLD_CONTROL_SEED_ATTRIBUTE = "data-webenvoy-main-world-bridge-seed";
+const MAIN_WORLD_CONTROL_MESSAGE_SCOPE = "webenvoy.main_world.bridge.control.v1";
 const maxRecoveryQueuedForwards = 5;
 const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
@@ -3733,45 +3732,37 @@ class ChromeBackgroundBridge {
     const results = await this.chromeApi.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: (
-        controlEventPrefix: unknown,
-        controlSeedAttribute: unknown,
-        requestEventName: unknown,
-        resultEventName: unknown
-      ) => {
+      func: (messageScope: unknown, requestEventName: unknown, resultEventName: unknown) => {
         if (
-          typeof controlEventPrefix !== "string" ||
-          controlEventPrefix.length === 0 ||
-          typeof controlSeedAttribute !== "string" ||
-          controlSeedAttribute.length === 0 ||
-          typeof document === "undefined"
+          typeof messageScope !== "string" ||
+          messageScope.length === 0 ||
+          typeof window.postMessage !== "function" ||
+          typeof MessageChannel !== "function"
         ) {
           return false;
         }
-        const documentElement = document.documentElement;
-        const seed =
-          documentElement && typeof documentElement.getAttribute === "function"
-            ? documentElement.getAttribute(controlSeedAttribute)
-            : null;
-        if (typeof seed !== "string" || seed.length === 0) {
-          return false;
-        }
-        const controlEvent = `${controlEventPrefix}${seed}`;
-        const detail = {
-          kind: "attach-channel" as const,
-          requestEvent: requestEventName,
-          resultEvent: resultEventName,
-          attached: false
-        };
-        window.dispatchEvent(new CustomEvent(controlEvent, { detail }));
-        return detail.attached === true;
+        return new Promise<boolean>((resolve) => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (event) => {
+            const record =
+              typeof event.data === "object" && event.data !== null
+                ? (event.data as Record<string, unknown>)
+                : null;
+            resolve(record?.ok === true && record.attached === true);
+          };
+          window.postMessage(
+            {
+              scope: messageScope,
+              kind: "attach-channel",
+              requestEvent: requestEventName,
+              resultEvent: resultEventName
+            },
+            "*",
+            [channel.port2]
+          );
+        });
       },
-      args: [
-        MAIN_WORLD_CONTROL_EVENT_PREFIX,
-        MAIN_WORLD_CONTROL_SEED_ATTRIBUTE,
-        requestEvent,
-        resultEvent
-      ]
+      args: [MAIN_WORLD_CONTROL_MESSAGE_SCOPE, requestEvent, resultEvent]
     });
     return results.some((result) => result?.result === true);
   }
@@ -3795,32 +3786,14 @@ class ChromeBackgroundBridge {
     const results = await this.chromeApi.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: async (url: unknown, controlSeedAttribute: unknown) => {
-        const hasControlSeed = (): boolean => {
-          if (
-            typeof document === "undefined" ||
-            typeof controlSeedAttribute !== "string" ||
-            controlSeedAttribute.length === 0
-          ) {
-            return false;
-          }
-          const documentElement = document.documentElement;
-          const seed =
-            documentElement && typeof documentElement.getAttribute === "function"
-              ? documentElement.getAttribute(controlSeedAttribute)
-              : null;
-          return typeof seed === "string" && seed.length > 0;
-        };
-        if (hasControlSeed()) {
-          return true;
-        }
+      func: async (url: unknown) => {
         if (typeof document === "undefined" || typeof url !== "string" || url.length === 0) {
           return false;
         }
         const existing = document.querySelector('script[data-webenvoy-main-world-bridge="1"]');
         if (existing) {
           await new Promise((resolve) => setTimeout(resolve, 0));
-          return hasControlSeed();
+          return true;
         }
         const script = document.createElement("script");
         script.setAttribute("data-webenvoy-main-world-bridge", "1");
@@ -3830,9 +3803,9 @@ class ChromeBackgroundBridge {
           script.addEventListener("error", () => resolve(false), { once: true });
           (document.documentElement ?? document.head ?? document.body)?.appendChild(script);
         });
-        return loaded && hasControlSeed();
+        return loaded;
       },
-      args: [bridgeUrl, MAIN_WORLD_CONTROL_SEED_ATTRIBUTE]
+      args: [bridgeUrl]
     });
     return results.some((result) => result?.result === true);
   }
@@ -3873,41 +3846,40 @@ class ChromeBackgroundBridge {
       const results = await executeScript({
         target: { tabId },
         world: "MAIN",
-        func: (controlEventPrefix: unknown, controlSeedAttribute: unknown, runtime: unknown) => {
+        func: (messageScope: unknown, runtime: unknown) => {
           if (
-            typeof controlEventPrefix !== "string" ||
-            controlEventPrefix.length === 0 ||
-            typeof controlSeedAttribute !== "string" ||
-            controlSeedAttribute.length === 0 ||
-            typeof document === "undefined"
+            typeof messageScope !== "string" ||
+            messageScope.length === 0 ||
+            typeof window.postMessage !== "function" ||
+            typeof MessageChannel !== "function"
           ) {
             return null;
           }
-          const documentElement = document.documentElement;
-          const seed =
-            documentElement && typeof documentElement.getAttribute === "function"
-              ? documentElement.getAttribute(controlSeedAttribute)
-              : null;
-          if (typeof seed !== "string" || seed.length === 0) {
-            return null;
-          }
-          const controlEvent = `${controlEventPrefix}${seed}`;
-          const detail: {
-            kind: "fingerprint-install";
-            runtime: unknown;
-            ok?: boolean;
-            result?: unknown;
-          } = {
-            kind: "fingerprint-install",
-            runtime
-          };
-          window.dispatchEvent(new CustomEvent(controlEvent, { detail }));
-          if (detail.ok !== true || typeof detail.result !== "object" || detail.result === null) {
-            return null;
-          }
-          return detail.result;
+          return new Promise<Record<string, unknown> | null>((resolve) => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = (event) => {
+              const record =
+                typeof event.data === "object" && event.data !== null
+                  ? (event.data as Record<string, unknown>)
+                  : null;
+              if (record?.ok !== true || typeof record.result !== "object" || record.result === null) {
+                resolve(null);
+                return;
+              }
+              resolve(record.result as Record<string, unknown>);
+            };
+            window.postMessage(
+              {
+                scope: messageScope,
+                kind: "fingerprint-install",
+                runtime
+              },
+              "*",
+              [channel.port2]
+            );
+          });
         },
-        args: [MAIN_WORLD_CONTROL_EVENT_PREFIX, MAIN_WORLD_CONTROL_SEED_ATTRIBUTE, fingerprintRuntime]
+        args: [MAIN_WORLD_CONTROL_MESSAGE_SCOPE, fingerprintRuntime]
       });
       return asRecord(results[0]?.result);
     };
