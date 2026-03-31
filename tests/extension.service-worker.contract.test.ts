@@ -863,6 +863,122 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("converges runtime bootstrap state to ready after trusted bootstrap hit", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-trusted-ready-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-trusted-ready-001",
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-trusted-ready-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-trusted-ready-001",
+      runtimeContextId: "ctx-bootstrap-trusted-ready-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-trusted-ready-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-trusted-ready-001",
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-trusted-ready-002",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-trusted-ready-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-trusted-ready-003",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "ready",
+        run_id: "run-bootstrap-trusted-ready-001",
+        runtime_context_id: "ctx-bootstrap-trusted-ready-001"
+      })
+    });
+  });
+
   it("allows runtime.readiness promotion without xhs-specific target binding", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

@@ -58,7 +58,9 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const isNonIdempotentForward = (input) => {
-    if (input.command === "runtime.bootstrap") {
+    if (input.command === "runtime.bootstrap" ||
+        input.command === "runtime.start" ||
+        input.command === "runtime.login") {
         return true;
     }
     const requestedExecutionMode = input.params.requested_execution_mode;

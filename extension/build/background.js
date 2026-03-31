@@ -1402,6 +1402,16 @@ class ChromeBackgroundBridge {
         const bootstrapReadyFromTrusted = trustedMatchesBootstrap &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
         if (bootstrapReadyFromState && trustedMatchesBootstrap || bootstrapReadyFromTrusted) {
+            this.#runtimeBootstrapStates.set(profile, {
+                version,
+                runId,
+                runtimeContextId,
+                profile,
+                sessionId: requestSessionId,
+                status: "ready",
+                serializedFingerprintRuntime,
+                updatedAt: new Date().toISOString()
+            });
             this.#emit({
                 id: request.id,
                 status: "success",

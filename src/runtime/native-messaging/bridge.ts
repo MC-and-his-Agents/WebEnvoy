@@ -111,7 +111,11 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
     : null;
 
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
-  if (input.command === "runtime.bootstrap") {
+  if (
+    input.command === "runtime.bootstrap" ||
+    input.command === "runtime.start" ||
+    input.command === "runtime.login"
+  ) {
     return true;
   }
   const requestedExecutionMode = input.params.requested_execution_mode;
