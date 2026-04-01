@@ -567,7 +567,12 @@ slim_pr_body() {
 }
 
 slim_issue_body() {
-  awk '
+  local input_text
+  local structured
+
+  input_text="$(cat)"
+  structured="$(
+    printf '%s\n' "${input_text}" | awk '
     BEGIN {
       keep = 0
     }
@@ -585,6 +590,16 @@ slim_issue_body() {
       print
     }
   ' | slim_user_markdown
+  )"
+
+  if [[ -n "${structured//[[:space:]]/}" ]]; then
+    printf '%s\n' "${structured}"
+    return
+  fi
+
+  printf '%s\n' "${input_text}" \
+    | slim_user_markdown \
+    | awk 'NR <= 40 { print }'
 }
 
 fetch_issue_summary() {
@@ -862,6 +877,19 @@ line_range_reviewable() {
 normalize_native_review_result() {
   local raw_result_file="$1"
   local normalized_result_file="$2"
+
+  if jq -e '
+    type == "object"
+    and ((.verdict // "") | IN("APPROVE", "REQUEST_CHANGES"))
+    and (.safe_to_merge? | type == "boolean")
+    and (.summary? | type == "string")
+    and (.findings? | type == "array")
+    and (.required_actions? | type == "array")
+  ' "${raw_result_file}" >/dev/null 2>&1; then
+    jq -c '.' "${raw_result_file}" > "${normalized_result_file}" \
+      || die "guardian 审查 JSON 输出无法直接读取。"
+    return
+  fi
 
   if jq -e '
     type == "object"

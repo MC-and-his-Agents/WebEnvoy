@@ -620,8 +620,8 @@ EOF
   fetch_issue_summary > "${issue_file}"
 
   assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
-  assert_file_not_contains "${issue_file}" "这是旧 issue 的纯正文描述。"
-  assert_file_not_contains "${issue_file}" "这里还有一段关闭线索。"
+  assert_file_contains "${issue_file}" "这是旧 issue 的纯正文描述。"
+  assert_file_contains "${issue_file}" "这里还有一段关闭线索。"
 }
 
 test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded() {
@@ -1426,6 +1426,21 @@ EOF
   assert_file_contains "${result_file}" '"required_actions":["修复：Keep native review path"]'
 }
 
+test_normalize_native_review_result_accepts_guardian_schema_json() {
+  setup_case_dir "normalize-guardian-schema-json"
+
+  local raw_file="${TMP_DIR}/guardian-review.json"
+  local result_file="${TMP_DIR}/normalized-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema() {
   setup_case_dir "normalize-native-text-review"
 
@@ -2222,6 +2237,7 @@ main() {
   test_assert_required_review_context_available_accepts_missing_optional_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
+  test_normalize_native_review_result_accepts_guardian_schema_json
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
