@@ -172,7 +172,7 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/.guardian-review-context.md"
+  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
   hydrate_worktree_dependencies
 
   list_changed_files > "${CHANGED_FILES_FILE}"
@@ -740,28 +740,45 @@ prepare_reviewer_owned_baseline_overlay() {
     target_path="${WORKTREE_DIR}/${relative_path}"
     if [[ "${resolved_path}" != "${target_path}" ]]; then
       mkdir -p "$(dirname "${target_path}")"
+      mark_path_skip_worktree_if_tracked "${target_path}"
       cp "${resolved_path}" "${target_path}"
     fi
   done
 }
 
-write_review_context_overlay() {
-  cp "${PROMPT_RUN_FILE}" "${WORKTREE_REVIEW_CONTEXT_FILE}"
+mark_path_skip_worktree_if_tracked() {
+  local path="$1"
+  local relative_path
+
+  [[ -n "${WORKTREE_DIR:-}" && "${path}" == "${WORKTREE_DIR}/"* ]] || return 0
+  relative_path="${path#${WORKTREE_DIR}/}"
+
+  if git -C "${WORKTREE_DIR}" ls-files --error-unmatch -- "${relative_path}" >/dev/null 2>&1; then
+    git -C "${WORKTREE_DIR}" update-index --skip-worktree -- "${relative_path}" >/dev/null 2>&1 \
+      || die "无法隔离 review overlay 文件: ${relative_path}"
+  fi
 }
 
-append_review_overlay_to_agents() {
-  local agents_file="${WORKTREE_DIR}/AGENTS.md"
+write_review_context_overlay() {
+  local existing_context_file="${TMP_DIR}/existing-review-context.md"
 
-  [[ -f "${agents_file}" ]] || return 0
+  mkdir -p "$(dirname "${WORKTREE_REVIEW_CONTEXT_FILE}")"
 
-  cat >> "${agents_file}" <<'EOF'
+  if [[ -f "${WORKTREE_REVIEW_CONTEXT_FILE}" ]]; then
+    cp "${WORKTREE_REVIEW_CONTEXT_FILE}" "${existing_context_file}"
+  else
+    : > "${existing_context_file}"
+  fi
 
-## Guardian Review Overlay
+  mark_path_skip_worktree_if_tracked "${WORKTREE_REVIEW_CONTEXT_FILE}"
 
-- 如果仓库根目录存在 `.guardian-review-context.md`，在展开其他上下文前先读取该文件，并按其中列出的最小上下文完成当前 guardian review。
-- 对 reviewer-owned baseline 与审查摘要，以当前 review worktree 中的文件快照为准；这些快照已由 guardian 预先对齐到目标基线或当前 PR 修改版本。
-- 不要默认展开与当前 PR 无关的 FR / architecture 全目录；仅在 `.guardian-review-context.md` 明确要求时再继续下钻。
-EOF
+  {
+    cat "${PROMPT_RUN_FILE}"
+    if [[ -s "${existing_context_file}" ]]; then
+      printf '\n\n---\n\n当前分支原始 TODO.md：\n'
+      cat "${existing_context_file}"
+    fi
+  } > "${WORKTREE_REVIEW_CONTEXT_FILE}"
 }
 
 prepare_review_worktree_context() {
@@ -770,7 +787,6 @@ prepare_review_worktree_context() {
   build_review_prompt "${pr_number}"
   prepare_reviewer_owned_baseline_overlay
   write_review_context_overlay
-  append_review_overlay_to_agents
 }
 
 normalize_review_path() {
