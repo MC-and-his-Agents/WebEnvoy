@@ -90,6 +90,14 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
 fi
 
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
+  issue_exit_code="${MOCK_GH_ISSUE_VIEW_EXIT_CODE:-0}"
+  issue_stderr="${MOCK_GH_ISSUE_VIEW_STDERR:-}"
+  if [[ "${issue_exit_code}" != "0" ]]; then
+    if [[ -n "${issue_stderr:-}" ]]; then
+      printf '%s\n' "${issue_stderr}" >&2
+    fi
+    exit "${issue_exit_code}"
+  fi
   cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
   exit 0
 fi
@@ -213,6 +221,8 @@ setup_case_dir() {
   unset MOCK_GH_REQUIRED_CHECKS_JSON || true
   unset MOCK_GH_REQUIRED_CHECKS_EXIT_CODE || true
   unset MOCK_GH_REQUIRED_CHECKS_STDERR || true
+  unset MOCK_GH_ISSUE_VIEW_EXIT_CODE || true
+  unset MOCK_GH_ISSUE_VIEW_STDERR || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -481,6 +491,21 @@ EOF
   assert_file_not_contains "${issue_file}" "## 检查清单"
 }
 
+test_fetch_issue_summary_fails_when_declared_issue_cannot_be_loaded() {
+  setup_case_dir "issue-summary-failure"
+
+  ISSUE_NUMBER="123"
+  export ISSUE_NUMBER
+
+  MOCK_GH_ISSUE_VIEW_EXIT_CODE=1
+  MOCK_GH_ISSUE_VIEW_STDERR="issue not found"
+  export MOCK_GH_ISSUE_VIEW_EXIT_CODE MOCK_GH_ISSUE_VIEW_STDERR
+
+  local err_file="${TMP_DIR}/issue.err"
+  assert_fail fetch_issue_summary > /dev/null 2>"${err_file}"
+  assert_file_contains "${err_file}" "关联 Issue 拉取失败: #123"
+}
+
 test_collect_spec_review_docs_includes_todo_baseline() {
   setup_case_dir "spec-review-docs"
 
@@ -717,12 +742,21 @@ test_build_review_prompt_prefers_worktree_review_baseline_files() {
   restore_test_repo_root
 }
 
-test_assert_review_support_files_available_accepts_worktree_only_review_summaries() {
+test_assert_required_review_context_available_accepts_worktree_only_review_summaries() {
   setup_case_dir "worktree-only-review-summaries"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+  cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${fake_worktree_dir}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
+  cp "${REPO_ROOT}/spec_review.md" "${fake_worktree_dir}/spec_review.md"
   rm -f "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   rm -f "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
 
@@ -730,11 +764,39 @@ test_assert_review_support_files_available_accepts_worktree_only_review_summarie
   printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
 
   WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="spec_review_profile"
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
-  export WORKTREE_DIR REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+  export WORKTREE_DIR REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
-  assert_pass assert_review_support_files_available
+  assert_pass assert_required_review_context_available
+
+  restore_test_repo_root
+}
+
+test_assert_required_review_context_available_fails_when_worktree_required_baseline_missing() {
+  setup_case_dir "missing-required-baseline"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+  cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${fake_worktree_dir}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  rm -f "${fake_worktree_dir}/code_review.md"
+
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="default_impl_profile"
+  export WORKTREE_DIR REVIEW_PROFILE
+
+  local err_file="${TMP_DIR}/baseline.err"
+  assert_fail assert_required_review_context_available 2>"${err_file}"
+  assert_file_contains "${err_file}" "缺少必需审查基线文件"
 
   restore_test_repo_root
 }
@@ -1241,6 +1303,7 @@ main() {
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_fetch_issue_summary_keeps_body_without_checklist
+  test_fetch_issue_summary_fails_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_append_unique_line_prefers_worktree_for_existing_repo_file
@@ -1250,7 +1313,8 @@ main() {
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_worktree_review_baseline_files
-  test_assert_review_support_files_available_accepts_worktree_only_review_summaries
+  test_assert_required_review_context_available_accepts_worktree_only_review_summaries
+  test_assert_required_review_context_available_fails_when_worktree_required_baseline_missing
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

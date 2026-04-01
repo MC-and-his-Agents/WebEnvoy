@@ -191,6 +191,27 @@ classify_review_profile() {
   printf '%s\n' "default_impl_profile"
 }
 
+is_required_review_context_path() {
+  local value="$1"
+
+  case "${value}" in
+    "${REPO_ROOT}/vision.md"|\
+    "${REPO_ROOT}/AGENTS.md"|\
+    "${REPO_ROOT}/docs/dev/AGENTS.md"|\
+    "${REPO_ROOT}/docs/dev/roadmap.md"|\
+    "${REPO_ROOT}/docs/dev/architecture/system-design.md"|\
+    "${CODE_REVIEW_FILE}"|\
+    "${REVIEW_ADDENDUM_FILE}"|\
+    "${SPEC_REVIEW_SUMMARY_FILE}"|\
+    "${SPEC_REVIEW_FILE}")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 resolve_review_path() {
   local value="$1"
 
@@ -201,6 +222,9 @@ resolve_review_path() {
       printf '%s\n' "${worktree_path}"
       return
     fi
+    if is_required_review_context_path "${value}"; then
+      return
+    fi
   fi
 
   if [[ -f "${value}" ]]; then
@@ -208,15 +232,27 @@ resolve_review_path() {
   fi
 }
 
-assert_review_support_files_available() {
-  local review_addendum_path
-  local spec_review_summary_path
+assert_required_review_context_available() {
+  local required_paths=(
+    "${REPO_ROOT}/vision.md"
+    "${REPO_ROOT}/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/roadmap.md"
+    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
+    "${CODE_REVIEW_FILE}"
+    "${REVIEW_ADDENDUM_FILE}"
+  )
+  local path
+  local resolved_path
 
-  review_addendum_path="$(resolve_review_path "${REVIEW_ADDENDUM_FILE}")"
-  [[ -n "${review_addendum_path}" && -f "${review_addendum_path}" ]] || die "缺少 Guardian 常驻审查摘要: ${REVIEW_ADDENDUM_FILE}"
+  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    required_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
+  fi
 
-  spec_review_summary_path="$(resolve_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
-  [[ -n "${spec_review_summary_path}" && -f "${spec_review_summary_path}" ]] || die "缺少 Guardian spec review 摘要: ${SPEC_REVIEW_SUMMARY_FILE}"
+  for path in "${required_paths[@]}"; do
+    resolved_path="$(resolve_review_path "${path}")"
+    [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || die "缺少必需审查基线文件: ${path}"
+  done
 }
 
 append_unique_line() {
@@ -323,7 +359,7 @@ fetch_issue_summary() {
 
   issue_file="${TMP_DIR}/issue.json"
   if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
-    return 0
+    die "关联 Issue 拉取失败: #${ISSUE_NUMBER}"
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
@@ -990,7 +1026,7 @@ main() {
 
   check_gh_auth
   prepare_pr_workspace "${pr_number}"
-  assert_review_support_files_available
+  assert_required_review_context_available
   run_codex_review "${pr_number}"
   print_summary
 
