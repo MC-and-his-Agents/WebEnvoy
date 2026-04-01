@@ -220,11 +220,9 @@ resolve_review_path() {
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
-      return
+      return 0
     fi
-    if is_required_review_context_path "${value}"; then
-      return
-    fi
+    return 0
   fi
 
   if [[ -f "${value}" ]]; then
@@ -359,7 +357,8 @@ fetch_issue_summary() {
 
   issue_file="${TMP_DIR}/issue.json"
   if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
-    die "关联 Issue 拉取失败: #${ISSUE_NUMBER}"
+    warn "关联 Issue 拉取失败，已忽略 Issue 摘要: #${ISSUE_NUMBER}"
+    return 0
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"

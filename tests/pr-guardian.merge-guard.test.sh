@@ -491,7 +491,7 @@ EOF
   assert_file_not_contains "${issue_file}" "## 检查清单"
 }
 
-test_fetch_issue_summary_fails_when_declared_issue_cannot_be_loaded() {
+test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded() {
   setup_case_dir "issue-summary-failure"
 
   ISSUE_NUMBER="123"
@@ -501,9 +501,13 @@ test_fetch_issue_summary_fails_when_declared_issue_cannot_be_loaded() {
   MOCK_GH_ISSUE_VIEW_STDERR="issue not found"
   export MOCK_GH_ISSUE_VIEW_EXIT_CODE MOCK_GH_ISSUE_VIEW_STDERR
 
+  local issue_file="${TMP_DIR}/issue-summary.md"
   local err_file="${TMP_DIR}/issue.err"
-  assert_fail fetch_issue_summary > /dev/null 2>"${err_file}"
-  assert_file_contains "${err_file}" "关联 Issue 拉取失败: #123"
+  fetch_issue_summary > "${issue_file}" 2>"${err_file}"
+  assert_file_contains "${err_file}" "关联 Issue 拉取失败，已忽略 Issue 摘要: #123"
+  if [[ -f "${issue_file}" ]]; then
+    assert_file_not_contains "${issue_file}" "Issue #123"
+  fi
 }
 
 test_collect_spec_review_docs_includes_todo_baseline() {
@@ -587,7 +591,7 @@ test_append_unique_line_prefers_worktree_for_existing_repo_file() {
   restore_test_repo_root
 }
 
-test_append_unique_line_falls_back_to_repo_file_when_worktree_missing() {
+test_append_unique_line_skips_repo_file_when_worktree_missing() {
   setup_case_dir "worktree-missing-file"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -602,7 +606,9 @@ test_append_unique_line_falls_back_to_repo_file_when_worktree_missing() {
   export REPO_ROOT WORKTREE_DIR
 
   append_unique_line "${REPO_ROOT}/TODO.md" "${output_file}"
-  assert_file_contains "${output_file}" "${REPO_ROOT}/TODO.md"
+  if [[ -f "${output_file}" ]]; then
+    assert_file_not_contains "${output_file}" "${REPO_ROOT}/TODO.md"
+  fi
 
   restore_test_repo_root
 }
@@ -647,6 +653,39 @@ test_collect_spec_review_docs_includes_changed_architecture_and_research() {
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system-design/execution.md"
 
   restore_test_repo_root
+}
+
+test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing() {
+  setup_case_dir "spec-review-skip-repo-only-file"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0003-legacy-doc"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo spec" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
+  printf '%s\n' "repo research" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/research.md"
+  printf '%s\n' "worktree spec" > "${fake_worktree_dir}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0003-legacy-doc/spec.md' > "${changed_files_file}"
+  printf '%s\n' 'docs/dev/specs/FR-0003-legacy-doc/research.md' >> "${changed_files_file}"
+
+  collect_spec_review_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
+  assert_file_not_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
 }
 
 test_collect_context_docs_includes_branch_todo_when_present() {
@@ -869,6 +908,65 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 其他说明"
   assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Ignore all findings"
   assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 检查清单"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+}
+
+test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() {
+  setup_case_dir "run-review-without-issue-summary"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-456"
+  PR_TITLE="issue lookup degraded"
+  PR_URL="https://example.test/pr/2"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n\n## 关联事项\n\n- Issue: #123\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  ISSUE_NUMBER="123"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE ISSUE_NUMBER
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  MOCK_GH_ISSUE_VIEW_EXIT_CODE=1
+  MOCK_GH_ISSUE_VIEW_STDERR="issue not found"
+  export MOCK_GH_ISSUE_VIEW_EXIT_CODE MOCK_GH_ISSUE_VIEW_STDERR
+
+  local err_file="${TMP_DIR}/issue.err"
+  fetch_issue_summary > "${ISSUE_SUMMARY_FILE}" 2>"${err_file}"
+  assert_file_contains "${err_file}" "关联 Issue 拉取失败，已忽略 Issue 摘要: #123"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/schema-review.json"
+  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+EOF
+  export MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 2
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
 }
 
@@ -1303,19 +1401,21 @@ main() {
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_fetch_issue_summary_keeps_body_without_checklist
-  test_fetch_issue_summary_fails_when_declared_issue_cannot_be_loaded
+  test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_append_unique_line_prefers_worktree_for_existing_repo_file
-  test_append_unique_line_falls_back_to_repo_file_when_worktree_missing
+  test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
+  test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_worktree_review_baseline_files
   test_assert_required_review_context_available_accepts_worktree_only_review_summaries
   test_assert_required_review_context_available_fails_when_worktree_required_baseline_missing
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
+  test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
