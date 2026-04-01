@@ -285,83 +285,33 @@ slim_user_markdown() {
     }
     /^## / {
       skip = ($0 == "## 检查清单")
+      if (!skip) {
+        print
+      }
+      next
     }
-    !skip {
+    skip {
+      next
+    }
+    {
+      lower = tolower($0)
+      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/) {
+        next
+      }
+      if ($0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/) {
+        next
+      }
       print
     }
   ' | trim_blank_lines
 }
 
 slim_pr_body() {
-  printf '%s\n' "${PR_BODY}" | awk '
-    BEGIN {
-      current = ""
-    }
-    /^## / {
-      current = $0
-      if (current == "## 摘要" || current == "## 关联事项" || current == "## 风险级别" || current == "## 验证" || current == "## 回滚" || current == "## 变更文件" || current == "## 自动生成的验证建议") {
-        print
-      } else {
-        current = ""
-      }
-      next
-    }
-    current == "## 摘要" {
-      if ($0 ~ /^- 变更目的：/ || $0 ~ /^- 主要改动：/ || NF == 0) {
-        print
-      }
-      next
-    }
-    current == "## 关联事项" {
-      if ($0 ~ /^- Issue:/ || $0 ~ /^- Closing:/ || NF == 0) {
-        print
-      }
-      next
-    }
-    current == "## 风险级别" {
-      if ($0 ~ /^- / || NF == 0) {
-        print
-      }
-      next
-    }
-    current == "## 验证" || current == "## 自动生成的验证建议" {
-      if ($0 ~ /^- 已执行：/ || $0 ~ /^- 未执行：/ || NF == 0) {
-        print
-      }
-      next
-    }
-    current == "## 回滚" {
-      if ($0 ~ /^- 回滚方式：/ || NF == 0) {
-        print
-      }
-      next
-    }
-    current == "## 变更文件" {
-      if ($0 ~ /^- `/ || NF == 0) {
-        print
-      }
-    }
-  ' | trim_blank_lines
+  printf '%s\n' "${PR_BODY}" | slim_user_markdown
 }
 
 slim_issue_body() {
-  awk '
-    BEGIN {
-      keep = 0
-    }
-    /^## / {
-      keep = ($0 == "## 目标" || $0 == "## 边界" || $0 == "## 关闭条件" || $0 == "## 验收标准" || $0 == "## 非目标")
-      if (keep) {
-        print
-      }
-      next
-    }
-    keep {
-      if ($0 ~ /^[-*] / || $0 ~ /^[0-9]+\./ || NF == 0) {
-        print
-      }
-    }
-  ' | trim_blank_lines
+  slim_user_markdown
 }
 
 fetch_issue_summary() {
