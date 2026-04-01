@@ -62,6 +62,8 @@ fetch_origin_tracking_ref() {
   local refspec="${source_ref}:${target_ref}"
   local origin_url=""
   local https_url=""
+  local gh_token=""
+  local auth_header=""
 
   if git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
     return 0
@@ -76,6 +78,13 @@ fetch_origin_tracking_ref() {
   fi
 
   warn "origin SSH 拉取失败，已回退到 HTTPS 继续准备审查上下文: ${source_ref}"
+  gh_token="$(gh auth token 2>/dev/null || true)"
+  if [[ -n "${gh_token}" ]]; then
+    auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${gh_token}" | base64 | tr -d '\n')"
+    git -C "${REPO_ROOT}" -c credential.helper= -c "http.https://github.com/.extraheader=${auth_header}" fetch "${https_url}" "${refspec}" >/dev/null
+    return 0
+  fi
+
   git -C "${REPO_ROOT}" fetch "${https_url}" "${refspec}" >/dev/null
 }
 
@@ -259,6 +268,20 @@ is_reviewer_owned_baseline_path() {
   esac
 }
 
+is_optional_review_baseline_path() {
+  local value="$1"
+
+  case "${value}" in
+    "${REVIEW_ADDENDUM_FILE}"|\
+    "${SPEC_REVIEW_SUMMARY_FILE}")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 resolve_review_path() {
   local value="$1"
   local relative_path
@@ -270,20 +293,13 @@ resolve_review_path() {
     worktree_path="${WORKTREE_DIR}/${relative_path}"
 
     if is_reviewer_owned_baseline_path "${value}"; then
-      if path_changed_in_pr "${value}"; then
-        if [[ -f "${worktree_path}" ]]; then
-          printf '%s\n' "${worktree_path}"
-        fi
-        return 0
-      fi
-
       base_snapshot_path="$(materialize_base_snapshot_path "${value}")"
       if [[ -n "${base_snapshot_path}" && -f "${base_snapshot_path}" ]]; then
         printf '%s\n' "${base_snapshot_path}"
         return 0
       fi
 
-      if [[ -f "${worktree_path}" ]]; then
+      if ! is_optional_review_baseline_path "${value}" && [[ -f "${worktree_path}" ]]; then
         printf '%s\n' "${worktree_path}"
       fi
       return 0
@@ -361,6 +377,9 @@ assert_required_review_context_available() {
   fi
 
   for path in "${required_paths[@]}"; do
+    if is_optional_review_baseline_path "${path}"; then
+      continue
+    fi
     resolved_path="$(resolve_review_path "${path}")"
     [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || die "缺少必需审查基线文件: ${path}"
   done
