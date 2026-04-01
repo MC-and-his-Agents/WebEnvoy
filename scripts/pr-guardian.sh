@@ -88,13 +88,15 @@ fetch_github_https_ref() {
   local https_url="$1"
   local refspec="$2"
   local gh_token=""
+  local secret_tmp_dir=""
   local askpass_script=""
   local token_file=""
 
   gh_token="$(gh auth token 2>/dev/null || true)"
   if [[ -n "${gh_token}" ]]; then
-    askpass_script="${TMP_DIR}/git-askpass.sh"
-    token_file="${TMP_DIR}/github-token.txt"
+    secret_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-gh-auth.XXXXXX")"
+    askpass_script="${secret_tmp_dir}/git-askpass.sh"
+    token_file="${secret_tmp_dir}/github-token.txt"
     printf '%s' "${gh_token}" > "${token_file}"
     chmod 600 "${token_file}"
     cat > "${askpass_script}" <<EOF
@@ -106,9 +108,13 @@ case "\${1:-}" in
 esac
 EOF
     chmod 700 "${askpass_script}"
-    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="${askpass_script}" \
-      git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null
-    return 0
+    if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="${askpass_script}" \
+      git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null; then
+      rm -rf "${secret_tmp_dir}"
+      return 0
+    fi
+    rm -rf "${secret_tmp_dir}"
+    return 1
   fi
 
   git -C "${REPO_ROOT}" fetch "${https_url}" "${refspec}" >/dev/null
@@ -716,37 +722,8 @@ slim_issue_body() {
 }
 
 fetch_issue_summary() {
-  local issue_file
-  local issue_title
-  local safe_issue_title
-  local issue_body
-  local issue_body_file
-
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
-
-  issue_file="${TMP_DIR}/issue.json"
-  if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
-    warn "关联 Issue 拉取失败，已忽略 Issue 摘要: #${ISSUE_NUMBER}"
-    return 0
-  fi
-
-  issue_title="$(jq -r '.title // ""' "${issue_file}")"
-  safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
-  issue_body="$(jq -r '.body // ""' "${issue_file}")"
-  issue_body_file="${TMP_DIR}/issue-body.md"
-  if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
-    printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${safe_issue_title}"
-  else
-    printf 'Issue #%s\n' "${ISSUE_NUMBER}"
-  fi
-
-  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
-    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
-    if [[ -s "${issue_body_file}" ]]; then
-      printf '\n'
-      cat "${issue_body_file}"
-    fi
-  fi
+  printf 'Issue 引用（来自 PR 元数据，未加载正文）: #%s\n' "${ISSUE_NUMBER}"
 }
 
 collect_high_risk_architecture_docs() {
