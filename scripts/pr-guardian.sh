@@ -220,6 +220,9 @@ prepare_pr_workspace() {
   list_changed_files > "${CHANGED_FILES_FILE}"
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
   ISSUE_NUMBER="$(jq -r 'if (.closingIssuesReferences | length) == 1 then (.closingIssuesReferences[0].number // "") else "" end' "${META_FILE}")"
+  if [[ -z "${ISSUE_NUMBER}" ]]; then
+    ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
+  fi
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
@@ -570,14 +573,6 @@ extract_issue_number_from_pr_body() {
       print "$1\n";
       exit;
     }
-    if (/-\s*Closing:\s*(?:Fixes|Refs)\s*#(\d+)/i) {
-      print "$1\n";
-      exit;
-    }
-    if (/\b(?:Fixes|Refs)\s*#(\d+)/i) {
-      print "$1\n";
-      exit;
-    }
   '
 }
 
@@ -820,6 +815,7 @@ collect_spec_review_docs() {
     [[ -n "${changed_file}" ]] || continue
     case "${changed_file}" in
       docs/dev/architecture/*|docs/dev/specs/*)
+        append_unique_line "${REPO_ROOT}/${changed_file}" "${output_file}"
         append_proposed_review_line "${REPO_ROOT}/${changed_file}" "${output_file}"
         ;;
     esac
@@ -877,6 +873,8 @@ build_review_prompt() {
   local changed_baseline_path
   local changed_baseline_relative_path
   local changed_baseline_worktree_path
+  local deleted_formal_docs_file="${TMP_DIR}/deleted-formal-docs.txt"
+  local changed_formal_doc=""
 
   context_count="$(grep -c . "${CONTEXT_DOCS_FILE}" 2>/dev/null || true)"
   safe_pr_title="$(sanitize_user_prompt_line "${PR_TITLE}")"
@@ -890,6 +888,7 @@ build_review_prompt() {
   fi
   collect_changed_trusted_baseline_paths "${changed_trusted_baselines_file}" "${CHANGED_FILES_FILE}"
   : > "${deleted_trusted_baselines_file}"
+  : > "${deleted_formal_docs_file}"
   while IFS= read -r changed_baseline_path; do
     [[ -n "${changed_baseline_path}" ]] || continue
     [[ "${changed_baseline_path}" == "${REPO_ROOT}/"* ]] || continue
@@ -899,6 +898,18 @@ build_review_prompt() {
       printf '%s\n' "${changed_baseline_relative_path}" >> "${deleted_trusted_baselines_file}"
     fi
   done < "${changed_trusted_baselines_file}"
+  if [[ -n "${CHANGED_FILES_FILE:-}" && -f "${CHANGED_FILES_FILE}" ]]; then
+    while IFS= read -r changed_formal_doc; do
+      [[ -n "${changed_formal_doc}" ]] || continue
+      case "${changed_formal_doc}" in
+        docs/dev/architecture/*|docs/dev/specs/*)
+          if [[ -n "${WORKTREE_DIR:-}" && ! -f "${WORKTREE_DIR}/${changed_formal_doc}" ]]; then
+            printf '%s\n' "${changed_formal_doc}" >> "${deleted_formal_docs_file}"
+          fi
+          ;;
+      esac
+    done < "${CHANGED_FILES_FILE}"
+  fi
 
   {
     printf '你正在为 WebEnvoy 仓库审查 PR #%s。\n' "${pr_number}"
@@ -978,6 +989,14 @@ build_review_prompt() {
         [[ -n "${deleted_baseline}" ]] || continue
         printf -- '- %s\n' "${deleted_baseline}"
       done < "${deleted_trusted_baselines_file}"
+    fi
+
+    if [[ -s "${deleted_formal_docs_file}" ]]; then
+      printf '\n当前 PR 删除了以下正式 spec / architecture 文档；请结合上面的 baseline snapshot 对照其删除影响：\n'
+      while IFS= read -r deleted_formal_doc; do
+        [[ -n "${deleted_formal_doc}" ]] || continue
+        printf -- '- %s\n' "${deleted_formal_doc}"
+      done < "${deleted_formal_docs_file}"
     fi
 
     printf '\n请在当前仓库工作树中完成审查，并将当前分支相对 origin/%s 的差异视为唯一审查目标。\n' "${BASE_REF}"

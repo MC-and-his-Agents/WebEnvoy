@@ -1172,8 +1172,8 @@ test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs() {
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0004-formal-doc/TODO.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0004-formal-doc/plan.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/architecture/system-design/execution.md"
-  assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0004-formal-doc/spec.md"
-  assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/architecture/system-design/execution.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/architecture/system-design/execution.md"
 
   restore_test_repo_root
 }
@@ -1213,7 +1213,7 @@ test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
 
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
   assert_file_not_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
-  assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
 }
 
 test_collect_context_docs_includes_branch_todo_when_present() {
@@ -1380,6 +1380,47 @@ test_build_review_prompt_surfaces_deleted_trusted_baselines() {
   assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 删除了以下审查基线文档"
   assert_file_contains "${PROMPT_RUN_FILE}" "- code_review.md"
   assert_file_contains "${PROMPT_RUN_FILE}" "- docs/dev/review/guardian-spec-review-summary.md"
+
+  restore_test_repo_root
+}
+
+test_build_review_prompt_surfaces_deleted_formal_docs() {
+  setup_case_dir "deleted-formal-doc-prompt"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0001-runtime-cli-entry"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry"
+  printf '%s\n' "base spec" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
+
+  REVIEW_PROFILE="spec_review_profile"
+  PR_TITLE="deleted formal doc"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR BASELINE_SNAPSHOT_ROOT
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${CHANGED_FILES_FILE}"
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 删除了以下正式 spec / architecture 文档"
+  assert_file_contains "${PROMPT_RUN_FILE}" "- docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
+  assert_file_contains "${CONTEXT_DOCS_FILE}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
 
   restore_test_repo_root
 }
@@ -2573,6 +2614,7 @@ main() {
   test_collect_context_docs_includes_proposed_changed_guardian_summaries
   test_collect_context_docs_includes_proposed_changed_trusted_baselines
   test_build_review_prompt_surfaces_deleted_trusted_baselines
+  test_build_review_prompt_surfaces_deleted_formal_docs
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_sanitizes_pr_title
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
