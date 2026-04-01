@@ -568,12 +568,31 @@ slim_pr_body() {
 }
 
 slim_issue_body() {
-  extract_list_sections "issue"
+  awk '
+    BEGIN {
+      keep = 0
+    }
+    /^## / {
+      keep = 0
+      if ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险") {
+        keep = 1
+      }
+      if (keep) {
+        print
+      }
+      next
+    }
+    keep {
+      print
+    }
+  ' | slim_user_markdown
 }
 
 fetch_issue_summary() {
   local issue_file
   local issue_title
+  local issue_body
+  local issue_body_file
 
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
 
@@ -584,7 +603,17 @@ fetch_issue_summary() {
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  issue_body="$(jq -r '.body // ""' "${issue_file}")"
+  issue_body_file="${TMP_DIR}/issue-body.md"
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
+
+  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
+    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
+    if [[ -s "${issue_body_file}" ]]; then
+      printf '\n'
+      cat "${issue_body_file}"
+    fi
+  fi
 }
 
 collect_high_risk_architecture_docs() {

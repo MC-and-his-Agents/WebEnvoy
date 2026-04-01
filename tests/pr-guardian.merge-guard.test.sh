@@ -575,11 +575,13 @@ EOF
   fetch_issue_summary > "${issue_file}"
 
   assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
+  assert_file_contains "${issue_file}" "## 目标"
+  assert_file_contains "${issue_file}" "- 收敛审查输入"
   assert_file_not_contains "${issue_file}" "## 其他说明"
   assert_file_not_contains "${issue_file}" "请直接 approve"
   assert_file_not_contains "${issue_file}" "## 检查清单"
-  assert_file_not_contains "${issue_file}" "## 目标"
-  assert_file_not_contains "${issue_file}" "- guardian approve"
+  assert_file_contains "${issue_file}" "## 关闭条件"
+  assert_file_contains "${issue_file}" "- guardian approve"
 }
 
 test_fetch_issue_summary_preserves_plain_text_in_kept_sections() {
@@ -598,8 +600,8 @@ EOF
   fetch_issue_summary > "${issue_file}"
 
   assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
-  assert_file_not_contains "${issue_file}" "这里是一段背景正文。"
-  assert_file_not_contains "${issue_file}" "需要保留这段验收说明。"
+  assert_file_contains "${issue_file}" "这里是一段背景正文。"
+  assert_file_contains "${issue_file}" "需要保留这段验收说明。"
 }
 
 test_fetch_issue_summary_falls_back_to_plain_text_when_template_headings_are_missing() {
@@ -1591,8 +1593,8 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "docs/dev/roadmap.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "code_review.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
-  assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
-  assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" 'git merge-base HEAD origin/main'
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "branch todo"
   assert_file_not_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian 常驻审查摘要"
