@@ -109,7 +109,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         params: expect.objectContaining({
           version: "v1",
           run_id: "run-xhs-ready-001",
-          profile: "official_ready_profile"
+          profile: "official_ready_profile",
+          target_tab_id: 32
         })
       })
     );

@@ -782,6 +782,97 @@ export class ProfileRuntimeService {
             updatedAt: meta?.updatedAt ?? null
         };
     }
+    async attach(input) {
+        const nowIso = isoNow();
+        const store = this.#createStore(input.cwd);
+        const profileDir = this.#resolveProfileDir(store, input.profile);
+        const lockPath = this.#getLockPath(profileDir);
+        const meta = await this.#readMeta(store, input.profile, {
+            mode: readFingerprintMetaMode(input.params) ?? "readonly"
+        });
+        const storedProfileState = meta?.profileState ?? "uninitialized";
+        const activeState = isRuntimeActiveProfileState(storedProfileState);
+        if (!activeState) {
+            throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${storedProfileState} 不能接管 live runtime`, { retryable: true });
+        }
+        const lock = await this.#readLock(lockPath);
+        if (!lock) {
+            throw new CliError("ERR_PROFILE_LOCKED", "profile 当前未持有可接管的 live runtime", {
+                retryable: true
+            });
+        }
+        const lockInspection = await this.#inspectProfileLock(lock, profileDir);
+        const healthyLock = lockInspection.blocksReuse;
+        const profileState = activeState && !(lockInspection.controlConnected ?? false) ? "disconnected" : storedProfileState;
+        if (!healthyLock ||
+            !lockInspection.controlConnected ||
+            profileState !== "ready") {
+            throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
+                retryable: true
+            });
+        }
+        const identityPreflight = await this.#runIdentityPreflight({
+            input,
+            meta,
+            profileDir
+        });
+        if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
+            throw buildIdentityPreflightError(identityPreflight);
+        }
+        if (identityPreflight.mode !== "official_chrome_persistent_extension" ||
+            identityPreflight.identityBindingState !== "bound") {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", "official Chrome runtime identity 未就绪，无法接管", {
+                retryable: true
+            });
+        }
+        const requestedExecutionMode = readRequestedExecutionMode(input.params);
+        const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
+            requestedExecutionMode
+        });
+        ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
+        if (lock.ownerRunId !== input.runId) {
+            await this.#rebindActiveRuntimeOwnership({
+                profileDir,
+                lockPath,
+                lock,
+                nextRunId: input.runId,
+                nowIso
+            });
+        }
+        const readiness = await this.#readRuntimeReadiness({
+            runtimeInput: input,
+            lockHeld: true,
+            identityPreflight,
+            profileState
+        });
+        return {
+            profile: input.profile,
+            profileState,
+            browserState: browserStateFromProfileState(profileState, true),
+            profileDir,
+            proxyUrl: meta?.proxyBinding?.url ?? null,
+            lockHeld: true,
+            identityBindingState: readiness.identityBindingState,
+            transportState: readiness.transportState,
+            bootstrapState: readiness.bootstrapState,
+            runtimeReadiness: readiness.runtimeReadiness,
+            identityPreflight: {
+                mode: identityPreflight.mode,
+                binding: identityPreflight.binding,
+                manifestPath: identityPreflight.manifestPath,
+                expectedOrigin: identityPreflight.expectedOrigin,
+                allowedOrigins: identityPreflight.allowedOrigins,
+                browserPath: identityPreflight.browserPath,
+                browserVersion: identityPreflight.browserVersion,
+                blocking: identityPreflight.blocking,
+                failureReason: identityPreflight.failureReason
+            },
+            lockOwnerPid: lock.ownerPid,
+            recoverableSession: buildRecoverableSessionSummary(meta),
+            fingerprint_runtime: fingerprintRuntime,
+            updatedAt: meta?.updatedAt ?? null
+        };
+    }
     async stop(input) {
         const nowIso = isoNow();
         const store = this.#createStore(input.cwd);
@@ -1074,10 +1165,8 @@ export class ProfileRuntimeService {
         const statePath = join(profileDir, BROWSER_STATE_FILENAME);
         try {
             const raw = await this.#lockFileAdapter.readFile(statePath, "utf8");
-            const parsed = JSON.parse(raw);
-            if (typeof parsed.runId !== "string" ||
-                !Number.isInteger(parsed.controllerPid) ||
-                !Number.isInteger(parsed.browserPid)) {
+            const parsed = this.#parseBrowserInstanceState(raw);
+            if (parsed === null) {
                 return null;
             }
             const controllerPid = parsed.controllerPid;
@@ -1097,6 +1186,61 @@ export class ProfileRuntimeService {
                 return null;
             }
             return null;
+        }
+    }
+    #parseBrowserInstanceState(raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed.runId !== "string" ||
+                !Number.isInteger(parsed.controllerPid) ||
+                !Number.isInteger(parsed.browserPid)) {
+                return null;
+            }
+            return {
+                ...parsed,
+                runId: parsed.runId,
+                controllerPid: parsed.controllerPid,
+                browserPid: parsed.browserPid
+            };
+        }
+        catch {
+            return null;
+        }
+    }
+    async #rebindActiveRuntimeOwnership(input) {
+        const statePath = join(input.profileDir, BROWSER_STATE_FILENAME);
+        let stateRaw;
+        try {
+            stateRaw = await this.#lockFileAdapter.readFile(statePath, "utf8");
+        }
+        catch {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态缺失，无法安全接管 live runtime", {
+                retryable: true
+            });
+        }
+        const parsedState = this.#parseBrowserInstanceState(stateRaw);
+        if (parsedState === null ||
+            parsedState.controllerPid !== input.lock.ownerPid) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
+                retryable: true
+            });
+        }
+        const nextState = {
+            ...parsedState,
+            runId: input.nextRunId
+        };
+        const nextLock = {
+            ...input.lock,
+            ownerRunId: input.nextRunId,
+            lastHeartbeatAt: input.nowIso
+        };
+        await this.#lockFileAdapter.writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
+        try {
+            await this.#writeLock(input.lockPath, nextLock);
+        }
+        catch (error) {
+            await this.#lockFileAdapter.writeFile(statePath, stateRaw, "utf8").catch(() => undefined);
+            throw error;
         }
     }
     async #inspectProfileLock(lock, profileDir) {

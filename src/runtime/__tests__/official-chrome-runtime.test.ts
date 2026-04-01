@@ -105,6 +105,173 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("forwards explicit target_tab_id into hidden runtime.bootstrap when provided", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-ready-target-tab-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_target_tab_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_target_tab_profile",
+          run_id: "run-runtime-ready-target-tab-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_write",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 44,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      bootstrapState: "ready",
+      transportState: "ready"
+    });
+
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        params: expect.objectContaining({
+          target_tab_id: 44
+        })
+      })
+    );
+  });
+
+  it("attaches a fresh run_id to an already-ready runtime before bootstrapping its own context", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: false
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "pending",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_attach_profile",
+          run_id: "run-runtime-attach-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_write",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      bootstrapState: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        params: expect.objectContaining({
+          run_id: "run-runtime-attach-001",
+          target_tab_id: 52
+        })
+      })
+    );
+  });
+
   it("waits for bridge readiness when bootstrap is initially not delivered", async () => {
     const readStatus = vi
       .fn()

@@ -1805,6 +1805,146 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("allows a fresh run_id to attach an already-ready official Chrome runtime and rebind ownership", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-ready-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_ready_profile"
+    });
+    const service = createTestService();
+
+    const ownerStart = await service.start({
+      cwd: baseDir,
+      profile: "attach_ready_profile",
+      runId: "run-runtime-attach-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+    expect(ownerStart).toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "ready"
+    });
+    await writeFile(
+      join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "attach_ready_profile",
+        BROWSER_STATE_FILENAME
+      ),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-ready-token-001",
+          profileDir: join(baseDir, ".webenvoy", "profiles", "attach_ready_profile"),
+          runId: "run-runtime-attach-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_profile",
+        runId: "run-runtime-attach-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      runtimeReadiness: "blocked",
+      transportState: "ready",
+      bootstrapState: "ready"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_ready_profile",
+        runId: "run-runtime-attach-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      bootstrapState: "ready"
+    });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_profile",
+        runId: "run-runtime-attach-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_profile",
+        runId: "run-runtime-attach-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "ready"
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_ready_profile");
+    const lockRaw = await readFile(join(profileDir, "__webenvoy_lock.json"), "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    expect(lock.ownerRunId).toBe("run-runtime-attach-next-001");
+
+    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+    expect(browserState.runId).toBe("run-runtime-attach-next-001");
+  });
+
   it("accepts relocated manifest path when stable identity still matches", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-relocate-"));
     tempDirs.push(baseDir);

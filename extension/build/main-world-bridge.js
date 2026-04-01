@@ -1,8 +1,10 @@
 "use strict";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
+let activeMainWorldBootstrapListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
 const audioNoiseSeedByPrototype = new WeakMap();
 const DEFAULT_PLUGIN_DESCRIPTORS = [
@@ -292,7 +294,7 @@ const parseMainWorldRequest = (event) => {
     }
     const id = asString(detail.id);
     const type = detail.type;
-    if (!id || type !== "fingerprint-install") {
+    if (!id || (type !== "fingerprint-install" && type !== "fingerprint-verify")) {
         return null;
     }
     return {
@@ -302,6 +304,22 @@ const parseMainWorldRequest = (event) => {
     };
 };
 const handleRequest = async (request) => {
+    if (request.type === "fingerprint-verify") {
+        if (!activeMainWorldEventChannel) {
+            return;
+        }
+        const hasGetBattery = typeof window.navigator.getBattery === "function";
+        await emitResult(activeMainWorldEventChannel.resultEvent, {
+            id: request.id,
+            ok: true,
+            result: {
+                has_get_battery: hasGetBattery,
+                plugins_length: typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
+                mime_types_length: typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
+            }
+        });
+        return;
+    }
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
     if (!activeMainWorldEventChannel) {
@@ -351,6 +369,24 @@ const resolveExpectedMainWorldEventChannel = () => {
         resultEvent
     };
 };
+const resolveBootstrappedMainWorldEventChannel = (event) => {
+    const detail = asRecord(event.detail);
+    const requestEvent = asString(detail?.request_event);
+    const resultEvent = asString(detail?.result_event);
+    if (!requestEvent || !resultEvent) {
+        return null;
+    }
+    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+        return null;
+    }
+    if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+        return null;
+    }
+    return {
+        requestEvent,
+        resultEvent
+    };
+};
 const attachMainWorldEventChannel = (channel) => {
     if (activeMainWorldEventChannel) {
         if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
@@ -382,7 +418,23 @@ const attachMainWorldEventChannel = (channel) => {
     };
     window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
 };
+const ensureBootstrapListener = () => {
+    if (activeMainWorldBootstrapListener || typeof window.addEventListener !== "function") {
+        return;
+    }
+    activeMainWorldBootstrapListener = (event) => {
+        const channel = resolveBootstrappedMainWorldEventChannel(event);
+        if (!channel) {
+            return;
+        }
+        attachMainWorldEventChannel(channel);
+    };
+    window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, activeMainWorldBootstrapListener);
+};
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);
+}
+else {
+    ensureBootstrapListener();
 }

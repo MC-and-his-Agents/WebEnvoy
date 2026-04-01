@@ -1,5 +1,6 @@
 import {
   ContentScriptHandler,
+  resolveMainWorldEventNamesForSecret,
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
 } from "./content-script-handler.js";
@@ -1442,7 +1443,7 @@ class ChromeBackgroundBridge {
       command === "runtime.ping" &&
       !!bootstrap &&
       bootstrap.sessionId === sessionId &&
-      bootstrap.status === "pending" &&
+      (bootstrap.status === "pending" || bootstrap.status === "ready") &&
       bootstrap.serializedFingerprintRuntime === serializeFingerprintRuntimeContext(fingerprintRuntime);
     if (!canPrimeFromBootstrap) {
       return;
@@ -1798,6 +1799,22 @@ class ChromeBackgroundBridge {
       await this.#handleRuntimeBootstrap(request);
       return;
     }
+    if (command === "runtime.tabs") {
+      await this.#handleRuntimeTabs(request);
+      return;
+    }
+    if (command === "runtime.reload_tab") {
+      await this.#handleRuntimeReloadTab(request);
+      return;
+    }
+    if (command === "runtime.main_world_probe") {
+      await this.#handleRuntimeMainWorldProbe(request);
+      return;
+    }
+    if (command === "runtime.trusted_fingerprint_probe") {
+      this.#handleRuntimeTrustedFingerprintProbe(request);
+      return;
+    }
     if (command === "runtime.readiness") {
       this.#handleRuntimeReadiness(request);
       return;
@@ -1976,6 +1993,355 @@ class ChromeBackgroundBridge {
     return;
   }
 
+  async #handleRuntimeTabs(request: BridgeRequest): Promise<void> {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const currentWindowOnly = commandParams.current_window_only !== false;
+    const rawUrlPatterns = Array.isArray(commandParams.url_patterns)
+      ? commandParams.url_patterns.filter((entry): entry is string => typeof entry === "string")
+      : [];
+
+    try {
+      const tabs = await this.chromeApi.tabs.query({
+        ...(currentWindowOnly ? { currentWindow: true } : {}),
+        ...(rawUrlPatterns.length > 0 ? { url: rawUrlPatterns } : {})
+      });
+      this.#emit({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params.session_id ?? this.#sessionId),
+          run_id: String(request.params.run_id ?? request.id),
+          command: "runtime.tabs",
+          relay_path: "host>background"
+        },
+        payload: {
+          tabs: tabs.map((tab) => ({
+            tab_id: typeof tab.id === "number" ? tab.id : null,
+            active: tab.active === true,
+            url: typeof tab.url === "string" ? tab.url : null
+          }))
+        },
+        error: null
+      });
+    } catch (error) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+  }
+
+  async #handleRuntimeReloadTab(request: BridgeRequest): Promise<void> {
+    const tabId = await this.#resolveTargetTabId(request);
+    if (!tabId) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "runtime.reload_tab requires resolvable target_tab_id"
+        }
+      });
+      return;
+    }
+    if (!this.chromeApi.scripting?.executeScript) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "chrome.scripting.executeScript is unavailable"
+        }
+      });
+      return;
+    }
+    try {
+      const results = await this.chromeApi.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+          const href = location.href;
+          setTimeout(() => {
+            location.reload();
+          }, 0);
+          return {
+            href,
+            reload_scheduled: true
+          };
+        }
+      });
+      this.#emit({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params.session_id ?? this.#sessionId),
+          run_id: String(request.params.run_id ?? request.id),
+          command: "runtime.reload_tab",
+          profile: typeof request.profile === "string" ? request.profile : null,
+          tab_id: tabId,
+          relay_path: "host>background>main-world>background>host"
+        },
+        payload: {
+          target_tab_id: tabId,
+          result: Array.isArray(results) ? (results[0]?.result ?? null) : null
+        },
+        error: null
+      });
+    } catch (error) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>main-world>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+  }
+
+  async #handleRuntimeMainWorldProbe(request: BridgeRequest): Promise<void> {
+    const tabId = await this.#resolveTargetTabId(request);
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const mainWorldSecret = asNonEmptyString(commandParams.main_world_secret);
+
+    if (!tabId || !mainWorldSecret) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+          message: "runtime.main_world_probe requires target_tab_id and main_world_secret"
+        }
+      });
+      return;
+    }
+
+    if (!this.chromeApi.scripting?.executeScript) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "chrome.scripting.executeScript is unavailable"
+        }
+      });
+      return;
+    }
+
+    const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
+
+    try {
+      const results = await this.chromeApi.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: async (requestEventName: unknown, resultEventName: unknown) => {
+          const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+          const requestEvent =
+            typeof requestEventName === "string" ? requestEventName : "";
+          const resultEvent =
+            typeof resultEventName === "string" ? resultEventName : "";
+          const state = {
+            ready_state: document.readyState,
+            href: location.href,
+            plugins_length:
+              typeof navigator.plugins?.length === "number" ? navigator.plugins.length : null,
+            mime_types_length:
+              typeof navigator.mimeTypes?.length === "number" ? navigator.mimeTypes.length : null,
+            has_get_battery:
+              typeof (navigator as Navigator & { getBattery?: unknown }).getBattery === "function"
+          };
+          if (!requestEvent || !resultEvent) {
+            return {
+              ...state,
+              probe_response_received: false,
+              error: "invalid probe event names"
+            };
+          }
+
+          return await new Promise<Record<string, unknown>>((resolve) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              window.removeEventListener(resultEvent, onResult as EventListener);
+              resolve({
+                ...state,
+                probe_response_received: false,
+                error: "main world probe timeout"
+              });
+            }, 1_500);
+
+            const onResult = (event: Event) => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              clearTimeout(timer);
+              window.removeEventListener(resultEvent, onResult as EventListener);
+              const detail =
+                typeof (event as CustomEvent<unknown>).detail === "object" &&
+                (event as CustomEvent<unknown>).detail !== null
+                  ? ((event as CustomEvent<unknown>).detail as Record<string, unknown>)
+                  : null;
+              resolve({
+                ...state,
+                probe_response_received: true,
+                probe_result: detail
+              });
+            };
+
+            window.addEventListener(resultEvent, onResult as EventListener);
+            window.dispatchEvent(
+              new CustomEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
+                detail: {
+                  request_event: requestEvent,
+                  result_event: resultEvent
+                }
+              })
+            );
+            window.dispatchEvent(
+              new CustomEvent(requestEvent, {
+                detail: {
+                  id: `probe-${Date.now()}`,
+                  type: "fingerprint-install",
+                  payload: {}
+                }
+              })
+            );
+          });
+        },
+        args: [requestEvent, resultEvent]
+      });
+      const payload =
+        Array.isArray(results) && results.length > 0
+          ? (results[0]?.result as Record<string, unknown> | undefined)
+          : undefined;
+      this.#emit({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params.session_id ?? this.#sessionId),
+          run_id: String(request.params.run_id ?? request.id),
+          command: "runtime.main_world_probe",
+          profile: typeof request.profile === "string" ? request.profile : null,
+          tab_id: tabId,
+          relay_path: "host>background>main-world>background>host"
+        },
+        payload: {
+          target_tab_id: tabId,
+          request_event: requestEvent,
+          result_event: resultEvent,
+          ...(payload ? { probe: payload } : {})
+        },
+        error: null
+      });
+    } catch (error) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>main-world>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+  }
+
+  #handleRuntimeTrustedFingerprintProbe(request: BridgeRequest): void {
+    const profile = asNonEmptyString(request.profile);
+    const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
+    const sourceBinding = this.#resolveRequestTargetBinding(request);
+    const trusted =
+      profile !== null
+        ? this.#trustedFingerprintContexts.get(buildTrustedFingerprintContextKey(profile, sessionId)) ?? null
+        : null;
+    const profileEntries =
+      profile === null
+        ? []
+        : Array.from(this.#trustedFingerprintContexts.entries())
+            .filter(([key]) => key.startsWith(`${profile}::`))
+            .map(([key, entry]) => ({
+              key,
+              session_id: entry.sessionId,
+              run_id: entry.runId,
+              runtime_context_id: entry.runtimeContextId,
+              source_tab_id: entry.sourceTabId,
+              source_domain: entry.sourceDomain
+            }));
+    this.#emit({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: sessionId,
+        run_id: String(request.params.run_id ?? request.id),
+        command: "runtime.trusted_fingerprint_probe",
+        profile,
+        relay_path: "host>background"
+      },
+      payload: {
+        trusted_context_present: trusted !== null,
+        trusted_context: trusted
+          ? {
+              session_id: trusted.sessionId,
+              run_id: trusted.runId,
+              runtime_context_id: trusted.runtimeContextId,
+              source_tab_id: trusted.sourceTabId,
+              source_domain: trusted.sourceDomain,
+              fingerprint_runtime: trusted.fingerprintRuntime
+            }
+          : null,
+        debug: {
+          background_session_id: this.#sessionId,
+          request_session_id: sessionId,
+          resolved_request_target_binding: sourceBinding
+            ? {
+                tab_id: sourceBinding.tabId,
+                domain: sourceBinding.domain
+              }
+            : null,
+          bootstrap_state: bootstrap
+            ? {
+                session_id: bootstrap.sessionId,
+                run_id: bootstrap.runId,
+                runtime_context_id: bootstrap.runtimeContextId,
+                status: bootstrap.status
+              }
+            : null,
+          profile_entries: profileEntries
+        }
+      },
+      error: null
+    });
+  }
+
   #handleRuntimeReadiness(request: BridgeRequest): void {
     const profile = asNonEmptyString(request.profile);
     const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
@@ -2132,6 +2498,22 @@ class ChromeBackgroundBridge {
     bootstrap.status = "ready";
     bootstrap.updatedAt = new Date().toISOString();
     this.#runtimeBootstrapStates.set(profile, bootstrap);
+    const attestedFingerprintRuntime = resolveAttestedFingerprintRuntimeContext(
+      input.payload.fingerprint_runtime ?? null
+    );
+    const sourceBinding = this.#resolveRequestTargetBinding(input.request);
+    if (
+      attestedFingerprintRuntime &&
+      attestedFingerprintRuntime.profile === profile &&
+      sourceBinding
+    ) {
+      this.#upsertTrustedFingerprintContext(profile, bootstrap.sessionId, attestedFingerprintRuntime, {
+        sourceTabId: sourceBinding.tabId,
+        sourceDomain: sourceBinding.domain,
+        runId: bootstrap.runId,
+        runtimeContextId: bootstrap.runtimeContextId
+      });
+    }
     if (input.suppressHostResponse) {
       return;
     }

@@ -12,6 +12,7 @@ type BootstrapState = "not_started" | "pending" | "ready" | "stale" | "failed";
 type TransportState = "not_connected" | "ready" | "disconnected";
 
 type RuntimeStatusReader = () => Promise<JsonObject>;
+type RuntimeAttachReader = () => Promise<JsonObject>;
 
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
@@ -72,6 +73,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
   profile: string;
   runId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
+  targetTabId?: number | null;
+  targetDomain?: string | null;
+  targetPage?: string | null;
 }): JsonObject & {
   version: "v1";
   run_id: string;
@@ -83,6 +87,15 @@ const buildRuntimeBootstrapEnvelope = (input: {
   run_id: input.runId,
   runtime_context_id: buildRuntimeBootstrapContextId(input.profile, input.runId),
   profile: input.profile,
+  ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
+    ? { target_tab_id: input.targetTabId }
+    : {}),
+  ...(typeof input.targetDomain === "string" && input.targetDomain.length > 0
+    ? { target_domain: input.targetDomain }
+    : {}),
+  ...(typeof input.targetPage === "string" && input.targetPage.length > 0
+    ? { target_page: input.targetPage }
+    : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
   main_world_secret: randomUUID()
@@ -261,12 +274,28 @@ export const prepareOfficialChromeRuntime = async (input: {
   requestedExecutionMode: string;
   bridge: NativeMessagingBridge;
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>;
+  bootstrapTargetTabId?: number | null;
+  bootstrapTargetDomain?: string | null;
+  bootstrapTargetPage?: string | null;
   readStatus?: RuntimeStatusReader;
+  attachRuntime?: RuntimeAttachReader;
 }): Promise<JsonObject> => {
   const readStatus =
     input.readStatus ??
     (async () =>
       await profileRuntime.status({
+        cwd: input.context.cwd,
+        profile: input.context.profile ?? "",
+        runId: input.context.run_id,
+        params: buildOfficialChromeRuntimeStatusParams(
+          input.context,
+          input.requestedExecutionMode
+        )
+      }));
+  const attachRuntime =
+    input.attachRuntime ??
+    (async () =>
+      await profileRuntime.attach({
         cwd: input.context.cwd,
         profile: input.context.profile ?? "",
         runId: input.context.run_id,
@@ -295,6 +324,22 @@ export const prepareOfficialChromeRuntime = async (input: {
   let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
 
+  const syncRuntimeStatus = (nextStatus: JsonObject): void => {
+    status = nextStatus;
+    profileState =
+      typeof status.profileState === "string" ? status.profileState : "uninitialized";
+    confirmationRequired = status.confirmationRequired === true;
+    runtimeReadiness =
+      typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
+    lockHeld = status.lockHeld === true;
+    identityBindingState =
+      typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
+    bootstrapState =
+      typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
+    transportState =
+      typeof status.transportState === "string" ? status.transportState : "not_connected";
+  };
+
   const buildBaseDetails = () => ({
     ability_id: input.consumerId,
     stage: "execution" as const,
@@ -307,11 +352,24 @@ export const prepareOfficialChromeRuntime = async (input: {
     confirmation_required: confirmationRequired
   });
 
+  if (
+    !lockHeld &&
+    profileState === "ready" &&
+    identityBindingState === "bound" &&
+    transportState === "ready" &&
+    bootstrapState !== "stale"
+  ) {
+    syncRuntimeStatus(await attachRuntime());
+  }
+
   const attemptExecutionBootstrap = async (): Promise<void> => {
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.context.profile ?? "",
       runId: input.context.run_id,
-      fingerprintRuntime: input.fingerprintContext
+      fingerprintRuntime: input.fingerprintContext,
+      targetTabId: input.bootstrapTargetTabId,
+      targetDomain: input.bootstrapTargetDomain ?? null,
+      targetPage: input.bootstrapTargetPage ?? null
     });
     const bootstrapResult = await input.bridge.runCommand({
       runId: input.context.run_id,
@@ -446,19 +504,7 @@ export const prepareOfficialChromeRuntime = async (input: {
     (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")
   ) {
     await attemptExecutionBootstrap();
-    status = await readStatus();
-    profileState =
-      typeof status.profileState === "string" ? status.profileState : "uninitialized";
-    confirmationRequired = status.confirmationRequired === true;
-    runtimeReadiness =
-      typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
-    lockHeld = status.lockHeld === true;
-    identityBindingState =
-      typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
-    bootstrapState =
-      typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
-    transportState =
-      typeof status.transportState === "string" ? status.transportState : "not_connected";
+    syncRuntimeStatus(await readStatus());
 
     if (runtimeReadiness !== "ready" && lockHeld && identityBindingState === "bound") {
       const bridgedReadiness = await readOfficialChromeRuntimeReadinessViaBridge({

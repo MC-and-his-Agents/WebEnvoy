@@ -4,6 +4,7 @@ import {
   ContentScriptHandler,
   encodeMainWorldPayload,
   installMainWorldEventChannelSecret,
+  MAIN_WORLD_EVENT_BOOTSTRAP,
   resetMainWorldEventChannelForContract,
   resolveFingerprintContextForContract,
   resolveMainWorldEventNamesForSecret
@@ -218,6 +219,35 @@ const withMockMainWorld = async (
             message: error instanceof Error ? error.message : String(error)
           });
         }
+        return;
+      }
+
+      if (requestType === "fingerprint-verify") {
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: {
+            has_get_battery:
+              typeof (mockWindow.navigator as Navigator & { getBattery?: unknown }).getBattery ===
+              "function",
+            plugins_length:
+              typeof (mockWindow.navigator as Navigator & { plugins?: { length?: unknown } }).plugins
+                ?.length === "number"
+                ? Number(
+                    (mockWindow.navigator as Navigator & { plugins?: { length?: unknown } }).plugins
+                      ?.length
+                  )
+                : null,
+            mime_types_length:
+              typeof (mockWindow.navigator as Navigator & { mimeTypes?: { length?: unknown } }).mimeTypes
+                ?.length === "number"
+                ? Number(
+                    (mockWindow.navigator as Navigator & { mimeTypes?: { length?: unknown } }).mimeTypes
+                      ?.length
+                  )
+                : null
+          }
+        });
         return;
       }
 
@@ -620,7 +650,7 @@ describe("content-script handler contract", () => {
     expect(JSON.parse(decoded)).toEqual(payload);
   });
 
-  it("does not broadcast main-world channel names to page events", () => {
+  it("only broadcasts a bootstrap event instead of request/result channel names", () => {
     const previousWindow = (globalThis as { window?: unknown }).window;
     const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
     const dispatchedTypes: string[] = [];
@@ -655,7 +685,7 @@ describe("content-script handler contract", () => {
       expect(addedEvents).toEqual(
         expect.arrayContaining([resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET).resultEvent])
       );
-      expect(dispatchedTypes).toEqual([]);
+      expect(dispatchedTypes).toEqual([MAIN_WORLD_EVENT_BOOTSTRAP]);
     } finally {
       resetMainWorldEventChannelForContract();
       (globalThis as { window?: unknown }).window = previousWindow;

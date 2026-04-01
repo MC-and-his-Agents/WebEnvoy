@@ -1,6 +1,6 @@
 type RecordValue = Record<string, unknown>;
 
-type MainWorldRequestType = "fingerprint-install";
+type MainWorldRequestType = "fingerprint-install" | "fingerprint-verify";
 
 type MainWorldRequest = {
   id: string;
@@ -24,10 +24,12 @@ type MainWorldEventChannel = {
 
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
 let activeMainWorldRequestListener: ((event: Event) => void) | null = null;
+let activeMainWorldBootstrapListener: ((event: Event) => void) | null = null;
 const patchedAudioContextPrototypes = new WeakSet<object>();
 const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
@@ -386,7 +388,7 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
   }
   const id = asString(detail.id);
   const type = detail.type;
-  if (!id || type !== "fingerprint-install") {
+  if (!id || (type !== "fingerprint-install" && type !== "fingerprint-verify")) {
     return null;
   }
   return {
@@ -397,6 +399,25 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
 };
 
 const handleRequest = async (request: MainWorldRequest): Promise<void> => {
+  if (request.type === "fingerprint-verify") {
+    if (!activeMainWorldEventChannel) {
+      return;
+    }
+    const hasGetBattery =
+      typeof (window.navigator as Navigator & { getBattery?: unknown }).getBattery === "function";
+    await emitResult(activeMainWorldEventChannel.resultEvent, {
+      id: request.id,
+      ok: true,
+      result: {
+        has_get_battery: hasGetBattery,
+        plugins_length:
+          typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
+        mime_types_length:
+          typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
+      }
+    });
+    return;
+  }
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
   if (!activeMainWorldEventChannel) {
@@ -453,6 +474,25 @@ const resolveExpectedMainWorldEventChannel = (): MainWorldEventChannel | null =>
   };
 };
 
+const resolveBootstrappedMainWorldEventChannel = (event: Event): MainWorldEventChannel | null => {
+  const detail = asRecord((event as CustomEvent<unknown>).detail);
+  const requestEvent = asString(detail?.request_event);
+  const resultEvent = asString(detail?.result_event);
+  if (!requestEvent || !resultEvent) {
+    return null;
+  }
+  if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+    return null;
+  }
+  if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+    return null;
+  }
+  return {
+    requestEvent,
+    resultEvent
+  };
+};
+
 const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   if (activeMainWorldEventChannel) {
     if (
@@ -490,7 +530,26 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
 
+const ensureBootstrapListener = (): void => {
+  if (activeMainWorldBootstrapListener || typeof window.addEventListener !== "function") {
+    return;
+  }
+  activeMainWorldBootstrapListener = (event: Event) => {
+    const channel = resolveBootstrappedMainWorldEventChannel(event);
+    if (!channel) {
+      return;
+    }
+    attachMainWorldEventChannel(channel);
+  };
+  window.addEventListener(
+    MAIN_WORLD_EVENT_BOOTSTRAP,
+    activeMainWorldBootstrapListener as EventListener
+  );
+};
+
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {
   attachMainWorldEventChannel(expectedMainWorldEventChannel);
+} else {
+  ensureBootstrapListener();
 }
