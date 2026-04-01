@@ -472,7 +472,6 @@ resolve_proposed_review_path() {
   local value="$1"
   local relative_path
   local worktree_path
-  local base_snapshot_path
 
   if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
     relative_path="${value#${REPO_ROOT}/}"
@@ -480,12 +479,6 @@ resolve_proposed_review_path() {
 
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
-      return 0
-    fi
-
-    base_snapshot_path="$(materialize_base_snapshot_path "${value}")"
-    if [[ -n "${base_snapshot_path}" && -f "${base_snapshot_path}" ]]; then
-      printf '%s\n' "${base_snapshot_path}"
       return 0
     fi
     return 0
