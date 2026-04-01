@@ -154,6 +154,7 @@ prepare_pr_workspace() {
   SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
   ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  BASELINE_SNAPSHOT_ROOT="${TMP_DIR}/baseline-snapshot"
 
   gh pr view "${pr_number}" --json \
     number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author \
@@ -261,18 +262,28 @@ resolve_review_path() {
   local value="$1"
   local relative_path
   local worktree_path
+  local base_snapshot_path
 
   if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
     relative_path="${value#${REPO_ROOT}/}"
     worktree_path="${WORKTREE_DIR}/${relative_path}"
 
     if is_reviewer_owned_baseline_path "${value}"; then
-      if [[ -f "${worktree_path}" ]]; then
-        if path_changed_in_pr "${worktree_path}" || [[ ! -f "${value}" ]]; then
+      if path_changed_in_pr "${value}"; then
+        if [[ -f "${worktree_path}" ]]; then
           printf '%s\n' "${worktree_path}"
-        else
-          printf '%s\n' "${value}"
         fi
+        return 0
+      fi
+
+      base_snapshot_path="$(materialize_base_snapshot_path "${value}")"
+      if [[ -n "${base_snapshot_path}" && -f "${base_snapshot_path}" ]]; then
+        printf '%s\n' "${base_snapshot_path}"
+        return 0
+      fi
+
+      if [[ -f "${worktree_path}" ]]; then
+        printf '%s\n' "${worktree_path}"
       fi
       return 0
     fi
@@ -302,6 +313,33 @@ path_changed_in_pr() {
   fi
 
   grep -Fxq -- "${relative_path}" "${CHANGED_FILES_FILE}"
+}
+
+materialize_base_snapshot_path() {
+  local value="$1"
+  local relative_path
+  local snapshot_path
+
+  [[ "${value}" == "${REPO_ROOT}/"* ]] || return 0
+  relative_path="${value#${REPO_ROOT}/}"
+
+  if [[ -n "${BASELINE_SNAPSHOT_ROOT:-}" ]]; then
+    snapshot_path="${BASELINE_SNAPSHOT_ROOT}/${relative_path}"
+    if [[ -f "${snapshot_path}" ]]; then
+      printf '%s\n' "${snapshot_path}"
+      return 0
+    fi
+  else
+    snapshot_path=""
+  fi
+
+  [[ -n "${BASE_REF:-}" && -n "${snapshot_path}" ]] || return 0
+  mkdir -p "$(dirname "${snapshot_path}")"
+
+  if git -C "${REPO_ROOT}" cat-file -e "origin/${BASE_REF}:${relative_path}" 2>/dev/null; then
+    git -C "${REPO_ROOT}" show "origin/${BASE_REF}:${relative_path}" > "${snapshot_path}"
+    printf '%s\n' "${snapshot_path}"
+  fi
 }
 
 assert_required_review_context_available() {
@@ -435,13 +473,7 @@ extract_list_sections() {
       next
     }
     keep {
-      if ($0 ~ /^[-*][[:space:]]/ || $0 ~ /^[0-9]+\.[[:space:]]/) {
-        print
-        next
-      }
-      if ($0 ~ /^[[:space:]]*$/) {
-        print
-      }
+      print
     }
   ' | slim_user_markdown
 }
@@ -830,19 +862,10 @@ run_codex_review() {
     -C "${WORKTREE_DIR}" \
     -s read-only \
     -o "${RAW_RESULT_FILE}" \
+    "${prompt_content}" \
     review \
-    --base "${BASE_REF}" \
-    "${prompt_content}" >/dev/null 2>"${native_error_file}"; then
+    --base "${BASE_REF}" >/dev/null 2>"${native_error_file}"; then
     normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
-    validate_review_result_shape "${RESULT_FILE}"
-  elif grep -Fq "the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" "${native_error_file}"; then
-    warn "当前 Codex CLI 不支持 base review 携带自定义 prompt，已回退到 guardian schema exec 审查路径。"
-    codex exec \
-      -C "${WORKTREE_DIR}" \
-      -s read-only \
-      --output-schema "${SCHEMA_FILE}" \
-      -o "${RESULT_FILE}" \
-      "${prompt_content}" >/dev/null
     validate_review_result_shape "${RESULT_FILE}"
   else
     sed 's/^/  /' "${native_error_file}" >&2 || true

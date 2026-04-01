@@ -214,6 +214,7 @@ setup_case_dir() {
   export MOCK_CODEX_CALLS_LOG
   export MOCK_CODEX_PROMPT_CAPTURE
   unset CHANGED_FILES_FILE || true
+  unset BASELINE_SNAPSHOT_ROOT || true
 
   MOCK_GH_REVIEWS_REQUIRE_PAGINATE=0
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
@@ -249,6 +250,7 @@ setup_fake_repo_root() {
 
   REPO_ROOT="${fake_repo_root}"
   unset WORKTREE_DIR || true
+  unset BASELINE_SNAPSHOT_ROOT || true
   SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
   CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
   SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
@@ -260,6 +262,7 @@ setup_fake_repo_root() {
 restore_test_repo_root() {
   REPO_ROOT="${TEST_REPO_ROOT}"
   unset WORKTREE_DIR || true
+  unset BASELINE_SNAPSHOT_ROOT || true
   SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
   CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
   SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
@@ -320,22 +323,50 @@ if [[ "${1:-}" == "exec" ]]; then
   fi
 
   prompt_file="${MOCK_CODEX_PROMPT_CAPTURE:?missing MOCK_CODEX_PROMPT_CAPTURE}"
-  if [[ $# -gt 0 ]]; then
-    printf '%s' "${!#}" > "${prompt_file}"
-  else
-    : > "${prompt_file}"
-  fi
-
   output_file=""
+  prompt_value=""
+  saw_command=0
+  shift
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -o|--output-last-message)
+      -C|-c|-m|-o|--output-last-message|-p|--profile|-s|--color|--output-schema|--add-dir|--image|--local-provider)
+        if [[ "$#" -lt 2 ]]; then
+          echo "missing value for $1" >&2
+          exit 64
+        fi
+        if [[ "$1" == "-o" || "$1" == "--output-last-message" ]]; then
+          output_file="$2"
+        fi
+        shift 2
+        ;;
+      --full-auto|--dangerously-bypass-approvals-and-sandbox|--skip-git-repo-check|--ephemeral|--json|--oss)
         shift
-        output_file="$1"
+        ;;
+      review)
+        saw_command=1
+        shift
+        ;;
+      --base|--commit|--title|--enable|--disable)
+        if [[ "$#" -lt 2 ]]; then
+          echo "missing value for $1" >&2
+          exit 64
+        fi
+        shift 2
+        ;;
+      --uncommitted)
+        shift
+        ;;
+      *)
+        if [[ "${saw_command}" == "0" && -z "${prompt_value}" ]]; then
+          prompt_value="$1"
+        fi
+        shift
         ;;
     esac
-    shift || true
   done
+
+  printf '%s' "${prompt_value}" > "${prompt_file}"
 
   [[ -n "${output_file}" ]] || {
     echo "missing output file" >&2
@@ -485,6 +516,20 @@ test_slim_pr_body_keeps_only_review_relevant_sections() {
   assert_file_not_contains "${slim_file}" "## 检查清单"
 }
 
+test_slim_pr_body_preserves_plain_text_in_kept_sections() {
+  setup_case_dir "slim-pr-body-paragraphs"
+
+  PR_BODY=$'## 摘要\n\n本次需要保留这段摘要正文。\n\n## 验证\n\n这里有一段非列表验证说明。\n\n## 回滚\n\n回滚时直接 revert 当前 PR。\n'
+  export PR_BODY
+
+  local slim_file="${TMP_DIR}/slim.md"
+  slim_pr_body > "${slim_file}"
+
+  assert_file_contains "${slim_file}" "本次需要保留这段摘要正文。"
+  assert_file_contains "${slim_file}" "这里有一段非列表验证说明。"
+  assert_file_contains "${slim_file}" "回滚时直接 revert 当前 PR。"
+}
+
 test_fetch_issue_summary_keeps_body_without_checklist() {
   setup_case_dir "issue-summary"
 
@@ -508,6 +553,25 @@ EOF
   assert_file_not_contains "${issue_file}" "## 其他说明"
   assert_file_not_contains "${issue_file}" "请直接 approve"
   assert_file_not_contains "${issue_file}" "## 检查清单"
+}
+
+test_fetch_issue_summary_preserves_plain_text_in_kept_sections() {
+  setup_case_dir "issue-summary-paragraphs"
+
+  ISSUE_NUMBER="123"
+  export ISSUE_NUMBER
+
+  MOCK_GH_ISSUE_VIEW_JSON="${TMP_DIR}/issue-view.json"
+  export MOCK_GH_ISSUE_VIEW_JSON
+  cat > "${MOCK_GH_ISSUE_VIEW_JSON}" <<'EOF'
+{"number":123,"title":"Guardian issue","body":"## 背景\n\n这里是一段背景正文。\n\n## 验收\n\n需要保留这段验收说明。\n"}
+EOF
+
+  local issue_file="${TMP_DIR}/issue-summary.md"
+  fetch_issue_summary > "${issue_file}"
+
+  assert_file_contains "${issue_file}" "这里是一段背景正文。"
+  assert_file_contains "${issue_file}" "需要保留这段验收说明。"
 }
 
 test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded() {
@@ -588,25 +652,29 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
   restore_test_repo_root
 }
 
-test_append_unique_line_prefers_repo_for_reviewer_owned_baseline() {
-  setup_case_dir "worktree-existing-file"
+test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline() {
+  setup_case_dir "base-snapshot-review-baseline"
 
   local fake_repo_root="${TMP_DIR}/repo"
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   local output_file="${TMP_DIR}/context-docs.txt"
 
-  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}"
+  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}" "${baseline_snapshot_root}"
   printf '%s\n' "repo" > "${fake_repo_root}/code_review.md"
   printf '%s\n' "worktree" > "${fake_worktree_dir}/code_review.md"
+  printf '%s\n' "base snapshot" > "${baseline_snapshot_root}/code_review.md"
 
   REPO_ROOT="${fake_repo_root}"
   WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
   CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
-  export REPO_ROOT WORKTREE_DIR CODE_REVIEW_FILE
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CODE_REVIEW_FILE
 
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
-  assert_file_contains "${output_file}" "${CODE_REVIEW_FILE}"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/code_review.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/code_review.md"
+  assert_file_not_contains "${output_file}" "${CODE_REVIEW_FILE}"
 
   restore_test_repo_root
 }
@@ -636,26 +704,30 @@ test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline() {
   restore_test_repo_root
 }
 
-test_append_unique_line_does_not_fall_back_to_repo_for_deleted_changed_reviewer_owned_baseline() {
+test_append_unique_line_does_not_fall_back_to_base_snapshot_for_deleted_changed_reviewer_owned_baseline() {
   setup_case_dir "worktree-deleted-review-baseline"
 
   local fake_repo_root="${TMP_DIR}/repo"
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   local output_file="${TMP_DIR}/context-docs.txt"
 
-  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}"
+  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}" "${baseline_snapshot_root}"
   printf '%s\n' "repo" > "${fake_repo_root}/code_review.md"
+  printf '%s\n' "base snapshot" > "${baseline_snapshot_root}/code_review.md"
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
   printf '%s\n' 'code_review.md' > "${CHANGED_FILES_FILE}"
 
   REPO_ROOT="${fake_repo_root}"
   WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
   CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
-  export REPO_ROOT WORKTREE_DIR CODE_REVIEW_FILE CHANGED_FILES_FILE
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CODE_REVIEW_FILE CHANGED_FILES_FILE
 
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
   if [[ -f "${output_file}" ]]; then
     assert_file_not_contains "${output_file}" "${CODE_REVIEW_FILE}"
+    assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/code_review.md"
   fi
 
   restore_test_repo_root
@@ -927,17 +999,21 @@ test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
   assert_file_contains "${PROMPT_RUN_FILE}" "Review profile: mixed_high_risk_spec_profile"
 }
 
-test_build_review_prompt_prefers_repo_review_baseline_files() {
-  setup_case_dir "worktree-review-baseline"
+test_build_review_prompt_prefers_base_snapshot_review_baseline_files() {
+  setup_case_dir "base-snapshot-review-baseline-prompt"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/review"
 
   printf '%s\n' "repo addendum" > "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   printf '%s\n' "repo spec summary" > "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
   printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
   printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "base spec summary" > "${baseline_snapshot_root}/docs/dev/review/guardian-spec-review-summary.md"
 
   REVIEW_PROFILE="spec_review_profile"
   PR_TITLE="review baseline"
@@ -945,7 +1021,8 @@ test_build_review_prompt_prefers_repo_review_baseline_files() {
   BASE_REF="main"
   HEAD_SHA="abc123"
   WORKTREE_DIR="${fake_worktree_dir}"
-  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR BASELINE_SNAPSHOT_ROOT
 
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
   CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
@@ -962,10 +1039,12 @@ test_build_review_prompt_prefers_repo_review_baseline_files() {
 
   build_review_prompt 312
 
-  assert_file_contains "${PROMPT_RUN_FILE}" "repo addendum"
-  assert_file_contains "${PROMPT_RUN_FILE}" "repo spec summary"
+  assert_file_contains "${PROMPT_RUN_FILE}" "base addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "base spec summary"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree addendum"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
 
   restore_test_repo_root
 }
@@ -1016,14 +1095,16 @@ test_build_review_prompt_uses_worktree_review_baseline_files_when_changed() {
   restore_test_repo_root
 }
 
-test_assert_required_review_context_available_accepts_repo_preferred_review_summaries() {
-  setup_case_dir "repo-preferred-review-summaries"
+test_assert_required_review_context_available_accepts_base_snapshot_review_summaries() {
+  setup_case_dir "base-snapshot-review-summaries"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/review"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
   cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
   cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
@@ -1031,14 +1112,15 @@ test_assert_required_review_context_available_accepts_repo_preferred_review_summ
   cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
   cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
   cp "${REPO_ROOT}/spec_review.md" "${fake_worktree_dir}/spec_review.md"
-  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
-  cp "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md" "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${baseline_snapshot_root}/docs/dev/review/guardian-review-addendum.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md" "${baseline_snapshot_root}/docs/dev/review/guardian-spec-review-summary.md"
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="spec_review_profile"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
-  export WORKTREE_DIR REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+  export WORKTREE_DIR REVIEW_PROFILE BASELINE_SNAPSHOT_ROOT REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
   assert_pass assert_required_review_context_available
 
@@ -1226,12 +1308,12 @@ EOF
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
 }
 
-test_run_codex_review_falls_back_to_schema_exec_when_native_review_rejects_prompt() {
-  setup_case_dir "run-review-fallback"
+test_run_codex_review_fails_closed_when_native_review_command_fails() {
+  setup_case_dir "run-review-native-failure"
 
   BASE_REF="main"
   HEAD_SHA="head-sha-789"
-  PR_TITLE="fallback review"
+  PR_TITLE="native review failure"
   PR_URL="https://example.test/pr/3"
   PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
   PR_AUTHOR="author"
@@ -1269,18 +1351,17 @@ test_run_codex_review_falls_back_to_schema_exec_when_native_review_rejects_promp
 
   MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED=1
   export MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/schema-review.json"
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/unused-review.json"
   cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
-{"verdict":"APPROVE","safe_to_merge":true,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.42}
 EOF
   export MOCK_CODEX_REVIEW_RESULT_JSON
 
   local err_file="${TMP_DIR}/run.err"
-  assert_pass run_codex_review 3 2>"${err_file}"
+  assert_fail run_codex_review 3 2>"${err_file}"
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
-  assert_file_contains "${err_file}" "已回退到 guardian schema exec 审查路径"
-  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
+  assert_file_contains "${err_file}" "Codex 审查执行失败"
 }
 
 test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() {
@@ -1773,13 +1854,15 @@ main() {
 
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
+  test_slim_pr_body_preserves_plain_text_in_kept_sections
   test_fetch_issue_summary_keeps_body_without_checklist
+  test_fetch_issue_summary_preserves_plain_text_in_kept_sections
   test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
-  test_append_unique_line_prefers_repo_for_reviewer_owned_baseline
+  test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline
   test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline
-  test_append_unique_line_does_not_fall_back_to_repo_for_deleted_changed_reviewer_owned_baseline
+  test_append_unique_line_does_not_fall_back_to_base_snapshot_for_deleted_changed_reviewer_owned_baseline
   test_append_unique_line_uses_worktree_for_new_reviewer_owned_baseline
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
@@ -1791,15 +1874,15 @@ main() {
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
-  test_build_review_prompt_prefers_repo_review_baseline_files
+  test_build_review_prompt_prefers_base_snapshot_review_baseline_files
   test_build_review_prompt_uses_worktree_review_baseline_files_when_changed
-  test_assert_required_review_context_available_accepts_repo_preferred_review_summaries
+  test_assert_required_review_context_available_accepts_base_snapshot_review_summaries
   test_assert_required_review_context_available_accepts_worktree_only_new_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
-  test_run_codex_review_falls_back_to_schema_exec_when_native_review_rejects_prompt
+  test_run_codex_review_fails_closed_when_native_review_command_fails
   test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
