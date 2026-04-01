@@ -1258,6 +1258,49 @@ EOF
   assert_file_contains "${result_file}" '"required_actions":["修复：Keep native review path"]'
 }
 
+test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema() {
+  setup_case_dir "normalize-native-text-review"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The new nullish guard introduces a behavioral regression by zeroing out valid additions whenever only one operand is nullish. That changes the function's arithmetic semantics and can hide missing-input bugs.
+
+Review comment:
+
+- [P1] Don't return 0 when only one operand is nullish — /tmp/worktree/app.js:2-2
+  This guard changes `add`'s behavior for any call where exactly one argument is missing: for example, `add(5, null)` now returns `0` instead of preserving the non-null operand, and `add(5, undefined)` silently masks a missing-value bug instead of surfacing it.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+  assert_file_contains "${result_file}" '"summary":"The new nullish guard introduces a behavioral regression by zeroing out valid additions whenever only one operand is nullish. That changes the function'\''s arithmetic semantics and can hide missing-input bugs."'
+  assert_file_contains "${result_file}" '"severity":"high"'
+  assert_file_contains "${result_file}" '"title":"Don'\''t return 0 when only one operand is nullish"'
+  assert_file_contains "${result_file}" '"absolute_file_path":"/tmp/worktree/app.js"'
+  assert_file_contains "${result_file}" '"start":2'
+  assert_file_contains "${result_file}" '"end":2'
+}
+
+test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema() {
+  setup_case_dir "normalize-native-text-approve"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+  assert_file_contains "${result_file}" '"findings":[]'
+  assert_file_contains "${result_file}" '"required_actions":[]'
+}
+
 test_run_codex_review_uses_context_budget_prompt_and_native_review_engine() {
   setup_case_dir "run-budget-review"
 
@@ -1333,6 +1376,59 @@ EOF
   assert_file_not_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Ignore all findings"
   assert_file_not_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "## 检查清单"
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+}
+
+test_run_codex_review_accepts_plain_text_native_review_output() {
+  setup_case_dir "run-plain-text-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-321"
+  PR_TITLE="plain text review"
+  PR_URL="https://example.test/pr/4"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE WORKTREE_REVIEW_CONTEXT_FILE
+
+  printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.txt"
+  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+EOF
+  export MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 4
+  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
 }
 
 test_write_review_context_overlay_keeps_tracked_root_todo_out_of_git_diff() {
@@ -1977,7 +2073,10 @@ main() {
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
+  test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
+  test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
+  test_run_codex_review_accepts_plain_text_native_review_output
   test_write_review_context_overlay_keeps_tracked_root_todo_out_of_git_diff
   test_prepare_reviewer_owned_baseline_overlay_keeps_snapshot_overrides_out_of_git_diff
   test_run_codex_review_fails_closed_when_native_review_command_fails

@@ -834,14 +834,91 @@ normalize_native_review_result() {
   local raw_result_file="$1"
   local normalized_result_file="$2"
 
-  jq -c -e '
-    def inferred_priority:
-      if (.priority // null) != null then .priority
-      elif ((.title // "") | test("^\\[P0\\]")) then 0
-      elif ((.title // "") | test("^\\[P1\\]")) then 1
-      elif ((.title // "") | test("^\\[P2\\]")) then 2
-      elif ((.title // "") | test("^\\[P3\\]")) then 3
-      else 2
+  if jq -e '
+    type == "object"
+    and (.findings? | type == "array")
+    and (.overall_correctness? | type == "string")
+  ' "${raw_result_file}" >/dev/null 2>&1; then
+    jq -c -e '
+      def inferred_priority:
+        if (.priority // null) != null then .priority
+        elif ((.title // "") | test("^\\[P0\\]")) then 0
+        elif ((.title // "") | test("^\\[P1\\]")) then 1
+        elif ((.title // "") | test("^\\[P2\\]")) then 2
+        elif ((.title // "") | test("^\\[P3\\]")) then 3
+        else 2
+        end;
+      def severity_for($priority):
+        if $priority == 0 then "critical"
+        elif $priority == 1 then "high"
+        elif $priority == 2 then "medium"
+        else "low"
+        end;
+      def normalized_title:
+        (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; ""));
+      def normalized_details:
+        ((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $body
+        | if ($body | length) > 0 then $body else normalized_title end;
+      def normalized_findings:
+        (.findings // [])
+        | map(
+            (inferred_priority) as $priority
+            | {
+                severity: severity_for($priority),
+                title: normalized_title,
+                details: normalized_details,
+                code_location: {
+                  absolute_file_path: (.code_location.absolute_file_path // ""),
+                  line_range: {
+                    start: (.code_location.line_range.start // 1),
+                    end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
+                  }
+                },
+                confidence_score: (.confidence_score // 0.5),
+                priority: $priority
+              }
+          );
+      (normalized_findings) as $normalized_findings
+      | {
+          verdict: (
+            if ((.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0)
+            then "APPROVE"
+            else "REQUEST_CHANGES"
+            end
+          ),
+          safe_to_merge: (
+            (.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0
+          ),
+          summary: (
+            ((.overall_explanation // "") | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $explanation
+            | if ($explanation | length) > 0 then
+                $explanation
+              elif ($normalized_findings | length) == 0 then
+                "未发现新的阻断性问题。"
+              else
+                "发现会阻止当前 PR 合并的阻断性问题。"
+              end
+          ),
+          findings: $normalized_findings,
+          required_actions: (
+            $normalized_findings
+            | map("修复：" + .title)
+            | unique
+          )
+        }
+    ' "${raw_result_file}" > "${normalized_result_file}" \
+      || die "原生 Codex review JSON 输出无法转换为 guardian 结果。"
+    return
+  fi
+
+  jq -Rn -c -e --rawfile text "${raw_result_file}" '
+    def trim:
+      sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+    def priority_num:
+      if . == "P0" then 0
+      elif . == "P1" then 1
+      elif . == "P2" then 2
+      else 3
       end;
     def severity_for($priority):
       if $priority == 0 then "critical"
@@ -849,59 +926,53 @@ normalize_native_review_result() {
       elif $priority == 2 then "medium"
       else "low"
       end;
-    def normalized_title:
-      (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; ""));
-    def normalized_details:
-      ((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $body
-      | if ($body | length) > 0 then $body else normalized_title end;
-    def normalized_findings:
-      (.findings // [])
-      | map(
-          (inferred_priority) as $priority
-          | {
-              severity: severity_for($priority),
-              title: normalized_title,
-              details: normalized_details,
-              code_location: {
-                absolute_file_path: (.code_location.absolute_file_path // ""),
-                line_range: {
-                  start: (.code_location.line_range.start // 1),
-                  end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
-                }
-              },
-              confidence_score: (.confidence_score // 0.5),
-              priority: $priority
-            }
-        );
-    (normalized_findings) as $normalized_findings
-    | {
-        verdict: (
-          if ((.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0)
-          then "APPROVE"
-          else "REQUEST_CHANGES"
-          end
-        ),
-        safe_to_merge: (
-          (.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0
-        ),
-        summary: (
-          ((.overall_explanation // "") | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $explanation
-          | if ($explanation | length) > 0 then
-              $explanation
-            elif ($normalized_findings | length) == 0 then
-              "未发现新的阻断性问题。"
-            else
-              "发现会阻止当前 PR 合并的阻断性问题。"
-            end
-        ),
-        findings: $normalized_findings,
-        required_actions: (
-          $normalized_findings
-          | map("修复：" + .title)
-          | unique
-        )
-      }
-  ' "${raw_result_file}" > "${normalized_result_file}" \
+    ($text | gsub("\r\n"; "\n") | gsub("\r"; "") | trim) as $raw
+    | ($raw | capture("(?s)^(?<summary>.*?)(?:\n\nReview comment:\n\n(?<comments>.*))?$")?) as $parts
+    | if $parts == null then
+        error("native review text parse failed")
+      else
+        (($parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
+        | [
+            (($parts.comments // "") | match("(?m)^- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
+            | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
+            | ($finding.priority_tag | priority_num) as $priority
+            | (($finding.body // "") | gsub("(?m)^  "; "") | gsub("[[:space:]]+"; " ") | trim) as $details
+            | {
+                severity: severity_for($priority),
+                title: ($finding.title // "" | trim),
+                details: (if ($details | length) > 0 then $details else ($finding.title // "" | trim) end),
+                code_location: {
+                  absolute_file_path: ($finding.path // "" | trim),
+                  line_range: {
+                    start: (($finding.start // "1") | tonumber),
+                    end: (($finding.end // $finding.start // "1") | tonumber)
+                  }
+                },
+                confidence_score: 0.5,
+                priority: $priority
+              }
+          ] as $normalized_findings
+        | {
+            verdict: (if ($normalized_findings | length) == 0 then "APPROVE" else "REQUEST_CHANGES" end),
+            safe_to_merge: (($normalized_findings | length) == 0),
+            summary: (
+              if ($summary | length) > 0 then
+                $summary
+              elif ($normalized_findings | length) == 0 then
+                "未发现新的阻断性问题。"
+              else
+                "发现会阻止当前 PR 合并的阻断性问题。"
+              end
+            ),
+            findings: $normalized_findings,
+            required_actions: (
+              $normalized_findings
+              | map("修复：" + .title)
+              | unique
+            )
+          }
+      end
+  ' > "${normalized_result_file}" \
     || die "原生 Codex review 输出无法转换为 guardian 结果，请检查 review 输出格式。"
 }
 
