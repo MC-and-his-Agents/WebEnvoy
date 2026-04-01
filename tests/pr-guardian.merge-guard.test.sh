@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GUARDIAN_SCRIPT="${REPO_ROOT}/scripts/pr-guardian.sh"
+TEST_REPO_ROOT="${REPO_ROOT}"
 
 TEST_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pr-guardian-merge-guard.test.XXXXXX")"
 cleanup_test_tmp() {
@@ -20,6 +21,12 @@ load_guardian_without_main() {
   ' "${GUARDIAN_SCRIPT}" > "${bootstrap_file}"
   # shellcheck source=/dev/null
   source "${bootstrap_file}"
+  REPO_ROOT="${TEST_REPO_ROOT}"
+  SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
 }
 
 setup_mock_gh() {
@@ -79,6 +86,11 @@ fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
   echo "$*" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
+  cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
   exit 0
 fi
 
@@ -187,6 +199,13 @@ setup_case_dir() {
   export MOCK_GH_MERGE_LOG
   export MOCK_GH_REVIEW_LOG
 
+  MOCK_CODEX_CALLS_LOG="${case_dir}/codex.calls.log"
+  MOCK_CODEX_PROMPT_CAPTURE="${case_dir}/codex.prompt.log"
+  : > "${MOCK_CODEX_CALLS_LOG}"
+  : > "${MOCK_CODEX_PROMPT_CAPTURE}"
+  export MOCK_CODEX_CALLS_LOG
+  export MOCK_CODEX_PROMPT_CAPTURE
+
   MOCK_GH_REVIEWS_REQUIRE_PAGINATE=0
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
   unset MOCK_GH_PR_VIEW_SEQUENCE_FILE || true
@@ -231,6 +250,46 @@ exit 64
 EOF
 
   chmod +x "${mock_bin}/npm"
+}
+
+setup_mock_codex() {
+  local mock_bin="${TEST_TMP_DIR}/bin"
+
+  cat > "${mock_bin}/codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "$*" >> "${MOCK_CODEX_CALLS_LOG:?missing MOCK_CODEX_CALLS_LOG}"
+
+if [[ "${1:-}" == "exec" && "${2:-}" == "review" ]]; then
+  prompt_file="${MOCK_CODEX_PROMPT_CAPTURE:?missing MOCK_CODEX_PROMPT_CAPTURE}"
+  cat > "${prompt_file}"
+
+  output_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--output-last-message)
+        shift
+        output_file="$1"
+        ;;
+    esac
+    shift || true
+  done
+
+  [[ -n "${output_file}" ]] || {
+    echo "missing output file" >&2
+    exit 64
+  }
+
+  cat "${MOCK_CODEX_REVIEW_RESULT_JSON:?missing MOCK_CODEX_REVIEW_RESULT_JSON}" > "${output_file}"
+  exit 0
+fi
+
+echo "unexpected codex call: $*" >&2
+exit 64
+EOF
+
+  chmod +x "${mock_bin}/codex"
 }
 
 run_all_checks_pass_with_payload() {
@@ -301,6 +360,113 @@ run_all_checks_pass_when_all_checks_list_is_empty() {
   export MOCK_GH_CHECKS_EXIT_CODE
 
   all_required_checks_pass 123 >/dev/null 2>&1
+}
+
+test_classify_review_profile_matches_expected_buckets() {
+  setup_case_dir "review-profile"
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+
+  printf '%s\n' 'src/foo.ts' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "high_risk_impl_profile" ]]; then
+    echo "expected src changes to be treated as high-risk implementation profile" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "spec_review_profile" ]]; then
+    echo "expected spec changes to be treated as spec review profile" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'README.md' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "default_impl_profile" ]]; then
+    echo "expected default changes to be treated as default implementation profile" >&2
+    exit 1
+  fi
+}
+
+test_slim_pr_body_keeps_only_review_relevant_sections() {
+  setup_case_dir "slim-pr-body"
+
+  PR_BODY=$'## 摘要\n\n- 变更目的：A\n- 主要改动：B\n\n## 检查清单\n\n- [ ] ignore\n\n## 验证\n\n- 已执行：X\n\n## 回滚\n\n- 回滚方式：Y\n'
+  export PR_BODY
+
+  local slim_file="${TMP_DIR}/slim.md"
+  slim_pr_body > "${slim_file}"
+
+  assert_file_contains "${slim_file}" "## 摘要"
+  assert_file_contains "${slim_file}" "## 验证"
+  assert_file_contains "${slim_file}" "## 回滚"
+  assert_file_not_contains "${slim_file}" "## 检查清单"
+}
+
+test_convert_codex_review_result_maps_native_schema_to_guardian_schema() {
+  setup_case_dir "convert-native-review"
+
+  local raw_result_file="${TMP_DIR}/raw.json"
+  local result_file="${TMP_DIR}/result.json"
+
+  cat > "${raw_result_file}" <<'EOF'
+{"findings":[{"title":"[P1] Broken lock recovery","body":"This can leave the runtime stuck after controller restarts.","confidence_score":0.87,"priority":1,"code_location":{"absolute_file_path":"/tmp/repo/scripts/pr-guardian.sh","line_range":{"start":10,"end":12}}}],"overall_correctness":"patch is incorrect","overall_explanation":"The patch introduces a blocking regression in lock recovery.","overall_confidence_score":0.91}
+EOF
+
+  assert_pass convert_codex_review_result "${raw_result_file}" "${result_file}"
+  assert_file_contains "${result_file}" '"verdict": "REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge": false'
+  assert_file_contains "${result_file}" '"severity": "high"'
+  assert_file_contains "${result_file}" '"required_actions": ['
+}
+
+test_run_codex_review_uses_native_review_engine_with_addendum_prompt() {
+  setup_case_dir "run-native-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-123"
+  PR_TITLE="test title"
+  PR_URL="https://example.test/pr/1"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n\n## 关联事项\n\n- Issue: #123\n- Closing: Refs #123\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="high_risk_impl_profile"
+  ISSUE_NUMBER="123"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE ISSUE_NUMBER
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+
+  MOCK_GH_ISSUE_VIEW_JSON="${TMP_DIR}/issue-view.json"
+  printf '%s\n' '{"number":123,"title":"Guardian issue","body":"Issue body line 1\n\nIssue body line 2"}' > "${MOCK_GH_ISSUE_VIEW_JSON}"
+  export MOCK_GH_ISSUE_VIEW_JSON
+  fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.json"
+  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.52}
+EOF
+  export MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 1
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec review - --base main -o"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Guardian 常驻审查摘要"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
+  assert_file_contains "${RESULT_FILE}" '"verdict": "APPROVE"'
 }
 
 setup_hydrate_fixture() {
@@ -728,7 +894,13 @@ test_merge_if_safe_rejects_comment_marker_without_formal_review() {
 main() {
   setup_mock_gh
   setup_mock_npm
+  setup_mock_codex
   load_guardian_without_main
+
+  test_classify_review_profile_matches_expected_buckets
+  test_slim_pr_body_keeps_only_review_relevant_sections
+  test_convert_codex_review_result_maps_native_schema_to_guardian_schema
+  test_run_codex_review_uses_native_review_engine_with_addendum_prompt
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

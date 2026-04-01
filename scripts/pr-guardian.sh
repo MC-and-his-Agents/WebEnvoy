@@ -4,8 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PROMPT_FILE="${REPO_ROOT}/code_review.md"
 SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
+CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
 
 usage() {
   cat <<'EOF'
@@ -39,11 +42,11 @@ check_gh_auth() {
 }
 
 cleanup() {
-  if [[ -n "${WORKTREE_DIR:-}" ]] && [[ -d "${WORKTREE_DIR}" ]]; then
+  if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]]; then
     git -C "${REPO_ROOT}" worktree remove --force "${WORKTREE_DIR}" >/dev/null 2>&1 || true
   fi
 
-  if [[ -n "${TMP_DIR:-}" ]] && [[ -d "${TMP_DIR}" ]]; then
+  if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR}" ]]; then
     rm -rf "${TMP_DIR}"
   fi
 }
@@ -99,8 +102,14 @@ prepare_pr_workspace() {
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
   META_FILE="${TMP_DIR}/pr.json"
   RESULT_FILE="${TMP_DIR}/review.json"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
   PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
 
   gh pr view "${pr_number}" --json \
     number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author \
@@ -119,6 +128,13 @@ prepare_pr_workspace() {
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
   hydrate_worktree_dependencies
+
+  list_changed_files > "${CHANGED_FILES_FILE}"
+  REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
+  ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 }
 
 hydrate_worktree_dependencies() {
@@ -139,6 +155,284 @@ hydrate_worktree_dependencies() {
   fi
 
   warn "未检测到可复用的仓库 node_modules，继续无依赖审查。"
+}
+
+list_changed_files() {
+  git -C "${WORKTREE_DIR}" diff --name-only "origin/${BASE_REF}...HEAD"
+}
+
+classify_review_profile() {
+  local changed_files_file="$1"
+
+  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
+    printf '%s\n' "spec_review_profile"
+    return
+  fi
+
+  if grep -Eq '^(scripts/|\.github/workflows/|src/|extension/|tests/)' "${changed_files_file}"; then
+    printf '%s\n' "high_risk_impl_profile"
+    return
+  fi
+
+  printf '%s\n' "default_impl_profile"
+}
+
+append_unique_line() {
+  local value="$1"
+  local output_file="$2"
+
+  [[ -n "${value}" ]] || return 0
+  [[ -f "${value}" ]] || return 0
+
+  if [[ ! -f "${output_file}" ]] || ! grep -Fxq -- "${value}" "${output_file}"; then
+    printf '%s\n' "${value}" >> "${output_file}"
+  fi
+}
+
+extract_issue_number_from_pr_body() {
+  printf '%s\n' "${PR_BODY}" | perl -ne '
+    if (/-\s*Issue:\s*#(\d+)/i) {
+      print "$1\n";
+      exit;
+    }
+    if (/-\s*Closing:\s*(?:Fixes|Refs)\s*#(\d+)/i) {
+      print "$1\n";
+      exit;
+    }
+    if (/\b(?:Fixes|Refs)\s*#(\d+)/i) {
+      print "$1\n";
+      exit;
+    }
+  '
+}
+
+trim_blank_lines() {
+  awk '
+    NF {
+      blank = 0
+      print
+      next
+    }
+    !blank {
+      print ""
+      blank = 1
+    }
+  '
+}
+
+slim_pr_body() {
+  printf '%s\n' "${PR_BODY}" | awk '
+    BEGIN {
+      keep = 0
+    }
+    /^## / {
+      keep = ($0 == "## 摘要" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚")
+    }
+    keep {
+      print
+    }
+  ' | trim_blank_lines
+}
+
+fetch_issue_summary() {
+  local issue_file
+  local issue_title
+  local issue_body
+
+  [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
+
+  issue_file="${TMP_DIR}/issue.json"
+  if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
+    return 0
+  fi
+
+  issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  issue_body="$(jq -r '.body // ""' "${issue_file}")"
+
+  {
+    printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
+    if [[ -n "${issue_body}" ]]; then
+      printf '\n'
+      printf '%s\n' "${issue_body}" | awk '
+        BEGIN {
+          shown = 0
+        }
+        /^[-*] \[[ xX]\]/ {
+          next
+        }
+        /^$/ && shown == 0 {
+          next
+        }
+        {
+          print
+          shown++
+        }
+        shown >= 20 {
+          exit
+        }
+      ' | trim_blank_lines
+    fi
+  }
+}
+
+collect_high_risk_architecture_docs() {
+  local changed_files_file="$1"
+  local output_file="$2"
+
+  if grep -Eiq '(communication|native|extension|bridge|message)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/communication.md" "${output_file}"
+  fi
+
+  if grep -Eiq '(read|write|page|dom|content|browser)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/read-write.md" "${output_file}"
+  fi
+
+  if grep -Eiq '(account|session|profile|login|controller)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/account.md" "${output_file}"
+  fi
+
+  if grep -Eiq '(adapter|rules)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/adapter.md" "${output_file}"
+  fi
+
+  if grep -Eiq '(sqlite|database|schema|migration|store|sql)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/database.md" "${output_file}"
+  fi
+
+  if grep -Eiq '(execution|runtime|playwright|start|stop)' "${changed_files_file}"; then
+    append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/execution.md" "${output_file}"
+  fi
+}
+
+collect_spec_review_docs() {
+  local changed_files_file="$1"
+  local output_file="$2"
+  local fr_dirs_file
+  local fr_dir
+
+  append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
+  append_unique_line "${SPEC_REVIEW_FILE}" "${output_file}"
+
+  fr_dirs_file="${TMP_DIR}/fr-dirs.txt"
+  : > "${fr_dirs_file}"
+
+  awk -F/ '
+    /^docs\/dev\/specs\/FR-[^/]+\// {
+      print $1 "/" $2 "/" $3 "/" $4
+    }
+  ' "${changed_files_file}" | sort -u > "${fr_dirs_file}"
+
+  while IFS= read -r fr_dir; do
+    [[ -n "${fr_dir}" ]] || continue
+    append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
+    if grep -Fxq -- "${fr_dir}/plan.md" "${changed_files_file}"; then
+      append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+    fi
+    if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
+      while IFS= read -r contract_file; do
+        append_unique_line "${REPO_ROOT}/${contract_file}" "${output_file}"
+      done < <(grep -E "^${fr_dir}/contracts/" "${changed_files_file}")
+    fi
+    if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
+      append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+    fi
+    if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
+      append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+    fi
+  done < "${fr_dirs_file}"
+}
+
+collect_context_docs() {
+  local changed_files_file="$1"
+  local output_file="$2"
+
+  : > "${output_file}"
+  append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
+
+  case "${REVIEW_PROFILE}" in
+    default_impl_profile)
+      ;;
+    high_risk_impl_profile)
+      append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
+      collect_high_risk_architecture_docs "${changed_files_file}" "${output_file}"
+      ;;
+    spec_review_profile)
+      collect_spec_review_docs "${changed_files_file}" "${output_file}"
+      ;;
+    *)
+      die "未知审查 profile: ${REVIEW_PROFILE}"
+      ;;
+  esac
+}
+
+relative_to_repo_root() {
+  local path="$1"
+  printf '%s\n' "${path#${REPO_ROOT}/}"
+}
+
+build_review_prompt() {
+  local pr_number="$1"
+  local context_count
+
+  context_count="$(grep -c . "${CONTEXT_DOCS_FILE}" 2>/dev/null || true)"
+
+  {
+    printf '你正在为 WebEnvoy 仓库审查 PR #%s。\n' "${pr_number}"
+    printf '只报告当前 PR 引入、且真正影响是否合并的可操作问题。\n\n'
+
+    printf '常驻仓库审查摘要：\n'
+    cat "${REVIEW_ADDENDUM_FILE}"
+    printf '\n'
+
+    if [[ "${REVIEW_PROFILE}" == "spec_review_profile" ]]; then
+      printf 'Spec review 升级摘要：\n'
+      cat "${SPEC_REVIEW_SUMMARY_FILE}"
+      printf '\n'
+    fi
+
+    printf 'Review profile: %s\n' "${REVIEW_PROFILE}"
+    printf 'PR: #%s\n' "${pr_number}"
+    printf '标题: %s\n' "${PR_TITLE}"
+    printf '链接: %s\n' "${PR_URL}"
+    printf '基线分支: %s\n' "${BASE_REF}"
+    printf '头部提交: %s\n\n' "${HEAD_SHA}"
+
+    printf '变更文件：\n'
+    if [[ -s "${CHANGED_FILES_FILE}" ]]; then
+      while IFS= read -r changed_file; do
+        [[ -n "${changed_file}" ]] || continue
+        printf -- '- %s\n' "${changed_file}"
+      done < "${CHANGED_FILES_FILE}"
+    else
+      printf -- '- 无\n'
+    fi
+
+    if [[ -s "${SLIM_PR_FILE}" ]]; then
+      printf '\nPR 摘要：\n'
+      cat "${SLIM_PR_FILE}"
+    fi
+
+    if [[ -s "${ISSUE_SUMMARY_FILE}" ]]; then
+      printf '\nIssue 摘要：\n'
+      cat "${ISSUE_SUMMARY_FILE}"
+    fi
+
+    if [[ "${context_count}" != "0" ]]; then
+      printf '\n如判断需要，请优先查阅以下仓库文件：\n'
+      while IFS= read -r context_doc; do
+        [[ -n "${context_doc}" ]] || continue
+        printf -- '- %s\n' "$(relative_to_repo_root "${context_doc}")"
+      done < "${CONTEXT_DOCS_FILE}"
+    fi
+
+    printf '\n继续使用原生 review rubric，并仅输出内置 review JSON 结果。\n'
+  } > "${PROMPT_RUN_FILE}"
+
+  {
+    printf 'profile=%s\n' "${REVIEW_PROFILE}"
+    printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
+    printf 'context_docs=%s\n' "${context_count}"
+  } > "${REVIEW_STATS_FILE}"
 }
 
 normalize_review_path() {
@@ -182,34 +476,74 @@ line_range_reviewable() {
   return 1
 }
 
+convert_codex_review_result() {
+  local raw_result_file="$1"
+  local result_file="$2"
+
+  jq -e '
+    def severity_from_priority($priority):
+      if $priority == 0 then "critical"
+      elif $priority == 1 then "high"
+      elif $priority == 2 then "medium"
+      else "low"
+      end;
+    def normalized_priority:
+      if (.priority | type) == "number" then .priority
+      else 2
+      end;
+    {
+      verdict: (if .overall_correctness == "patch is correct" then "APPROVE" else "REQUEST_CHANGES" end),
+      safe_to_merge: (.overall_correctness == "patch is correct"),
+      summary: (.overall_explanation // "审查完成。"),
+      findings: (
+        (.findings // [])
+        | map(
+            . as $finding
+            | ($finding | normalized_priority) as $priority
+            | {
+                severity: severity_from_priority($priority),
+                title: ($finding.title // "未命名问题"),
+                details: ($finding.body // "缺少问题描述。"),
+                code_location: {
+                  absolute_file_path: $finding.code_location.absolute_file_path,
+                  line_range: {
+                    start: $finding.code_location.line_range.start,
+                    end: $finding.code_location.line_range.end
+                  }
+                },
+                confidence_score: ($finding.confidence_score // 0.5),
+                priority: $priority
+              }
+          )
+      ),
+      required_actions: (
+        if (.findings // [] | length) > 0 then
+          (.findings | map("处理: " + (.title // "未命名问题")))
+        elif .overall_correctness == "patch is incorrect" then
+          [(.overall_explanation // "修复审查中发现的阻断问题。")]
+        else
+          []
+        end
+      )
+    }
+  ' "${raw_result_file}" > "${result_file}" || die "无法转换原生 review 结果：${raw_result_file}"
+}
+
 run_codex_review() {
   local pr_number="$1"
 
-  {
-    awk '
-      found { print }
-      /^## Codex Review Prompt$/ { found=1; next }
-    ' "${PROMPT_FILE}"
-    echo
-    echo "PR 元数据："
-    echo "- PR: #${pr_number}"
-    echo "- 标题: ${PR_TITLE}"
-    echo "- 链接: ${PR_URL}"
-    echo "- 基线分支: ${BASE_REF}"
-    echo "- 头部提交: ${HEAD_SHA}"
-    echo "- PR 描述:"
-    echo "${PR_BODY}"
-    echo
-    echo "请在当前仓库工作树中完成审查，比较当前分支与 origin/${BASE_REF} 的差异。"
-  } > "${PROMPT_RUN_FILE}"
+  build_review_prompt "${pr_number}"
 
-  codex exec \
-    -C "${WORKTREE_DIR}" \
-    -s read-only \
-    --output-schema "${SCHEMA_FILE}" \
-    -o "${RESULT_FILE}" \
-    - < "${PROMPT_RUN_FILE}" >/dev/null
+  (
+    cd "${WORKTREE_DIR}"
+    codex exec review \
+      - \
+      --base "${BASE_REF}" \
+      -o "${RAW_RESULT_FILE}" \
+      < "${PROMPT_RUN_FILE}" >/dev/null
+  )
 
+  convert_codex_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
   build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
 }
 
@@ -415,6 +749,11 @@ post_inline_comments() {
 }
 
 print_summary() {
+  if [[ -f "${REVIEW_STATS_FILE}" ]]; then
+    echo "审查上下文：$(tr '\n' ' ' < "${REVIEW_STATS_FILE}" | sed 's/ $//')"
+    echo
+  fi
+
   echo
   cat "${REVIEW_MD_FILE}"
   echo
@@ -577,8 +916,9 @@ main() {
   require_cmd gh
   require_cmd jq
   require_cmd codex
-  [[ -f "${PROMPT_FILE}" ]] || die "缺少审查提示词文件: ${PROMPT_FILE}"
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
+  [[ -f "${REVIEW_ADDENDUM_FILE}" ]] || die "缺少 Guardian 常驻审查摘要: ${REVIEW_ADDENDUM_FILE}"
+  [[ -f "${SPEC_REVIEW_SUMMARY_FILE}" ]] || die "缺少 Guardian spec review 摘要: ${SPEC_REVIEW_SUMMARY_FILE}"
 
   local mode="${1:-}"
   local pr_number="${2:-}"
