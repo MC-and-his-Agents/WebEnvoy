@@ -198,7 +198,7 @@ prepare_pr_workspace() {
   BASELINE_SNAPSHOT_ROOT="${TMP_DIR}/baseline-snapshot"
 
   gh pr view "${pr_number}" --json \
-    number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author \
+    number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author,closingIssuesReferences \
     > "${META_FILE}"
 
   BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
@@ -219,7 +219,7 @@ prepare_pr_workspace() {
 
   list_changed_files > "${CHANGED_FILES_FILE}"
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
-  ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
+  ISSUE_NUMBER="$(jq -r 'if (.closingIssuesReferences | length) == 1 then (.closingIssuesReferences[0].number // "") else "" end' "${META_FILE}")"
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
@@ -649,8 +649,8 @@ extract_list_sections() {
     }
     /^## / {
       keep = 0
-      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 设计说明" || $0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 风险" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
-        keep = 1
+      if (mode == "pr") {
+        keep = ($0 != "## 检查清单")
       }
       if (mode == "issue" && ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险")) {
         keep = 1
@@ -715,8 +715,37 @@ slim_issue_body() {
 }
 
 fetch_issue_summary() {
+  local issue_file
+  local issue_title
+  local safe_issue_title
+  local issue_body
+  local issue_body_file
+
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
-  printf 'Issue 引用（来自 PR 元数据，未加载正文）: #%s\n' "${ISSUE_NUMBER}"
+
+  issue_file="${TMP_DIR}/issue.json"
+  if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
+    warn "关联 Issue 拉取失败，已忽略 Issue 摘要: #${ISSUE_NUMBER}"
+    return 0
+  fi
+
+  issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
+  issue_body="$(jq -r '.body // ""' "${issue_file}")"
+  issue_body_file="${TMP_DIR}/issue-body.md"
+  if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
+    printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${safe_issue_title}"
+  else
+    printf 'Issue #%s\n' "${ISSUE_NUMBER}"
+  fi
+
+  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
+    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
+    if [[ -s "${issue_body_file}" ]]; then
+      printf '\n'
+      cat "${issue_body_file}"
+    fi
+  fi
 }
 
 collect_high_risk_architecture_docs() {
