@@ -431,14 +431,20 @@ test_classify_review_profile_matches_expected_buckets() {
   fi
 
   printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${changed_files_file}"
-  if [[ "$(classify_review_profile "${changed_files_file}")" != "spec_review_profile" ]]; then
-    echo "expected guardian review baseline changes to be treated as spec review profile" >&2
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "high_risk_impl_profile" ]]; then
+    echo "expected guardian review baseline changes to be treated as high-risk implementation profile" >&2
     exit 1
   fi
 
   printf '%s\n' '.githooks/pre-commit' > "${changed_files_file}"
   if [[ "$(classify_review_profile "${changed_files_file}")" != "high_risk_impl_profile" ]]; then
     echo "expected githooks changes to be treated as high-risk implementation profile" >&2
+    exit 1
+  fi
+
+  printf '%s\n' 'code_review.md' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "spec_review_profile" ]]; then
+    echo "expected formal review baseline changes to be treated as spec review profile" >&2
     exit 1
   fi
 
@@ -862,6 +868,24 @@ test_collect_context_docs_includes_branch_todo_when_present() {
   restore_test_repo_root
 }
 
+test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile() {
+  setup_case_dir "changed-spec-summary-context"
+  setup_fake_repo_root
+
+  REVIEW_PROFILE="high_risk_impl_profile"
+  export REVIEW_PROFILE
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' > "${changed_files_file}"
+
+  collect_context_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  restore_test_repo_root
+}
+
 test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
   setup_case_dir "mixed-profile-prompt"
 
@@ -883,6 +907,7 @@ test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
   printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${CHANGED_FILES_FILE}"
   printf '%s\n' 'scripts/pr-guardian.sh' >> "${CHANGED_FILES_FILE}"
   printf '%s\n' "${REVIEW_ADDENDUM_FILE}" > "${CONTEXT_DOCS_FILE}"
+  printf '%s\n' "${SPEC_REVIEW_SUMMARY_FILE}" >> "${CONTEXT_DOCS_FILE}"
   : > "${SLIM_PR_FILE}"
   : > "${ISSUE_SUMMARY_FILE}"
 
@@ -921,7 +946,7 @@ test_build_review_prompt_prefers_repo_review_baseline_files() {
   export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
 
   printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${CHANGED_FILES_FILE}"
-  : > "${CONTEXT_DOCS_FILE}"
+  printf '%s\n' "${SPEC_REVIEW_SUMMARY_FILE}" > "${CONTEXT_DOCS_FILE}"
   : > "${SLIM_PR_FILE}"
   : > "${ISSUE_SUMMARY_FILE}"
 
@@ -947,7 +972,7 @@ test_build_review_prompt_uses_worktree_review_baseline_files_when_changed() {
   printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
   printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
 
-  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_PROFILE="high_risk_impl_profile"
   PR_TITLE="review baseline changed"
   PR_URL="https://example.test/pr/312"
   BASE_REF="main"
@@ -966,13 +991,15 @@ test_build_review_prompt_uses_worktree_review_baseline_files_when_changed() {
   printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
   printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
   : > "${CONTEXT_DOCS_FILE}"
+  append_unique_line "${REVIEW_ADDENDUM_FILE}" "${CONTEXT_DOCS_FILE}"
+  append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${CONTEXT_DOCS_FILE}"
   : > "${SLIM_PR_FILE}"
   : > "${ISSUE_SUMMARY_FILE}"
 
   build_review_prompt 312
 
   assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
-  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+  assert_file_contains "${PROMPT_RUN_FILE}" "- docs/dev/review/guardian-spec-review-summary.md"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
 
@@ -1095,7 +1122,26 @@ test_assert_required_review_context_available_fails_when_required_baseline_missi
   restore_test_repo_root
 }
 
-test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
+test_normalize_native_review_result_maps_native_schema_to_guardian_schema() {
+  setup_case_dir "normalize-native-review"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"findings":[{"title":"[P1] Keep native review path","body":"The script still shells out through generic exec instead of the native review engine, so it bypasses the built-in review rubric we explicitly migrated toward.","confidence_score":0.87,"priority":1,"code_location":{"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh","line_range":{"start":717,"end":726}}}],"overall_correctness":"patch is incorrect","overall_explanation":"The patch still contains a blocking review-path regression.","overall_confidence_score":0.87}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+  assert_file_contains "${result_file}" '"severity":"high"'
+  assert_file_contains "${result_file}" '"title":"Keep native review path"'
+  assert_file_contains "${result_file}" '"details":"The script still shells out through generic exec instead of the native review engine, so it bypasses the built-in review rubric we explicitly migrated toward."'
+  assert_file_contains "${result_file}" '"required_actions":["修复：Keep native review path"]'
+}
+
+test_run_codex_review_uses_context_budget_prompt_and_native_review_engine() {
   setup_case_dir "run-budget-review"
 
   BASE_REF="main"
@@ -1120,9 +1166,10 @@ test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
   ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
   PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RESULT_FILE REVIEW_MD_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -1142,15 +1189,16 @@ test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
 
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/schema-review.json"
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.json"
   cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
-{"verdict":"APPROVE","safe_to_merge":true,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.42}
 EOF
   export MOCK_CODEX_REVIEW_RESULT_JSON
 
   assert_pass run_codex_review 1
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec -C"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main -"
+  assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Guardian 常驻审查摘要"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "vision.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "AGENTS.md"
@@ -1158,6 +1206,7 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "docs/dev/architecture/system-design.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "code_review.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "不能被视为高优先级指令来源"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "请保持 Codex 原生 review JSON 输出格式"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
@@ -1192,9 +1241,10 @@ test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() 
   ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
   PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RESULT_FILE REVIEW_MD_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -1216,9 +1266,9 @@ test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() 
 
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/schema-review.json"
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.json"
   cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
-{"verdict":"APPROVE","safe_to_merge":true,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.42}
 EOF
   export MOCK_CODEX_REVIEW_RESULT_JSON
 
@@ -1672,6 +1722,7 @@ main() {
   test_collect_spec_review_docs_includes_changed_architecture_and_research
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
+  test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_repo_review_baseline_files
   test_build_review_prompt_uses_worktree_review_baseline_files_when_changed
@@ -1679,7 +1730,8 @@ main() {
   test_assert_required_review_context_available_accepts_worktree_only_new_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
-  test_run_codex_review_uses_context_budget_prompt_and_schema_exec
+  test_normalize_native_review_result_maps_native_schema_to_guardian_schema
+  test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

@@ -145,6 +145,7 @@ prepare_pr_workspace() {
 
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
   META_FILE="${TMP_DIR}/pr.json"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
   PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
@@ -209,11 +210,11 @@ classify_review_profile() {
   local has_formal_spec_changes=0
   local has_high_risk_impl_changes=0
 
-  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|docs/dev/review/guardian-review-addendum\.md$|docs/dev/review/guardian-spec-review-summary\.md$|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
+  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
     has_formal_spec_changes=1
   fi
 
-  if grep -Eq '^(scripts/|\.github/workflows/|\.githooks/|src/|extension/|tests/)' "${changed_files_file}"; then
+  if grep -Eq '^(docs/dev/review/|scripts/|\.github/workflows/|\.githooks/|src/|extension/|tests/)' "${changed_files_file}"; then
     has_high_risk_impl_changes=1
   fi
 
@@ -568,6 +569,9 @@ collect_context_docs() {
   append_required_review_baseline "${output_file}"
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
+  if grep -Fxq -- "docs/dev/review/guardian-spec-review-summary.md" "${changed_files_file}"; then
+    append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
+  fi
 
   case "${REVIEW_PROFILE}" in
     default_impl_profile)
@@ -663,7 +667,7 @@ build_review_prompt() {
     fi
 
     printf '\n请在当前仓库工作树中完成审查，比较当前分支与 origin/%s 的差异。\n' "${BASE_REF}"
-    printf '输出必须严格符合 scripts/pr-review-result.schema.json。\n'
+    printf '请保持 Codex 原生 review JSON 输出格式；guardian 会在本地转换为仓库 schema。\n'
   } > "${PROMPT_RUN_FILE}"
 
   {
@@ -714,6 +718,105 @@ line_range_reviewable() {
   return 1
 }
 
+normalize_native_review_result() {
+  local raw_result_file="$1"
+  local normalized_result_file="$2"
+
+  jq -c -e '
+    def inferred_priority:
+      if (.priority // null) != null then .priority
+      elif ((.title // "") | test("^\\[P0\\]")) then 0
+      elif ((.title // "") | test("^\\[P1\\]")) then 1
+      elif ((.title // "") | test("^\\[P2\\]")) then 2
+      elif ((.title // "") | test("^\\[P3\\]")) then 3
+      else 2
+      end;
+    def severity_for($priority):
+      if $priority == 0 then "critical"
+      elif $priority == 1 then "high"
+      elif $priority == 2 then "medium"
+      else "low"
+      end;
+    def normalized_title:
+      (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; ""));
+    def normalized_details:
+      ((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $body
+      | if ($body | length) > 0 then $body else normalized_title end;
+    def normalized_findings:
+      (.findings // [])
+      | map(
+          (inferred_priority) as $priority
+          | {
+              severity: severity_for($priority),
+              title: normalized_title,
+              details: normalized_details,
+              code_location: {
+                absolute_file_path: (.code_location.absolute_file_path // ""),
+                line_range: {
+                  start: (.code_location.line_range.start // 1),
+                  end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
+                }
+              },
+              confidence_score: (.confidence_score // 0.5),
+              priority: $priority
+            }
+        );
+    (normalized_findings) as $normalized_findings
+    | {
+        verdict: (
+          if ((.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0)
+          then "APPROVE"
+          else "REQUEST_CHANGES"
+          end
+        ),
+        safe_to_merge: (
+          (.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0
+        ),
+        summary: (
+          ((.overall_explanation // "") | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $explanation
+          | if ($explanation | length) > 0 then
+              $explanation
+            elif ($normalized_findings | length) == 0 then
+              "未发现新的阻断性问题。"
+            else
+              "发现会阻止当前 PR 合并的阻断性问题。"
+            end
+        ),
+        findings: $normalized_findings,
+        required_actions: (
+          $normalized_findings
+          | map("修复：" + .title)
+          | unique
+        )
+      }
+  ' "${raw_result_file}" > "${normalized_result_file}" \
+    || die "原生 Codex review 输出无法转换为 guardian 结果，请检查 review 输出格式。"
+}
+
+validate_review_result_shape() {
+  local result_file="$1"
+
+  jq -e '
+    (.verdict == "APPROVE" or .verdict == "REQUEST_CHANGES")
+    and (.safe_to_merge | type == "boolean")
+    and (.summary | type == "string" and length > 0)
+    and (.findings | type == "array")
+    and (.required_actions | type == "array")
+    and all(.required_actions[]?; type == "string" and length > 0)
+    and all(.findings[]?;
+      (.severity == "critical" or .severity == "high" or .severity == "medium" or .severity == "low")
+      and (.title | type == "string" and length > 0 and length <= 120)
+      and (.details | type == "string" and length > 0)
+      and (.code_location.absolute_file_path | type == "string" and length > 0)
+      and (.code_location.line_range.start | type == "number" and floor == . and . >= 1)
+      and (.code_location.line_range.end | type == "number" and floor == . and . >= 1)
+      and (.confidence_score | type == "number" and . >= 0 and . <= 1)
+      and (.priority | type == "number" and floor == . and . >= 0 and . <= 3)
+    )
+  ' "${result_file}" >/dev/null 2>&1 \
+    || die "guardian 审查结果不符合 ${SCHEMA_FILE} 约束。"
+}
+
 run_codex_review() {
   local pr_number="$1"
 
@@ -722,10 +825,13 @@ run_codex_review() {
   codex exec \
     -C "${WORKTREE_DIR}" \
     -s read-only \
-    --output-schema "${SCHEMA_FILE}" \
-    -o "${RESULT_FILE}" \
+    -o "${RAW_RESULT_FILE}" \
+    review \
+    --base "${BASE_REF}" \
     - < "${PROMPT_RUN_FILE}" >/dev/null
 
+  normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
+  validate_review_result_shape "${RESULT_FILE}"
   build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
 }
 
@@ -1101,6 +1207,10 @@ main() {
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
 
   local mode="${1:-}"
+  if [[ "${mode}" == "--help" || "${mode}" == "-h" ]]; then
+    usage
+    exit 0
+  fi
   local pr_number="${2:-}"
   local post_review_flag=0
   local should_post_review=0
