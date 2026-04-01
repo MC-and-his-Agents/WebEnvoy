@@ -91,7 +91,7 @@
 - 本地门禁可见性
   - 若 PR 声明通过本地创建脚本发起，是否在 PR 描述或评论中提供了可复核的门禁执行证据
 - live evidence 元数据完整性
-  - 对落入专项门禁的 PR，是否至少写明 `profile`、`browser/channel`、`page URL`、`target_tab_id`、`run_id`、`relay_path`、`editor_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact/log` 引用；若失败，是否写明失败原因与阻断层级
+  - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser/channel`、`execution_surface`、`page URL`、`target_tab_id`、`run_id`、`relay_path`、`editor_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact/log` 引用；若失败，是否写明失败原因与阻断层级
 
 说明：
 

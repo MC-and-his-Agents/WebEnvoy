@@ -231,8 +231,10 @@ spec review 的执行约束：
 
 专项门禁 PR 的描述必须显式提供 live evidence 区块，至少包含：
 
+- `latest_head_sha`
 - `profile`
 - `browser/channel`
+- `execution_surface`
 - `page URL`
 - `target_tab_id`
 - `run_id`
