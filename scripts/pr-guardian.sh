@@ -198,15 +198,15 @@ append_unique_line() {
 
   [[ -n "${value}" ]] || return 0
 
-  if [[ ! -f "${resolved_path}" ]] && [[ -n "${WORKTREE_DIR:-}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+  if [[ -n "${WORKTREE_DIR:-}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
     local relative_path="${value#${REPO_ROOT}/}"
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       resolved_path="${worktree_path}"
-    else
-      return 0
     fi
-  elif [[ ! -f "${resolved_path}" ]]; then
+  fi
+
+  if [[ ! -f "${resolved_path}" ]]; then
     return 0
   fi
 
@@ -223,6 +223,7 @@ append_required_review_baseline() {
   append_unique_line "${REPO_ROOT}/docs/dev/AGENTS.md" "${output_file}"
   append_unique_line "${REPO_ROOT}/docs/dev/roadmap.md" "${output_file}"
   append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/TODO.md" "${output_file}"
 }
 
 extract_issue_number_from_pr_body() {
@@ -256,8 +257,8 @@ trim_blank_lines() {
   '
 }
 
-slim_pr_body() {
-  printf '%s\n' "${PR_BODY}" | awk '
+slim_user_markdown() {
+  awk '
     BEGIN {
       skip = 0
     }
@@ -270,20 +271,34 @@ slim_pr_body() {
   ' | trim_blank_lines
 }
 
+slim_pr_body() {
+  printf '%s\n' "${PR_BODY}" | slim_user_markdown
+}
+
+slim_issue_body() {
+  slim_user_markdown
+}
+
 fetch_issue_summary() {
   local issue_file
   local issue_title
+  local issue_body
 
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
 
   issue_file="${TMP_DIR}/issue.json"
-  if ! gh issue view "${ISSUE_NUMBER}" --json number,title > "${issue_file}" 2>/dev/null; then
+  if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
     return 0
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  issue_body="$(jq -r '.body // ""' "${issue_file}")"
 
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
+  if [[ -n "${issue_body}" ]]; then
+    printf '\n'
+    printf '%s\n' "${issue_body}" | slim_issue_body
+  fi
 }
 
 collect_high_risk_architecture_docs() {
