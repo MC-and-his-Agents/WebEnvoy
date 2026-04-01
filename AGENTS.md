@@ -200,7 +200,7 @@ spec review 的执行约束：
 
 - 实现闭环并在本 PR 合入后应关闭 issue：使用 `Fixes #<issue-number>`
 - Spike、规约、研究或仅部分完成闭环：使用 `Refs #<issue-number>`，不要提前关闭
-- 若 PR 声称完成真实 runtime / 真实页面交互 / 真实 live read-write 闭环，只有 latest head 上的新鲜有效 live evidence 已齐备，才允许使用 `Fixes #<issue-number>`；否则一律使用 `Refs #<issue-number>`
+- 若 PR 声称完成真实 runtime / 真实页面交互 / 真实 live read-write 闭环，或把 live evidence 作为关闭 issue、判定“已完成”或请求 merge 放行的核心依据，只有 latest head 上的新鲜有效 live evidence 已齐备，才允许使用 `Fixes #<issue-number>`；否则一律使用 `Refs #<issue-number>`
 
 ## 真实 Live Evidence 专项门禁
 
