@@ -417,6 +417,12 @@ test_classify_review_profile_matches_expected_buckets() {
     exit 1
   fi
 
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "spec_review_profile" ]]; then
+    echo "expected guardian review baseline changes to be treated as spec review profile" >&2
+    exit 1
+  fi
+
   printf '%s\n' 'README.md' > "${changed_files_file}"
   if [[ "$(classify_review_profile "${changed_files_file}")" != "default_impl_profile" ]]; then
     echo "expected default changes to be treated as default implementation profile" >&2
@@ -632,6 +638,49 @@ test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
 
   assert_file_contains "${PROMPT_RUN_FILE}" "Spec review 升级摘要："
   assert_file_contains "${PROMPT_RUN_FILE}" "Review profile: mixed_high_risk_spec_profile"
+}
+
+test_build_review_prompt_prefers_worktree_review_baseline_files() {
+  setup_case_dir "worktree-review-baseline"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo addendum" > "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "repo spec summary" > "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+
+  REVIEW_PROFILE="spec_review_profile"
+  PR_TITLE="review baseline"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
+  : > "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
+
+  restore_test_repo_root
 }
 
 test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
@@ -1131,6 +1180,7 @@ main() {
   test_collect_spec_review_docs_includes_changed_architecture_and_research
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
+  test_build_review_prompt_prefers_worktree_review_baseline_files
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

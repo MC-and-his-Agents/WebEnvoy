@@ -165,7 +165,7 @@ classify_review_profile() {
   local has_formal_spec_changes=0
   local has_high_risk_impl_changes=0
 
-  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
+  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|docs/dev/review/guardian-review-addendum\.md$|docs/dev/review/guardian-spec-review-summary\.md$|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
     has_formal_spec_changes=1
   fi
 
@@ -191,20 +191,28 @@ classify_review_profile() {
   printf '%s\n' "default_impl_profile"
 }
 
-append_unique_line() {
+resolve_review_path() {
   local value="$1"
-  local output_file="$2"
-  local resolved_path="$value"
-
-  [[ -n "${value}" ]] || return 0
 
   if [[ -n "${WORKTREE_DIR:-}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
     local relative_path="${value#${REPO_ROOT}/}"
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
-      resolved_path="${worktree_path}"
+      printf '%s\n' "${worktree_path}"
+      return
     fi
   fi
+
+  printf '%s\n' "${value}"
+}
+
+append_unique_line() {
+  local value="$1"
+  local output_file="$2"
+  local resolved_path
+
+  [[ -n "${value}" ]] || return 0
+  resolved_path="$(resolve_review_path "${value}")"
 
   if [[ ! -f "${resolved_path}" ]]; then
     return 0
@@ -419,20 +427,24 @@ relative_to_repo_root() {
 build_review_prompt() {
   local pr_number="$1"
   local context_count
+  local review_addendum_path
+  local spec_review_summary_path
 
   context_count="$(grep -c . "${CONTEXT_DOCS_FILE}" 2>/dev/null || true)"
+  review_addendum_path="$(resolve_review_path "${REVIEW_ADDENDUM_FILE}")"
+  spec_review_summary_path="$(resolve_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
 
   {
     printf '你正在为 WebEnvoy 仓库审查 PR #%s。\n' "${pr_number}"
     printf '只报告当前 PR 引入、且真正影响是否合并的可操作问题。\n\n'
 
     printf '常驻仓库审查摘要：\n'
-    cat "${REVIEW_ADDENDUM_FILE}"
+    cat "${review_addendum_path}"
     printf '\n'
 
     if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
       printf 'Spec review 升级摘要：\n'
-      cat "${SPEC_REVIEW_SUMMARY_FILE}"
+      cat "${spec_review_summary_path}"
       printf '\n'
     fi
 
