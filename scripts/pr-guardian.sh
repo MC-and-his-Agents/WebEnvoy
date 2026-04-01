@@ -199,11 +199,24 @@ resolve_review_path() {
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
+      return
     fi
-    return
   fi
 
-  printf '%s\n' "${value}"
+  if [[ -f "${value}" ]]; then
+    printf '%s\n' "${value}"
+  fi
+}
+
+assert_review_support_files_available() {
+  local review_addendum_path
+  local spec_review_summary_path
+
+  review_addendum_path="$(resolve_review_path "${REVIEW_ADDENDUM_FILE}")"
+  [[ -n "${review_addendum_path}" && -f "${review_addendum_path}" ]] || die "缺少 Guardian 常驻审查摘要: ${REVIEW_ADDENDUM_FILE}"
+
+  spec_review_summary_path="$(resolve_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
+  [[ -n "${spec_review_summary_path}" && -f "${spec_review_summary_path}" ]] || die "缺少 Guardian spec review 摘要: ${SPEC_REVIEW_SUMMARY_FILE}"
 }
 
 append_unique_line() {
@@ -990,8 +1003,6 @@ main() {
   require_cmd jq
   require_cmd codex
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
-  [[ -f "${REVIEW_ADDENDUM_FILE}" ]] || die "缺少 Guardian 常驻审查摘要: ${REVIEW_ADDENDUM_FILE}"
-  [[ -f "${SPEC_REVIEW_SUMMARY_FILE}" ]] || die "缺少 Guardian spec review 摘要: ${SPEC_REVIEW_SUMMARY_FILE}"
 
   local mode="${1:-}"
   local pr_number="${2:-}"
@@ -1029,6 +1040,7 @@ main() {
 
   check_gh_auth
   prepare_pr_workspace "${pr_number}"
+  assert_review_support_files_available
   run_codex_review "${pr_number}"
   print_summary
 

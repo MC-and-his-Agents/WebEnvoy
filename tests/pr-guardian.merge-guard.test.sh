@@ -559,7 +559,7 @@ test_append_unique_line_prefers_worktree_for_existing_repo_file() {
   restore_test_repo_root
 }
 
-test_append_unique_line_skips_missing_worktree_file_instead_of_falling_back() {
+test_append_unique_line_falls_back_to_repo_file_when_worktree_missing() {
   setup_case_dir "worktree-missing-file"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -574,10 +574,7 @@ test_append_unique_line_skips_missing_worktree_file_instead_of_falling_back() {
   export REPO_ROOT WORKTREE_DIR
 
   append_unique_line "${REPO_ROOT}/TODO.md" "${output_file}"
-  if [[ -f "${output_file}" ]] && [[ -s "${output_file}" ]]; then
-    echo "expected missing worktree file to be skipped instead of falling back to repo root" >&2
-    exit 1
-  fi
+  assert_file_contains "${output_file}" "${REPO_ROOT}/TODO.md"
 
   restore_test_repo_root
 }
@@ -713,6 +710,28 @@ test_build_review_prompt_prefers_worktree_review_baseline_files() {
   assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
+
+  restore_test_repo_root
+}
+
+test_assert_review_support_files_available_accepts_worktree_only_review_summaries() {
+  setup_case_dir "worktree-only-review-summaries"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  export WORKTREE_DIR REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+
+  assert_pass assert_review_support_files_available
 
   restore_test_repo_root
 }
@@ -1221,12 +1240,13 @@ main() {
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_append_unique_line_prefers_worktree_for_existing_repo_file
-  test_append_unique_line_skips_missing_worktree_file_instead_of_falling_back
+  test_append_unique_line_falls_back_to_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_worktree_review_baseline_files
+  test_assert_review_support_files_available_accepts_worktree_only_review_summaries
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
