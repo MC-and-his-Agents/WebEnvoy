@@ -594,6 +594,19 @@ slim_user_markdown() {
   ' | trim_blank_lines
 }
 
+sanitize_user_prompt_line() {
+  local value="$1"
+  local sanitized
+
+  sanitized="$(
+    printf '%s\n' "${value}" \
+      | slim_user_markdown \
+      | awk 'NF { print; exit }'
+  )"
+
+  printf '%s\n' "${sanitized}"
+}
+
 extract_list_sections() {
   local mode="$1"
   local input_text
@@ -675,6 +688,7 @@ slim_issue_body() {
 fetch_issue_summary() {
   local issue_file
   local issue_title
+  local safe_issue_title
   local issue_body
   local issue_body_file
 
@@ -687,9 +701,14 @@ fetch_issue_summary() {
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
   issue_body="$(jq -r '.body // ""' "${issue_file}")"
   issue_body_file="${TMP_DIR}/issue-body.md"
-  printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
+  if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
+    printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${safe_issue_title}"
+  else
+    printf 'Issue #%s\n' "${ISSUE_NUMBER}"
+  fi
 
   if [[ -n "${issue_body//[[:space:]]/}" ]]; then
     printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
@@ -781,14 +800,30 @@ collect_spec_review_docs() {
 collect_context_docs() {
   local changed_files_file="$1"
   local output_file="$2"
+  local trusted_baseline_paths=(
+    "${REPO_ROOT}/vision.md"
+    "${REPO_ROOT}/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/roadmap.md"
+    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
+    "${REVIEW_ADDENDUM_FILE}"
+    "${CODE_REVIEW_FILE}"
+  )
+  local baseline_path
 
   : > "${output_file}"
   append_required_review_baseline "${output_file}"
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
-  append_changed_proposed_review_line "${REVIEW_ADDENDUM_FILE}" "${output_file}" "${changed_files_file}"
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
   append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
-  append_changed_proposed_review_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}" "${changed_files_file}"
+
+  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    trusted_baseline_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
+  fi
+
+  for baseline_path in "${trusted_baseline_paths[@]}"; do
+    append_changed_proposed_review_line "${baseline_path}" "${output_file}" "${changed_files_file}"
+  done
 
   case "${REVIEW_PROFILE}" in
     default_impl_profile)
@@ -812,12 +847,14 @@ collect_context_docs() {
 build_review_prompt() {
   local pr_number="$1"
   local context_count
+  local safe_pr_title
   local review_addendum_path
   local spec_review_summary_path
   local proposed_review_addendum_path=""
   local proposed_spec_review_summary_path=""
 
   context_count="$(grep -c . "${CONTEXT_DOCS_FILE}" 2>/dev/null || true)"
+  safe_pr_title="$(sanitize_user_prompt_line "${PR_TITLE}")"
   review_addendum_path="$(resolve_review_path "${REVIEW_ADDENDUM_FILE}")"
   spec_review_summary_path="$(resolve_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
   if path_changed_in_pr "${REVIEW_ADDENDUM_FILE}"; then
@@ -859,7 +896,11 @@ build_review_prompt() {
 
     printf 'Review profile: %s\n' "${REVIEW_PROFILE}"
     printf 'PR: #%s\n' "${pr_number}"
-    printf '标题: %s\n' "${PR_TITLE}"
+    if [[ -n "${safe_pr_title//[[:space:]]/}" ]]; then
+      printf '标题: %s\n' "${safe_pr_title}"
+    else
+      printf '标题: [标题已因 prompt 安全规则省略]\n'
+    fi
     printf '链接: %s\n' "${PR_URL}"
     printf '基线分支: %s\n' "${BASE_REF}"
     printf '头部提交: %s\n\n' "${HEAD_SHA}"
