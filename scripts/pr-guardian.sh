@@ -222,12 +222,12 @@ trim_blank_lines() {
 slim_pr_body() {
   printf '%s\n' "${PR_BODY}" | awk '
     BEGIN {
-      keep = 0
+      skip = 0
     }
     /^## / {
-      keep = ($0 == "## 摘要" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚")
+      skip = ($0 == "## 检查清单")
     }
-    keep {
+    !skip {
       print
     }
   ' | trim_blank_lines
@@ -291,7 +291,7 @@ collect_spec_review_docs() {
   : > "${fr_dirs_file}"
 
   awk -F/ '
-    /^docs\/dev\/specs\/FR-[^/]+\// {
+    /^docs\/dev\/specs\/FR-[^\/]+\// {
       print $1 "/" $2 "/" $3 "/" $4
     }
   ' "${changed_files_file}" | sort -u > "${fr_dirs_file}"
@@ -299,6 +299,7 @@ collect_spec_review_docs() {
   while IFS= read -r fr_dir; do
     [[ -n "${fr_dir}" ]] || continue
     append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
+    append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
     if grep -Fxq -- "${fr_dir}/plan.md" "${changed_files_file}"; then
       append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
     fi

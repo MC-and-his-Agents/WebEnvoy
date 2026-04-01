@@ -389,16 +389,38 @@ test_classify_review_profile_matches_expected_buckets() {
 test_slim_pr_body_keeps_only_review_relevant_sections() {
   setup_case_dir "slim-pr-body"
 
-  PR_BODY=$'## 摘要\n\n- 变更目的：A\n- 主要改动：B\n\n## 检查清单\n\n- [ ] ignore\n\n## 验证\n\n- 已执行：X\n\n## 回滚\n\n- 回滚方式：Y\n'
+  PR_BODY=$'## 摘要\n\n- 变更目的：A\n- 主要改动：B\n\n## 设计说明\n\n- 方案：保留\n\n## 检查清单\n\n- [ ] ignore\n\n## 验证\n\n- 已执行：X\n\n## 回滚\n\n- 回滚方式：Y\n'
   export PR_BODY
 
   local slim_file="${TMP_DIR}/slim.md"
   slim_pr_body > "${slim_file}"
 
   assert_file_contains "${slim_file}" "## 摘要"
+  assert_file_contains "${slim_file}" "## 设计说明"
   assert_file_contains "${slim_file}" "## 验证"
   assert_file_contains "${slim_file}" "## 回滚"
   assert_file_not_contains "${slim_file}" "## 检查清单"
+}
+
+test_collect_spec_review_docs_includes_todo_baseline() {
+  setup_case_dir "spec-review-docs"
+
+  REVIEW_PROFILE="spec_review_profile"
+  export REVIEW_PROFILE
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/TODO.md"
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${changed_files_file}"
+
+  collect_context_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/TODO.md"
 }
 
 test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
@@ -885,6 +907,7 @@ main() {
 
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
+  test_collect_spec_review_docs_includes_todo_baseline
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
