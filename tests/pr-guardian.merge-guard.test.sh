@@ -1128,6 +1128,62 @@ test_collect_spec_review_docs_includes_changed_architecture_and_research() {
   restore_test_repo_root
 }
 
+test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs() {
+  setup_case_dir "spec-review-prefers-worktree-formal-docs"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0004-formal-doc"
+  mkdir -p "${fake_repo_root}/docs/dev/architecture/system-design"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0004-formal-doc"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture/system-design"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0004-formal-doc"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture/system-design"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo spec" > "${fake_repo_root}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  printf '%s\n' "repo todo" > "${fake_repo_root}/docs/dev/specs/FR-0004-formal-doc/TODO.md"
+  printf '%s\n' "repo plan" > "${fake_repo_root}/docs/dev/specs/FR-0004-formal-doc/plan.md"
+  printf '%s\n' "repo execution" > "${fake_repo_root}/docs/dev/architecture/system-design/execution.md"
+
+  printf '%s\n' "worktree spec" > "${fake_worktree_dir}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  printf '%s\n' "worktree todo" > "${fake_worktree_dir}/docs/dev/specs/FR-0004-formal-doc/TODO.md"
+  printf '%s\n' "worktree plan" > "${fake_worktree_dir}/docs/dev/specs/FR-0004-formal-doc/plan.md"
+  printf '%s\n' "worktree execution" > "${fake_worktree_dir}/docs/dev/architecture/system-design/execution.md"
+
+  printf '%s\n' "snapshot spec" > "${baseline_snapshot_root}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  printf '%s\n' "snapshot todo" > "${baseline_snapshot_root}/docs/dev/specs/FR-0004-formal-doc/TODO.md"
+  printf '%s\n' "snapshot plan" > "${baseline_snapshot_root}/docs/dev/specs/FR-0004-formal-doc/plan.md"
+  printf '%s\n' "snapshot execution" > "${baseline_snapshot_root}/docs/dev/architecture/system-design/execution.md"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0004-formal-doc/spec.md' > "${changed_files_file}"
+  printf '%s\n' 'docs/dev/architecture/system-design/execution.md' >> "${changed_files_file}"
+
+  collect_spec_review_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0004-formal-doc/TODO.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0004-formal-doc/plan.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/architecture/system-design/execution.md"
+  assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0004-formal-doc/spec.md"
+  assert_file_not_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/architecture/system-design/execution.md"
+
+  restore_test_repo_root
+}
+
 test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing() {
   setup_case_dir "spec-review-skip-repo-only-file"
 
@@ -1646,6 +1702,7 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "绝对路径临时文件表示 merge-base / trusted snapshot"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" 'git merge-base HEAD origin/main'
   assert_file_contains "${WORKTREE_DIR}/TODO.md" "branch todo"
   assert_file_not_contains "${WORKTREE_DIR}/TODO.md" "Guardian 常驻审查摘要"
@@ -2273,6 +2330,7 @@ main() {
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
+  test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile

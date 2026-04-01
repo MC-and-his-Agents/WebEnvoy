@@ -462,6 +462,51 @@ append_unique_line() {
   fi
 }
 
+resolve_proposed_review_path() {
+  local value="$1"
+  local relative_path
+  local worktree_path
+  local base_snapshot_path
+
+  if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+    relative_path="${value#${REPO_ROOT}/}"
+    worktree_path="${WORKTREE_DIR}/${relative_path}"
+
+    if [[ -f "${worktree_path}" ]]; then
+      printf '%s\n' "${worktree_path}"
+      return 0
+    fi
+
+    base_snapshot_path="$(materialize_base_snapshot_path "${value}")"
+    if [[ -n "${base_snapshot_path}" && -f "${base_snapshot_path}" ]]; then
+      printf '%s\n' "${base_snapshot_path}"
+      return 0
+    fi
+    return 0
+  fi
+
+  if [[ -f "${value}" ]]; then
+    printf '%s\n' "${value}"
+  fi
+}
+
+append_proposed_review_line() {
+  local value="$1"
+  local output_file="$2"
+  local resolved_path
+
+  [[ -n "${value}" ]] || return 0
+  resolved_path="$(resolve_proposed_review_path "${value}")"
+
+  if [[ ! -f "${resolved_path}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "${output_file}" ]] || ! grep -Fxq -- "${resolved_path}" "${output_file}"; then
+    printf '%s\n' "${resolved_path}" >> "${output_file}"
+  fi
+}
+
 append_required_review_baseline() {
   local output_file="$1"
 
@@ -687,22 +732,22 @@ collect_spec_review_docs() {
 
   while IFS= read -r fr_dir; do
     [[ -n "${fr_dir}" ]] || continue
-    append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
-    append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
-    append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
+    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
+    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
     if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
       while IFS= read -r contract_file; do
-        append_unique_line "${REPO_ROOT}/${contract_file}" "${output_file}"
+        append_proposed_review_line "${REPO_ROOT}/${contract_file}" "${output_file}"
       done < <(grep -E "^${fr_dir}/contracts/" "${changed_files_file}")
     fi
     if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
-      append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
     fi
     if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
-      append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
     fi
     if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
-      append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
     fi
   done < "${fr_dirs_file}"
 
@@ -710,7 +755,7 @@ collect_spec_review_docs() {
     [[ -n "${changed_file}" ]] || continue
     case "${changed_file}" in
       docs/dev/architecture/*|docs/dev/specs/*)
-        append_unique_line "${REPO_ROOT}/${changed_file}" "${output_file}"
+        append_proposed_review_line "${REPO_ROOT}/${changed_file}" "${output_file}"
         ;;
     esac
   done < "${changed_files_file}"
@@ -806,6 +851,7 @@ build_review_prompt() {
 
     if [[ "${context_count}" != "0" ]]; then
       printf '\n你必须先查阅以下仓库文件，并按其中规则完成审查：\n'
+      printf '注意：绝对路径临时文件表示 merge-base / trusted snapshot；仓库相对路径表示当前 PR 提议后的正式文档全文。\n'
       while IFS= read -r context_doc; do
         [[ -n "${context_doc}" ]] || continue
         printf -- '- %s\n' "$(format_review_context_reference "${context_doc}")"
