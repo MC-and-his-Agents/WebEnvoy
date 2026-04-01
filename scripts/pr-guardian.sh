@@ -667,7 +667,7 @@ build_review_prompt() {
     fi
 
     printf '\n请在当前仓库工作树中完成审查，比较当前分支与 origin/%s 的差异。\n' "${BASE_REF}"
-    printf '请保持 Codex 原生 review JSON 输出格式；guardian 会在本地转换为仓库 schema。\n'
+    printf '请保持结构化 JSON 输出；guardian 会在本地校验并在需要时转换为仓库 schema。\n'
   } > "${PROMPT_RUN_FILE}"
 
   {
@@ -820,20 +820,35 @@ validate_review_result_shape() {
 run_codex_review() {
   local pr_number="$1"
   local prompt_content
+  local native_error_file
 
   build_review_prompt "${pr_number}"
   prompt_content="$(cat "${PROMPT_RUN_FILE}")"
+  native_error_file="${TMP_DIR}/codex-native-review.err"
 
-  codex exec \
+  if codex exec \
     -C "${WORKTREE_DIR}" \
     -s read-only \
     -o "${RAW_RESULT_FILE}" \
     review \
     --base "${BASE_REF}" \
-    "${prompt_content}" >/dev/null
+    "${prompt_content}" >/dev/null 2>"${native_error_file}"; then
+    normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
+    validate_review_result_shape "${RESULT_FILE}"
+  elif grep -Fq "the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" "${native_error_file}"; then
+    warn "当前 Codex CLI 不支持 base review 携带自定义 prompt，已回退到 guardian schema exec 审查路径。"
+    codex exec \
+      -C "${WORKTREE_DIR}" \
+      -s read-only \
+      --output-schema "${SCHEMA_FILE}" \
+      -o "${RESULT_FILE}" \
+      "${prompt_content}" >/dev/null
+    validate_review_result_shape "${RESULT_FILE}"
+  else
+    sed 's/^/  /' "${native_error_file}" >&2 || true
+    die "Codex 审查执行失败。"
+  fi
 
-  normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
-  validate_review_result_shape "${RESULT_FILE}"
   build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
 }
 
