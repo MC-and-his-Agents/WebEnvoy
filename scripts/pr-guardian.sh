@@ -2096,6 +2096,7 @@ run_codex_review() {
         die "Codex 审查执行失败。"
       fi
     fi
+    add_fallback_finding_for_unstructured_rejection "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"
   else
     sed 's/^/  /' "${native_error_file}" >&2 || true
