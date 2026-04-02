@@ -959,7 +959,7 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
       return 0
     fi
 
-    if [[ "${1:-}" == "-C" && "${3:-}" == "fetch" && "${4:-}" == "https://github.com/mcontheway/WebEnvoy.git" ]]; then
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${REPO_ROOT}" && "${3:-}" == "-c" && "${4:-}" == "credential.helper=" && "${5:-}" == "fetch" && "${6:-}" == "https://github.com/mcontheway/WebEnvoy.git" ]]; then
       return 0
     fi
 
@@ -971,7 +971,7 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   assert_file_contains "${git_calls_log}" "BatchMode=yes"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin refs/heads/main:refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} remote get-url origin"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -1079,6 +1079,88 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https()
   unset -f gh
   unset -f git
   restore_test_repo_root
+}
+
+test_fetch_github_https_ref_without_gh_token_stays_non_interactive() {
+  setup_case_dir "fetch-https-ref-without-gh-token"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  : > "${git_calls_log}"
+  REPO_ROOT="${TMP_DIR}/repo"
+  mkdir -p "${REPO_ROOT}"
+  export REPO_ROOT
+
+  gh() {
+    if [[ "${1:-}" == "auth" && "${2:-}" == "token" ]]; then
+      return 0
+    fi
+    return 64
+  }
+
+  git() {
+    printf 'env GIT_TERMINAL_PROMPT=%s :: %s\n' "${GIT_TERMINAL_PROMPT:-}" "$*" >> "${git_calls_log}"
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${REPO_ROOT}" && "${3:-}" == "-c" && "${4:-}" == "credential.helper=" && "${5:-}" == "fetch" ]]; then
+      return 1
+    fi
+    return 0
+  }
+
+  assert_fail fetch_github_https_ref "https://github.com/mcontheway/WebEnvoy.git" "refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+
+  unset -f gh
+  unset -f git
+}
+
+test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive() {
+  setup_case_dir "fetch-origin-non-normalizable-remote"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  : > "${git_calls_log}"
+  REPO_ROOT="${TMP_DIR}/repo"
+  mkdir -p "${REPO_ROOT}"
+  export REPO_ROOT
+
+  git() {
+    printf 'env GIT_TERMINAL_PROMPT=%s :: %s\n' "${GIT_TERMINAL_PROMPT:-}" "$*" >> "${git_calls_log}"
+
+    if [[ "${1:-}" == "-C" && "${3:-}" == "fetch" && "${4:-}" == "origin" ]]; then
+      return 1
+    fi
+
+    if [[ "${1:-}" == "-C" && "${3:-}" == "remote" && "${4:-}" == "get-url" && "${5:-}" == "origin" ]]; then
+      printf '%s\n' 'git@example.com:repo.git'
+      return 0
+    fi
+
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${REPO_ROOT}" && "${3:-}" == "-c" && "${4:-}" == "credential.helper=" && "${5:-}" == "fetch" && "${6:-}" == "origin" ]]; then
+      return 1
+    fi
+
+    return 0
+  }
+
+  assert_fail fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch origin refs/heads/main:refs/remotes/origin/main"
+
+  unset -f git
+}
+
+test_cleanup_registered_secret_tmp_dirs_removes_registered_paths() {
+  setup_case_dir "cleanup-registered-secret-tmp-dirs"
+
+  local secret_dir="${TMP_DIR}/secret"
+  mkdir -p "${secret_dir}"
+  register_secret_tmp_dir "${secret_dir}"
+
+  cleanup_registered_secret_tmp_dirs
+
+  if [[ -d "${secret_dir}" ]]; then
+    echo "expected cleanup_registered_secret_tmp_dirs to remove ${secret_dir}" >&2
+    exit 1
+  fi
 }
 
 test_append_unique_line_skips_repo_baseline_when_worktree_missing() {
@@ -1262,8 +1344,12 @@ test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0003-legacy-doc"
 
   printf '%s\n' "repo spec" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
+  printf '%s\n' "repo todo" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/TODO.md"
+  printf '%s\n' "repo plan" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/plan.md"
   printf '%s\n' "repo research" > "${fake_repo_root}/docs/dev/specs/FR-0003-legacy-doc/research.md"
   printf '%s\n' "worktree spec" > "${fake_worktree_dir}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
+  printf '%s\n' "worktree todo" > "${fake_worktree_dir}/docs/dev/specs/FR-0003-legacy-doc/TODO.md"
+  printf '%s\n' "worktree plan" > "${fake_worktree_dir}/docs/dev/specs/FR-0003-legacy-doc/plan.md"
   printf '%s\n' "snapshot research" > "${baseline_snapshot_root}/docs/dev/specs/FR-0003-legacy-doc/research.md"
 
   REPO_ROOT="${fake_repo_root}"
@@ -1302,16 +1388,25 @@ test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs() {
   printf '%s\n' "repo spec stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/spec.md"
   printf '%s\n' "repo todo stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/TODO.md"
   printf '%s\n' "repo plan stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  printf '%s\n' "repo data model stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/data-model.md"
+  printf '%s\n' "repo risks stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/risks.md"
+  printf '%s\n' "repo research stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/research.md"
   printf '%s\n' "repo contract" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
 
   printf '%s\n' "worktree spec stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/spec.md"
   printf '%s\n' "worktree todo stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/TODO.md"
   printf '%s\n' "worktree plan stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  printf '%s\n' "worktree data model stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/data-model.md"
+  printf '%s\n' "worktree risks stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/risks.md"
+  printf '%s\n' "worktree research stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/research.md"
   printf '%s\n' "worktree contract changed" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
 
   printf '%s\n' "snapshot spec current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/spec.md"
   printf '%s\n' "snapshot todo current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/TODO.md"
   printf '%s\n' "snapshot plan current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  printf '%s\n' "snapshot data model current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/data-model.md"
+  printf '%s\n' "snapshot risks current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/risks.md"
+  printf '%s\n' "snapshot research current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/research.md"
 
   REPO_ROOT="${fake_repo_root}"
   WORKTREE_DIR="${fake_worktree_dir}"
@@ -1333,6 +1428,9 @@ test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs() {
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/spec.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/TODO.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/data-model.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/risks.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/research.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
 }
 
@@ -1393,6 +1491,39 @@ test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline() {
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/risks.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/research.md"
+}
+
+test_collect_spec_review_docs_fails_when_required_fr_entry_docs_missing() {
+  setup_case_dir "spec-review-missing-required-entry-docs"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+  local err_file="${TMP_DIR}/context-docs.err"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0007-incomplete-suite/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0007-incomplete-suite/contracts"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0007-incomplete-suite/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "worktree contract changed" > "${fake_worktree_dir}/docs/dev/specs/FR-0007-incomplete-suite/contracts/runtime.json"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  CHANGED_FILES_FILE="${changed_files_file}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0007-incomplete-suite/contracts/runtime.json' > "${changed_files_file}"
+
+  assert_fail collect_spec_review_docs "${changed_files_file}" "${output_file}" 2>"${err_file}"
+  assert_file_contains "${err_file}" "formal FR 套件缺少必需文件: docs/dev/specs/FR-0007-incomplete-suite/spec.md"
 }
 
 test_collect_context_docs_includes_branch_todo_when_present() {
@@ -1572,6 +1703,8 @@ test_build_review_prompt_surfaces_deleted_formal_docs() {
   mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0001-runtime-cli-entry"
   mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry"
   printf '%s\n' "base spec" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
+  printf '%s\n' "base todo" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry/TODO.md"
+  printf '%s\n' "base plan" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-runtime-cli-entry/plan.md"
 
   REVIEW_PROFILE="spec_review_profile"
   PR_TITLE="deleted formal doc"
@@ -1884,6 +2017,37 @@ test_assert_required_review_context_available_fails_when_required_baseline_missi
   local err_file="${TMP_DIR}/baseline.err"
   assert_fail assert_required_review_context_available 2>"${err_file}"
   assert_file_contains "${err_file}" "缺少必需审查基线文件"
+
+  restore_test_repo_root
+}
+
+test_assert_required_review_context_available_fails_when_high_risk_security_baselines_are_missing() {
+  setup_case_dir "missing-high-risk-security-baselines"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture/system-design"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+  cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${fake_worktree_dir}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  rm -f "${fake_worktree_dir}/docs/dev/architecture/anti-detection.md"
+  rm -f "${fake_worktree_dir}/docs/dev/architecture/system_nfr.md"
+  rm -f "${REPO_ROOT}/docs/dev/architecture/anti-detection.md"
+  rm -f "${REPO_ROOT}/docs/dev/architecture/system_nfr.md"
+
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="high_risk_impl_profile"
+  export WORKTREE_DIR REVIEW_PROFILE
+
+  local err_file="${TMP_DIR}/baseline.err"
+  assert_fail assert_required_review_context_available 2>"${err_file}"
+  assert_file_contains "${err_file}" "缺少必需审查基线文件: ${REPO_ROOT}/docs/dev/architecture/anti-detection.md"
 
   restore_test_repo_root
 }
@@ -3021,6 +3185,9 @@ main() {
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
   test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback
   test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https
+  test_fetch_github_https_ref_without_gh_token_stays_non_interactive
+  test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive
+  test_cleanup_registered_secret_tmp_dirs_removes_registered_paths
   test_append_unique_line_skips_repo_baseline_when_worktree_missing
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
@@ -3030,6 +3197,7 @@ main() {
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs
   test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline
+  test_collect_spec_review_docs_fails_when_required_fr_entry_docs_missing
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_skips_spec_review_summary_for_default_profile
   test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile
@@ -3045,6 +3213,7 @@ main() {
   test_assert_required_review_context_available_accepts_missing_optional_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
+  test_assert_required_review_context_available_fails_when_high_risk_security_baselines_are_missing
   test_line_range_reviewable_uses_merge_base_diff
   test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff
   test_normalize_native_review_result_accepts_guardian_schema_json

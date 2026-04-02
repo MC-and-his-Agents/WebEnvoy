@@ -9,6 +9,7 @@ CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
 SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
 REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
 SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+declare -a REGISTERED_SECRET_TMP_DIRS=()
 
 usage() {
   cat <<'EOF'
@@ -72,8 +73,10 @@ fetch_origin_tracking_ref() {
   https_url="$(origin_url_to_https "${origin_url}" 2>/dev/null || true)"
 
   if [[ -z "${https_url}" ]]; then
-    git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null
-    return 0
+    if GIT_TERMINAL_PROMPT=0 git -C "${REPO_ROOT}" -c credential.helper= fetch origin "${refspec}" >/dev/null; then
+      return 0
+    fi
+    return 1
   fi
 
   if [[ "${https_url}" == "${origin_url}" ]]; then
@@ -96,6 +99,7 @@ fetch_github_https_ref() {
   gh_token="$(gh auth token 2>/dev/null || true)"
   if [[ -n "${gh_token}" ]]; then
     secret_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-gh-auth.XXXXXX")"
+    register_secret_tmp_dir "${secret_tmp_dir}"
     askpass_script="${secret_tmp_dir}/git-askpass.sh"
     token_file="${secret_tmp_dir}/github-token.txt"
     printf '%s' "${gh_token}" > "${token_file}"
@@ -112,13 +116,18 @@ EOF
     if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="${askpass_script}" \
       git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null; then
       rm -rf "${secret_tmp_dir}"
+      unregister_secret_tmp_dir "${secret_tmp_dir}"
       return 0
     fi
     rm -rf "${secret_tmp_dir}"
+    unregister_secret_tmp_dir "${secret_tmp_dir}"
     return 1
   fi
 
-  git -C "${REPO_ROOT}" fetch "${https_url}" "${refspec}" >/dev/null
+  if GIT_TERMINAL_PROMPT=0 git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 check_gh_auth() {
@@ -127,7 +136,38 @@ check_gh_auth() {
   fi
 }
 
+register_secret_tmp_dir() {
+  local path="$1"
+  [[ -n "${path}" ]] || return 0
+  REGISTERED_SECRET_TMP_DIRS+=("${path}")
+}
+
+unregister_secret_tmp_dir() {
+  local path="$1"
+  local remaining=()
+  local entry=""
+
+  [[ -n "${path}" ]] || return 0
+  for entry in "${REGISTERED_SECRET_TMP_DIRS[@]:-}"; do
+    [[ "${entry}" == "${path}" ]] && continue
+    remaining+=("${entry}")
+  done
+  REGISTERED_SECRET_TMP_DIRS=("${remaining[@]:-}")
+}
+
+cleanup_registered_secret_tmp_dirs() {
+  local entry=""
+
+  for entry in "${REGISTERED_SECRET_TMP_DIRS[@]:-}"; do
+    [[ -n "${entry}" && -d "${entry}" ]] || continue
+    rm -rf "${entry}"
+  done
+  REGISTERED_SECRET_TMP_DIRS=()
+}
+
 cleanup() {
+  cleanup_registered_secret_tmp_dirs
+
   if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]]; then
     git -C "${REPO_ROOT}" worktree remove --force "${WORKTREE_DIR}" >/dev/null 2>&1 || true
   fi
@@ -444,6 +484,13 @@ assert_required_review_context_available() {
 
   if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
     required_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
+  fi
+
+  if [[ "${REVIEW_PROFILE}" == "high_risk_impl_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    required_paths+=(
+      "${REPO_ROOT}/docs/dev/architecture/anti-detection.md"
+      "${REPO_ROOT}/docs/dev/architecture/system_nfr.md"
+    )
   fi
 
   for path in "${required_paths[@]}"; do
@@ -800,6 +847,8 @@ collect_spec_review_docs() {
   local output_file="$2"
   local fr_dirs_file
   local fr_dir
+  local requires_high_risk_companions=0
+  local required_entry_docs_changed=0
 
   append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
   append_unique_line "${SPEC_REVIEW_FILE}" "${output_file}"
@@ -815,34 +864,46 @@ collect_spec_review_docs() {
 
   while IFS= read -r fr_dir; do
     [[ -n "${fr_dir}" ]] || continue
+    requires_high_risk_companions=0
+    required_entry_docs_changed=0
     if grep -Eq "^${fr_dir}/(spec\.md|TODO\.md|plan\.md)$" "${changed_files_file}"; then
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+      required_entry_docs_changed=1
+    fi
+    if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
+      requires_high_risk_companions=1
+      while IFS= read -r contract_file; do
+        append_proposed_review_line "${REPO_ROOT}/${contract_file}" "${output_file}"
+      done < <(grep -E "^${fr_dir}/contracts/" "${changed_files_file}")
+    fi
+    if [[ "${required_entry_docs_changed}" == "1" || "${requires_high_risk_companions}" == "1" ]]; then
+      append_required_formal_doc_line "${fr_dir}" "spec.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
+      append_required_formal_doc_line "${fr_dir}" "TODO.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
+      append_required_formal_doc_line "${fr_dir}" "plan.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
     else
       append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
       append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
       append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
     fi
-    if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
-      while IFS= read -r contract_file; do
-        append_proposed_review_line "${REPO_ROOT}/${contract_file}" "${output_file}"
-      done < <(grep -E "^${fr_dir}/contracts/" "${changed_files_file}")
-    fi
-    if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+    if [[ "${requires_high_risk_companions}" == "1" ]]; then
+      append_required_formal_doc_line "${fr_dir}" "data-model.md" "${changed_files_file}" "${output_file}"
+      append_required_formal_doc_line "${fr_dir}" "risks.md" "${changed_files_file}" "${output_file}"
+      append_required_formal_doc_line "${fr_dir}" "research.md" "${changed_files_file}" "${output_file}"
     else
-      append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
-    fi
-    if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
-    else
-      append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
-    fi
-    if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
-      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
-    else
-      append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+      if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
+        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+      else
+        append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+      fi
+      if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
+        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+      else
+        append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+      fi
+      if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
+        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+      else
+        append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+      fi
     fi
   done < "${fr_dirs_file}"
 
@@ -855,6 +916,48 @@ collect_spec_review_docs() {
         ;;
     esac
   done < "${changed_files_file}"
+}
+
+append_required_formal_doc_line() {
+  local fr_dir="$1"
+  local doc_name="$2"
+  local changed_files_file="$3"
+  local output_file="$4"
+  local force_proposed="${5:-0}"
+  local repo_path="${REPO_ROOT}/${fr_dir}/${doc_name}"
+  local relative_path="${fr_dir}/${doc_name}"
+  local proposed_path=""
+  local snapshot_path=""
+
+  if [[ "${force_proposed}" == "1" ]] || grep -Fxq -- "${relative_path}" "${changed_files_file}"; then
+    proposed_path="$(resolve_proposed_review_path "${repo_path}")"
+    if [[ -n "${proposed_path}" && -f "${proposed_path}" ]]; then
+      append_proposed_review_line "${repo_path}" "${output_file}"
+      return 0
+    fi
+
+    snapshot_path="$(materialize_base_snapshot_path "${repo_path}")"
+    if [[ -n "${snapshot_path}" && -f "${snapshot_path}" ]]; then
+      append_unique_line "${repo_path}" "${output_file}"
+      return 0
+    fi
+
+    die "formal FR 套件缺少必需文件: ${relative_path}"
+  fi
+
+  snapshot_path="$(materialize_base_snapshot_path "${repo_path}")"
+  if [[ -n "${snapshot_path}" && -f "${snapshot_path}" ]]; then
+    append_unique_line "${repo_path}" "${output_file}"
+    return 0
+  fi
+
+  proposed_path="$(resolve_proposed_review_path "${repo_path}")"
+  if [[ -n "${proposed_path}" && -f "${proposed_path}" ]]; then
+    append_proposed_review_line "${repo_path}" "${output_file}"
+    return 0
+  fi
+
+  die "formal FR 套件缺少必需文件: ${relative_path}"
 }
 
 collect_context_docs() {
