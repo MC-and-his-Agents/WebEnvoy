@@ -3533,7 +3533,7 @@ EOF
     fi
     if [[ "${1:-}" == "exec" && "$*" == *"--output-schema"* ]]; then
       cat > "${RESULT_FILE}" <<'EOF'
-{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"在对照 merge-base diff、仓库审查基线和本次新增测试后，我没有发现当前 PR 明确引入、且足以阻止合并的离散问题。此次改动的主逻辑与新增回归用例基本一致，能支撑其宣称的 fail-closed 收紧目标。","findings":[],"required_actions":[]}
 EOF
       return 0
     fi

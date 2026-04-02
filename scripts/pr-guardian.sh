@@ -1840,13 +1840,15 @@ normalize_native_review_result() {
         or ($trimmed | test("^可合并[。！!]*$"))
         or ($trimmed | test("^可以批准[。！!]*$"))
         or ($trimmed | test("^建议批准[。！!]*$"))
-        or ($trimmed | test("^审查通过[。！!]*$"));
+        or ($trimmed | test("^审查通过[。！!]*$"))
+        or ($trimmed | test("^.*(?:未发现|没有发现|我没有发现).*(?:足以阻止合并|阻止合并).*(?:问题|回归|缺陷)[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
-        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+        or (($sentence | trim) | test("^.*(?:基本一致|可以支撑|能支撑).*(?:目标|收紧目标)[。！!]*$"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1866,8 +1868,14 @@ normalize_native_review_result() {
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
       | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
-      | any($sentences[]; strong_safe_sentence(.))
-        and all($sentences[]; looks_like_safe_sentence(.));
+      | (
+          any($sentences[]; strong_safe_sentence(.))
+          and all($sentences[]; looks_like_safe_sentence(.))
+        )
+        or (
+          ($collapsed | test("(?:未发现|没有发现|我没有发现).*(?:足以阻止合并|阻止合并).*(?:问题|回归|缺陷)"))
+          and ($collapsed | test("(?:基本一致|可以支撑|能支撑).*(?:目标|收紧目标)"))
+        );
     def priority_num:
       if . == "P0" then 0
       elif . == "P1" then 1
@@ -2085,13 +2093,15 @@ harmonize_safe_schema_fallback_result() {
         or ($trimmed | test("^可合并[。！!]*$"))
         or ($trimmed | test("^可以批准[。！!]*$"))
         or ($trimmed | test("^建议批准[。！!]*$"))
-        or ($trimmed | test("^审查通过[。！!]*$"));
+        or ($trimmed | test("^审查通过[。！!]*$"))
+        or ($trimmed | test("^.*(?:未发现|没有发现|我没有发现).*(?:足以阻止合并|阻止合并).*(?:问题|回归|缺陷)[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
-        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+        or (($sentence | trim) | test("^.*(?:基本一致|可以支撑|能支撑).*(?:目标|收紧目标)[。！!]*$"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -2111,8 +2121,14 @@ harmonize_safe_schema_fallback_result() {
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
       | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
-      | any($sentences[]; strong_safe_sentence(.))
-        and all($sentences[]; looks_like_safe_sentence(.));
+      | (
+          any($sentences[]; strong_safe_sentence(.))
+          and all($sentences[]; looks_like_safe_sentence(.))
+        )
+        or (
+          ($collapsed | test("(?:未发现|没有发现|我没有发现).*(?:足以阻止合并|阻止合并).*(?:问题|回归|缺陷)"))
+          and ($collapsed | test("(?:基本一致|可以支撑|能支撑).*(?:目标|收紧目标)"))
+        );
     if .verdict == "REQUEST_CHANGES"
       and (.findings | length) == 0
       and (.required_actions | length) == 0
