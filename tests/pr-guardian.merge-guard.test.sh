@@ -1888,6 +1888,72 @@ test_assert_required_review_context_available_fails_when_required_baseline_missi
   restore_test_repo_root
 }
 
+test_line_range_reviewable_uses_merge_base_diff() {
+  setup_case_dir "line-range-reviewable-merge-base"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  BASE_REF="main"
+  MERGE_BASE_SHA="abc123mergebase"
+  export WORKTREE_DIR BASE_REF MERGE_BASE_SHA
+  mkdir -p "${WORKTREE_DIR}"
+
+  git() {
+    printf '%s\n' "$*" >> "${git_calls_log}"
+    if [[ "${1:-}" == "-C" && "${3:-}" == "diff" && "${5:-}" == "${MERGE_BASE_SHA}" ]]; then
+      cat <<'EOF'
+@@ -10,0 +27,2 @@
++line one
++line two
+EOF
+      return 0
+    fi
+    return 0
+  }
+
+  assert_pass line_range_reviewable "scripts/pr-guardian.sh" 27 28
+  assert_file_contains "${git_calls_log}" "-C ${WORKTREE_DIR} diff --unified=0 ${MERGE_BASE_SHA} -- scripts/pr-guardian.sh"
+
+  unset -f git
+}
+
+test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff() {
+  setup_case_dir "fallback-finding-merge-base"
+
+  local result_file="${TMP_DIR}/guardian-review.json"
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  BASE_REF="main"
+  MERGE_BASE_SHA="abc123mergebase"
+  export WORKTREE_DIR CHANGED_FILES_FILE BASE_REF MERGE_BASE_SHA
+  mkdir -p "${WORKTREE_DIR}/scripts"
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  cat > "${result_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"Native review returned a negative freeform summary.","findings":[],"required_actions":[]}
+EOF
+
+  git() {
+    printf '%s\n' "$*" >> "${git_calls_log}"
+    if [[ "${1:-}" == "-C" && "${3:-}" == "diff" && "${5:-}" == "${MERGE_BASE_SHA}" ]]; then
+      cat <<'EOF'
+@@ -10,0 +27,2 @@
++line one
++line two
+EOF
+      return 0
+    fi
+    return 0
+  }
+
+  assert_pass add_fallback_finding_for_unstructured_rejection "${result_file}"
+  assert_file_contains "${git_calls_log}" "-C ${WORKTREE_DIR} diff --unified=0 ${MERGE_BASE_SHA} -- scripts/pr-guardian.sh"
+  assert_file_contains "${result_file}" '"start":27'
+  assert_file_contains "${result_file}" '"end":27'
+
+  unset -f git
+}
+
 test_normalize_native_review_result_maps_native_schema_to_guardian_schema() {
   setup_case_dir "normalize-native-review"
 
@@ -2979,6 +3045,8 @@ main() {
   test_assert_required_review_context_available_accepts_missing_optional_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
+  test_line_range_reviewable_uses_merge_base_diff
+  test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff
   test_normalize_native_review_result_accepts_guardian_schema_json
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json

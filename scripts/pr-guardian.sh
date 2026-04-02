@@ -1102,6 +1102,14 @@ first_changed_file_absolute_path() {
   fi
 }
 
+review_diff_base_ref() {
+  if [[ -n "${MERGE_BASE_SHA:-}" ]]; then
+    printf '%s\n' "${MERGE_BASE_SHA}"
+  else
+    printf 'origin/%s\n' "${BASE_REF}"
+  fi
+}
+
 line_range_reviewable() {
   local path="$1"
   local line_start="$2"
@@ -1110,7 +1118,9 @@ line_range_reviewable() {
   local hunk_start
   local hunk_count
   local hunk_end
+  local diff_base
 
+  diff_base="$(review_diff_base_ref)"
   while IFS= read -r diff_line; do
     [[ "${diff_line}" =~ ^@@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+)(,([0-9]+))?\ @@ ]] || continue
 
@@ -1122,7 +1132,7 @@ line_range_reviewable() {
     if (( line_start >= hunk_start && line_end <= hunk_end )); then
       return 0
     fi
-  done < <(git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${path}")
+  done < <(git -C "${WORKTREE_DIR}" diff --unified=0 "${diff_base}" -- "${path}")
 
   return 1
 }
@@ -1408,16 +1418,18 @@ add_fallback_finding_for_unstructured_rejection() {
   local first_changed_file=""
   local changed_line=""
   local temp_file="${result_file}.tmp"
+  local diff_base=""
 
   if ! jq -e '.verdict == "REQUEST_CHANGES" and (.findings | length) == 0' "${result_file}" >/dev/null 2>&1; then
     return 0
   fi
 
+  diff_base="$(review_diff_base_ref)"
   if [[ -n "${CHANGED_FILES_FILE:-}" && -f "${CHANGED_FILES_FILE}" ]]; then
     while IFS= read -r first_changed_file; do
       [[ -n "${first_changed_file}" ]] || continue
       changed_line="$(
-        git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${first_changed_file}" \
+        git -C "${WORKTREE_DIR}" diff --unified=0 "${diff_base}" -- "${first_changed_file}" \
           | awk '
               /^@@ / {
                 if (match($0, /\+([0-9]+)/)) {
