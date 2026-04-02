@@ -264,17 +264,6 @@ const readNativeHostRegistrationManifest = async (manifestPath) => {
         return null;
     }
 };
-const removeManagedInstallBundle = async (launcherPath) => {
-    if (!launcherPath) {
-        return false;
-    }
-    const managedInstall = inspectManagedNativeHostInstall(launcherPath);
-    if (!managedInstall) {
-        return false;
-    }
-    await rm(managedInstall.channelRoot, { recursive: true, force: true });
-    return true;
-};
 const buildLauncherScript = (input) => {
     const argv = tokenizeHostCommand(input.command, input.hostCommand)
         .map((token) => quoteShellArgForScript(token))
@@ -373,7 +362,7 @@ export const installNativeHost = async (input) => {
     const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
     const allowedOrigin = `chrome-extension://${input.extensionId}/`;
     const profileDir = resolveProfileDirForLauncher({
-        cwd: input.cwd,
+        cwd: resolvedPaths.worktreePath,
         profileRoot,
         profileDir: input.profileDir
     });
@@ -400,11 +389,9 @@ export const installNativeHost = async (input) => {
     await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
     await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
     const currentRegistration = await readNativeHostRegistrationManifest(resolvedPaths.manifestPath);
-    if (currentRegistration?.launcherPath &&
-        currentRegistration.launcherPath !== resolvedPaths.launcherPath &&
-        inspectManagedNativeHostInstall(currentRegistration.launcherPath)) {
-        await removeManagedInstallBundle(currentRegistration.launcherPath);
-    }
+    const previousManagedInstall = currentRegistration?.launcherPath && currentRegistration.launcherPath !== resolvedPaths.launcherPath
+        ? inspectManagedNativeHostInstall(currentRegistration.launcherPath)
+        : null;
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     const bundleRuntimeExisted = await pathExists(join(resolvedPaths.runtimeRoot, "native-messaging", "native-host-entry.js"));
@@ -432,6 +419,9 @@ export const installNativeHost = async (input) => {
         allowed_origins: [allowedOrigin]
     };
     await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    if (previousManagedInstall && previousManagedInstall.channelRoot !== resolvedPaths.channelRoot) {
+        await rm(previousManagedInstall.channelRoot, { recursive: true, force: true });
+    }
     return {
         operation: "install",
         native_host_name: input.nativeHostName,
@@ -492,32 +482,42 @@ export const uninstallNativeHost = async (input) => {
     });
     await assertNotSymlink("runtime.uninstall", "manifest_path", resolvedPaths.manifestPath);
     const currentRegistration = await readNativeHostRegistrationManifest(resolvedPaths.manifestPath);
-    const launcherPath = resolvedPaths.hasCustomLauncherPath || !currentRegistration?.launcherPath
-        ? resolvedPaths.launcherPath
-        : currentRegistration.launcherPath;
-    const managedInstall = inspectManagedNativeHostInstall(launcherPath);
+    const legacyLauncherPath = resolvedPaths.hasCustomLauncherPath
+        ? null
+        : resolveLegacyDefaultLauncherPath(resolvedPaths.manifestDir, input.nativeHostName);
+    const registeredLauncherPath = currentRegistration?.launcherPath ?? null;
+    const registeredManagedInstall = registeredLauncherPath
+        ? inspectManagedNativeHostInstall(registeredLauncherPath)
+        : null;
+    const shouldDeleteExplicitLauncher = resolvedPaths.hasCustomLauncherPath;
+    const shouldDeleteRegisteredLegacyLauncher = !resolvedPaths.hasCustomLauncherPath &&
+        registeredLauncherPath !== null &&
+        legacyLauncherPath !== null &&
+        registeredLauncherPath === legacyLauncherPath;
+    const shouldDeleteRegisteredManagedLauncher = !resolvedPaths.hasCustomLauncherPath && registeredManagedInstall !== null;
+    const launcherPath = shouldDeleteExplicitLauncher || !registeredLauncherPath ? resolvedPaths.launcherPath : registeredLauncherPath;
+    const managedInstall = shouldDeleteRegisteredManagedLauncher ? registeredManagedInstall : null;
     const launcherPathSource = resolvedPaths.hasCustomLauncherPath
         ? "custom"
         : managedInstall
             ? "repo_owned_default"
             : "browser_default";
-    if (resolvedPaths.hasCustomLauncherPath || managedInstall) {
+    if (shouldDeleteExplicitLauncher || managedInstall) {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.uninstall",
             field: "launcher_path",
             fromDir: managedInstall?.launcherRoot ?? resolvedPaths.launcherRoot,
             targetDir: dirname(launcherPath)
         });
+        await assertNotSymlink("runtime.uninstall", "launcher_path", launcherPath);
     }
-    await assertNotSymlink("runtime.uninstall", "launcher_path", launcherPath);
-    const legacyLauncherPath = resolvedPaths.hasCustomLauncherPath
-        ? null
-        : resolveLegacyDefaultLauncherPath(resolvedPaths.manifestDir, input.nativeHostName);
     if (legacyLauncherPath && legacyLauncherPath !== launcherPath) {
         await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
     }
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
-    const launcherExisted = await pathExists(launcherPath);
+    const launcherExisted = shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
+        ? await pathExists(launcherPath)
+        : false;
     const bundleRuntimeExisted = managedInstall ? await pathExists(managedInstall.runtimeRoot) : false;
     const legacyLauncherExisted = legacyLauncherPath && legacyLauncherPath !== launcherPath
         ? await pathExists(legacyLauncherPath)
@@ -526,7 +526,7 @@ export const uninstallNativeHost = async (input) => {
     if (managedInstall) {
         await rm(managedInstall.channelRoot, { recursive: true, force: true });
     }
-    else {
+    else if (shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher) {
         await rm(launcherPath, { force: true });
     }
     if (legacyLauncherPath && legacyLauncherPath !== launcherPath) {
@@ -554,7 +554,11 @@ export const uninstallNativeHost = async (input) => {
         },
         remove_result: {
             manifest: manifestExisted ? "removed" : "already_absent",
-            launcher: launcherExisted ? "removed" : "already_absent",
+            launcher: shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
+                ? launcherExisted
+                    ? "removed"
+                    : "already_absent"
+                : "preserved_non_managed",
             bundle_runtime: bundleRuntimeExisted ? "removed" : "already_absent",
             legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
         },

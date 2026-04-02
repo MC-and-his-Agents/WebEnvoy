@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -3499,6 +3499,42 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("resolves relative profile_dir against the detected worktree root from a nested cwd", async () => {
+    const { repositoryCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const nestedCwd = path.join(repositoryCwd, "nested", "child");
+    const relativeProfileDir = path.join(".webenvoy", "profiles", "xhs_nested_relative_probe");
+    await mkdir(nestedCwd, { recursive: true });
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-profile-dir-relative-nested-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          profile_dir: relativeProfileDir
+        })
+      ],
+      nestedCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+
+    expect(result.status).toBe(0);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        profile_root: path.join(repositoryCwd, ".webenvoy", "profiles"),
+        profile_dir: path.join(repositoryCwd, relativeProfileDir),
+        profile_scoped_bridge_socket_path: path.join(repositoryCwd, relativeProfileDir, "nm.sock")
+      }
+    });
+  });
+
   it("rejects runtime.install when profile_dir escapes controlled profile root", async () => {
     const runtimeCwd = await createRuntimeCwd();
 
@@ -4140,6 +4176,115 @@ process.stdin.on("data", (chunk) => {
     ).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+
+  it("keeps a non-managed live launcher on disk when runtime.uninstall omits launcher_path", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const manifestPath = path.join(manifestDir, "com.webenvoy.host.json");
+    const externalLauncherPath = path.join(runtimeCwd, "external-launcher.sh");
+    await mkdir(manifestDir, { recursive: true });
+    await writeFile(externalLauncherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          description: "WebEnvoy CLI ↔ Extension bridge",
+          path: externalLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-non-managed-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(0);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        launcher_path: externalLauncherPath,
+        launcher_path_source: "browser_default",
+        removed: {
+          manifest: true,
+          launcher: false
+        },
+        remove_result: {
+          manifest: "removed",
+          launcher: "preserved_non_managed"
+        }
+      }
+    });
+    await expect(readFile(manifestPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(externalLauncherPath, "utf8")).resolves.toContain("exit 0");
+  });
+
+  it("keeps the previous managed bundle when a cross-worktree reinstall fails late", async () => {
+    const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const firstInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-failed-reinstall-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      linkedWorktreeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(firstInstall.status).toBe(0);
+    const firstSummary = parseSingleJsonLine(firstInstall.stdout).summary as Record<string, unknown>;
+    const firstLauncherPath = String(firstSummary.launcher_path);
+    const firstInstallRoot = String(firstSummary.install_root);
+    const manifestPath = path.join(sharedManifestRoot, "com.webenvoy.host.json");
+    await chmod(manifestPath, 0o444);
+
+    const secondInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-failed-reinstall-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      repositoryCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(secondInstall.status).not.toBe(0);
+    await expect(readFile(firstLauncherPath, "utf8")).resolves.toContain("exec ");
+    await expect(
+      readFile(path.join(firstInstallRoot, "runtime", "native-messaging", "native-host-entry.js"), "utf8")
+    ).resolves.toContain("process.stdin.resume()");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    expect(manifest.path).toBe(await realpath(firstLauncherPath));
   });
 
   it("rejects runtime.install when manifest_dir or launcher_path escapes controlled roots", async () => {
