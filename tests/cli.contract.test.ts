@@ -3904,6 +3904,95 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("keeps official Chrome runtime.start/status aligned after nested-cwd install", async () => {
+    const { repositoryCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const nestedCwd = path.join(repositoryCwd, "nested", "child");
+    const profile = "nested_runtime_profile";
+    await mkdir(nestedCwd, { recursive: true });
+    const env = {
+      ...defaultRuntimeEnv(repositoryCwd),
+      WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot,
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    };
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-nested-runtime-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      nestedCwd,
+      env
+    );
+    expect(install.status).toBe(0);
+    const installSummary = parseSingleJsonLine(install.stdout).summary as Record<string, unknown>;
+
+    await seedInstalledPersistentExtension({
+      cwd: repositoryCwd,
+      profile
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-install-nested-runtime-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: installSummary.manifest_path
+          }
+        })
+      ],
+      nestedCwd,
+      env
+    );
+    expect(start.status).toBe(0);
+    expect(parseSingleJsonLine(start.stdout)).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        identityBindingState: "bound"
+      }
+    });
+
+    await seedInstalledPersistentExtension({
+      cwd: repositoryCwd,
+      profile
+    });
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-install-nested-runtime-002"
+      ],
+      nestedCwd,
+      env
+    );
+    expect(status.status).toBe(0);
+    expect(parseSingleJsonLine(status.stdout)).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        identityPreflight: {
+          manifestPath: installSummary.manifest_path,
+          manifestSource: "binding"
+        }
+      }
+    });
+  });
+
   it("removes the currently registered managed launcher from another cwd when runtime.uninstall omits launcher_path", async () => {
     const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
     const install = runCli(

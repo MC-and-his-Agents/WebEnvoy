@@ -566,7 +566,89 @@ describe("runIdentityPreflight", () => {
       failureReason: "IDENTITY_PREFLIGHT_PASSED",
       installDiagnostics: {
         launcherPath: join(profileDir, "missing-launcher.sh"),
-        launcherExists: false
+        launcherExists: false,
+        bundleRuntimePath: null,
+        bundleRuntimeExists: null
+      }
+    });
+  });
+
+  it("flags missing bundled runtime from a managed launcher as a broken install", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-broken-bundle-"));
+    const manifestPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    const launcherPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await mkdir(dirname(launcherPath), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        bundleRuntimePath: join(
+          profileDir,
+          ".webenvoy",
+          "native-host-install",
+          "chrome",
+          "runtime",
+          "native-messaging",
+          "native-host-entry.js"
+        ),
+        bundleRuntimeExists: false
       }
     });
   });

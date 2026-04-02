@@ -16,6 +16,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
+import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   buildUnifiedRiskStateOutput,
   resolveRiskState,
@@ -153,7 +154,7 @@ const runtimePing = async (context: RuntimeContext) => {
       typeof context.params.requested_execution_mode === "string"
         ? context.params.requested_execution_mode
         : null;
-    const profileStore = new ProfileStore(join(context.cwd, ".webenvoy", "profiles"));
+    const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const bridgeParams = context.profile
       ? appendFingerprintContext(

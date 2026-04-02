@@ -10,9 +10,9 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
+import { resolveRuntimeProfileRoot } from "../worktree-root.js";
 
 export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
-const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"] as const;
 
 type TransportCodedError = Error & {
   transportCode?:
@@ -242,12 +242,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
     if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
       return null;
     }
-    const candidate = join(
-      process.cwd(),
-      ...PROFILE_ROOT_SEGMENTS,
-      request.profile.trim(),
-      PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME
-    );
+    const candidate = join(resolveRuntimeProfileRoot(process.cwd()), request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
     try {
       await access(candidate);
       this.#activeSocketPath = candidate;

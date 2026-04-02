@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
 import { isValidNativeHostName } from "../install/native-host.js";
+import { inspectManagedNativeHostInstall } from "../install/native-host-install-root.js";
 import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
@@ -19,7 +20,9 @@ const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS = {
 let identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
 const EMPTY_INSTALL_DIAGNOSTICS = {
     launcherPath: null,
-    launcherExists: null
+    launcherExists: null,
+    bundleRuntimePath: null,
+    bundleRuntimeExists: null
 };
 export const setIdentityPreflightAdaptersForTests = (overrides) => {
     identityPreflightAdapters = {
@@ -276,19 +279,32 @@ const resolveInstallDiagnostics = async (manifest) => {
     if (!manifest?.path) {
         return EMPTY_INSTALL_DIAGNOSTICS;
     }
+    const managedInstall = inspectManagedNativeHostInstall(manifest.path);
+    const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
+    let launcherExists = false;
+    let bundleRuntimeExists = null;
     try {
         await access(manifest.path);
-        return {
-            launcherPath: manifest.path,
-            launcherExists: true
-        };
+        launcherExists = true;
     }
     catch {
-        return {
-            launcherPath: manifest.path,
-            launcherExists: false
-        };
+        launcherExists = false;
     }
+    if (bundleRuntimePath) {
+        try {
+            await access(bundleRuntimePath);
+            bundleRuntimeExists = true;
+        }
+        catch {
+            bundleRuntimeExists = false;
+        }
+    }
+    return {
+        launcherPath: manifest.path,
+        launcherExists,
+        bundleRuntimePath,
+        bundleRuntimeExists
+    };
 };
 const readProfileExtensionStateFromPreferences = (input, extensionId) => {
     const extensions = asRecord(input.extensions);
@@ -395,7 +411,9 @@ export const buildIdentityPreflightError = (result) => {
         expected_origin: result.expectedOrigin,
         allowed_origins: result.allowedOrigins,
         launcher_path: result.installDiagnostics.launcherPath,
-        launcher_exists: result.installDiagnostics.launcherExists
+        launcher_exists: result.installDiagnostics.launcherExists,
+        bundle_runtime_path: result.installDiagnostics.bundleRuntimePath,
+        bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists
     };
     if (result.failureReason === "BOOTSTRAP_PENDING") {
         return new CliError("ERR_RUNTIME_BOOTSTRAP_PENDING", "identity preflight 已通过，但 persistent extension bootstrap 尚未实现", { details, retryable: false });
@@ -532,6 +550,27 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: [],
+            installDiagnostics,
+            failureReason: "IDENTITY_MANIFEST_MISSING"
+        });
+    }
+    const installBroken = installDiagnostics.launcherExists === true &&
+        installDiagnostics.bundleRuntimePath !== null &&
+        installDiagnostics.bundleRuntimeExists === false;
+    if (installBroken) {
+        return buildBlockingResult({
+            mode: "official_chrome_persistent_extension",
+            browserPath,
+            browserVersion,
+            identityBindingState: "mismatch",
+            binding: {
+                ...binding,
+                manifestPath
+            },
+            manifestPath,
+            manifestSource: manifestResolution.manifestSource,
+            expectedOrigin,
+            allowedOrigins: manifest.allowed_origins,
             installDiagnostics,
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });

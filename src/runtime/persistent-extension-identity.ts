@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import { isValidNativeHostName } from "../install/native-host.js";
+import { inspectManagedNativeHostInstall } from "../install/native-host-install-root.js";
 import {
   BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
@@ -30,6 +31,8 @@ interface NativeHostManifest {
 export interface IdentityPreflightInstallDiagnostics {
   launcherPath: string | null;
   launcherExists: boolean | null;
+  bundleRuntimePath: string | null;
+  bundleRuntimeExists: boolean | null;
 }
 
 type ProfileExtensionState = "enabled" | "disabled" | "missing";
@@ -85,7 +88,9 @@ const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS: IdentityPreflightAdapters = {
 let identityPreflightAdapters: IdentityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
 const EMPTY_INSTALL_DIAGNOSTICS: IdentityPreflightInstallDiagnostics = {
   launcherPath: null,
-  launcherExists: null
+  launcherExists: null,
+  bundleRuntimePath: null,
+  bundleRuntimeExists: null
 };
 
 export const setIdentityPreflightAdaptersForTests = (
@@ -426,18 +431,30 @@ const resolveInstallDiagnostics = async (
   if (!manifest?.path) {
     return EMPTY_INSTALL_DIAGNOSTICS;
   }
+  const managedInstall = inspectManagedNativeHostInstall(manifest.path);
+  const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
+  let launcherExists = false;
+  let bundleRuntimeExists: boolean | null = null;
   try {
     await access(manifest.path);
-    return {
-      launcherPath: manifest.path,
-      launcherExists: true
-    };
+    launcherExists = true;
   } catch {
-    return {
-      launcherPath: manifest.path,
-      launcherExists: false
-    };
+    launcherExists = false;
   }
+  if (bundleRuntimePath) {
+    try {
+      await access(bundleRuntimePath);
+      bundleRuntimeExists = true;
+    } catch {
+      bundleRuntimeExists = false;
+    }
+  }
+  return {
+    launcherPath: manifest.path,
+    launcherExists,
+    bundleRuntimePath,
+    bundleRuntimeExists
+  };
 };
 
 const readProfileExtensionStateFromPreferences = (
@@ -562,7 +579,9 @@ export const buildIdentityPreflightError = (
     expected_origin: result.expectedOrigin,
     allowed_origins: result.allowedOrigins,
     launcher_path: result.installDiagnostics.launcherPath,
-    launcher_exists: result.installDiagnostics.launcherExists
+    launcher_exists: result.installDiagnostics.launcherExists,
+    bundle_runtime_path: result.installDiagnostics.bundleRuntimePath,
+    bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists
   };
 
   if (result.failureReason === "BOOTSTRAP_PENDING") {
@@ -724,6 +743,28 @@ export const runIdentityPreflight = async (input: {
       manifestSource: manifestResolution.manifestSource,
       expectedOrigin,
       allowedOrigins: [],
+      installDiagnostics,
+      failureReason: "IDENTITY_MANIFEST_MISSING"
+    });
+  }
+  const installBroken =
+    installDiagnostics.launcherExists === true &&
+    installDiagnostics.bundleRuntimePath !== null &&
+    installDiagnostics.bundleRuntimeExists === false;
+  if (installBroken) {
+    return buildBlockingResult({
+      mode: "official_chrome_persistent_extension",
+      browserPath,
+      browserVersion,
+      identityBindingState: "mismatch",
+      binding: {
+        ...binding,
+        manifestPath
+      },
+      manifestPath,
+      manifestSource: manifestResolution.manifestSource,
+      expectedOrigin,
+      allowedOrigins: manifest.allowed_origins,
       installDiagnostics,
       failureReason: "IDENTITY_MANIFEST_MISSING"
     });
