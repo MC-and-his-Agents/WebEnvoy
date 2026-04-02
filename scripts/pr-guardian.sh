@@ -2066,6 +2066,7 @@ validate_review_result_shape() {
 run_codex_review() {
   local pr_number="$1"
   local native_error_file
+  local legacy_error_file
 
   prepare_review_worktree_context "${pr_number}"
   native_error_file="${TMP_DIR}/codex-native-review.err"
@@ -2077,8 +2078,24 @@ run_codex_review() {
     -o "${RAW_RESULT_FILE}" \
     review \
     - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${native_error_file}"; then
-    normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
-    add_fallback_finding_for_unstructured_rejection "${RESULT_FILE}"
+    if jq -e 'type == "object"' "${RAW_RESULT_FILE}" >/dev/null 2>&1 \
+      && normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"; then
+      :
+    else
+      warn "原生 review 未返回可接受的结构化结果，已回退到 guardian schema 审查路径。"
+      legacy_error_file="${TMP_DIR}/codex-legacy-review.err"
+      if ! codex exec \
+        -C "${WORKTREE_DIR}" \
+        -s read-only \
+        --add-dir "${TMP_DIR}" \
+        --output-schema "${SCHEMA_FILE}" \
+        -o "${RESULT_FILE}" \
+        - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${legacy_error_file}"; then
+        sed 's/^/  /' "${native_error_file}" >&2 || true
+        sed 's/^/  /' "${legacy_error_file}" >&2 || true
+        die "Codex 审查执行失败。"
+      fi
+    fi
     validate_review_result_shape "${RESULT_FILE}"
   else
     sed 's/^/  /' "${native_error_file}" >&2 || true

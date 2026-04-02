@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TEST_REPO_ROOT="${REPO_ROOT}"
 GUARDIAN_SCRIPT="${REPO_ROOT}/scripts/pr-guardian.sh"
 TEST_REPO_ROOT="${REPO_ROOT}"
 
@@ -27,6 +28,13 @@ load_guardian_without_main() {
   SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+}
+
+restore_test_repo_root() {
+  REPO_ROOT="${TEST_REPO_ROOT}"
+  PROMPT_FILE="${REPO_ROOT}/code_review.md"
+  SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
+  export REPO_ROOT PROMPT_FILE SCHEMA_FILE
 }
 
 setup_mock_gh() {
@@ -3304,15 +3312,39 @@ test_run_codex_review_accepts_plain_text_native_review_output() {
 
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.txt"
-  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+  local err_file="${TMP_DIR}/run.err"
+  local codex_calls="${TMP_DIR}/codex.calls.log"
+
+  cat > "${TMP_DIR}/native-review.txt" <<'EOF'
 The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
 EOF
-  export MOCK_CODEX_REVIEW_RESULT_JSON
+  cat > "${TMP_DIR}/schema-review.json" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"fallback schema result","findings":[],"required_actions":[]}
+EOF
 
-  assert_pass run_codex_review 4
-  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
-  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
+  codex() {
+    printf '%s\n' "$*" >> "${codex_calls}"
+    cat > /dev/null
+    if [[ "$*" == *" review -"* && "$*" != *"--output-schema"* ]]; then
+      cat "${TMP_DIR}/native-review.txt" > "${RAW_RESULT_FILE}"
+      return 0
+    fi
+    if [[ "${1:-}" == "exec" && "$*" == *"--output-schema"* ]]; then
+      cat "${TMP_DIR}/schema-review.json" > "${RESULT_FILE}"
+      return 0
+    fi
+    echo "unexpected codex call: $*" >&2
+    return 64
+  }
+
+  assert_pass run_codex_review 4 2>"${err_file}"
+  assert_file_contains "${codex_calls}" "review -"
+  assert_file_contains "${codex_calls}" "--output-schema ${SCHEMA_FILE}"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: REQUEST_CHANGES"
+  assert_file_contains "${err_file}" "原生 review 未返回可接受的结构化结果"
+
+  unset -f codex
 }
 
 test_run_codex_review_fails_closed_when_native_review_command_fails() {
