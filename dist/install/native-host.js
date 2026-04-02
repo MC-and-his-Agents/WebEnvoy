@@ -215,12 +215,12 @@ const buildLauncherScript = (input) => {
     const argv = tokenizeHostCommand(input.command, input.hostCommand)
         .map((token) => quoteShellArgForScript(token))
         .join(" ");
-    const profileDirExport = typeof input.profileDir === "string" && input.profileDir.length > 0
-        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.profileDir)}\n`
+    const profileRootExport = typeof input.profileRoot === "string" && input.profileRoot.length > 0
+        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT=${quoteShellArgForScript(input.profileRoot)}\n`
         : "";
     return `#!/usr/bin/env bash
 set -euo pipefail
-${profileDirExport}exec ${argv} "$@"
+${profileRootExport}exec ${argv} "$@"
 `;
 };
 export const resolveControlledInstallRoots = (cwd, browserChannel) => {
@@ -272,6 +272,7 @@ const resolveInstallPaths = (input) => {
     }
     return {
         channelRoot: roots.channelRoot,
+        manifestRoot,
         manifestDir,
         manifestPath,
         launcherPath,
@@ -316,14 +317,12 @@ export const installNativeHost = async (input) => {
         cwd: input.cwd,
         profileDir: input.profileDir
     });
-    if (resolvedPaths.hasCustomManifestDir) {
-        await assertNoSymlinkAncestorBetween({
-            command: "runtime.install",
-            field: "manifest_dir",
-            fromDir: input.cwd,
-            targetDir: resolvedPaths.manifestDir
-        });
-    }
+    await assertNoSymlinkAncestorBetween({
+        command: "runtime.install",
+        field: "manifest_dir",
+        fromDir: resolvedPaths.manifestRoot,
+        targetDir: resolvedPaths.manifestDir
+    });
     if (resolvedPaths.hasCustomLauncherPath) {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.install",
@@ -349,7 +348,7 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileDir
+        profileRoot: profileDir ? resolveProfileRoot(input.cwd) : undefined
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
@@ -406,14 +405,12 @@ export const uninstallNativeHost = async (input) => {
         manifestDir: input.manifestDir,
         launcherPath: input.launcherPath
     });
-    if (resolvedPaths.hasCustomManifestDir) {
-        await assertNoSymlinkAncestorBetween({
-            command: "runtime.uninstall",
-            field: "manifest_dir",
-            fromDir: input.cwd,
-            targetDir: resolvedPaths.manifestDir
-        });
-    }
+    await assertNoSymlinkAncestorBetween({
+        command: "runtime.uninstall",
+        field: "manifest_dir",
+        fromDir: resolvedPaths.manifestRoot,
+        targetDir: resolvedPaths.manifestDir
+    });
     if (resolvedPaths.hasCustomLauncherPath) {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.uninstall",

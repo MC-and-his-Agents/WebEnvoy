@@ -12,16 +12,15 @@ import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "./host.js";
 
 const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
-const PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
-const SOCKET_PATH = PROFILE_DIR
-  ? join(PROFILE_DIR, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-  : null;
+const PROFILE_ROOT = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT?.trim() ?? "";
 
 let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
 let extensionOpened = false;
 let shuttingDown = false;
 let socketServer: Server | null = null;
+let activeProfileDir: string | null = null;
+let activeSocketPath: string | null = null;
 const socketBuffers = new WeakMap<Socket, Buffer>();
 const pendingSocketResponses = new Map<
   string,
@@ -38,6 +37,23 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
+
+const resolveSocketTarget = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): { profileDir: string; socketPath: string } | null => {
+  if (!PROFILE_ROOT) {
+    return null;
+  }
+  const profileName = asString(request.profile);
+  if (!profileName) {
+    return null;
+  }
+  const profileDir = join(PROFILE_ROOT, profileName);
+  return {
+    profileDir,
+    socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+  };
+};
 
 const isBridgeResponse = (value: unknown): value is BridgeResponseEnvelope => {
   const record = asRecord(value);
@@ -182,9 +198,11 @@ const cleanupSocketServer = async (): Promise<void> => {
       current.close(() => resolve());
     });
   }
-  if (SOCKET_PATH) {
-    await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+  if (activeSocketPath) {
+    await rm(activeSocketPath, { force: true }).catch(() => undefined);
   }
+  activeSocketPath = null;
+  activeProfileDir = null;
 };
 
 const shutdown = async (code = 0): Promise<void> => {
@@ -203,13 +221,25 @@ const shutdown = async (code = 0): Promise<void> => {
   process.exit(code);
 };
 
-const ensureSocketServer = async (): Promise<void> => {
-  if (!SOCKET_PATH || socketServer) {
+const ensureSocketServer = async (
+  target: { profileDir: string; socketPath: string } | null
+): Promise<void> => {
+  if (!target) {
     return;
   }
 
-  await mkdir(PROFILE_DIR, { recursive: true });
-  await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+  if (socketServer && activeSocketPath === target.socketPath) {
+    return;
+  }
+
+  if (socketServer && activeSocketPath !== target.socketPath) {
+    await cleanupSocketServer();
+  }
+
+  await mkdir(target.profileDir, { recursive: true });
+  await rm(target.socketPath, { force: true }).catch(() => undefined);
+  activeProfileDir = target.profileDir;
+  activeSocketPath = target.socketPath;
 
   socketServer = createServer((socket) => {
     activeSockets.add(socket);
@@ -269,12 +299,12 @@ const ensureSocketServer = async (): Promise<void> => {
 
   await new Promise<void>((resolve, reject) => {
     const server = socketServer;
-    if (!server || !SOCKET_PATH) {
+    if (!server || !activeSocketPath) {
       resolve();
       return;
     }
     server.once("error", reject);
-    server.listen(SOCKET_PATH, () => {
+    server.listen(activeSocketPath, () => {
       server.removeListener("error", reject);
       resolve();
     });
@@ -363,7 +393,7 @@ const handleSocketRequest = async (socket: Socket, rawRequest: unknown): Promise
 
 const handleExtensionBridgeOpen = async (request: BridgeRequestEnvelope): Promise<void> => {
   extensionOpened = true;
-  await ensureSocketServer();
+  await ensureSocketServer(resolveSocketTarget(request));
   writeNativeSuccess(request, {
     summary: {
       protocol: BRIDGE_PROTOCOL,
@@ -396,7 +426,7 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
     return;
   }
 
-  if (!SOCKET_PATH && request.method === "bridge.forward") {
+  if (!activeSocketPath && request.method === "bridge.forward") {
     writeNativeSuccess(
       request,
       {

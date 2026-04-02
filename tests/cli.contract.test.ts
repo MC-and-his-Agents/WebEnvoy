@@ -3247,9 +3247,11 @@ process.stdin.on("data", (chunk) => {
       }
     });
     const launcherRaw = await readFile(launcherPath, "utf8");
+    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
     expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
+      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
     );
+    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
   });
@@ -3630,12 +3632,12 @@ process.stdin.on("data", (chunk) => {
 
   it("rejects runtime.install when parent chain under controlled root contains symlink", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
-    const safeLauncherRoot = path.join(channelRoot, "bin");
-    const symlinkedManifestRoot = path.join(channelRoot, "manifests");
+    const safeLauncherRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin");
+    const manifestRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-install-manifest-root-"));
     const externalManifestDir = await mkdtemp(path.join(tmpdir(), "webenvoy-install-symlink-"));
     tempDirs.push(externalManifestDir);
-    await mkdir(channelRoot, { recursive: true });
+    tempDirs.push(manifestRoot);
+    const symlinkedManifestRoot = path.join(manifestRoot, "symlinked");
     await mkdir(safeLauncherRoot, { recursive: true });
     await symlink(externalManifestDir, symlinkedManifestRoot);
 
@@ -3651,9 +3653,12 @@ process.stdin.on("data", (chunk) => {
           native_host_name: "com.webenvoy.host",
           manifest_dir: path.join(symlinkedManifestRoot, "nested"),
           launcher_path: path.join(safeLauncherRoot, "webenvoy-native-host")
-        })
-      ],
-      runtimeCwd
+          })
+        ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: manifestRoot
+      }
     );
     expect(install.status).toBe(2);
     expect(parseSingleJsonLine(install.stdout)).toMatchObject({
@@ -3671,14 +3676,13 @@ process.stdin.on("data", (chunk) => {
 
   it("rejects runtime.uninstall when parent chain under controlled root contains symlink", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
-    const safeManifestRoot = path.join(channelRoot, "manifests");
-    const symlinkedLauncherRoot = path.join(channelRoot, "bin");
-    const externalLauncherDir = await mkdtemp(path.join(tmpdir(), "webenvoy-uninstall-symlink-"));
-    tempDirs.push(externalLauncherDir);
-    await mkdir(channelRoot, { recursive: true });
-    await mkdir(safeManifestRoot, { recursive: true });
-    await symlink(externalLauncherDir, symlinkedLauncherRoot);
+    const manifestRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-uninstall-manifest-root-"));
+    const externalManifestDir = await mkdtemp(path.join(tmpdir(), "webenvoy-uninstall-symlink-"));
+    const launcherRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "bin");
+    tempDirs.push(manifestRoot, externalManifestDir);
+    const symlinkedManifestRoot = path.join(manifestRoot, "symlinked");
+    await mkdir(launcherRoot, { recursive: true });
+    await symlink(externalManifestDir, symlinkedManifestRoot);
 
     const uninstall = runCli(
       [
@@ -3689,11 +3693,14 @@ process.stdin.on("data", (chunk) => {
         JSON.stringify({
           browser_channel: "chrome",
           native_host_name: "com.webenvoy.host",
-          manifest_dir: safeManifestRoot,
-          launcher_path: path.join(symlinkedLauncherRoot, "webenvoy-native-host")
+          manifest_dir: path.join(symlinkedManifestRoot, "nested"),
+          launcher_path: path.join(launcherRoot, "webenvoy-native-host")
         })
       ],
-      runtimeCwd
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: manifestRoot
+      }
     );
     expect(uninstall.status).toBe(2);
     expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
@@ -3703,7 +3710,7 @@ process.stdin.on("data", (chunk) => {
         code: "ERR_CLI_INVALID_ARGS",
         details: {
           reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
-          field: "launcher_path"
+          field: "manifest_dir"
         }
       }
     });
