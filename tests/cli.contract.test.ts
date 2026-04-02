@@ -3418,6 +3418,82 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
+  it("keeps official Chrome identity preflight usable for managed installs with explicit host_command", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const explicitHostEntryPath = path.join(runtimeCwd, "custom-native-host-entry.mjs");
+    await writeFile(explicitHostEntryPath, "process.stdin.resume();\n", "utf8");
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-explicit-host-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          host_command: createNativeHostCommand(explicitHostEntryPath)
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: manifestDir
+      }
+    );
+    expect(install.status).toBe(0);
+    const installSummary = parseSingleJsonLine(install.stdout).summary as Record<string, unknown>;
+    expect(installSummary).toMatchObject({
+      host_command_source: "explicit",
+      write_result: {
+        bundle_runtime: "unchanged"
+      }
+    });
+
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "explicit_host_command_profile"
+    });
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "explicit_host_command_profile",
+        "--run-id",
+        "run-contract-install-explicit-host-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: installSummary.manifest_path
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: manifestDir
+      }
+    );
+    expect(status.status).toBe(0);
+    expect(parseSingleJsonLine(status.stdout)).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        identityPreflight: {
+          failureReason: "IDENTITY_PREFLIGHT_PASSED",
+          installDiagnostics: {
+            launcherExists: true,
+            launcherExecutable: true,
+            bundleRuntimeExists: null
+          }
+        }
+      }
+    });
+  });
+
   it("exports profile-scoped native bridge directory through runtime.install launcher", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");

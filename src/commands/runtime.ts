@@ -149,6 +149,7 @@ const runtimePing = async (context: RuntimeContext) => {
     throw new Error("forced execution failure");
   }
 
+  let bridge: NativeMessagingBridge | null = null;
   try {
     const requestedExecutionMode =
       typeof context.params.requested_execution_mode === "string"
@@ -164,7 +165,7 @@ const runtimePing = async (context: RuntimeContext) => {
           })
         )
       : context.params;
-    const bridge = resolveRuntimeBridge();
+    bridge = resolveRuntimeBridge();
     return await bridge.runtimePing({
       runId: context.run_id,
       profile: context.profile,
@@ -179,6 +180,8 @@ const runtimePing = async (context: RuntimeContext) => {
       });
     }
     throw error;
+  } finally {
+    await bridge?.close().catch(() => undefined);
   }
 };
 

@@ -31,6 +31,7 @@ interface NativeHostManifest {
 
 interface ManagedInstallMetadata {
   profileRoot: string | null;
+  bundleRuntimeExpected: boolean | null;
 }
 
 export interface IdentityPreflightInstallDiagnostics {
@@ -452,12 +453,18 @@ const readManagedInstallMetadata = async (
     const raw = await readFile(join(channelRoot, "install-metadata.json"), "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const profileRoot = asNonEmptyString(parsed.profile_root);
+    const bundleRuntimeExpected =
+      typeof parsed.bundle_runtime_expected === "boolean"
+        ? parsed.bundle_runtime_expected
+        : null;
     return {
-      profileRoot: profileRoot ? normalizePathForComparison(profileRoot) : null
+      profileRoot: profileRoot ? normalizePathForComparison(profileRoot) : null,
+      bundleRuntimeExpected
     };
   } catch {
     return {
-      profileRoot: null
+      profileRoot: null,
+      bundleRuntimeExpected: null
     };
   }
 };
@@ -476,6 +483,21 @@ const managedBundleFilesExist = async (channelRoot: string): Promise<boolean> =>
     return true;
   } catch {
     return false;
+  }
+};
+
+const inferManagedBundleExpectationFromLauncher = async (
+  launcherPath: string,
+  channelRoot: string
+): Promise<boolean> => {
+  try {
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    const bundledEntryPath = normalizePathForComparison(
+      join(channelRoot, "runtime", "native-messaging", "native-host-entry.js")
+    );
+    return launcherRaw.includes(bundledEntryPath);
+  } catch {
+    return true;
   }
 };
 
@@ -503,7 +525,7 @@ const resolveInstallDiagnostics = async (
   const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
   const managedInstallMetadata = managedInstall
     ? await readManagedInstallMetadata(managedInstall.channelRoot)
-    : { profileRoot: null };
+    : { profileRoot: null, bundleRuntimeExpected: null };
   let launcherExists = false;
   let launcherExecutable: boolean | null = null;
   let bundleRuntimeExists: boolean | null = null;
@@ -532,9 +554,15 @@ const resolveInstallDiagnostics = async (
     launcherExecutable = await managedLauncherExecutable(manifest.path);
   }
   if (bundleRuntimePath) {
-    bundleRuntimeExists = managedInstall
-      ? await managedBundleFilesExist(managedInstall.channelRoot)
-      : false;
+    const bundleRuntimeExpected =
+      managedInstallMetadata.bundleRuntimeExpected ??
+      (managedInstall
+        ? await inferManagedBundleExpectationFromLauncher(manifest.path, managedInstall.channelRoot)
+        : null);
+    bundleRuntimeExists =
+      managedInstall && bundleRuntimeExpected === true
+        ? await managedBundleFilesExist(managedInstall.channelRoot)
+        : null;
   }
   return {
     launcherPath: manifest.path,

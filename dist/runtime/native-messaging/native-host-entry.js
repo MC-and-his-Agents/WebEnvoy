@@ -55,6 +55,7 @@ const resolveSocketTarget = (request) => {
         socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
     };
 };
+const shouldPromoteToProfileSocket = (request) => typeof request.profile === "string" && request.profile.trim().length > 0 && !LEGACY_PROFILE_DIR && !!PROFILE_ROOT;
 const isBridgeResponse = (value) => {
     const record = asRecord(value);
     return (typeof record.id === "string" &&
@@ -138,19 +139,25 @@ const failPendingSocketResponses = (input) => {
         pendingSocketResponses.delete(id);
     }
 };
-const cleanupSocketServer = async () => {
+const cleanupSocketServer = async (options) => {
     const current = socketServer;
-    if (current) {
-        await new Promise((resolve) => {
-            socketServer = null;
-            current.close(() => resolve());
-        });
-    }
-    if (activeSocketPath) {
-        await rm(activeSocketPath, { force: true }).catch(() => undefined);
-    }
+    const currentSocketPath = activeSocketPath;
+    socketServer = null;
     activeSocketPath = null;
     activeProfileDir = null;
+    if (current) {
+        if (options?.waitForConnections === false) {
+            current.close();
+        }
+        else {
+            await new Promise((resolve) => {
+                current.close(() => resolve());
+            });
+        }
+    }
+    if (currentSocketPath) {
+        await rm(currentSocketPath, { force: true }).catch(() => undefined);
+    }
 };
 const shutdown = async (code = 0) => {
     if (shuttingDown) {
@@ -175,7 +182,7 @@ const ensureSocketServer = async (target) => {
         return;
     }
     if (socketServer && activeSocketPath !== target.socketPath) {
-        await cleanupSocketServer();
+        await cleanupSocketServer({ waitForConnections: false });
     }
     await mkdir(target.profileDir, { recursive: true });
     await rm(target.socketPath, { force: true }).catch(() => undefined);
@@ -249,6 +256,9 @@ const handleSocketRequest = async (socket, rawRequest) => {
                     message: "extension native bridge is not ready"
                 }));
                 return;
+            }
+            if (shouldPromoteToProfileSocket(request)) {
+                await ensureSocketServer(resolveSocketTarget(request));
             }
             writeSocketEnvelope(socket, buildSuccessEnvelope(request, {
                 summary: {

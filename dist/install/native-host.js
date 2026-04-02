@@ -278,9 +278,11 @@ ${profileRootExport}exec ${argv} "$@"
 `;
 };
 const writeManagedInstallMetadata = async (input) => {
-    await writeFile(join(input.channelRoot, MANAGED_INSTALL_METADATA_FILENAME), `${JSON.stringify({
-        profile_root: input.profileRoot
-    }, null, 2)}\n`, "utf8");
+    const metadata = {
+        profile_root: input.profileRoot,
+        bundle_runtime_expected: input.bundleRuntimeExpected
+    };
+    await writeFile(join(input.channelRoot, MANAGED_INSTALL_METADATA_FILENAME), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 };
 export const resolveControlledInstallRoots = (cwd, browserChannel) => {
     return resolveNativeHostInstallRoots(cwd, browserChannel);
@@ -423,7 +425,8 @@ export const installNativeHost = async (input) => {
     }), "utf8");
     await writeManagedInstallMetadata({
         channelRoot: resolvedPaths.channelRoot,
-        profileRoot
+        profileRoot,
+        bundleRuntimeExpected: bundleRuntimeWritten
     });
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {

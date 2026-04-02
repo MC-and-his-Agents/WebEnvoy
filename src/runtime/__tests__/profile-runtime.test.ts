@@ -422,7 +422,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("ignores transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
+  it("surfaces transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -452,10 +452,10 @@ describe("profile-runtime identity preflight", () => {
       runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
+        manifestPath,
         failureReason: "IDENTITY_BINDING_MISSING"
       }
     });
-    expect(status.identityPreflight).not.toHaveProperty("manifestPath", manifestPath);
   });
 
   it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {

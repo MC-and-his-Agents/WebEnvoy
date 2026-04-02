@@ -104,6 +104,7 @@ const runtimePing = async (context) => {
     if (asBoolean(context.params.force_fail)) {
         throw new Error("forced execution failure");
     }
+    let bridge = null;
     try {
         const requestedExecutionMode = typeof context.params.requested_execution_mode === "string"
             ? context.params.requested_execution_mode
@@ -115,7 +116,7 @@ const runtimePing = async (context) => {
                 requestedExecutionMode
             }))
             : context.params;
-        const bridge = resolveRuntimeBridge();
+        bridge = resolveRuntimeBridge();
         return await bridge.runtimePing({
             runId: context.run_id,
             profile: context.profile,
@@ -131,6 +132,9 @@ const runtimePing = async (context) => {
             });
         }
         throw error;
+    }
+    finally {
+        await bridge?.close().catch(() => undefined);
     }
 };
 const runtimeStart = async (context) => profileRuntime.start({

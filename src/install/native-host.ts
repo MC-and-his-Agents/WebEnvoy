@@ -324,6 +324,11 @@ interface NativeHostRegistrationManifest {
   allowedOrigins: string[];
 }
 
+interface ManagedInstallMetadataRecord {
+  profile_root: string;
+  bundle_runtime_expected: boolean;
+}
+
 const readNativeHostRegistrationManifest = async (
   manifestPath: string
 ): Promise<NativeHostRegistrationManifest | null> => {
@@ -368,16 +373,15 @@ ${profileRootExport}exec ${argv} "$@"
 const writeManagedInstallMetadata = async (input: {
   channelRoot: string;
   profileRoot: string;
+  bundleRuntimeExpected: boolean;
 }): Promise<void> => {
+  const metadata: ManagedInstallMetadataRecord = {
+    profile_root: input.profileRoot,
+    bundle_runtime_expected: input.bundleRuntimeExpected
+  };
   await writeFile(
     join(input.channelRoot, MANAGED_INSTALL_METADATA_FILENAME),
-    `${JSON.stringify(
-      {
-        profile_root: input.profileRoot
-      },
-      null,
-      2
-    )}\n`,
+    `${JSON.stringify(metadata, null, 2)}\n`,
     "utf8"
   );
 };
@@ -587,7 +591,8 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   );
   await writeManagedInstallMetadata({
     channelRoot: resolvedPaths.channelRoot,
-    profileRoot
+    profileRoot,
+    bundleRuntimeExpected: bundleRuntimeWritten
   });
   await chmod(resolvedPaths.launcherPath, 0o755);
 

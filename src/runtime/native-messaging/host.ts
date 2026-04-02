@@ -222,6 +222,14 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
     request: BridgeRequestEnvelope
   ): Promise<{ path: string; required: boolean } | null> {
     const profileRoot = resolveRuntimeProfileRoot(process.cwd());
+    const requestedProfile =
+      typeof request.profile === "string" && request.profile.trim().length > 0
+        ? request.profile.trim()
+        : null;
+    const rootSocketPath = join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+    const requestedProfileSocketPath = requestedProfile
+      ? join(profileRoot, requestedProfile, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+      : null;
     if (this.#socketPath) {
       this.#activeSocketPath = this.#socketPath;
       return {
@@ -229,25 +237,24 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
         required: true
       };
     }
-    if (this.#activeSocketPath) {
-      try {
-        await access(this.#activeSocketPath);
-        return {
-          path: this.#activeSocketPath,
-          required: false
-        };
-      } catch {
-        this.#activeSocketPath = null;
-      }
-    }
+
     const candidates =
-      typeof request.profile === "string" && request.profile.trim().length > 0
+      requestedProfile !== null
         ? [
-            join(profileRoot, request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME),
-            join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+            requestedProfileSocketPath,
+            this.#activeSocketPath !== requestedProfileSocketPath ? rootSocketPath : null,
+            this.#activeSocketPath &&
+            this.#activeSocketPath !== requestedProfileSocketPath &&
+            this.#activeSocketPath !== rootSocketPath
+              ? this.#activeSocketPath
+              : null
           ]
-        : [join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)];
+        : [this.#activeSocketPath, rootSocketPath];
+
     for (const candidate of candidates) {
+      if (!candidate) {
+        continue;
+      }
       try {
         await access(candidate);
         this.#activeSocketPath = candidate;
@@ -260,6 +267,25 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       }
     }
     return null;
+  }
+
+  async #promoteProfileSocketPath(profile: string | null, currentSocketPath: string): Promise<void> {
+    if (!profile || this.#socketPath) {
+      this.#activeSocketPath = currentSocketPath;
+      return;
+    }
+    const profileRoot = resolveRuntimeProfileRoot(process.cwd());
+    const preferredSocketPath = join(profileRoot, profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+    if (preferredSocketPath === currentSocketPath) {
+      this.#activeSocketPath = preferredSocketPath;
+      return;
+    }
+    try {
+      await access(preferredSocketPath);
+      this.#activeSocketPath = preferredSocketPath;
+    } catch {
+      this.#activeSocketPath = currentSocketPath;
+    }
   }
 
   #sendViaSpawn(
@@ -376,7 +402,13 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
           settled = true;
           clearTimeout(timeout);
           socket.end();
-          resolve(response);
+          void this.#promoteProfileSocketPath(
+            phase === "open" ? request.profile : null,
+            socketPath
+          ).then(
+            () => resolve(response),
+            () => resolve(response)
+          );
         } catch (error) {
           settleReject(asTransportError(error, "ERR_TRANSPORT_FORWARD_FAILED"), "ERR_TRANSPORT_FORWARD_FAILED");
         }
