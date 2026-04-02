@@ -554,6 +554,12 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     currentRegistration?.launcherPath && currentRegistration.launcherPath !== resolvedPaths.launcherPath
       ? inspectManagedNativeHostInstall(currentRegistration.launcherPath)
       : null;
+  const previousLegacyLauncherPath =
+    currentRegistration?.launcherPath &&
+    currentRegistration.launcherPath !== resolvedPaths.launcherPath &&
+    currentRegistration.launcherPath === resolveLegacyDefaultLauncherPath(resolvedPaths.manifestDir, input.nativeHostName)
+      ? currentRegistration.launcherPath
+      : null;
   const manifestExisted = await pathExists(resolvedPaths.manifestPath);
   const launcherExisted = await pathExists(resolvedPaths.launcherPath);
   const bundleRuntimeExisted = await pathExists(join(resolvedPaths.runtimeRoot, "native-messaging", "native-host-entry.js"));
@@ -595,6 +601,9 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   if (previousManagedInstall && previousManagedInstall.channelRoot !== resolvedPaths.channelRoot) {
     await rm(previousManagedInstall.channelRoot, { recursive: true, force: true });
+  }
+  if (previousLegacyLauncherPath) {
+    await rm(previousLegacyLauncherPath, { force: true });
   }
 
   return {

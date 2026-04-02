@@ -3878,6 +3878,51 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("cleans up a legacy browser-adjacent launcher when runtime.install rewrites the registration", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const manifestPath = path.join(manifestDir, "com.webenvoy.host.json");
+    const legacyLauncherPath = path.join(manifestDir, "com.webenvoy.host-launcher");
+    await mkdir(manifestDir, { recursive: true });
+    await writeFile(legacyLauncherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: legacyLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-legacy-upgrade-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+    const installSummary = parseSingleJsonLine(install.stdout).summary as Record<string, unknown>;
+    expect(installSummary.launcher_path).not.toBe(legacyLauncherPath);
+    await expect(readFile(legacyLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    const rewrittenManifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    expect(rewrittenManifest.path).toBe(await realpath(String(installSummary.launcher_path)));
+  });
+
   it("keeps default native-host bundles isolated per worktree while replacing the shared registration", async () => {
     const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
     const installArgs = [
@@ -4820,6 +4865,142 @@ process.stdin.on("data", (chunk) => {
           identity_binding_state: "mismatch",
           expected_origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
           manifest_path: manifestPath
+        }
+      }
+    });
+  });
+
+  it("blocks legacy browser-adjacent launchers during official Chrome identity preflight", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = await createRuntimeCwd();
+    const manifestPath = path.join(manifestDir, "com.webenvoy.host.json");
+    const launcherPath = path.join(manifestDir, "com.webenvoy.host-launcher");
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "legacy_launcher_profile"
+    });
+
+    const result = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "legacy_launcher_profile",
+        "--run-id",
+        "run-contract-legacy-launcher-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(result.status).toBe(5);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      run_id: "run-contract-legacy-launcher-001",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_MISMATCH",
+        details: {
+          reason: "IDENTITY_MANIFEST_MISSING",
+          legacy_launcher_detected: true,
+          launcher_path: launcherPath
+        }
+      }
+    });
+  });
+
+  it("blocks official Chrome runtime.start when managed install metadata is missing", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const installRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const manifestPath = path.join(installRoot, "manifests", "com.webenvoy.host.json");
+    const launcherPath = path.join(installRoot, "bin", "com.webenvoy.host-launcher");
+    const runtimeRoot = path.join(installRoot, "runtime");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await mkdir(path.dirname(launcherPath), { recursive: true });
+    await mkdir(path.join(runtimeRoot, "native-messaging"), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await chmod(launcherPath, 0o755);
+    await writeFile(path.join(runtimeRoot, "native-messaging", "native-host-entry.js"), "process.stdin.resume();\n", "utf8");
+    await writeFile(path.join(runtimeRoot, "native-messaging", "host.js"), "export {};\n", "utf8");
+    await writeFile(path.join(runtimeRoot, "native-messaging", "protocol.js"), "export {};\n", "utf8");
+    await writeFile(path.join(runtimeRoot, "worktree-root.js"), "export {};\n", "utf8");
+    await writeFile(path.join(runtimeRoot, "package.json"), '{\n  "type": "module"\n}\n', "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "missing_install_metadata_profile"
+    });
+
+    const result = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "missing_install_metadata_profile",
+        "--run-id",
+        "run-contract-missing-install-metadata-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(result.status).toBe(5);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      run_id: "run-contract-missing-install-metadata-001",
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_MISMATCH",
+        details: {
+          reason: "IDENTITY_MANIFEST_MISSING",
+          launcher_path: launcherPath,
+          launcher_profile_root: null,
+          expected_profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+          profile_root_matches: false
         }
       }
     });

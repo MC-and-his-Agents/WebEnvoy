@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -601,6 +601,7 @@ describe("runIdentityPreflight", () => {
     await mkdir(dirname(manifestPath), { recursive: true });
     await mkdir(dirname(launcherPath), { recursive: true });
     await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await chmod(launcherPath, 0o755);
     await writeInstalledProfileExtension({
       profileDir,
       extensionId: EXTENSION_ID
@@ -660,6 +661,101 @@ describe("runIdentityPreflight", () => {
     });
   });
 
+  it("blocks managed launchers when the launcher is not executable", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-non-executable-launcher-"));
+    const manifestPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    const launcherPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    const runtimeRoot = join(profileDir, ".webenvoy", "native-host-install", "chrome", "runtime");
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await mkdir(dirname(launcherPath), { recursive: true });
+    await mkdir(join(runtimeRoot, "native-messaging"), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      join(dirname(dirname(launcherPath)), "install-metadata.json"),
+      `${JSON.stringify(
+        {
+          profile_root: dirname(profileDir)
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(join(runtimeRoot, "native-messaging", "native-host-entry.js"), "process.stdin.resume();\n", "utf8");
+    await writeFile(join(runtimeRoot, "native-messaging", "host.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "native-messaging", "protocol.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "worktree-root.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "package.json"), '{\n  "type": "module"\n}\n', "utf8");
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        launcherExecutable: false,
+        bundleRuntimeExists: true
+      }
+    });
+  });
+
   it("blocks when the managed launcher belongs to another worktree profile root", async () => {
     const currentWorktreeRoot = await mkdtemp(join(tmpdir(), "webenvoy-native-host-current-worktree-"));
     const otherWorktreeRoot = await mkdtemp(join(tmpdir(), "webenvoy-native-host-other-worktree-"));
@@ -678,6 +774,7 @@ describe("runIdentityPreflight", () => {
     await mkdir(dirname(launcherPath), { recursive: true });
     await mkdir(dirname(manifestPath), { recursive: true });
     await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await chmod(launcherPath, 0o755);
     await writeFile(
       join(dirname(dirname(launcherPath)), "install-metadata.json"),
       `${JSON.stringify(
@@ -741,7 +838,260 @@ describe("runIdentityPreflight", () => {
         launcherExists: true,
         launcherProfileRoot: join(otherWorktreeRoot, ".webenvoy", "profiles"),
         expectedProfileRoot: join(currentWorktreeRoot, ".webenvoy", "profiles"),
-        profileRootMatches: false
+        profileRootMatches: false,
+        legacyLauncherDetected: false
+      }
+    });
+  });
+
+  it("blocks managed launchers when install metadata is missing", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-missing-metadata-"));
+    const manifestPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    const launcherPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    const runtimeRoot = join(profileDir, ".webenvoy", "native-host-install", "chrome", "runtime");
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await mkdir(dirname(launcherPath), { recursive: true });
+    await mkdir(join(runtimeRoot, "native-messaging"), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await chmod(launcherPath, 0o755);
+    await writeFile(join(runtimeRoot, "native-messaging", "native-host-entry.js"), "process.stdin.resume();\n", "utf8");
+    await writeFile(join(runtimeRoot, "native-messaging", "host.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "native-messaging", "protocol.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "worktree-root.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "package.json"), '{\n  "type": "module"\n}\n', "utf8");
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        launcherProfileRoot: null,
+        expectedProfileRoot: dirname(profileDir),
+        profileRootMatches: false,
+        bundleRuntimeExists: true,
+        legacyLauncherDetected: false
+      }
+    });
+  });
+
+  it("blocks managed launchers when bundled runtime support files are missing", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-incomplete-bundle-"));
+    const manifestPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    const launcherPath = join(
+      profileDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    const runtimeRoot = join(profileDir, ".webenvoy", "native-host-install", "chrome", "runtime");
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await mkdir(dirname(launcherPath), { recursive: true });
+    await mkdir(join(runtimeRoot, "native-messaging"), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await chmod(launcherPath, 0o755);
+    await writeFile(
+      join(dirname(dirname(launcherPath)), "install-metadata.json"),
+      `${JSON.stringify(
+        {
+          profile_root: join(profileDir, ".webenvoy", "profiles")
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(join(runtimeRoot, "native-messaging", "native-host-entry.js"), "process.stdin.resume();\n", "utf8");
+    await writeFile(join(runtimeRoot, "native-messaging", "protocol.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "worktree-root.js"), "export {};\n", "utf8");
+    await writeFile(join(runtimeRoot, "package.json"), '{\n  "type": "module"\n}\n', "utf8");
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        bundleRuntimePath: join(
+          profileDir,
+          ".webenvoy",
+          "native-host-install",
+          "chrome",
+          "runtime",
+          "native-messaging",
+          "native-host-entry.js"
+        ),
+        bundleRuntimeExists: false,
+        legacyLauncherDetected: false
+      }
+    });
+  });
+
+  it("blocks legacy browser-adjacent launchers until runtime.install rewrites them", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-legacy-launcher-"));
+    const manifestPath = join(profileDir, "com.webenvoy.host.json");
+    const launcherPath = join(profileDir, "com.webenvoy.host-launcher");
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        legacyLauncherDetected: true
       }
     });
   });
