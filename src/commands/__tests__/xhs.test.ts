@@ -109,7 +109,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         params: expect.objectContaining({
           version: "v1",
           run_id: "run-xhs-ready-001",
-          profile: "official_ready_profile"
+          profile: "official_ready_profile",
+          target_tab_id: 32
         })
       })
     );
@@ -784,7 +785,7 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
-  it("keeps transport failures distinct from bootstrap-not-delivered in final readiness gate", async () => {
+  it("surfaces missing official runtime readiness signals before execution", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {
         mode: "official_chrome_persistent_extension"
@@ -798,7 +799,13 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       lockHeld: true
     }));
     const bridge = {
-      runCommand: vi.fn()
+      runCommand: vi.fn(async () => ({
+        ok: true,
+        payload: {
+          message: "pong"
+        },
+        relay_path: "host>background>content-script>background>host"
+      }))
     };
 
     await expect(
@@ -831,13 +838,16 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     ).rejects.toMatchObject({
       code: "ERR_RUNTIME_UNAVAILABLE",
       details: expect.objectContaining({
-        runtime_readiness: "recoverable",
-        bootstrap_state: "not_started",
-        transport_state: "not_connected",
-        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
+        reason: "ERR_RUNTIME_READINESS_SIGNAL_MISSING",
+        relay_path: "host>background>content-script>background>host"
       })
     });
-    expect(bridge.runCommand).not.toHaveBeenCalled();
+    expect(bridge.runCommand).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.readiness"
+      })
+    );
   });
 });
 

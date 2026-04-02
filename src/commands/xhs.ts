@@ -372,7 +372,7 @@ export const ensureOfficialChromeRuntimeReady = async (
   requestedExecutionMode: XhsExecutionMode,
   bridge: NativeMessagingBridge,
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
-  _gate: ReturnType<typeof normalizeGateOptions>,
+  gate: ReturnType<typeof normalizeGateOptions>,
   readStatus?: () => Promise<JsonObject>
 ): Promise<void> => {
   await prepareOfficialChromeRuntime({
@@ -381,6 +381,9 @@ export const ensureOfficialChromeRuntimeReady = async (
     requestedExecutionMode,
     bridge,
     fingerprintContext,
+    bootstrapTargetTabId: gate.targetTabId,
+    bootstrapTargetDomain: gate.targetDomain,
+    bootstrapTargetPage: gate.targetPage,
     readStatus
   });
 };

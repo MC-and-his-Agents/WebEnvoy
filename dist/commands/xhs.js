@@ -261,13 +261,16 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
         reason: error.code
     }
 });
-export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, _gate, readStatus) => {
+export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
     await prepareOfficialChromeRuntime({
         context,
         consumerId: ability.id,
         requestedExecutionMode,
         bridge,
         fingerprintContext,
+        bootstrapTargetTabId: gate.targetTabId,
+        bootstrapTargetDomain: gate.targetDomain,
+        bootstrapTargetPage: gate.targetPage,
         readStatus
     });
 };

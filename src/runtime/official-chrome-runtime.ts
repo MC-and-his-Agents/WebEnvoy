@@ -12,6 +12,7 @@ type BootstrapState = "not_started" | "pending" | "ready" | "stale" | "failed";
 type TransportState = "not_connected" | "ready" | "disconnected";
 
 type RuntimeStatusReader = () => Promise<JsonObject>;
+type RuntimeAttachReader = () => Promise<JsonObject>;
 
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
@@ -72,6 +73,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
   profile: string;
   runId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
+  targetTabId?: number | null;
+  targetDomain?: string | null;
+  targetPage?: string | null;
 }): JsonObject & {
   version: "v1";
   run_id: string;
@@ -83,6 +87,15 @@ const buildRuntimeBootstrapEnvelope = (input: {
   run_id: input.runId,
   runtime_context_id: buildRuntimeBootstrapContextId(input.profile, input.runId),
   profile: input.profile,
+  ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
+    ? { target_tab_id: input.targetTabId }
+    : {}),
+  ...(typeof input.targetDomain === "string" && input.targetDomain.length > 0
+    ? { target_domain: input.targetDomain }
+    : {}),
+  ...(typeof input.targetPage === "string" && input.targetPage.length > 0
+    ? { target_page: input.targetPage }
+    : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
   main_world_secret: randomUUID()
@@ -144,6 +157,31 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
   }
 
   const payload = asObject(readinessResult.payload);
+  const hasTransportState =
+    payload?.transport_state === "disconnected" ||
+    payload?.transport_state === "ready" ||
+    payload?.transport_state === "not_connected";
+  const hasBootstrapState =
+    payload?.bootstrap_state === "not_started" ||
+    payload?.bootstrap_state === "pending" ||
+    payload?.bootstrap_state === "ready" ||
+    payload?.bootstrap_state === "stale" ||
+    payload?.bootstrap_state === "failed";
+  if (!hasTransportState && !hasBootstrapState) {
+    throw new CliError(
+      "ERR_RUNTIME_UNAVAILABLE",
+      "official Chrome runtime readiness 缺少执行面信号",
+      {
+        retryable: true,
+        details: {
+          ability_id: input.consumerId,
+          stage: "execution",
+          reason: "ERR_RUNTIME_READINESS_SIGNAL_MISSING",
+          relay_path: readinessResult.relay_path
+        }
+      }
+    );
+  }
   const transportState =
     payload?.transport_state === "disconnected"
       ? "disconnected"
@@ -236,12 +274,28 @@ export const prepareOfficialChromeRuntime = async (input: {
   requestedExecutionMode: string;
   bridge: NativeMessagingBridge;
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>;
+  bootstrapTargetTabId?: number | null;
+  bootstrapTargetDomain?: string | null;
+  bootstrapTargetPage?: string | null;
   readStatus?: RuntimeStatusReader;
+  attachRuntime?: RuntimeAttachReader;
 }): Promise<JsonObject> => {
   const readStatus =
     input.readStatus ??
     (async () =>
       await profileRuntime.status({
+        cwd: input.context.cwd,
+        profile: input.context.profile ?? "",
+        runId: input.context.run_id,
+        params: buildOfficialChromeRuntimeStatusParams(
+          input.context,
+          input.requestedExecutionMode
+        )
+      }));
+  const attachRuntime =
+    input.attachRuntime ??
+    (async () =>
+      await profileRuntime.attach({
         cwd: input.context.cwd,
         profile: input.context.profile ?? "",
         runId: input.context.run_id,
@@ -270,6 +324,22 @@ export const prepareOfficialChromeRuntime = async (input: {
   let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
 
+  const syncRuntimeStatus = (nextStatus: JsonObject): void => {
+    status = nextStatus;
+    profileState =
+      typeof status.profileState === "string" ? status.profileState : "uninitialized";
+    confirmationRequired = status.confirmationRequired === true;
+    runtimeReadiness =
+      typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
+    lockHeld = status.lockHeld === true;
+    identityBindingState =
+      typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
+    bootstrapState =
+      typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
+    transportState =
+      typeof status.transportState === "string" ? status.transportState : "not_connected";
+  };
+
   const buildBaseDetails = () => ({
     ability_id: input.consumerId,
     stage: "execution" as const,
@@ -282,11 +352,24 @@ export const prepareOfficialChromeRuntime = async (input: {
     confirmation_required: confirmationRequired
   });
 
+  if (
+    !lockHeld &&
+    profileState === "ready" &&
+    identityBindingState === "bound" &&
+    transportState === "ready" &&
+    bootstrapState !== "stale"
+  ) {
+    syncRuntimeStatus(await attachRuntime());
+  }
+
   const attemptExecutionBootstrap = async (): Promise<void> => {
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.context.profile ?? "",
       runId: input.context.run_id,
-      fingerprintRuntime: input.fingerprintContext
+      fingerprintRuntime: input.fingerprintContext,
+      targetTabId: input.bootstrapTargetTabId,
+      targetDomain: input.bootstrapTargetDomain ?? null,
+      targetPage: input.bootstrapTargetPage ?? null
     });
     const bootstrapResult = await input.bridge.runCommand({
       runId: input.context.run_id,
@@ -388,23 +471,40 @@ export const prepareOfficialChromeRuntime = async (input: {
   if (
     lockHeld &&
     identityBindingState === "bound" &&
+    runtimeReadiness !== "ready" &&
+    bootstrapState !== "stale" &&
+    transportState !== "ready"
+  ) {
+    const bridgedReadiness = await readOfficialChromeRuntimeReadinessViaBridge({
+      lockHeld,
+      context: input.context,
+      bridge: input.bridge,
+      consumerId: input.consumerId,
+      identityBindingState
+    });
+    runtimeReadiness = bridgedReadiness.runtimeReadiness;
+    identityBindingState = bridgedReadiness.identityBindingState;
+    bootstrapState = bridgedReadiness.bootstrapState;
+    transportState = bridgedReadiness.transportState;
+    if (runtimeReadiness === "ready") {
+      return applyReadinessToStatus(status, {
+        runtimeReadiness,
+        identityBindingState,
+        bootstrapState,
+        transportState,
+        lockHeld
+      });
+    }
+  }
+
+  if (
+    lockHeld &&
+    identityBindingState === "bound" &&
     transportState === "ready" &&
     (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")
   ) {
     await attemptExecutionBootstrap();
-    status = await readStatus();
-    profileState =
-      typeof status.profileState === "string" ? status.profileState : "uninitialized";
-    confirmationRequired = status.confirmationRequired === true;
-    runtimeReadiness =
-      typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
-    lockHeld = status.lockHeld === true;
-    identityBindingState =
-      typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
-    bootstrapState =
-      typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
-    transportState =
-      typeof status.transportState === "string" ? status.transportState : "not_connected";
+    syncRuntimeStatus(await readStatus());
 
     if (runtimeReadiness !== "ready" && lockHeld && identityBindingState === "bound") {
       const bridgedReadiness = await readOfficialChromeRuntimeReadinessViaBridge({

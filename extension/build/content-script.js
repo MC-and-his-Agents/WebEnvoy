@@ -2721,6 +2721,7 @@ const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value)
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 const AUDIO_PATCH_EPSILON = 1e-12;
 let mainWorldEventChannel = null;
@@ -2811,6 +2812,10 @@ const installMainWorldEventChannelSecret = (secret) => {
         requestEvent: names.requestEvent,
         resultEvent: names.resultEvent
     };
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
+        request_event: names.requestEvent,
+        result_event: names.resultEvent
+    }));
     return true;
 };
 const resetMainWorldEventChannelForContract = () => {
@@ -2861,6 +2866,10 @@ const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => awai
     payload: {
         fingerprint_runtime: fingerprintRuntime
     }
+});
+const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldCall({
+    type: "fingerprint-verify",
+    payload: {}
 });
 const requestXhsSignatureViaExtension = async (uri, body) => {
     const runtime = globalThis.chrome?.runtime;
@@ -2959,6 +2968,9 @@ const probeNavigatorMimeTypes = () => {
 const verifyFingerprintInstallResult = async (input) => {
     const requiredPatches = resolveRequiredFingerprintPatches(input.fingerprintRuntime);
     const reportedAppliedPatches = asStringArray(input.installResult?.applied_patches);
+    const mainWorldVerification = requiredPatches.includes("battery")
+        ? asRecord(await verifyFingerprintRuntimeViaMainWorld().catch(() => null))
+        : null;
     const appliedPatches = [];
     const missingRequiredPatches = [];
     const probeDetails = {};
@@ -2981,8 +2993,15 @@ const verifyFingerprintInstallResult = async (input) => {
         }
     }
     if (requiredPatches.includes("battery")) {
-        const batteryPatched = await probeBatteryApi();
-        probeDetails.battery = { verified: batteryPatched };
+        const isolatedWorldBatteryPatched = await probeBatteryApi();
+        const mainWorldBatteryPatched = mainWorldVerification?.has_get_battery === true;
+        const batteryPatched = isolatedWorldBatteryPatched || mainWorldBatteryPatched;
+        probeDetails.battery = {
+            verified: batteryPatched,
+            isolated_world_verified: isolatedWorldBatteryPatched,
+            main_world_verified: mainWorldBatteryPatched,
+            reported_applied: reportedAppliedPatches.includes("battery")
+        };
         if (batteryPatched) {
             appliedPatches.push("battery");
         }
