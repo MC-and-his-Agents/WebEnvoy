@@ -31,8 +31,8 @@ const resolveExistingPath = (input: string): string => {
   }
 };
 
-const resolveGitRepositoryRoot = (cwd: string): string | null => {
-  const result = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+const resolveGitPaths = (cwd: string): { repositoryRoot: string; worktreePath: string } | null => {
+  const result = spawnSync("git", ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], {
     cwd,
     encoding: "utf8"
   });
@@ -40,13 +40,25 @@ const resolveGitRepositoryRoot = (cwd: string): string | null => {
     return null;
   }
 
-  const output = result.stdout.trim();
-  if (output.length === 0) {
+  const outputLines = result.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (outputLines.length < 2) {
     return null;
   }
 
-  const commonDir = resolve(cwd, output);
-  return basename(commonDir) === ".git" ? dirname(commonDir) : null;
+  const worktreePath = resolveExistingPath(outputLines[0]);
+  const commonDir = resolveExistingPath(outputLines[1]);
+  const repositoryRoot = basename(commonDir) === ".git" ? dirname(commonDir) : null;
+  if (!repositoryRoot) {
+    return null;
+  }
+
+  return {
+    repositoryRoot,
+    worktreePath
+  };
 };
 
 const sanitizeInstallLabel = (value: string): string => {
@@ -63,9 +75,11 @@ export const resolveNativeHostInstallRoots = (
   cwd: string,
   browserChannel: string
 ): NativeHostInstallRoots => {
-  const worktreePath = resolveExistingPath(cwd);
-  const repositoryRoot = resolveGitRepositoryRoot(worktreePath);
-  const installKey = repositoryRoot ? buildInstallKey(worktreePath) : null;
+  const fallbackPath = resolveExistingPath(cwd);
+  const gitPaths = resolveGitPaths(fallbackPath);
+  const worktreePath = gitPaths?.worktreePath ?? fallbackPath;
+  const repositoryRoot = gitPaths?.repositoryRoot ?? fallbackPath;
+  const installKey = gitPaths ? buildInstallKey(worktreePath) : null;
   const sharedRepositoryRoot = repositoryRoot ?? worktreePath;
   const channelRoot = installKey
     ? join(

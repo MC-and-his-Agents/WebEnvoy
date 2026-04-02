@@ -11,20 +11,31 @@ const resolveExistingPath = (input) => {
         return normalized;
     }
 };
-const resolveGitRepositoryRoot = (cwd) => {
-    const result = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+const resolveGitPaths = (cwd) => {
+    const result = spawnSync("git", ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], {
         cwd,
         encoding: "utf8"
     });
     if (result.status !== 0) {
         return null;
     }
-    const output = result.stdout.trim();
-    if (output.length === 0) {
+    const outputLines = result.stdout
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    if (outputLines.length < 2) {
         return null;
     }
-    const commonDir = resolve(cwd, output);
-    return basename(commonDir) === ".git" ? dirname(commonDir) : null;
+    const worktreePath = resolveExistingPath(outputLines[0]);
+    const commonDir = resolveExistingPath(outputLines[1]);
+    const repositoryRoot = basename(commonDir) === ".git" ? dirname(commonDir) : null;
+    if (!repositoryRoot) {
+        return null;
+    }
+    return {
+        repositoryRoot,
+        worktreePath
+    };
 };
 const sanitizeInstallLabel = (value) => {
     const sanitized = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -35,9 +46,11 @@ const buildInstallKey = (worktreePath) => {
     return `${sanitizeInstallLabel(basename(worktreePath))}-${digest}`;
 };
 export const resolveNativeHostInstallRoots = (cwd, browserChannel) => {
-    const worktreePath = resolveExistingPath(cwd);
-    const repositoryRoot = resolveGitRepositoryRoot(worktreePath);
-    const installKey = repositoryRoot ? buildInstallKey(worktreePath) : null;
+    const fallbackPath = resolveExistingPath(cwd);
+    const gitPaths = resolveGitPaths(fallbackPath);
+    const worktreePath = gitPaths?.worktreePath ?? fallbackPath;
+    const repositoryRoot = gitPaths?.repositoryRoot ?? fallbackPath;
+    const installKey = gitPaths ? buildInstallKey(worktreePath) : null;
     const sharedRepositoryRoot = repositoryRoot ?? worktreePath;
     const channelRoot = installKey
         ? join(sharedRepositoryRoot, ".webenvoy", "native-host-install", "worktrees", installKey, browserChannel)

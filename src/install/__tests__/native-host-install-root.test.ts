@@ -49,6 +49,7 @@ describe("native-host-install-root", () => {
     tempDirs.push(baseDir);
     const repoDir = join(baseDir, "repo");
     const linkedWorktreeDir = join(baseDir, "repo-feature");
+    const linkedNestedDir = join(linkedWorktreeDir, "src", "install");
     await mkdir(repoDir, { recursive: true });
 
     runGit(repoDir, ["init"]);
@@ -56,19 +57,26 @@ describe("native-host-install-root", () => {
     runGit(repoDir, ["add", "README.md"]);
     runGit(repoDir, ["-c", "user.name=WebEnvoy Test", "-c", "user.email=test@example.com", "commit", "-m", "init"]);
     runGit(repoDir, ["worktree", "add", "-b", "feat/test-install-root", linkedWorktreeDir]);
+    await mkdir(linkedNestedDir, { recursive: true });
     const expectedRepoDir = await realpath(repoDir);
+    const expectedLinkedWorktreeDir = await realpath(linkedWorktreeDir);
 
     const mainRoots = resolveNativeHostInstallRoots(repoDir, "chrome");
     const linkedRoots = resolveNativeHostInstallRoots(linkedWorktreeDir, "chrome");
+    const linkedNestedRoots = resolveNativeHostInstallRoots(linkedNestedDir, "chrome");
 
     expect(mainRoots.repositoryRoot).toBe(expectedRepoDir);
     expect(linkedRoots.repositoryRoot).toBe(expectedRepoDir);
+    expect(linkedNestedRoots.repositoryRoot).toBe(expectedRepoDir);
     expect(mainRoots.installKey).not.toBeNull();
     expect(linkedRoots.installKey).not.toBeNull();
     expect(mainRoots.installKey).not.toBe(linkedRoots.installKey);
     expect(mainRoots.channelRoot).not.toBe(linkedRoots.channelRoot);
     expect(mainRoots.channelRoot).toContain(join(".webenvoy", "native-host-install", "worktrees"));
     expect(linkedRoots.channelRoot).toContain(join(".webenvoy", "native-host-install", "worktrees"));
+    expect(linkedNestedRoots.worktreePath).toBe(expectedLinkedWorktreeDir);
+    expect(linkedNestedRoots.installKey).toBe(linkedRoots.installKey);
+    expect(linkedNestedRoots.channelRoot).toBe(linkedRoots.channelRoot);
 
     const linkedInstall = inspectManagedNativeHostInstall(
       join(linkedRoots.launcherRoot, "com.webenvoy.host-launcher")

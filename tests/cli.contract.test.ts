@@ -3770,6 +3770,66 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("keeps default native-host bundle paths stable when runtime.install runs from a nested cwd", async () => {
+    const { repositoryCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const nestedCwd = path.join(repositoryCwd, "nested", "child");
+    await mkdir(nestedCwd, { recursive: true });
+    const installArgs = [
+      "runtime.install",
+      "--run-id",
+      "run-contract-install-nested-cwd-001",
+      "--params",
+      JSON.stringify({
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        browser_channel: "chrome"
+      })
+    ];
+
+    const firstInstall = runCli(installArgs, repositoryCwd, {
+      WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+    });
+    expect(firstInstall.status).toBe(0);
+    const firstSummary = parseSingleJsonLine(firstInstall.stdout).summary as Record<string, unknown>;
+
+    const secondInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-nested-cwd-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      nestedCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(secondInstall.status).toBe(0);
+    expect(parseSingleJsonLine(secondInstall.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        install_scope: "worktree_scoped_bundle",
+        install_key: firstSummary.install_key,
+        install_root: firstSummary.install_root,
+        launcher_path: firstSummary.launcher_path,
+        existed_before: {
+          manifest: true,
+          launcher: true,
+          bundle_runtime: true
+        },
+        write_result: {
+          manifest: "overwritten",
+          launcher: "overwritten",
+          bundle_runtime: "overwritten"
+        }
+      }
+    });
+  });
+
   it("removes the currently registered managed launcher from another cwd when runtime.uninstall omits launcher_path", async () => {
     const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
     const install = runCli(
