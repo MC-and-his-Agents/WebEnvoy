@@ -3,8 +3,8 @@ import { connect as connectSocket } from "node:net";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_TRANSPORT_TIMEOUT_MS, ensureBridgeRequestEnvelope } from "./protocol.js";
+import { resolveRuntimeProfileRoot } from "../worktree-root.js";
 export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
-const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const withTransportCode = (error, code) => Object.assign(error, { transportCode: code });
 const readNativeHostCommand = () => {
     const value = process.env.WEBENVOY_NATIVE_HOST_CMD;
@@ -151,6 +151,14 @@ export class NativeHostBridgeTransport {
         return await this.#sendViaSpawn(phase, request);
     }
     async #resolveSocketPath(request) {
+        const profileRoot = resolveRuntimeProfileRoot(process.cwd());
+        const requestedProfile = typeof request.profile === "string" && request.profile.trim().length > 0
+            ? request.profile.trim()
+            : null;
+        const rootSocketPath = join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+        const requestedProfileSocketPath = requestedProfile
+            ? join(profileRoot, requestedProfile, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+            : null;
         if (this.#socketPath) {
             this.#activeSocketPath = this.#socketPath;
             return {
@@ -158,32 +166,52 @@ export class NativeHostBridgeTransport {
                 required: true
             };
         }
-        if (this.#activeSocketPath) {
+        const candidates = requestedProfile !== null
+            ? [
+                requestedProfileSocketPath,
+                this.#activeSocketPath !== requestedProfileSocketPath ? rootSocketPath : null,
+                this.#activeSocketPath &&
+                    this.#activeSocketPath !== requestedProfileSocketPath &&
+                    this.#activeSocketPath !== rootSocketPath
+                    ? this.#activeSocketPath
+                    : null
+            ]
+            : [this.#activeSocketPath, rootSocketPath];
+        for (const candidate of candidates) {
+            if (!candidate) {
+                continue;
+            }
             try {
-                await access(this.#activeSocketPath);
+                await access(candidate);
+                this.#activeSocketPath = candidate;
                 return {
-                    path: this.#activeSocketPath,
+                    path: candidate,
                     required: false
                 };
             }
             catch {
-                this.#activeSocketPath = null;
+                continue;
             }
         }
-        if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
-            return null;
+        return null;
+    }
+    async #promoteProfileSocketPath(profile, currentSocketPath) {
+        if (!profile || this.#socketPath) {
+            this.#activeSocketPath = currentSocketPath;
+            return;
         }
-        const candidate = join(process.cwd(), ...PROFILE_ROOT_SEGMENTS, request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+        const profileRoot = resolveRuntimeProfileRoot(process.cwd());
+        const preferredSocketPath = join(profileRoot, profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+        if (preferredSocketPath === currentSocketPath) {
+            this.#activeSocketPath = preferredSocketPath;
+            return;
+        }
         try {
-            await access(candidate);
-            this.#activeSocketPath = candidate;
-            return {
-                path: candidate,
-                required: false
-            };
+            await access(preferredSocketPath);
+            this.#activeSocketPath = preferredSocketPath;
         }
         catch {
-            return null;
+            this.#activeSocketPath = currentSocketPath;
         }
     }
     #sendViaSpawn(phase, request) {
@@ -276,7 +304,7 @@ export class NativeHostBridgeTransport {
                     settled = true;
                     clearTimeout(timeout);
                     socket.end();
-                    resolve(response);
+                    void this.#promoteProfileSocketPath(phase === "open" ? request.profile : null, socketPath).then(() => resolve(response), () => resolve(response));
                 }
                 catch (error) {
                     settleReject(asTransportError(error, "ERR_TRANSPORT_FORWARD_FAILED"), "ERR_TRANSPORT_FORWARD_FAILED");

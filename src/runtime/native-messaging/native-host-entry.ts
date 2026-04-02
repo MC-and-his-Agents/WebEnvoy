@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BRIDGE_PROTOCOL,
@@ -12,16 +12,16 @@ import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "./host.js";
 
 const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
-const PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
-const SOCKET_PATH = PROFILE_DIR
-  ? join(PROFILE_DIR, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-  : null;
+const PROFILE_ROOT = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT?.trim() ?? "";
+const LEGACY_PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
 
 let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
 let extensionOpened = false;
 let shuttingDown = false;
 let socketServer: Server | null = null;
+let activeProfileDir: string | null = null;
+let activeSocketPath: string | null = null;
 const socketBuffers = new WeakMap<Socket, Buffer>();
 const pendingSocketResponses = new Map<
   string,
@@ -38,6 +38,48 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
+
+const isPathInside = (baseDir: string, targetPath: string): boolean => {
+  const normalizedBase = resolve(baseDir);
+  const normalizedTarget = resolve(targetPath);
+  const rel = relative(normalizedBase, normalizedTarget);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+
+const resolveSocketTarget = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): { profileDir: string; socketPath: string } | null => {
+  if (LEGACY_PROFILE_DIR) {
+    const profileDir = resolve(LEGACY_PROFILE_DIR);
+    return {
+      profileDir,
+      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    };
+  }
+  if (!PROFILE_ROOT) {
+    return null;
+  }
+  const profileRoot = resolve(PROFILE_ROOT);
+  const profileName = asString(request.profile);
+  if (!profileName) {
+    return {
+      profileDir: profileRoot,
+      socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    };
+  }
+  const profileDir = resolve(profileRoot, profileName);
+  if (!isPathInside(profileRoot, profileDir)) {
+    throw new Error("native bridge profile escapes controlled root");
+  }
+  return {
+    profileDir,
+    socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+  };
+};
+
+const shouldPromoteToProfileSocket = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): boolean => typeof request.profile === "string" && request.profile.trim().length > 0 && !LEGACY_PROFILE_DIR && !!PROFILE_ROOT;
 
 const isBridgeResponse = (value: unknown): value is BridgeResponseEnvelope => {
   const record = asRecord(value);
@@ -174,16 +216,26 @@ const failPendingSocketResponses = (input: { code: string; message: string }): v
   }
 };
 
-const cleanupSocketServer = async (): Promise<void> => {
+const cleanupSocketServer = async (options?: {
+  waitForConnections?: boolean;
+}): Promise<void> => {
   const current = socketServer;
+  const currentSocketPath = activeSocketPath;
+  socketServer = null;
+  activeSocketPath = null;
+  activeProfileDir = null;
+
   if (current) {
-    await new Promise<void>((resolve) => {
-      socketServer = null;
-      current.close(() => resolve());
-    });
+    if (options?.waitForConnections === false) {
+      current.close();
+    } else {
+      await new Promise<void>((resolve) => {
+        current.close(() => resolve());
+      });
+    }
   }
-  if (SOCKET_PATH) {
-    await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+  if (currentSocketPath) {
+    await rm(currentSocketPath, { force: true }).catch(() => undefined);
   }
 };
 
@@ -203,13 +255,25 @@ const shutdown = async (code = 0): Promise<void> => {
   process.exit(code);
 };
 
-const ensureSocketServer = async (): Promise<void> => {
-  if (!SOCKET_PATH || socketServer) {
+const ensureSocketServer = async (
+  target: { profileDir: string; socketPath: string } | null
+): Promise<void> => {
+  if (!target) {
     return;
   }
 
-  await mkdir(PROFILE_DIR, { recursive: true });
-  await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+  if (socketServer && activeSocketPath === target.socketPath) {
+    return;
+  }
+
+  if (socketServer && activeSocketPath !== target.socketPath) {
+    await cleanupSocketServer({ waitForConnections: false });
+  }
+
+  await mkdir(target.profileDir, { recursive: true });
+  await rm(target.socketPath, { force: true }).catch(() => undefined);
+  activeProfileDir = target.profileDir;
+  activeSocketPath = target.socketPath;
 
   socketServer = createServer((socket) => {
     activeSockets.add(socket);
@@ -269,12 +333,12 @@ const ensureSocketServer = async (): Promise<void> => {
 
   await new Promise<void>((resolve, reject) => {
     const server = socketServer;
-    if (!server || !SOCKET_PATH) {
+    if (!server || !activeSocketPath) {
       resolve();
       return;
     }
     server.once("error", reject);
-    server.listen(SOCKET_PATH, () => {
+    server.listen(activeSocketPath, () => {
       server.removeListener("error", reject);
       resolve();
     });
@@ -296,6 +360,9 @@ const handleSocketRequest = async (socket: Socket, rawRequest: unknown): Promise
           })
         );
         return;
+      }
+      if (shouldPromoteToProfileSocket(request)) {
+        await ensureSocketServer(resolveSocketTarget(request));
       }
       writeSocketEnvelope(
         socket,
@@ -362,8 +429,9 @@ const handleSocketRequest = async (socket: Socket, rawRequest: unknown): Promise
 };
 
 const handleExtensionBridgeOpen = async (request: BridgeRequestEnvelope): Promise<void> => {
+  const socketTarget = resolveSocketTarget(request);
   extensionOpened = true;
-  await ensureSocketServer();
+  await ensureSocketServer(socketTarget);
   writeNativeSuccess(request, {
     summary: {
       protocol: BRIDGE_PROTOCOL,
@@ -387,7 +455,14 @@ const handleExtensionHeartbeat = (request: BridgeRequestEnvelope): void => {
 
 const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<void> => {
   if (request.method === "bridge.open") {
-    await handleExtensionBridgeOpen(request);
+    try {
+      await handleExtensionBridgeOpen(request);
+    } catch (error) {
+      writeNativeError(request, {
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
     return;
   }
 
@@ -396,7 +471,7 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
     return;
   }
 
-  if (!SOCKET_PATH && request.method === "bridge.forward") {
+  if (!activeSocketPath && request.method === "bridge.forward") {
     writeNativeSuccess(
       request,
       {

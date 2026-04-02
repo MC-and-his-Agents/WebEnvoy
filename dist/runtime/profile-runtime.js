@@ -11,8 +11,8 @@ import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-m
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
+import { resolveRuntimeProfileRoot } from "./worktree-root.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
-const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
@@ -132,14 +132,6 @@ const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk"
 const readRequestedExecutionMode = (params) => {
     const mode = params.requested_execution_mode;
     return typeof mode === "string" && mode.length > 0 ? mode : null;
-};
-const stripTransientPersistentIdentityHints = (params) => {
-    const nextParams = {
-        ...params
-    };
-    delete nextParams.persistent_extension_identity;
-    delete nextParams.persistentExtensionIdentity;
-    return nextParams;
 };
 const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRuntime) => {
     if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
@@ -347,6 +339,19 @@ const mapRuntimeError = (error) => {
     }
     return new CliError("ERR_RUNTIME_UNAVAILABLE", "最小会话运行时不可用", { retryable: true });
 };
+const buildIdentityPreflightOutput = (identityPreflight) => ({
+    mode: identityPreflight.mode,
+    binding: identityPreflight.binding,
+    manifestPath: identityPreflight.manifestPath,
+    manifestSource: identityPreflight.manifestSource,
+    expectedOrigin: identityPreflight.expectedOrigin,
+    allowedOrigins: identityPreflight.allowedOrigins,
+    browserPath: identityPreflight.browserPath,
+    browserVersion: identityPreflight.browserVersion,
+    blocking: identityPreflight.blocking,
+    failureReason: identityPreflight.failureReason,
+    installDiagnostics: identityPreflight.installDiagnostics
+});
 export class ProfileRuntimeService {
     #storeFactory;
     #lockFileAdapter;
@@ -357,7 +362,7 @@ export class ProfileRuntimeService {
         this.#storeFactory =
             options?.storeFactory ??
                 ((cwd) => {
-                    return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+                    return new ProfileStore(resolveRuntimeProfileRoot(cwd));
                 });
         this.#lockFileAdapter = options?.lockFileAdapter ?? DEFAULT_LOCK_FILE_ADAPTER;
         this.#isProcessAlive =
@@ -501,6 +506,7 @@ export class ProfileRuntimeService {
                 transportState: readiness.transportState,
                 bootstrapState: readiness.bootstrapState,
                 runtimeReadiness: readiness.runtimeReadiness,
+                identityPreflight: buildIdentityPreflightOutput(identityPreflight),
                 browserPath: browserLaunch.browserPath,
                 browserPid: browserLaunch.browserPid,
                 controllerPid: browserLaunch.controllerPid,
@@ -657,6 +663,7 @@ export class ProfileRuntimeService {
                     transportState: readiness.transportState,
                     bootstrapState: readiness.bootstrapState,
                     runtimeReadiness: readiness.runtimeReadiness,
+                    identityPreflight: buildIdentityPreflightOutput(identityPreflight),
                     recoverableSession: buildRecoverableSessionSummary(recoveredMeta),
                     fingerprint_runtime: fingerprintRuntime,
                     confirmationRequired: true,
@@ -704,6 +711,7 @@ export class ProfileRuntimeService {
                 transportState: readiness.transportState,
                 bootstrapState: readiness.bootstrapState,
                 runtimeReadiness: readiness.runtimeReadiness,
+                identityPreflight: buildIdentityPreflightOutput(identityPreflight),
                 recoverableSession: buildRecoverableSessionSummary(nextMeta),
                 fingerprint_runtime: fingerprintRuntime,
                 lastLoginAt: nowIso
@@ -741,9 +749,7 @@ export class ProfileRuntimeService {
             requestedExecutionMode
         });
         const identityPreflight = await runIdentityPreflight({
-            params: meta?.persistentExtensionBinding === null || meta?.persistentExtensionBinding === undefined
-                ? stripTransientPersistentIdentityHints(input.params)
-                : input.params,
+            params: input.params,
             meta,
             profileDir
         });
@@ -765,17 +771,7 @@ export class ProfileRuntimeService {
             transportState: readiness.transportState,
             bootstrapState: readiness.bootstrapState,
             runtimeReadiness: readiness.runtimeReadiness,
-            identityPreflight: {
-                mode: identityPreflight.mode,
-                binding: identityPreflight.binding,
-                manifestPath: identityPreflight.manifestPath,
-                expectedOrigin: identityPreflight.expectedOrigin,
-                allowedOrigins: identityPreflight.allowedOrigins,
-                browserPath: identityPreflight.browserPath,
-                browserVersion: identityPreflight.browserVersion,
-                blocking: identityPreflight.blocking,
-                failureReason: identityPreflight.failureReason
-            },
+            identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: lock?.ownerPid ?? null,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
@@ -856,17 +852,7 @@ export class ProfileRuntimeService {
             transportState: readiness.transportState,
             bootstrapState: readiness.bootstrapState,
             runtimeReadiness: readiness.runtimeReadiness,
-            identityPreflight: {
-                mode: identityPreflight.mode,
-                binding: identityPreflight.binding,
-                manifestPath: identityPreflight.manifestPath,
-                expectedOrigin: identityPreflight.expectedOrigin,
-                allowedOrigins: identityPreflight.allowedOrigins,
-                browserPath: identityPreflight.browserPath,
-                browserVersion: identityPreflight.browserVersion,
-                blocking: identityPreflight.blocking,
-                failureReason: identityPreflight.failureReason
-            },
+            identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: lock.ownerPid,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
