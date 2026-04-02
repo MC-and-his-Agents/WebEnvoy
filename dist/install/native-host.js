@@ -203,6 +203,14 @@ const resolveDefaultManifestDirectory = (browserChannel) => {
         retryable: false
     });
 };
+const resolveManifestDirectoryOverride = () => {
+    const override = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
+    if (typeof override !== "string" || override.trim().length === 0) {
+        return null;
+    }
+    return resolve(override.trim());
+};
+export const resolveManifestDiscoveryDirectory = (browserChannel) => resolveManifestDirectoryOverride() ?? resolveDefaultManifestDirectory(browserChannel);
 const buildLauncherScript = (input) => {
     const argv = tokenizeHostCommand(input.command, input.hostCommand)
         .map((token) => quoteShellArgForScript(token))
@@ -238,14 +246,15 @@ const isPathInside = (baseDir, targetPath) => {
 const normalizePathForOutput = (input) => typeof input === "string" ? normalizePathForBoundaryCheck(input) : null;
 const resolveInstallPaths = (input) => {
     const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
+    const manifestRoot = resolveManifestDiscoveryDirectory(input.browserChannel);
     const manifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0
         ? asAbsolutePath(input.cwd, input.manifestDir)
-        : roots.manifestRoot;
+        : manifestRoot;
     const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-    if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
+    if (hasCustomManifestDir && !isPathInside(manifestRoot, manifestDir)) {
         throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
             field: "manifest_dir",
-            allowed_root: roots.manifestRoot,
+            allowed_root: manifestRoot,
             received_path: manifestDir
         });
     }
@@ -268,7 +277,7 @@ const resolveInstallPaths = (input) => {
         launcherPath,
         hasCustomManifestDir,
         hasCustomLauncherPath,
-        manifestPathSource: hasCustomManifestDir ? "custom" : "repo_owned_default",
+        manifestPathSource: hasCustomManifestDir ? "custom" : "browser_default",
         launcherPathSource: hasCustomLauncherPath ? "custom" : "repo_owned_default"
     };
 };

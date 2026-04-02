@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
-import { isValidNativeHostName, resolveRepoOwnedManifestPath } from "../install/native-host.js";
+import { isValidNativeHostName } from "../install/native-host.js";
 import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
@@ -42,7 +42,18 @@ const ensureValidNativeHostName = (nativeHostName) => {
         });
     }
 };
+const resolveManifestDirectoryOverride = () => {
+    const override = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
+    if (typeof override !== "string" || override.trim().length === 0) {
+        return null;
+    }
+    return resolve(override.trim());
+};
 const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
+    const manifestDirOverride = resolveManifestDirectoryOverride();
+    if (manifestDirOverride) {
+        return join(manifestDirOverride, `${nativeHostName}.json`);
+    }
     const platform = identityPreflightAdapters.platform();
     if (platform === "darwin") {
         const baseByChannel = {
@@ -111,24 +122,6 @@ const parseWindowsRegistryDefaultValue = (stdout) => {
     }
     return null;
 };
-const deriveWorkspaceRootFromProfileDir = (profileDir) => {
-    if (!profileDir) {
-        return null;
-    }
-    const profilesDir = dirname(resolve(profileDir));
-    const webenvoyDir = dirname(profilesDir);
-    if (basename(profilesDir) !== "profiles" || basename(webenvoyDir) !== ".webenvoy") {
-        return null;
-    }
-    return dirname(webenvoyDir);
-};
-const resolveRepoOwnedManifestPathForBinding = (binding, profileDir) => {
-    const workspaceRoot = deriveWorkspaceRootFromProfileDir(profileDir);
-    if (!workspaceRoot) {
-        return null;
-    }
-    return resolveRepoOwnedManifestPath(workspaceRoot, binding.browserChannel, binding.nativeHostName);
-};
 const resolveManifestPathForBinding = async (binding, _profileDir) => {
     if (binding.manifestPath) {
         return {
@@ -160,19 +153,6 @@ const resolveManifestPathForBinding = async (binding, _profileDir) => {
             manifestPath: null,
             manifestSource: null
         };
-    }
-    const repoOwnedManifestPath = resolveRepoOwnedManifestPathForBinding(binding, _profileDir);
-    if (repoOwnedManifestPath) {
-        try {
-            await access(repoOwnedManifestPath);
-            return {
-                manifestPath: repoOwnedManifestPath,
-                manifestSource: "repo_owned_default"
-            };
-        }
-        catch {
-            // fall through to browser default candidate for legacy installs
-        }
     }
     return {
         manifestPath: resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName),

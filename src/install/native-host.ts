@@ -123,7 +123,7 @@ const quoteShellToken = (value: string): string => JSON.stringify(value);
 
 const quoteShellArgForScript = (value: string): string => `'${value.replace(/'/g, `'\"'\"'`)}'`;
 
-type InstallPathSource = "repo_owned_default" | "custom";
+type InstallPathSource = "repo_owned_default" | "browser_default" | "custom";
 
 const tokenizeHostCommand = (
   command: "runtime.install" | "runtime.uninstall",
@@ -266,6 +266,17 @@ const resolveDefaultManifestDirectory = (browserChannel: BrowserChannel): string
   });
 };
 
+const resolveManifestDirectoryOverride = (): string | null => {
+  const override = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
+  if (typeof override !== "string" || override.trim().length === 0) {
+    return null;
+  }
+  return resolve(override.trim());
+};
+
+export const resolveManifestDiscoveryDirectory = (browserChannel: BrowserChannel): string =>
+  resolveManifestDirectoryOverride() ?? resolveDefaultManifestDirectory(browserChannel);
+
 const buildLauncherScript = (input: {
   command: "runtime.install" | "runtime.uninstall";
   hostCommand: string;
@@ -332,15 +343,16 @@ interface ResolveInstallPathsInput {
 
 const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
   const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
+  const manifestRoot = resolveManifestDiscoveryDirectory(input.browserChannel);
   const manifestDir =
     typeof input.manifestDir === "string" && input.manifestDir.length > 0
       ? asAbsolutePath(input.cwd, input.manifestDir)
-      : roots.manifestRoot;
+      : manifestRoot;
   const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-  if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
+  if (hasCustomManifestDir && !isPathInside(manifestRoot, manifestDir)) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "manifest_dir",
-      allowed_root: roots.manifestRoot,
+      allowed_root: manifestRoot,
       received_path: manifestDir
     });
   }
@@ -366,7 +378,7 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
     launcherPath,
     hasCustomManifestDir,
     hasCustomLauncherPath,
-    manifestPathSource: hasCustomManifestDir ? ("custom" as InstallPathSource) : ("repo_owned_default" as InstallPathSource),
+    manifestPathSource: hasCustomManifestDir ? ("custom" as InstallPathSource) : ("browser_default" as InstallPathSource),
     launcherPathSource: hasCustomLauncherPath ? ("custom" as InstallPathSource) : ("repo_owned_default" as InstallPathSource)
   };
 };

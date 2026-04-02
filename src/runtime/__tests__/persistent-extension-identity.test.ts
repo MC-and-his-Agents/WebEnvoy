@@ -448,48 +448,17 @@ describe("runIdentityPreflight", () => {
     expect(result.manifestPath?.startsWith(profileDir)).toBe(false);
   });
 
-  it("prefers repo-owned install manifest when binding omits manifestPath and workspace profileDir is known", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-repo-owned-"));
-    const profileDir = join(baseDir, ".webenvoy", "profiles", "identity-profile");
-    const repoOwnedManifestPath = join(
-      baseDir,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "manifests",
-      "com.webenvoy.host.json"
-    );
-    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-repo-owned-"));
-    const browserDefaultManifestPath = join(
-      fakeHome,
-      "Library",
-      "Application Support",
-      "Google",
-      "Chrome",
-      "NativeMessagingHosts",
-      "com.webenvoy.host.json"
-    );
-    vi.stubEnv("HOME", fakeHome);
-    await mkdir(dirname(repoOwnedManifestPath), { recursive: true });
-    await mkdir(dirname(browserDefaultManifestPath), { recursive: true });
+  it("resolves the native host manifest from an explicit discovery override when binding omits manifestPath", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-override-"));
+    const manifestDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-override-"));
+    const manifestPath = join(manifestDir, "com.webenvoy.host.json");
+    vi.stubEnv("WEBENVOY_NATIVE_HOST_MANIFEST_DIR", manifestDir);
     await writeFile(
-      repoOwnedManifestPath,
+      manifestPath,
       `${JSON.stringify(
         {
           name: "com.webenvoy.host",
           allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    );
-    await writeFile(
-      browserDefaultManifestPath,
-      `${JSON.stringify(
-        {
-          name: "com.webenvoy.host",
-          allowed_origins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
         },
         null,
         2
@@ -528,8 +497,8 @@ describe("runIdentityPreflight", () => {
     expect(result).toMatchObject({
       identityBindingState: "bound",
       failureReason: "IDENTITY_PREFLIGHT_PASSED",
-      manifestPath: repoOwnedManifestPath,
-      manifestSource: "repo_owned_default",
+      manifestPath,
+      manifestSource: "browser_default",
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`
     });
   });

@@ -18,6 +18,7 @@ const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
 const originalPath = process.env.PATH;
 const originalLocalAppData = process.env.LOCALAPPDATA;
 const originalAppData = process.env.APPDATA;
+const originalNativeHostManifestDir = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
 const originalPlatform = process.platform;
 const PERSISTENT_EXTENSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -223,6 +224,11 @@ afterEach(async () => {
     delete process.env.APPDATA;
   } else {
     process.env.APPDATA = originalAppData;
+  }
+  if (originalNativeHostManifestDir === undefined) {
+    delete process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
+  } else {
+    process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR = originalNativeHostManifestDir;
   }
   Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
@@ -1768,6 +1774,13 @@ describe("profile-runtime identity preflight", () => {
     await mkdir(join(baseDir, ".webenvoy", "native-host-install", "chrome", "manifests"), {
       recursive: true
     });
+    process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR = join(
+      baseDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests"
+    );
     await writeFile(
       repoOwnedManifestPath,
       `${JSON.stringify(

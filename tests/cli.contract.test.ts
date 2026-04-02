@@ -114,7 +114,14 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   NODE_ENV: "test",
   WEBENVOY_BROWSER_PATH: mockBrowserPath,
   WEBENVOY_BROWSER_MOCK_LOG: path.join(cwd, ".browser-launch.log"),
-  WEBENVOY_BROWSER_MOCK_TTL: "2"
+  WEBENVOY_BROWSER_MOCK_TTL: "2",
+  WEBENVOY_NATIVE_HOST_MANIFEST_DIR: path.join(
+    cwd,
+    ".webenvoy",
+    "native-host-install",
+    "chrome",
+    "manifests"
+  )
 });
 
 const runCli = (
@@ -3119,7 +3126,7 @@ process.stdin.on("data", (chunk) => {
         install_root: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome"),
         manifest_dir: path.dirname(defaultManifestPath),
         manifest_path: defaultManifestPath,
-        manifest_path_source: "repo_owned_default",
+        manifest_path_source: "browser_default",
         launcher_dir: path.dirname(defaultLauncherPath),
         launcher_path: defaultLauncherPath,
         launcher_path_source: "repo_owned_default",
