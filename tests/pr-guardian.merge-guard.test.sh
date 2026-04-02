@@ -831,6 +831,44 @@ test_materialize_base_snapshot_path_prefers_merge_base_commit() {
   restore_test_repo_root
 }
 
+test_materialize_base_snapshot_path_does_not_fall_back_to_base_head() {
+  setup_case_dir "materialize-no-base-head-fallback"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local materialized_path=""
+  mkdir -p "${fake_repo_root}" "${baseline_snapshot_root}"
+
+  REPO_ROOT="${fake_repo_root}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha"
+  export REPO_ROOT BASELINE_SNAPSHOT_ROOT BASE_REF MERGE_BASE_SHA
+
+  git() {
+    if [[ "${1:-}" == "-C" && "${3:-}" == "cat-file" && "${4:-}" == "-e" && "${5:-}" == "merge-base-sha:docs/dev/architecture/system-design.md" ]]; then
+      return 1
+    fi
+    if [[ "${1:-}" == "-C" && "${3:-}" == "cat-file" && "${4:-}" == "-e" && "${5:-}" == "origin/main:docs/dev/architecture/system-design.md" ]]; then
+      return 0
+    fi
+    if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "origin/main:docs/dev/architecture/system-design.md" ]]; then
+      printf '%s\n' 'base branch snapshot'
+      return 0
+    fi
+    command git "$@"
+  }
+
+  materialized_path="$(materialize_base_snapshot_path "${REPO_ROOT}/docs/dev/architecture/system-design.md")"
+  if [[ -n "${materialized_path}" ]]; then
+    echo "expected no materialized trusted snapshot when merge-base lacks the file, got ${materialized_path}" >&2
+    exit 1
+  fi
+
+  unset -f git
+  restore_test_repo_root
+}
+
 test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline() {
   setup_case_dir "base-snapshot-review-baseline"
 
@@ -2290,6 +2328,23 @@ EOF
   assert_file_contains "${result_file}" '"end":1'
 }
 
+test_normalize_native_review_result_coerces_stringified_legacy_schema_numbers() {
+  setup_case_dir "normalize-native-review-stringified-numbers"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"findings":[{"title":"[P2] Preserve review context","body":"The patch drops required review context for medium items.","confidence_score":"0.73","priority":"2","code_location":{"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh","line_range":{"start":"223","end":"225"}}}],"overall_correctness":"patch is incorrect","overall_explanation":"The patch still contains a blocking review-context regression.","overall_confidence_score":"0.73"}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"start":223'
+  assert_file_contains "${result_file}" '"end":225'
+  assert_file_contains "${result_file}" '"confidence_score":0.73'
+  assert_file_contains "${result_file}" '"priority":2'
+}
+
 test_normalize_native_review_result_accepts_guardian_schema_json() {
   setup_case_dir "normalize-guardian-schema-json"
 
@@ -2303,6 +2358,24 @@ EOF
   assert_pass validate_review_result_shape "${result_file}"
   assert_file_contains "${result_file}" '"verdict":"APPROVE"'
   assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_coerces_stringified_guardian_schema_numbers() {
+  setup_case_dir "normalize-guardian-schema-stringified-numbers"
+
+  local raw_file="${TMP_DIR}/guardian-review.json"
+  local result_file="${TMP_DIR}/normalized-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":"false","summary":"Blocking issue found.","findings":[{"severity":"","title":"[P1] Normalize review output","details":"The parser still leaves numeric fields as strings.","code_location":{"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh","line_range":{"start":"1555","end":"1559"}},"confidence_score":"0.83","priority":"1"}],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"start":1555'
+  assert_file_contains "${result_file}" '"end":1559'
+  assert_file_contains "${result_file}" '"confidence_score":0.83'
+  assert_file_contains "${result_file}" '"priority":1'
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
 }
 
 test_normalize_native_review_result_fails_closed_for_inconsistent_guardian_schema_json() {
@@ -3390,6 +3463,7 @@ main() {
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_materialize_base_snapshot_path_prefers_merge_base_commit
+  test_materialize_base_snapshot_path_does_not_fall_back_to_base_head
   test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline
   test_append_unique_line_prefers_base_snapshot_for_changed_reviewer_owned_baseline
   test_append_unique_line_uses_base_snapshot_for_deleted_changed_reviewer_owned_baseline
@@ -3432,7 +3506,11 @@ main() {
   test_assert_required_review_context_available_fails_when_high_risk_security_baselines_are_missing
   test_line_range_reviewable_uses_merge_base_diff
   test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff
+  test_normalize_native_review_result_maps_native_schema_to_guardian_schema
+  test_normalize_native_review_result_maps_native_schema_without_code_location
+  test_normalize_native_review_result_coerces_stringified_legacy_schema_numbers
   test_normalize_native_review_result_accepts_guardian_schema_json
+  test_normalize_native_review_result_coerces_stringified_guardian_schema_numbers
   test_normalize_native_review_result_fails_closed_for_inconsistent_guardian_schema_json
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json
@@ -3440,8 +3518,6 @@ main() {
   test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat
   test_normalize_native_review_result_accepts_brace_bearing_preamble_json
   test_normalize_native_review_result_accepts_second_fenced_json_block
-  test_normalize_native_review_result_maps_native_schema_to_guardian_schema
-  test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema

@@ -470,11 +470,6 @@ materialize_base_snapshot_path() {
     printf '%s\n' "${snapshot_path}"
     return 0
   fi
-
-  if [[ -n "${BASE_REF:-}" ]] && git -C "${REPO_ROOT}" cat-file -e "origin/${BASE_REF}:${relative_path}" 2>/dev/null; then
-    git -C "${REPO_ROOT}" show "origin/${BASE_REF}:${relative_path}" > "${snapshot_path}"
-    printf '%s\n' "${snapshot_path}"
-  fi
 }
 
 has_trusted_review_baseline_snapshot() {
@@ -1373,20 +1368,41 @@ normalize_native_review_result() {
   if jq -e '
     type == "object"
     and ((.verdict // "") | IN("APPROVE", "REQUEST_CHANGES"))
-    and (.safe_to_merge? | type == "boolean")
-    and (.summary? | type == "string")
+    and (.safe_to_merge? != null)
+    and (.summary? != null)
     and (.findings? | type == "array")
     and (.required_actions? | type == "array")
   ' "${json_source_file}" >/dev/null 2>&1; then
     jq -c -e --arg fallback_path "${fallback_path}" '
       def trim_text:
         gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+      def to_int_or($default):
+        if . == null then $default
+        elif type == "number" then floor
+        elif type == "string" and test("^[0-9]+$") then tonumber
+        else $default
+        end;
+      def to_number_or($default):
+        if . == null then $default
+        elif type == "number" then .
+        elif type == "string" and test("^[0-9]+(?:\\.[0-9]+)?$") then tonumber
+        else $default
+        end;
+      def to_bool_or($default):
+        if type == "boolean" then .
+        elif type == "string" then
+          if ascii_downcase == "true" then true
+          elif ascii_downcase == "false" then false
+          else $default
+          end
+        else $default
+        end;
       def inferred_priority:
         if (.priority // null) != null then .priority
-        elif ((.title // "") | test("^\\[P0\\]")) then 0
-        elif ((.title // "") | test("^\\[P1\\]")) then 1
-        elif ((.title // "") | test("^\\[P2\\]")) then 2
-        elif ((.title // "") | test("^\\[P3\\]")) then 3
+        elif (((.title // "") | tostring) | test("^\\[P0\\]")) then 0
+        elif (((.title // "") | tostring) | test("^\\[P1\\]")) then 1
+        elif (((.title // "") | tostring) | test("^\\[P2\\]")) then 2
+        elif (((.title // "") | tostring) | test("^\\[P3\\]")) then 3
         else 2
         end;
       def severity_for($priority):
@@ -1396,32 +1412,33 @@ normalize_native_review_result() {
         else "low"
         end;
       def normalized_title:
-        (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; "") | trim_text);
+        ((.title // "") | tostring | sub("^\\[P[0-3]\\][[:space:]]*"; "") | trim_text);
       def normalized_details:
-        ((.details // .body // "") | trim_text) as $details
+        ((.details // .body // "") | tostring | trim_text) as $details
         | if ($details | length) > 0 then $details else normalized_title end;
       ((.findings // [])
         | map(
-            (inferred_priority) as $priority
+            ((inferred_priority) | to_int_or(2)) as $priority
+            | ((.code_location.line_range.start // 1) | to_int_or(1)) as $line_start
             | {
-                severity: ((.severity // "") | if length > 0 then . else severity_for($priority) end),
+                severity: (((.severity // "") | tostring) | if length > 0 then . else severity_for($priority) end),
                 title: normalized_title,
                 details: normalized_details,
                 code_location: {
-                  absolute_file_path: (.code_location.absolute_file_path // $fallback_path),
+                  absolute_file_path: ((.code_location.absolute_file_path // $fallback_path) | tostring),
                   line_range: {
-                    start: (.code_location.line_range.start // 1),
-                    end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
+                    start: $line_start,
+                    end: ((.code_location.line_range.end // $line_start) | to_int_or($line_start))
                   }
                 },
-                confidence_score: (.confidence_score // 0.5),
+                confidence_score: ((.confidence_score // 0.5) | to_number_or(0.5)),
                 priority: $priority
               }
           )) as $findings
       | ((.required_actions // []) | map(tostring | trim_text) | map(select(length > 0))) as $required_actions
-      | ((.summary // "") | trim_text) as $summary
+      | ((.summary // "") | tostring | trim_text) as $summary
       | ((.verdict // "") == "APPROVE") as $native_approve
-      | (.safe_to_merge == true) as $native_safe
+      | ((.safe_to_merge // false) | to_bool_or(false)) as $native_safe
       | {
           verdict: (
             if ($findings | length) == 0 and $native_approve and $native_safe
@@ -1462,6 +1479,18 @@ normalize_native_review_result() {
     jq -c -e --arg fallback_path "${fallback_path}" '
       def trim_text:
         gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+      def to_int_or($default):
+        if . == null then $default
+        elif type == "number" then floor
+        elif type == "string" and test("^[0-9]+$") then tonumber
+        else $default
+        end;
+      def to_number_or($default):
+        if . == null then $default
+        elif type == "number" then .
+        elif type == "string" and test("^[0-9]+(?:\\.[0-9]+)?$") then tonumber
+        else $default
+        end;
       def has_contrast($sentence):
         ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
       def has_condition($sentence):
@@ -1524,10 +1553,10 @@ normalize_native_review_result() {
           and all($sentences[]; looks_like_safe_sentence(.));
       def inferred_priority:
         if (.priority // null) != null then .priority
-        elif ((.title // "") | test("^\\[P0\\]")) then 0
-        elif ((.title // "") | test("^\\[P1\\]")) then 1
-        elif ((.title // "") | test("^\\[P2\\]")) then 2
-        elif ((.title // "") | test("^\\[P3\\]")) then 3
+        elif (((.title // "") | tostring) | test("^\\[P0\\]")) then 0
+        elif (((.title // "") | tostring) | test("^\\[P1\\]")) then 1
+        elif (((.title // "") | tostring) | test("^\\[P2\\]")) then 2
+        elif (((.title // "") | tostring) | test("^\\[P3\\]")) then 3
         else 2
         end;
       def severity_for($priority):
@@ -1537,26 +1566,27 @@ normalize_native_review_result() {
         else "low"
         end;
       def normalized_title:
-        (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; ""));
+        ((.title // "") | tostring | sub("^\\[P[0-3]\\][[:space:]]*"; ""));
       def normalized_details:
-        ((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $body
+        ((.body // "") | tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $body
         | if ($body | length) > 0 then $body else normalized_title end;
       def normalized_findings:
         (.findings // [])
         | map(
-            (inferred_priority) as $priority
+            ((inferred_priority) | to_int_or(2)) as $priority
+            | ((.code_location.line_range.start // 1) | to_int_or(1)) as $line_start
             | {
                 severity: severity_for($priority),
                 title: normalized_title,
                 details: normalized_details,
                 code_location: {
-                  absolute_file_path: ((.code_location.absolute_file_path // "") | if length > 0 then . else $fallback_path end),
+                  absolute_file_path: (((.code_location.absolute_file_path // "") | tostring) | if length > 0 then . else $fallback_path end),
                   line_range: {
-                    start: (.code_location.line_range.start // 1),
-                    end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
+                    start: $line_start,
+                    end: ((.code_location.line_range.end // $line_start) | to_int_or($line_start))
                   }
                 },
-                confidence_score: (.confidence_score // 0.5),
+                confidence_score: ((.confidence_score // 0.5) | to_number_or(0.5)),
                 priority: $priority
               }
           );
