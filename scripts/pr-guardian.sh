@@ -908,7 +908,7 @@ collect_spec_review_docs() {
   local output_file="$2"
   local fr_dirs_file
   local fr_dir
-  local requires_high_risk_companions=0
+  local has_contract_changes=0
   local required_entry_docs_changed=0
 
   append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
@@ -925,18 +925,18 @@ collect_spec_review_docs() {
 
   while IFS= read -r fr_dir; do
     [[ -n "${fr_dir}" ]] || continue
-    requires_high_risk_companions=0
+    has_contract_changes=0
     required_entry_docs_changed=0
     if grep -Eq "^${fr_dir}/(spec\.md|TODO\.md|plan\.md)$" "${changed_files_file}"; then
       required_entry_docs_changed=1
     fi
     if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
-      requires_high_risk_companions=1
+      has_contract_changes=1
       while IFS= read -r contract_file; do
         append_proposed_review_line "${REPO_ROOT}/${contract_file}" "${output_file}"
       done < <(grep -E "^${fr_dir}/contracts/" "${changed_files_file}")
     fi
-    if [[ "${required_entry_docs_changed}" == "1" || "${requires_high_risk_companions}" == "1" ]]; then
+    if [[ "${required_entry_docs_changed}" == "1" || "${has_contract_changes}" == "1" ]]; then
       append_required_formal_doc_line "${fr_dir}" "spec.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
       append_required_formal_doc_line "${fr_dir}" "TODO.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
       append_required_formal_doc_line "${fr_dir}" "plan.md" "${changed_files_file}" "${output_file}" "${required_entry_docs_changed}"
@@ -945,26 +945,20 @@ collect_spec_review_docs() {
       append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
       append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
     fi
-    if [[ "${requires_high_risk_companions}" == "1" ]]; then
-      append_required_formal_doc_line "${fr_dir}" "data-model.md" "${changed_files_file}" "${output_file}"
-      append_required_formal_doc_line "${fr_dir}" "risks.md" "${changed_files_file}" "${output_file}"
-      append_required_formal_doc_line "${fr_dir}" "research.md" "${changed_files_file}" "${output_file}"
+    if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
     else
-      if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
-        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
-      else
-        append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
-      fi
-      if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
-        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
-      else
-        append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
-      fi
-      if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
-        append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
-      else
-        append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
-      fi
+      append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+    fi
+    if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+    fi
+    if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
     fi
   done < "${fr_dirs_file}"
 

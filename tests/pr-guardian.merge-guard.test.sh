@@ -1579,6 +1579,60 @@ test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline() {
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/research.md"
 }
 
+test_collect_spec_review_docs_allows_missing_optional_companions_on_contract_changes() {
+  setup_case_dir "spec-review-contract-change-missing-optional-companions"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/contracts"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0001-contract-only/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo spec stale" > "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/spec.md"
+  printf '%s\n' "repo todo stale" > "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/TODO.md"
+  printf '%s\n' "repo plan stale" > "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/plan.md"
+  printf '%s\n' "repo risks stale" > "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/risks.md"
+  printf '%s\n' "repo contract" > "${fake_repo_root}/docs/dev/specs/FR-0001-contract-only/contracts/runtime.json"
+
+  printf '%s\n' "worktree spec stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/spec.md"
+  printf '%s\n' "worktree todo stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/TODO.md"
+  printf '%s\n' "worktree plan stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/plan.md"
+  printf '%s\n' "worktree risks stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/risks.md"
+  printf '%s\n' "worktree contract changed" > "${fake_worktree_dir}/docs/dev/specs/FR-0001-contract-only/contracts/runtime.json"
+
+  printf '%s\n' "snapshot spec current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-contract-only/spec.md"
+  printf '%s\n' "snapshot todo current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-contract-only/TODO.md"
+  printf '%s\n' "snapshot plan current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-contract-only/plan.md"
+  printf '%s\n' "snapshot risks current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0001-contract-only/risks.md"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  CHANGED_FILES_FILE="${changed_files_file}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-contract-only/contracts/runtime.json' > "${changed_files_file}"
+
+  collect_spec_review_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0001-contract-only/spec.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0001-contract-only/TODO.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0001-contract-only/plan.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0001-contract-only/risks.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0001-contract-only/contracts/runtime.json"
+  assert_file_not_contains "${output_file}" "data-model.md"
+  assert_file_not_contains "${output_file}" "research.md"
+}
+
 test_collect_spec_review_docs_fails_when_required_fr_entry_docs_missing() {
   setup_case_dir "spec-review-missing-required-entry-docs"
 
@@ -3485,6 +3539,7 @@ main() {
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs
   test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline
+  test_collect_spec_review_docs_allows_missing_optional_companions_on_contract_changes
   test_collect_spec_review_docs_fails_when_required_fr_entry_docs_missing
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_skips_spec_review_summary_for_default_profile
