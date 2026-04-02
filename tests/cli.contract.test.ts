@@ -14,28 +14,6 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
 const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
-const repoOwnedNativeHostEntryPath = path.join(
-  repoRoot,
-  "dist",
-  "runtime",
-  "native-messaging",
-  "native-host-entry.js"
-);
-const gitCommonDir = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-  cwd: repoRoot,
-  encoding: "utf8"
-});
-const stableCheckoutRoot =
-  gitCommonDir.status === 0 && gitCommonDir.stdout.trim().endsWith("/.git")
-    ? path.dirname(gitCommonDir.stdout.trim())
-    : repoRoot;
-const stableRepoOwnedNativeHostEntryPath = path.join(
-  stableCheckoutRoot,
-  "dist",
-  "runtime",
-  "native-messaging",
-  "native-host-entry.js"
-);
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -3102,6 +3080,15 @@ process.stdin.on("data", (chunk) => {
 
   it("uses repo-owned controlled roots by default when runtime.install omits manifest_dir and launcher_path", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const defaultBundledEntryPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "runtime",
+      "native-messaging",
+      "native-host-entry.js"
+    );
     const defaultManifestPath = path.join(
       runtimeCwd,
       ".webenvoy",
@@ -3156,16 +3143,20 @@ process.stdin.on("data", (chunk) => {
     const parsedDefaultManifest = JSON.parse(
       await readFile(defaultManifestPath, "utf8")
     ) as Record<string, unknown>;
+    const resolvedBundledEntryPath = await realpath(defaultBundledEntryPath);
     expect(parsedDefaultManifest).toMatchObject({
       path: await realpath(defaultLauncherPath)
     });
     await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
-      stableRepoOwnedNativeHostEntryPath
+      resolvedBundledEntryPath
     );
     await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
       `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${path
         .join(await realpath(runtimeCwd), ".webenvoy", "profiles")
         .replace(/'/g, `'\"'\"'`)}'`
+    );
+    await expect(readFile(defaultBundledEntryPath, "utf8")).resolves.toContain(
+      "process.stdin.resume()"
     );
   });
 
@@ -3180,8 +3171,15 @@ process.stdin.on("data", (chunk) => {
       "bin",
       "webenvoy-native-host-default"
     );
-    const defaultHostCommand = createNativeHostCommand(stableRepoOwnedNativeHostEntryPath);
-
+    const defaultBundledEntryPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "runtime",
+      "native-messaging",
+      "native-host-entry.js"
+    );
     const result = runCli(
       [
         "runtime.install",
@@ -3199,6 +3197,8 @@ process.stdin.on("data", (chunk) => {
       runtimeCwd
     );
     expect(result.status).toBe(0);
+    const resolvedBundledEntryPath = await realpath(defaultBundledEntryPath);
+    const defaultHostCommand = createNativeHostCommand(resolvedBundledEntryPath);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       run_id: "run-contract-install-default-001",
@@ -3222,6 +3222,7 @@ process.stdin.on("data", (chunk) => {
     });
 
     const launcherRaw = await readFile(launcherPath, "utf8");
+    expect(launcherRaw).toContain(resolvedBundledEntryPath);
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
   });

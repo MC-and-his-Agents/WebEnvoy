@@ -1,10 +1,10 @@
-import { access, chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "../core/errors.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
-import { resolveRepositoryProfileRoot, resolveRepositoryRoot, resolveStableRepoPath } from "../runtime/repository-root.js";
+import { resolveRepositoryProfileRoot, resolveRepositoryRoot } from "../runtime/repository-root.js";
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
 const NATIVE_HOST_DESCRIPTION = "WebEnvoy CLI ↔ Extension bridge";
@@ -173,7 +173,36 @@ const tokenizeHostCommand = (command, hostCommand) => {
     }
     return tokens;
 };
-export const resolveRepoOwnedNativeHostEntryPath = () => resolveStableRepoPath(dirname(fileURLToPath(import.meta.url)), "dist", "runtime", "native-messaging", "native-host-entry.js");
+const resolveCurrentBuildNativeHostRuntimePaths = () => {
+    const distInstallDir = dirname(fileURLToPath(import.meta.url));
+    const distRuntimeDir = resolve(distInstallDir, "..", "runtime");
+    return {
+        entryPath: join(distRuntimeDir, "native-messaging", "native-host-entry.js"),
+        protocolPath: join(distRuntimeDir, "native-messaging", "protocol.js"),
+        hostPath: join(distRuntimeDir, "native-messaging", "host.js"),
+        repositoryRootPath: join(distRuntimeDir, "repository-root.js")
+    };
+};
+const resolveBundledNativeHostRuntimePaths = (channelRoot) => {
+    const runtimeRoot = join(channelRoot, "runtime");
+    return {
+        entryPath: join(runtimeRoot, "native-messaging", "native-host-entry.js"),
+        protocolPath: join(runtimeRoot, "native-messaging", "protocol.js"),
+        hostPath: join(runtimeRoot, "native-messaging", "host.js"),
+        repositoryRootPath: join(runtimeRoot, "repository-root.js")
+    };
+};
+const ensureBundledNativeHostRuntime = async (channelRoot) => {
+    const source = resolveCurrentBuildNativeHostRuntimePaths();
+    const target = resolveBundledNativeHostRuntimePaths(channelRoot);
+    await mkdir(dirname(target.entryPath), { recursive: true });
+    await copyFile(source.entryPath, target.entryPath);
+    await copyFile(source.protocolPath, target.protocolPath);
+    await copyFile(source.hostPath, target.hostPath);
+    await copyFile(source.repositoryRootPath, target.repositoryRootPath);
+    return target.entryPath;
+};
+export const resolveRepoOwnedNativeHostEntryPath = () => resolveCurrentBuildNativeHostRuntimePaths().entryPath;
 export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 export const resolveProfileRoot = (cwd) => resolveRepositoryProfileRoot(cwd);
 export const resolveProfileScopedNativeBridgeSocketPath = (profileDir) => join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
@@ -313,12 +342,12 @@ export const installNativeHost = async (input) => {
         launcherPath: input.launcherPath
     });
     const allowedOrigin = `chrome-extension://${input.extensionId}/`;
-    const hostCommand = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
-        ? input.hostCommand.trim()
-        : resolveRepoOwnedNativeHostCommand();
     const hostCommandSource = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
         ? "explicit"
         : "repo_owned_default";
+    const hostCommand = hostCommandSource === "explicit"
+        ? input.hostCommand.trim()
+        : `${quoteShellToken(process.execPath)} ${quoteShellToken(await ensureBundledNativeHostRuntime(resolvedPaths.channelRoot))}`;
     const profileDir = resolveProfileDirForLauncher({
         cwd: input.cwd,
         profileDir: input.profileDir
@@ -333,7 +362,7 @@ export const installNativeHost = async (input) => {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.install",
             field: "launcher_path",
-            fromDir: input.cwd,
+            fromDir: resolveRepositoryRoot(input.cwd),
             targetDir: dirname(resolvedPaths.launcherPath)
         });
     }
@@ -421,7 +450,7 @@ export const uninstallNativeHost = async (input) => {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.uninstall",
             field: "launcher_path",
-            fromDir: input.cwd,
+            fromDir: resolveRepositoryRoot(input.cwd),
             targetDir: dirname(resolvedPaths.launcherPath)
         });
     }
