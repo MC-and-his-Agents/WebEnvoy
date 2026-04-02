@@ -755,6 +755,21 @@ test_extract_issue_number_from_pr_body_prefers_explicit_issue_field() {
   fi
 }
 
+test_extract_issue_number_from_pr_body_supports_direct_closing_field() {
+  setup_case_dir "extract-issue-number-direct-closing"
+
+  PR_BODY=$'## 摘要\n\n- 只做 guardian 改造\n\n## 关联事项\n\n- Closing: #123\n'
+  export PR_BODY
+
+  local extracted
+  extracted="$(extract_issue_number_from_pr_body)"
+
+  if [[ "${extracted}" != "123" ]]; then
+    echo "expected direct Closing field to return 123, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
 test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links() {
   setup_case_dir "extract-issue-number-ambiguous"
 
@@ -2483,6 +2498,42 @@ EOF
   unset -f git
 }
 
+test_add_fallback_finding_for_unstructured_rejection_clamps_deletion_only_hunks() {
+  setup_case_dir "fallback-finding-deletion-only"
+
+  local result_file="${TMP_DIR}/guardian-review.json"
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  BASE_REF="main"
+  MERGE_BASE_SHA="abc123mergebase"
+  export WORKTREE_DIR CHANGED_FILES_FILE BASE_REF MERGE_BASE_SHA
+  mkdir -p "${WORKTREE_DIR}/docs"
+  printf '%s\n' 'docs/deleted.md' > "${CHANGED_FILES_FILE}"
+  cat > "${result_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"Native review returned a negative freeform summary.","findings":[],"required_actions":[]}
+EOF
+
+  git() {
+    if [[ "${1:-}" == "-C" && "${3:-}" == "diff" && "${5:-}" == "${MERGE_BASE_SHA}" ]]; then
+      cat <<'EOF'
+@@ -12,3 +0,0 @@
+-deleted line one
+-deleted line two
+-deleted line three
+EOF
+      return 0
+    fi
+    return 0
+  }
+
+  assert_pass add_fallback_finding_for_unstructured_rejection "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"start":1'
+  assert_file_contains "${result_file}" '"end":1'
+
+  unset -f git
+}
+
 test_normalize_native_review_result_maps_native_schema_to_guardian_schema() {
   setup_case_dir "normalize-native-review"
 
@@ -2933,6 +2984,47 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_maps_numbered_review_comment_findings() {
+  setup_case_dir "normalize-native-text-numbered-review-comment"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Looks good to me.
+
+Review comment:
+
+1. [P1] Keep fallback path fail-closed — /tmp/worktree/scripts/pr-guardian.sh:1844-1845
+  The plain-text fallback still upgrades some unparsed review outputs to APPROVE.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"title":"Keep fallback path fail-closed"'
+  assert_file_contains "${result_file}" '"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh"'
+}
+
+test_normalize_native_review_result_fails_closed_for_unparsed_review_comment_block() {
+  setup_case_dir "normalize-native-text-unparsed-review-comment-block"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Looks good to me.
+
+Review comment:
+
+- Please revisit fallback handling before merge.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+  assert_file_contains "${result_file}" '"summary":"Native review returned an unparsed Review comment block."'
+}
+
 test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase() {
   setup_case_dir "normalize-native-text-ambiguous-safe-phrase"
 
@@ -3179,6 +3271,33 @@ EOF
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
   assert_file_contains "${err_file}" "mock codex failure"
   assert_file_contains "${err_file}" "Codex 审查执行失败"
+}
+
+test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
+  setup_case_dir "main-review-mode"
+
+  local call_log="${TMP_DIR}/main.calls.log"
+  export call_log
+
+  (
+    require_cmd() { :; }
+    check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
+    prepare_pr_workspace() { printf '%s\n' "prepare_pr_workspace:$1" >> "${call_log}"; }
+    assert_required_review_context_available() { printf '%s\n' "assert_required_review_context_available" >> "${call_log}"; }
+    run_codex_review() { printf '%s\n' "run_codex_review:$1" >> "${call_log}"; }
+    print_summary() { printf '%s\n' "print_summary" >> "${call_log}"; }
+    post_review() { printf '%s\n' "post_review:$1" >> "${call_log}"; }
+    merge_if_safe() { printf '%s\n' "merge_if_safe:$1:$2" >> "${call_log}"; }
+    cleanup() { :; }
+
+    assert_pass main review 274
+  )
+  assert_file_contains "${call_log}" "check_gh_auth"
+  assert_file_contains "${call_log}" "prepare_pr_workspace:274"
+  assert_file_contains "${call_log}" "run_codex_review:274"
+  assert_file_contains "${call_log}" "print_summary"
+  assert_file_not_contains "${call_log}" "post_review:274"
+  assert_file_not_contains "${call_log}" "merge_if_safe:274"
 }
 
 test_fetch_issue_summary_fails_closed_when_issue_lookup_fails() {
@@ -3672,6 +3791,7 @@ main() {
   test_fetch_issue_summary_skips_when_issue_number_missing
   test_extract_issue_number_from_pr_body_supports_refs_only_linkage
   test_extract_issue_number_from_pr_body_prefers_explicit_issue_field
+  test_extract_issue_number_from_pr_body_supports_direct_closing_field
   test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links
   test_resolve_linked_issue_numbers_merges_pr_and_metadata_links
   test_collect_spec_review_docs_includes_todo_baseline
@@ -3723,6 +3843,7 @@ main() {
   test_assert_required_review_context_available_fails_when_high_risk_security_baselines_are_missing
   test_line_range_reviewable_uses_merge_base_diff
   test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff
+  test_add_fallback_finding_for_unstructured_rejection_clamps_deletion_only_hunks
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_coerces_stringified_legacy_schema_numbers
@@ -3750,6 +3871,8 @@ main() {
   test_normalize_native_review_result_fails_closed_for_chinese_followup
   test_normalize_native_review_result_fails_closed_for_other_than_caveat
   test_normalize_native_review_result_fails_closed_for_unparsed_priority_bullet
+  test_normalize_native_review_result_maps_numbered_review_comment_findings
+  test_normalize_native_review_result_fails_closed_for_unparsed_review_comment_block
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
   test_normalize_native_review_result_fails_closed_for_unless_caveat
@@ -3757,6 +3880,7 @@ main() {
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output
   test_run_codex_review_fails_closed_when_native_review_command_fails
+  test_main_review_mode_does_not_fail_on_mode_expansion_after_summary
   test_fetch_issue_summary_fails_closed_when_issue_lookup_fails
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

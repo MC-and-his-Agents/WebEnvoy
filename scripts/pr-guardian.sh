@@ -733,6 +733,11 @@ extract_issue_numbers_from_pr_body() {
       push @ordered, $1;
     }
 
+    while (/(?:^|\n)\s*(?:-\s*)?Closing\s*:\s*#(\d+)/img) {
+      next if $seen{$1}++;
+      push @ordered, $1;
+    }
+
     while (/(?:^|[[:space:][:punct:]])(?:refs?|fix(?:e[sd]?|es)|close[sd]?|resolve[sd]?)\s*#(\d+)/ig) {
       next if $seen{$1}++;
       push @ordered, $1;
@@ -1841,10 +1846,11 @@ normalize_native_review_result() {
         error("native review text parse failed")
       else
         (($parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
-        | ([($raw | match("(?m)(?:^|[[:space:]])- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))] | length) as $strict_priority_finding_count
-        | ((($parts.comments // "") | test("(?m)^- \\[(P[0-3])\\] ")) and ($strict_priority_finding_count == 0)) as $has_unparsed_priority_bullets
+        | (($parts.comments // "") | trim) as $comments
+        | ([($comments | match("(?m)^(?:[-*]|[0-9]+\\.) \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))] | length) as $strict_priority_finding_count
+        | (($comments | test("(?m)^(?:[-*]|[0-9]+\\.) \\[(P[0-3])\\] ")) and ($strict_priority_finding_count == 0)) as $has_unparsed_priority_bullets
         | [
-            ($raw | match("(?m)(?:^|[[:space:]])- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
+            ($comments | match("(?m)^(?:[-*]|[0-9]+\\.) \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
             | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
             | ($finding.priority_tag | priority_num) as $priority
             | (($finding.body // "") | gsub("(?m)^  "; "") | gsub("[[:space:]]+"; " ") | trim) as $details
@@ -1863,11 +1869,12 @@ normalize_native_review_result() {
                 priority: $priority
               }
           ] as $normalized_findings
+        | (($comments | length) > 0 and ($normalized_findings | length) == 0) as $has_unparsed_review_comments
         | {
             verdict: (
               if ($normalized_findings | length) > 0 then
                 "REQUEST_CHANGES"
-              elif $has_unparsed_priority_bullets then
+              elif $has_unparsed_priority_bullets or $has_unparsed_review_comments then
                 "REQUEST_CHANGES"
               elif looks_like_safe_approve($summary) then
                 "APPROVE"
@@ -1878,10 +1885,13 @@ normalize_native_review_result() {
             safe_to_merge: (
               ($normalized_findings | length) == 0
               and ($has_unparsed_priority_bullets | not)
+              and ($has_unparsed_review_comments | not)
               and looks_like_safe_approve($summary)
             ),
             summary: (
-              if ($summary | length) > 0 then
+              if $has_unparsed_review_comments then
+                "Native review returned an unparsed Review comment block."
+              elif ($summary | length) > 0 then
                 $summary
               elif ($normalized_findings | length) == 0 then
                 "未发现新的阻断性问题。"
@@ -1930,8 +1940,10 @@ add_fallback_finding_for_unstructured_rejection() {
             '
       )"
       fallback_path="${WORKTREE_DIR}/${first_changed_file}"
-      if [[ -n "${changed_line}" ]]; then
+      if [[ -n "${changed_line}" && "${changed_line}" =~ ^[0-9]+$ && "${changed_line}" -ge 1 ]]; then
         fallback_line="${changed_line}"
+      else
+        fallback_line="1"
       fi
       break
     done < "${CHANGED_FILES_FILE}"
@@ -2431,7 +2443,7 @@ main() {
   run_codex_review "${pr_number}"
   print_summary
 
-  if [[ "${mode}" == "merge-if-safe" ]]; then
+  if [[ "${mode:-}" == "merge-if-safe" ]]; then
     should_post_review=1
   else
     should_post_review="${post_review_flag}"
@@ -2442,7 +2454,7 @@ main() {
     echo "已回写 PR review。"
   fi
 
-  if [[ "${mode}" == "merge-if-safe" ]]; then
+  if [[ "${mode:-}" == "merge-if-safe" ]]; then
     merge_if_safe "${pr_number}" "${delete_branch_flag}"
   fi
 }
