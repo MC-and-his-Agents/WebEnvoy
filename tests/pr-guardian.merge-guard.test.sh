@@ -3890,6 +3890,10 @@ main() {
   assert_fail run_all_checks_pass_when_required_checks_pass_but_all_checks_fail
   assert_fail run_all_checks_pass_when_all_checks_list_is_empty
 
+  # Merge-gate tests depend on the original guardian function set; reload once
+  # to avoid cross-test pollution from earlier override-style cases.
+  load_guardian_without_main
+
   test_merge_if_safe_without_post_review_respects_comment_contract
   test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api
   test_merge_if_safe_finds_head_review_across_paginated_reviews
