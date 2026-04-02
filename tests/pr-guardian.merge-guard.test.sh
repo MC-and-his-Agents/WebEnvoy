@@ -1168,6 +1168,28 @@ test_collect_spec_review_docs_includes_changed_architecture_and_research() {
   restore_test_repo_root
 }
 
+test_collect_high_risk_architecture_docs_includes_security_and_nfr_baselines() {
+  setup_case_dir "high-risk-architecture-baselines"
+  setup_fake_repo_root
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  touch "${REPO_ROOT}/docs/dev/architecture/anti-detection.md"
+  touch "${REPO_ROOT}/docs/dev/architecture/system_nfr.md"
+  touch "${REPO_ROOT}/docs/dev/architecture/system-design/account.md"
+
+  printf '%s\n' 'scripts/account-session-guard.sh' > "${changed_files_file}"
+
+  collect_high_risk_architecture_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/anti-detection.md"
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system_nfr.md"
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system-design/account.md"
+
+  restore_test_repo_root
+}
+
 test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs() {
   setup_case_dir "spec-review-prefers-worktree-formal-docs"
 
@@ -1312,6 +1334,65 @@ test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs() {
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/TODO.md"
   assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/plan.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
+}
+
+test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline() {
+  setup_case_dir "spec-review-optional-formal-docs-baseline"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/contracts"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo spec stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/spec.md"
+  printf '%s\n' "repo todo stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/TODO.md"
+  printf '%s\n' "repo plan stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/plan.md"
+  printf '%s\n' "repo data model stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
+  printf '%s\n' "repo risks stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/risks.md"
+  printf '%s\n' "repo research stale" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/research.md"
+  printf '%s\n' "repo contract" > "${fake_repo_root}/docs/dev/specs/FR-0006-risky-contract/contracts/runtime.json"
+
+  printf '%s\n' "worktree spec stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/spec.md"
+  printf '%s\n' "worktree todo stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/TODO.md"
+  printf '%s\n' "worktree plan stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/plan.md"
+  printf '%s\n' "worktree data model stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
+  printf '%s\n' "worktree risks stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/risks.md"
+  printf '%s\n' "worktree research stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/research.md"
+  printf '%s\n' "worktree contract changed" > "${fake_worktree_dir}/docs/dev/specs/FR-0006-risky-contract/contracts/runtime.json"
+
+  printf '%s\n' "snapshot spec current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/spec.md"
+  printf '%s\n' "snapshot todo current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/TODO.md"
+  printf '%s\n' "snapshot plan current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/plan.md"
+  printf '%s\n' "snapshot data model current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
+  printf '%s\n' "snapshot risks current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/risks.md"
+  printf '%s\n' "snapshot research current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0006-risky-contract/research.md"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  CHANGED_FILES_FILE="${changed_files_file}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0006-risky-contract/contracts/runtime.json' > "${changed_files_file}"
+
+  collect_spec_review_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0006-risky-contract/risks.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0006-risky-contract/research.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/data-model.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/risks.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0006-risky-contract/research.md"
 }
 
 test_collect_context_docs_includes_branch_todo_when_present() {
@@ -1897,6 +1978,57 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_relaxed_native_schema_correctness_phrase() {
+  setup_case_dir "normalize-native-schema-relaxed-correctness"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"findings":[],"overall_correctness":"The patch is correct.","overall_explanation":"No blocking issues found.","overall_confidence_score":0.74}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_accepts_brace_bearing_preamble_json() {
+  setup_case_dir "normalize-native-json-brace-preamble"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Reviewer notes {keep context intact}.
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+}
+
+test_normalize_native_review_result_accepts_second_fenced_json_block() {
+  setup_case_dir "normalize-native-json-second-fence"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Context first:
+```text
+{not-json}
+```
+
+```json
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[],"required_actions":[]}
+```
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+}
+
 test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema() {
   setup_case_dir "normalize-native-text-review"
 
@@ -1955,6 +2087,21 @@ EOF
   assert_file_contains "${result_file}" '"required_actions":[]'
 }
 
+test_normalize_native_review_result_accepts_chinese_plain_text_approve() {
+  setup_case_dir "normalize-native-text-approve-zh"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+未发现新的阻断性问题。可以合并。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_accepts_common_plain_text_approve_phrases() {
   setup_case_dir "normalize-native-text-approve-common-phrases"
 
@@ -1962,6 +2109,21 @@ test_normalize_native_review_result_accepts_common_plain_text_approve_phrases() 
   local result_file="${TMP_DIR}/guardian-review.json"
   cat > "${raw_file}" <<'EOF'
 No issues found. I didn't find any problems with this patch.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase() {
+  setup_case_dir "normalize-native-text-approve-polite"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Looks good to me. Thanks!
 EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
@@ -1998,6 +2160,36 @@ EOF
   assert_pass validate_review_result_shape "${result_file}"
   assert_file_contains "${result_file}" '"verdict":"APPROVE"'
   assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_fails_closed_for_chinese_caveat() {
+  setup_case_dir "normalize-native-text-chinese-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+未发现新的阻断性问题，但仍缺少 issue 上下文，暂不建议合并。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_chinese_condition() {
+  setup_case_dir "normalize-native-text-chinese-condition"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+可以合并，前提是先补齐 issue 上下文。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
 test_normalize_native_review_result_fails_closed_for_other_than_caveat() {
@@ -2767,9 +2959,11 @@ main() {
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
+  test_collect_high_risk_architecture_docs_includes_security_and_nfr_baselines
   test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs
+  test_collect_spec_review_docs_includes_optional_formal_docs_from_baseline
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_skips_spec_review_summary_for_default_profile
   test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile
@@ -2788,14 +2982,21 @@ main() {
   test_normalize_native_review_result_accepts_guardian_schema_json
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json
+  test_normalize_native_review_result_accepts_relaxed_native_schema_correctness_phrase
+  test_normalize_native_review_result_accepts_brace_bearing_preamble_json
+  test_normalize_native_review_result_accepts_second_fenced_json_block
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
+  test_normalize_native_review_result_accepts_chinese_plain_text_approve
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
+  test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
   test_normalize_native_review_result_accepts_lgtm_phrase
+  test_normalize_native_review_result_fails_closed_for_chinese_caveat
+  test_normalize_native_review_result_fails_closed_for_chinese_condition
   test_normalize_native_review_result_fails_closed_for_other_than_caveat
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat

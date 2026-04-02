@@ -767,6 +767,9 @@ collect_high_risk_architecture_docs() {
   local changed_files_file="$1"
   local output_file="$2"
 
+  append_unique_line "${REPO_ROOT}/docs/dev/architecture/anti-detection.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/architecture/system_nfr.md" "${output_file}"
+
   if grep -Eiq '(communication|native|extension|bridge|message)' "${changed_files_file}"; then
     append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design/communication.md" "${output_file}"
   fi
@@ -828,12 +831,18 @@ collect_spec_review_docs() {
     fi
     if grep -Fxq -- "${fr_dir}/data-model.md" "${changed_files_file}"; then
       append_proposed_review_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/data-model.md" "${output_file}"
     fi
     if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
       append_proposed_review_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
     fi
     if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
       append_proposed_review_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
     fi
   done < "${fr_dirs_file}"
 
@@ -1132,15 +1141,25 @@ normalize_native_review_result() {
     else
       extracted_json_file="$(mktemp "${TMPDIR:-/tmp}/native-review.extracted.XXXXXX.json")"
     fi
-    if perl -0ne '
+    if perl -MJSON::PP -0ne '
       my $text = $_;
       my @candidates = ();
-      if ($text =~ /```(?:json)?\s*(\{.*\})\s*```/is) {
+
+      while ($text =~ /```(?:json)?\s*(\{.*?\})\s*```/isg) {
         push @candidates, $1;
       }
-      if ($text =~ /(\{.*\})/s) {
-        push @candidates, $1;
+
+      my $json = JSON::PP->new->allow_nonref;
+      for my $offset (0 .. (length($text) - 1)) {
+        next unless substr($text, $offset, 1) eq "{";
+        my $candidate = substr($text, $offset);
+        my ($decoded, $consumed);
+        eval { ($decoded, $consumed) = $json->decode_prefix($candidate); 1 } or next;
+        next unless defined $consumed && $consumed > 0 && ref($decoded) eq "HASH";
+        push @candidates, substr($candidate, 0, $consumed);
+        last;
       }
+
       for my $candidate (@candidates) {
         $candidate =~ s/^\s+|\s+$//g;
         next unless length $candidate;
@@ -1209,16 +1228,21 @@ normalize_native_review_result() {
                 priority: $priority
               }
           );
+      def overall_correct:
+        ((.overall_correctness // "") | ascii_downcase | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $correctness
+        | ($correctness | test("^((the )?patch is correct)[.!]?$"))
+          or ($correctness | test("^补丁(是)?正确的?[。！!]?$"))
+          or ($correctness | test("^当前补丁正确[。！!]?$"));
       (normalized_findings) as $normalized_findings
       | {
           verdict: (
-            if ((.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0)
+            if (overall_correct and ($normalized_findings | length) == 0)
             then "APPROVE"
             else "REQUEST_CHANGES"
             end
           ),
           safe_to_merge: (
-            (.overall_correctness // "") == "patch is correct" and ($normalized_findings | length) == 0
+            overall_correct and ($normalized_findings | length) == 0
           ),
           summary: (
             ((.overall_explanation // "") | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $explanation
@@ -1246,13 +1270,14 @@ normalize_native_review_result() {
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def has_contrast($sentence):
-      ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b"));
+      ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
-      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b"));
+      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
     def strong_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("did not identify any actionable bugs"))
         or ($lower | test("no blocking issues found"))
+        or ($lower | test("\\bno blockers\\b"))
         or ($lower | test("no merge blockers? found"))
         or ($lower | test("don.t see any merge blockers?"))
         or ($lower | test("do not see any merge blockers?"))
@@ -1263,14 +1288,32 @@ normalize_native_review_result() {
         or ($lower | test("\\bno problems found\\b"))
         or ($lower | test("\\blgtm\\b"))
         or ($lower | test("looks good to me"))
+        or ($lower | test("looks fine to me"))
         or ($lower | test("\\bi didn.t find any problems\\b"))
         or ($lower | test("\\bdid not find any problems\\b"))
-        or ($lower | test("\\bno issues detected\\b"));
+        or ($lower | test("\\bno issues detected\\b"))
+        or ($lower | test("未发现新的阻断性问题"))
+        or ($lower | test("未发现阻断性问题"))
+        or ($lower | test("没有发现阻断性问题"))
+        or ($lower | test("未发现阻断问题"))
+        or ($lower | test("没有发现阻断问题"))
+        or ($lower | test("没有合并阻断"))
+        or ($lower | test("可以合并"))
+        or ($lower | test("可合并"))
+        or ($lower | test("可以批准"))
+        or ($lower | test("建议批准"))
+        or ($lower | test("审查通过"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"));
+    def harmless_tail_sentence($sentence):
+      ($sentence | ascii_downcase | trim) as $lower
+      | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
+        or ($lower | test("^ship it[.!]?$"))
+        or ($lower | test("^nice work[.!]?$"))
+        or ($sentence | trim | test("^(谢谢|谢了|辛苦了)[。！!]?$"));
     def looks_like_safe_sentence($sentence):
       ($sentence | trim) as $trimmed
       | if ($trimmed | length) == 0 then
@@ -1278,11 +1321,11 @@ normalize_native_review_result() {
         else
           ((has_contrast($trimmed) | not)
           and (has_condition($trimmed) | not)
-          and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed)))
+          and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
         end;
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
-      | ($collapsed | gsub("([.!?;:])[[:space:]]+"; "\\1\n") | split("\n")) as $sentences
+      | ($collapsed | gsub("[.!?;:。！？；：]([[:space:]]+|$)"; "\n") | split("\n")) as $sentences
       | any($sentences[]; strong_safe_sentence(.))
         and all($sentences[]; looks_like_safe_sentence(.));
     def priority_num:
