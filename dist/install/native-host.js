@@ -234,6 +234,7 @@ export const resolveControlledInstallRoots = (cwd, browserChannel) => {
 };
 export const resolveRepoOwnedManifestPath = (cwd, browserChannel, nativeHostName) => join(resolveControlledInstallRoots(cwd, browserChannel).manifestRoot, `${nativeHostName}.json`);
 export const resolveRepoOwnedLauncherPath = (cwd, browserChannel, nativeHostName) => join(resolveControlledInstallRoots(cwd, browserChannel).launcherRoot, `${nativeHostName}-launcher`);
+const resolveLegacyDefaultLauncherPath = (manifestDir, nativeHostName) => join(manifestDir, `${nativeHostName}-launcher`);
 const normalizePathForBoundaryCheck = (input) => {
     const normalized = resolve(input);
     return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -422,10 +423,22 @@ export const uninstallNativeHost = async (input) => {
     }
     await assertNotSymlink("runtime.uninstall", "manifest_path", resolvedPaths.manifestPath);
     await assertNotSymlink("runtime.uninstall", "launcher_path", resolvedPaths.launcherPath);
+    const legacyLauncherPath = resolvedPaths.hasCustomLauncherPath
+        ? null
+        : resolveLegacyDefaultLauncherPath(resolvedPaths.manifestDir, input.nativeHostName);
+    if (legacyLauncherPath && legacyLauncherPath !== resolvedPaths.launcherPath) {
+        await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
+    }
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
+    const legacyLauncherExisted = legacyLauncherPath && legacyLauncherPath !== resolvedPaths.launcherPath
+        ? await pathExists(legacyLauncherPath)
+        : false;
     await rm(resolvedPaths.manifestPath, { force: true });
     await rm(resolvedPaths.launcherPath, { force: true });
+    if (legacyLauncherPath && legacyLauncherPath !== resolvedPaths.launcherPath) {
+        await rm(legacyLauncherPath, { force: true });
+    }
     return {
         operation: "uninstall",
         native_host_name: input.nativeHostName,
@@ -437,14 +450,17 @@ export const uninstallNativeHost = async (input) => {
         launcher_dir: normalizePathForOutput(dirname(resolvedPaths.launcherPath)),
         launcher_path: normalizePathForOutput(resolvedPaths.launcherPath),
         launcher_path_source: resolvedPaths.launcherPathSource,
+        legacy_launcher_path: normalizePathForOutput(legacyLauncherPath && legacyLauncherPath !== resolvedPaths.launcherPath ? legacyLauncherPath : null),
         removed: {
             manifest: manifestExisted,
-            launcher: launcherExisted
+            launcher: launcherExisted,
+            legacy_launcher: legacyLauncherExisted
         },
         remove_result: {
             manifest: manifestExisted ? "removed" : "already_absent",
-            launcher: launcherExisted ? "removed" : "already_absent"
+            launcher: launcherExisted ? "removed" : "already_absent",
+            legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
         },
-        idempotent: !manifestExisted && !launcherExisted
+        idempotent: !manifestExisted && !launcherExisted && !legacyLauncherExisted
     };
 };

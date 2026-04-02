@@ -3458,6 +3458,86 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("removes legacy browser-adjacent launcher when runtime.uninstall uses default install paths", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const manifestPath = path.join(manifestDir, "com.webenvoy.host.json");
+    const legacyLauncherPath = path.join(manifestDir, "com.webenvoy.host-launcher");
+    const repoOwnedLauncherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    await mkdir(manifestDir, { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: legacyLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(legacyLauncherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-legacy-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(0);
+    const uninstallBody = parseSingleJsonLine(uninstall.stdout);
+    expect(uninstallBody).toMatchObject({
+      run_id: "run-contract-uninstall-legacy-001",
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        operation: "uninstall",
+        native_host_name: "com.webenvoy.host",
+        browser_channel: "chrome",
+        manifest_dir: manifestDir,
+        manifest_path: manifestPath,
+        manifest_path_source: "browser_default",
+        launcher_path: repoOwnedLauncherPath,
+        launcher_path_source: "repo_owned_default",
+        legacy_launcher_path: legacyLauncherPath,
+        removed: {
+          manifest: true,
+          launcher: false,
+          legacy_launcher: true
+        },
+        remove_result: {
+          manifest: "removed",
+          launcher: "already_absent",
+          legacy_launcher: "removed"
+        },
+        idempotent: false
+      }
+    });
+    await expect(readFile(manifestPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(legacyLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   it("reports overwrite diagnostics when runtime.install rewrites an existing install scene", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -5291,8 +5371,22 @@ document.body.textContent = JSON.stringify(state);
       expect(realBrowserPath).not.toBeNull();
 
       const runtimeCwd = await createRuntimeCwd();
+      const runtimeHome = await createRuntimeCwd();
       const profileName = "install_recovery_live_profile";
-      const env = { WEBENVOY_BROWSER_PATH: String(realBrowserPath) };
+      const env = {
+        WEBENVOY_BROWSER_PATH: String(realBrowserPath),
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: "",
+        HOME: runtimeHome
+      };
+      const expectedManifestPath = path.join(
+        runtimeHome,
+        "Library",
+        "Application Support",
+        "Google",
+        "Chrome",
+        "NativeMessagingHosts",
+        "com.webenvoy.host.json"
+      );
 
       const install = runCli(
         [
@@ -5313,6 +5407,7 @@ document.body.textContent = JSON.stringify(state);
       const installSummary = installBody.summary as {
         manifest_path: string;
       };
+      expect(installSummary.manifest_path).toBe(expectedManifestPath);
 
       await seedInstalledPersistentExtension({
         cwd: runtimeCwd,
@@ -5434,7 +5529,8 @@ document.body.textContent = JSON.stringify(state);
           }
         }
       });
-    }
+    },
+    15_000
   );
 
   it("rejects malformed profile meta for runtime.status/runtime.start/runtime.login", async () => {

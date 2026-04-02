@@ -6,6 +6,7 @@ import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "./host.js";
 const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
 const PROFILE_ROOT = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT?.trim() ?? "";
+const LEGACY_PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
 let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
 let extensionOpened = false;
@@ -27,6 +28,13 @@ const isPathInside = (baseDir, targetPath) => {
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
 const resolveSocketTarget = (request) => {
+    if (LEGACY_PROFILE_DIR) {
+        const profileDir = resolve(LEGACY_PROFILE_DIR);
+        return {
+            profileDir,
+            socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+        };
+    }
     if (!PROFILE_ROOT) {
         return null;
     }
