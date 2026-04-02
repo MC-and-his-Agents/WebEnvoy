@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions, isIssueScope } from "../../shared/risk-state.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
@@ -9,6 +8,7 @@ import { buildFingerprintContextForMeta, appendFingerprintContext } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
+import { resolveRepositoryProfileRoot } from "../runtime/repository-root.js";
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
@@ -27,7 +27,6 @@ const resolveRuntimeBridge = () => {
     });
 };
 const profileRuntime = new ProfileRuntimeService();
-const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const deriveWriteActionDecisions = (auditRecord) => {
     const issueScope = asString(auditRecord.issue_scope);
     const actionType = asString(auditRecord.action_type);
@@ -109,7 +108,7 @@ const runtimePing = async (context) => {
         const requestedExecutionMode = typeof context.params.requested_execution_mode === "string"
             ? context.params.requested_execution_mode
             : null;
-        const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+        const profileStore = new ProfileStore(resolveRepositoryProfileRoot(context.cwd));
         const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
         const bridgeParams = context.profile
             ? appendFingerprintContext(context.params, buildFingerprintContextForMeta(context.profile, profileMeta, {

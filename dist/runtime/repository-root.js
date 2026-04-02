@@ -27,3 +27,4 @@ const resolveGitCommonDir = (cwd) => {
 };
 export const resolveRepositoryRoot = (cwd) => resolveGitCommonDir(cwd) ?? resolve(cwd);
 export const resolveRepositoryProfileRoot = (cwd) => join(resolveRepositoryRoot(cwd), ".webenvoy", "profiles");
+export const resolveStableRepoPath = (cwd, ...segments) => join(resolveRepositoryRoot(cwd), ...segments);

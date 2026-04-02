@@ -21,6 +21,21 @@ const repoOwnedNativeHostEntryPath = path.join(
   "native-messaging",
   "native-host-entry.js"
 );
+const gitCommonDir = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+  cwd: repoRoot,
+  encoding: "utf8"
+});
+const stableCheckoutRoot =
+  gitCommonDir.status === 0 && gitCommonDir.stdout.trim().endsWith("/.git")
+    ? path.dirname(gitCommonDir.stdout.trim())
+    : repoRoot;
+const stableRepoOwnedNativeHostEntryPath = path.join(
+  stableCheckoutRoot,
+  "dist",
+  "runtime",
+  "native-messaging",
+  "native-host-entry.js"
+);
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -3145,7 +3160,7 @@ process.stdin.on("data", (chunk) => {
       path: await realpath(defaultLauncherPath)
     });
     await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
-      repoOwnedNativeHostEntryPath
+      stableRepoOwnedNativeHostEntryPath
     );
     await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
       `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${path
@@ -3165,7 +3180,7 @@ process.stdin.on("data", (chunk) => {
       "bin",
       "webenvoy-native-host-default"
     );
-    const defaultHostCommand = createNativeHostCommand(repoOwnedNativeHostEntryPath);
+    const defaultHostCommand = createNativeHostCommand(stableRepoOwnedNativeHostEntryPath);
 
     const result = runCli(
       [

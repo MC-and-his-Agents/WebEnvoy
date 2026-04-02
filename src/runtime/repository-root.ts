@@ -35,3 +35,6 @@ export const resolveRepositoryRoot = (cwd: string): string => resolveGitCommonDi
 
 export const resolveRepositoryProfileRoot = (cwd: string): string =>
   join(resolveRepositoryRoot(cwd), ".webenvoy", "profiles");
+
+export const resolveStableRepoPath = (cwd: string, ...segments: string[]): string =>
+  join(resolveRepositoryRoot(cwd), ...segments);

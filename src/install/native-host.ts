@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { CliError } from "../core/errors.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
-import { resolveRepositoryProfileRoot, resolveRepositoryRoot } from "../runtime/repository-root.js";
+import {
+  resolveRepositoryProfileRoot,
+  resolveRepositoryRoot,
+  resolveStableRepoPath
+} from "../runtime/repository-root.js";
 
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
@@ -217,7 +221,13 @@ const tokenizeHostCommand = (
 };
 
 export const resolveRepoOwnedNativeHostEntryPath = (): string =>
-  fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
+  resolveStableRepoPath(
+    dirname(fileURLToPath(import.meta.url)),
+    "dist",
+    "runtime",
+    "native-messaging",
+    "native-host-entry.js"
+  );
 
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
@@ -415,8 +425,11 @@ const resolveProfileDirForLauncher = (input: {
   if (typeof input.profileDir !== "string" || input.profileDir.trim().length === 0) {
     return undefined;
   }
-  const normalizedProfileDir = asAbsolutePath(input.cwd, input.profileDir.trim());
+  const profileInput = input.profileDir.trim();
   const profileRoot = resolveProfileRoot(input.cwd);
+  const normalizedProfileDir = isAbsolute(profileInput)
+    ? resolve(profileInput)
+    : resolve(resolveRepositoryRoot(input.cwd), profileInput);
   if (!isPathInside(profileRoot, normalizedProfileDir)) {
     throw nativeHostPathError("runtime.install", "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "profile_dir",

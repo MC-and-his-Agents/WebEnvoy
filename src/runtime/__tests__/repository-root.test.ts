@@ -5,7 +5,11 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveRepositoryProfileRoot, resolveRepositoryRoot } from "../repository-root.js";
+import {
+  resolveRepositoryProfileRoot,
+  resolveRepositoryRoot,
+  resolveStableRepoPath
+} from "../repository-root.js";
 
 const tempDirs: string[] = [];
 
@@ -25,6 +29,7 @@ describe("repository-root", () => {
 
     expect(resolveRepositoryRoot(dir)).toBe(dir);
     expect(resolveRepositoryProfileRoot(dir)).toBe(`${dir}/.webenvoy/profiles`);
+    expect(resolveStableRepoPath(dir, "dist", "runtime")).toBe(`${dir}/dist/runtime`);
   });
 
   it("anchors linked worktree paths to the git common-dir repository root", () => {
@@ -39,5 +44,8 @@ describe("repository-root", () => {
 
     expect(resolveRepositoryRoot(cwd)).toBe(dirname(gitCommonDir));
     expect(resolveRepositoryProfileRoot(cwd)).toBe(`${dirname(gitCommonDir)}/.webenvoy/profiles`);
+    expect(resolveStableRepoPath(cwd, "dist", "runtime")).toBe(
+      `${dirname(gitCommonDir)}/dist/runtime`
+    );
   });
 });

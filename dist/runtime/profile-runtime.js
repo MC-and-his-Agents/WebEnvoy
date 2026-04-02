@@ -10,9 +10,9 @@ import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
+import { resolveRepositoryProfileRoot } from "./repository-root.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
-const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
@@ -357,7 +357,7 @@ export class ProfileRuntimeService {
         this.#storeFactory =
             options?.storeFactory ??
                 ((cwd) => {
-                    return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+                    return new ProfileStore(resolveRepositoryProfileRoot(cwd));
                 });
         this.#lockFileAdapter = options?.lockFileAdapter ?? DEFAULT_LOCK_FILE_ADAPTER;
         this.#isProcessAlive =
