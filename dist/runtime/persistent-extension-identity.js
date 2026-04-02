@@ -554,9 +554,10 @@ export const runIdentityPreflight = async (input) => {
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });
     }
-    const installBroken = installDiagnostics.launcherExists === true &&
-        installDiagnostics.bundleRuntimePath !== null &&
-        installDiagnostics.bundleRuntimeExists === false;
+    const installBroken = installDiagnostics.launcherExists === false ||
+        (installDiagnostics.launcherExists === true &&
+            installDiagnostics.bundleRuntimePath !== null &&
+            installDiagnostics.bundleRuntimeExists === false);
     if (installBroken) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",

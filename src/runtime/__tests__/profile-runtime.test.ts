@@ -102,12 +102,14 @@ const createNativeHostManifest = async (input: {
   const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-"));
   tempDirs.push(dir);
   const manifestPath = join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
+  const launcherPath = join(dir, "mock-webenvoy-host");
+  await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
   await writeFile(
     manifestPath,
     `${JSON.stringify(
       {
         name: input.nativeHostName ?? "com.webenvoy.host",
-        path: "/mock/webenvoy-host",
+        path: launcherPath,
         type: "stdio",
         allowed_origins: input.allowedOrigins
       },

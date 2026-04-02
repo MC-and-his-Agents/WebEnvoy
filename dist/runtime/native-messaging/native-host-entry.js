@@ -38,11 +38,14 @@ const resolveSocketTarget = (request) => {
     if (!PROFILE_ROOT) {
         return null;
     }
+    const profileRoot = resolve(PROFILE_ROOT);
     const profileName = asString(request.profile);
     if (!profileName) {
-        return null;
+        return {
+            profileDir: profileRoot,
+            socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+        };
     }
-    const profileRoot = resolve(PROFILE_ROOT);
     const profileDir = resolve(profileRoot, profileName);
     if (!isPathInside(profileRoot, profileDir)) {
         throw new Error("native bridge profile escapes controlled root");

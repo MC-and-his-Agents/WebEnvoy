@@ -214,6 +214,46 @@ describe("native messaging contract", () => {
     }
   });
 
+  it("keeps repo-owned native host entry compatible with profile-root bootstrap socket handshake", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-entry-profile-root-"));
+    tempDirs.push(profileRoot);
+    const socketPath = path.join(profileRoot, "nm.sock");
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot
+      }
+    });
+
+    try {
+      const responsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-profile-root-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      await expect(responsePromise).resolves.toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+      await expect(access(socketPath)).resolves.toBeUndefined();
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
   it("maps transport timeout to runtime unavailable exit code without loopback", () => {
     const result = runCli([
       "runtime.ping",

@@ -221,6 +221,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   async #resolveSocketPath(
     request: BridgeRequestEnvelope
   ): Promise<{ path: string; required: boolean } | null> {
+    const profileRoot = resolveRuntimeProfileRoot(process.cwd());
     if (this.#socketPath) {
       this.#activeSocketPath = this.#socketPath;
       return {
@@ -239,20 +240,26 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
         this.#activeSocketPath = null;
       }
     }
-    if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
-      return null;
+    const candidates =
+      typeof request.profile === "string" && request.profile.trim().length > 0
+        ? [
+            join(profileRoot, request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME),
+            join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+          ]
+        : [join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)];
+    for (const candidate of candidates) {
+      try {
+        await access(candidate);
+        this.#activeSocketPath = candidate;
+        return {
+          path: candidate,
+          required: false
+        };
+      } catch {
+        continue;
+      }
     }
-    const candidate = join(resolveRuntimeProfileRoot(process.cwd()), request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
-    try {
-      await access(candidate);
-      this.#activeSocketPath = candidate;
-      return {
-        path: candidate,
-        required: false
-      };
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   #sendViaSpawn(

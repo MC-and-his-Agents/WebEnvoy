@@ -80,14 +80,19 @@ const createNativeHostManifest = async (input: {
   profileDir: string;
   allowedOrigins: string[];
   launcherPath?: string;
+  createLauncher?: boolean;
 }): Promise<string> => {
   const manifestPath = join(input.profileDir, "com.webenvoy.host.json");
+  const launcherPath = input.launcherPath ?? join(input.profileDir, "mock-webenvoy-host");
+  if (input.createLauncher !== false) {
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  }
   await writeFile(
     manifestPath,
     `${JSON.stringify(
       {
         name: "com.webenvoy.host",
-        path: input.launcherPath ?? "/mock/webenvoy-host",
+        path: launcherPath,
         allowed_origins: input.allowedOrigins
       },
       null,
@@ -530,7 +535,8 @@ describe("runIdentityPreflight", () => {
     const manifestPath = await createNativeHostManifest({
       profileDir,
       allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`],
-      launcherPath: join(profileDir, "missing-launcher.sh")
+      launcherPath: join(profileDir, "missing-launcher.sh"),
+      createLauncher: false
     });
     await writeProfileExtensionPreferences({
       profileDir,
@@ -562,8 +568,9 @@ describe("runIdentityPreflight", () => {
     });
 
     expect(result).toMatchObject({
-      identityBindingState: "bound",
-      failureReason: "IDENTITY_PREFLIGHT_PASSED",
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
       installDiagnostics: {
         launcherPath: join(profileDir, "missing-launcher.sh"),
         launcherExists: false,

@@ -748,9 +748,10 @@ export const runIdentityPreflight = async (input: {
     });
   }
   const installBroken =
-    installDiagnostics.launcherExists === true &&
-    installDiagnostics.bundleRuntimePath !== null &&
-    installDiagnostics.bundleRuntimeExists === false;
+    installDiagnostics.launcherExists === false ||
+    (installDiagnostics.launcherExists === true &&
+      installDiagnostics.bundleRuntimePath !== null &&
+      installDiagnostics.bundleRuntimeExists === false);
   if (installBroken) {
     return buildBlockingResult({
       mode: "official_chrome_persistent_extension",
