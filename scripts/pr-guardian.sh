@@ -574,6 +574,17 @@ extract_issue_number_from_pr_body() {
       print "$1\n";
       exit;
     }
+  ' || return 0
+
+  printf '%s\n' "${PR_BODY}" | perl -0ne '
+    my %seen;
+    while (/(?:^|[[:space:][:punct:]])(?:refs?|fix(?:e[sd]?|es)|close[sd]?|resolve[sd]?)\s*#(\d+)/ig) {
+      $seen{$1} = 1;
+    }
+    my @issues = sort { $a <=> $b } keys %seen;
+    if (@issues == 1) {
+      print "$issues[0]\n";
+    }
   '
 }
 
@@ -1102,8 +1113,35 @@ normalize_native_review_result() {
   local raw_result_file="$1"
   local normalized_result_file="$2"
   local fallback_path=""
+  local json_source_file="$1"
+  local extracted_json_file=""
 
   fallback_path="$(first_changed_file_absolute_path)"
+  if ! jq -e '.' "${json_source_file}" >/dev/null 2>&1; then
+    if [[ -n "${TMP_DIR:-}" ]]; then
+      extracted_json_file="${TMP_DIR}/native-review.extracted.json"
+    else
+      extracted_json_file="$(mktemp "${TMPDIR:-/tmp}/native-review.extracted.XXXXXX.json")"
+    fi
+    if perl -0ne '
+      my $text = $_;
+      my @candidates = ();
+      if ($text =~ /```(?:json)?\s*(\{.*\})\s*```/is) {
+        push @candidates, $1;
+      }
+      if ($text =~ /(\{.*\})/s) {
+        push @candidates, $1;
+      }
+      for my $candidate (@candidates) {
+        $candidate =~ s/^\s+|\s+$//g;
+        next unless length $candidate;
+        print $candidate;
+        last;
+      }
+    ' "${raw_result_file}" > "${extracted_json_file}" && jq -e '.' "${extracted_json_file}" >/dev/null 2>&1; then
+      json_source_file="${extracted_json_file}"
+    fi
+  fi
 
   if jq -e '
     type == "object"
@@ -1112,8 +1150,8 @@ normalize_native_review_result() {
     and (.summary? | type == "string")
     and (.findings? | type == "array")
     and (.required_actions? | type == "array")
-  ' "${raw_result_file}" >/dev/null 2>&1; then
-    jq -c '.' "${raw_result_file}" > "${normalized_result_file}" \
+  ' "${json_source_file}" >/dev/null 2>&1; then
+    jq -c '.' "${json_source_file}" > "${normalized_result_file}" \
       || die "guardian 审查 JSON 输出无法直接读取。"
     return
   fi
@@ -1122,7 +1160,7 @@ normalize_native_review_result() {
     type == "object"
     and (.findings? | type == "array")
     and (.overall_correctness? | type == "string")
-  ' "${raw_result_file}" >/dev/null 2>&1; then
+  ' "${json_source_file}" >/dev/null 2>&1; then
     jq -c -e --arg fallback_path "${fallback_path}" '
       def inferred_priority:
         if (.priority // null) != null then .priority
@@ -1190,7 +1228,7 @@ normalize_native_review_result() {
             | unique
           )
         }
-    ' "${raw_result_file}" > "${normalized_result_file}" \
+    ' "${json_source_file}" > "${normalized_result_file}" \
       || die "原生 Codex review JSON 输出无法转换为 guardian 结果。"
     return
   fi

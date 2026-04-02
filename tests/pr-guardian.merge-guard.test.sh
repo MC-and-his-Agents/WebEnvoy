@@ -632,6 +632,36 @@ test_fetch_issue_summary_skips_when_issue_number_missing() {
   assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "issue view"
 }
 
+test_extract_issue_number_from_pr_body_supports_refs_only_linkage() {
+  setup_case_dir "extract-issue-number-refs-only"
+
+  PR_BODY=$'## 摘要\n\n- 只做 guardian 改造\n\n## 关联事项\n\nRefs #456\n'
+  export PR_BODY
+
+  local extracted
+  extracted="$(extract_issue_number_from_pr_body)"
+
+  if [[ "${extracted}" != "456" ]]; then
+    echo "expected extracted issue number to be 456, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
+test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links() {
+  setup_case_dir "extract-issue-number-ambiguous"
+
+  PR_BODY=$'## 摘要\n\n- 只做 guardian 改造\n\n## 关联事项\n\nRefs #456\nFixes #789\n'
+  export PR_BODY
+
+  local extracted
+  extracted="$(extract_issue_number_from_pr_body)"
+
+  if [[ -n "${extracted}" ]]; then
+    echo "expected ambiguous issue linkage to return empty, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
 test_collect_spec_review_docs_includes_todo_baseline() {
   setup_case_dir "spec-review-docs"
 
@@ -1817,6 +1847,41 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_code_fenced_native_schema_json() {
+  setup_case_dir "normalize-native-review-code-fenced-json"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Here is the structured review result:
+
+```json
+{"findings":[{"title":"[P1] Keep issue context loading","body":"The PR can skip issue context for linked non-closing work items.","confidence_score":0.66,"priority":1,"code_location":{"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh","line_range":{"start":223,"end":225}}}],"overall_correctness":"patch is incorrect","overall_explanation":"The patch still contains a blocking context-loading regression.","overall_confidence_score":0.66}
+```
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"title":"Keep issue context loading"'
+}
+
+test_normalize_native_review_result_accepts_preamble_guardian_schema_json() {
+  setup_case_dir "normalize-guardian-schema-preamble-json"
+
+  local raw_file="${TMP_DIR}/guardian-review.txt"
+  local result_file="${TMP_DIR}/normalized-review.json"
+  cat > "${raw_file}" <<'EOF'
+Structured result follows:
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema() {
   setup_case_dir "normalize-native-text-review"
 
@@ -2638,6 +2703,8 @@ main() {
   test_slim_pr_body_preserves_guardian_acceptance_lines
   test_fetch_issue_summary_loads_linked_issue_body
   test_fetch_issue_summary_skips_when_issue_number_missing
+  test_extract_issue_number_from_pr_body_supports_refs_only_linkage
+  test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_materialize_base_snapshot_path_prefers_merge_base_commit
@@ -2673,6 +2740,8 @@ main() {
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_normalize_native_review_result_accepts_guardian_schema_json
+  test_normalize_native_review_result_accepts_code_fenced_native_schema_json
+  test_normalize_native_review_result_accepts_preamble_guardian_schema_json
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
