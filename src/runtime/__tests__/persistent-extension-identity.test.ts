@@ -660,6 +660,92 @@ describe("runIdentityPreflight", () => {
     });
   });
 
+  it("blocks when the managed launcher belongs to another worktree profile root", async () => {
+    const currentWorktreeRoot = await mkdtemp(join(tmpdir(), "webenvoy-native-host-current-worktree-"));
+    const otherWorktreeRoot = await mkdtemp(join(tmpdir(), "webenvoy-native-host-other-worktree-"));
+    const profileDir = join(currentWorktreeRoot, ".webenvoy", "profiles", "identity-profile");
+    const launcherPath = join(
+      otherWorktreeRoot,
+      ".webenvoy",
+      "native-host-install",
+      "worktrees",
+      "feature-other-123456789abc",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    const manifestPath = join(profileDir, "com.webenvoy.host.json");
+    await mkdir(dirname(launcherPath), { recursive: true });
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      join(dirname(dirname(launcherPath)), "install-metadata.json"),
+      `${JSON.stringify(
+        {
+          profile_root: join(otherWorktreeRoot, ".webenvoy", "profiles")
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: launcherPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      blocking: true,
+      identityBindingState: "mismatch",
+      failureReason: "IDENTITY_MANIFEST_MISSING",
+      installDiagnostics: {
+        launcherPath,
+        launcherExists: true,
+        launcherProfileRoot: join(otherWorktreeRoot, ".webenvoy", "profiles"),
+        expectedProfileRoot: join(currentWorktreeRoot, ".webenvoy", "profiles"),
+        profileRootMatches: false
+      }
+    });
+  });
+
   it("treats developer-mode unpacked extension path as enabled when profile Extensions dir is absent", async () => {
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-unpacked-"));
     const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-unpacked-"));

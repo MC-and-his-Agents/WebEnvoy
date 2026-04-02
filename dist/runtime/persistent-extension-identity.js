@@ -22,7 +22,14 @@ const EMPTY_INSTALL_DIAGNOSTICS = {
     launcherPath: null,
     launcherExists: null,
     bundleRuntimePath: null,
-    bundleRuntimeExists: null
+    bundleRuntimeExists: null,
+    launcherProfileRoot: null,
+    expectedProfileRoot: null,
+    profileRootMatches: null
+};
+const normalizePathForComparison = (input) => {
+    const normalized = resolve(input);
+    return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
 };
 export const setIdentityPreflightAdaptersForTests = (overrides) => {
     identityPreflightAdapters = {
@@ -275,14 +282,37 @@ const readNativeHostManifest = async (manifestPath) => {
         return null;
     }
 };
-const resolveInstallDiagnostics = async (manifest) => {
+const readManagedInstallMetadata = async (channelRoot) => {
+    try {
+        const raw = await readFile(join(channelRoot, "install-metadata.json"), "utf8");
+        const parsed = JSON.parse(raw);
+        const profileRoot = asNonEmptyString(parsed.profile_root);
+        return {
+            profileRoot: profileRoot ? normalizePathForComparison(profileRoot) : null
+        };
+    }
+    catch {
+        return {
+            profileRoot: null
+        };
+    }
+};
+const resolveInstallDiagnostics = async (manifest, profileDir) => {
     if (!manifest?.path) {
         return EMPTY_INSTALL_DIAGNOSTICS;
     }
     const managedInstall = inspectManagedNativeHostInstall(manifest.path);
     const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
+    const managedInstallMetadata = managedInstall
+        ? await readManagedInstallMetadata(managedInstall.channelRoot)
+        : { profileRoot: null };
     let launcherExists = false;
     let bundleRuntimeExists = null;
+    const expectedProfileRoot = profileDir ? normalizePathForComparison(dirname(profileDir)) : null;
+    const launcherProfileRoot = managedInstallMetadata.profileRoot;
+    const profileRootMatches = launcherProfileRoot === null || expectedProfileRoot === null
+        ? null
+        : launcherProfileRoot === expectedProfileRoot;
     try {
         await access(manifest.path);
         launcherExists = true;
@@ -303,7 +333,10 @@ const resolveInstallDiagnostics = async (manifest) => {
         launcherPath: manifest.path,
         launcherExists,
         bundleRuntimePath,
-        bundleRuntimeExists
+        bundleRuntimeExists,
+        launcherProfileRoot,
+        expectedProfileRoot,
+        profileRootMatches
     };
 };
 const readProfileExtensionStateFromPreferences = (input, extensionId) => {
@@ -413,7 +446,10 @@ export const buildIdentityPreflightError = (result) => {
         launcher_path: result.installDiagnostics.launcherPath,
         launcher_exists: result.installDiagnostics.launcherExists,
         bundle_runtime_path: result.installDiagnostics.bundleRuntimePath,
-        bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists
+        bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists,
+        launcher_profile_root: result.installDiagnostics.launcherProfileRoot,
+        expected_profile_root: result.installDiagnostics.expectedProfileRoot,
+        profile_root_matches: result.installDiagnostics.profileRootMatches
     };
     if (result.failureReason === "BOOTSTRAP_PENDING") {
         return new CliError("ERR_RUNTIME_BOOTSTRAP_PENDING", "identity preflight 已通过，但 persistent extension bootstrap 尚未实现", { details, retryable: false });
@@ -535,7 +571,7 @@ export const runIdentityPreflight = async (input) => {
         });
     }
     const manifest = await readNativeHostManifest(manifestPath);
-    const installDiagnostics = await resolveInstallDiagnostics(manifest);
+    const installDiagnostics = await resolveInstallDiagnostics(manifest, profileDir ?? null);
     if (!manifest) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",
@@ -555,6 +591,7 @@ export const runIdentityPreflight = async (input) => {
         });
     }
     const installBroken = installDiagnostics.launcherExists === false ||
+        installDiagnostics.profileRootMatches === false ||
         (installDiagnostics.launcherExists === true &&
             installDiagnostics.bundleRuntimePath !== null &&
             installDiagnostics.bundleRuntimeExists === false);

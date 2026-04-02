@@ -8,6 +8,7 @@ import { inspectManagedNativeHostInstall, resolveNativeHostInstallRoots } from "
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
 const NATIVE_HOST_DESCRIPTION = "WebEnvoy CLI ↔ Extension bridge";
+const MANAGED_INSTALL_METADATA_FILENAME = "install-metadata.json";
 const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"];
 export const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const NATIVE_HOST_NAME_PATTERN = /^[a-z0-9_]+(?:\.[a-z0-9_]+)+$/;
@@ -276,6 +277,11 @@ set -euo pipefail
 ${profileRootExport}exec ${argv} "$@"
 `;
 };
+const writeManagedInstallMetadata = async (input) => {
+    await writeFile(join(input.channelRoot, MANAGED_INSTALL_METADATA_FILENAME), `${JSON.stringify({
+        profile_root: input.profileRoot
+    }, null, 2)}\n`, "utf8");
+};
 export const resolveControlledInstallRoots = (cwd, browserChannel) => {
     return resolveNativeHostInstallRoots(cwd, browserChannel);
 };
@@ -410,6 +416,10 @@ export const installNativeHost = async (input) => {
         hostCommand,
         profileRoot
     }), "utf8");
+    await writeManagedInstallMetadata({
+        channelRoot: resolvedPaths.channelRoot,
+        profileRoot
+    });
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
         name: input.nativeHostName,

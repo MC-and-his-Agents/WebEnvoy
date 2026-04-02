@@ -28,11 +28,18 @@ interface NativeHostManifest {
   path: string | null;
 }
 
+interface ManagedInstallMetadata {
+  profileRoot: string | null;
+}
+
 export interface IdentityPreflightInstallDiagnostics {
   launcherPath: string | null;
   launcherExists: boolean | null;
   bundleRuntimePath: string | null;
   bundleRuntimeExists: boolean | null;
+  launcherProfileRoot: string | null;
+  expectedProfileRoot: string | null;
+  profileRootMatches: boolean | null;
 }
 
 type ProfileExtensionState = "enabled" | "disabled" | "missing";
@@ -90,7 +97,15 @@ const EMPTY_INSTALL_DIAGNOSTICS: IdentityPreflightInstallDiagnostics = {
   launcherPath: null,
   launcherExists: null,
   bundleRuntimePath: null,
-  bundleRuntimeExists: null
+  bundleRuntimeExists: null,
+  launcherProfileRoot: null,
+  expectedProfileRoot: null,
+  profileRootMatches: null
+};
+
+const normalizePathForComparison = (input: string): string => {
+  const normalized = resolve(input);
+  return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
 };
 
 export const setIdentityPreflightAdaptersForTests = (
@@ -425,16 +440,43 @@ const readNativeHostManifest = async (manifestPath: string): Promise<NativeHostM
   }
 };
 
+const readManagedInstallMetadata = async (
+  channelRoot: string
+): Promise<ManagedInstallMetadata> => {
+  try {
+    const raw = await readFile(join(channelRoot, "install-metadata.json"), "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const profileRoot = asNonEmptyString(parsed.profile_root);
+    return {
+      profileRoot: profileRoot ? normalizePathForComparison(profileRoot) : null
+    };
+  } catch {
+    return {
+      profileRoot: null
+    };
+  }
+};
+
 const resolveInstallDiagnostics = async (
-  manifest: NativeHostManifest | null
+  manifest: NativeHostManifest | null,
+  profileDir: string | null
 ): Promise<IdentityPreflightInstallDiagnostics> => {
   if (!manifest?.path) {
     return EMPTY_INSTALL_DIAGNOSTICS;
   }
   const managedInstall = inspectManagedNativeHostInstall(manifest.path);
   const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
+  const managedInstallMetadata = managedInstall
+    ? await readManagedInstallMetadata(managedInstall.channelRoot)
+    : { profileRoot: null };
   let launcherExists = false;
   let bundleRuntimeExists: boolean | null = null;
+  const expectedProfileRoot = profileDir ? normalizePathForComparison(dirname(profileDir)) : null;
+  const launcherProfileRoot = managedInstallMetadata.profileRoot;
+  const profileRootMatches =
+    launcherProfileRoot === null || expectedProfileRoot === null
+      ? null
+      : launcherProfileRoot === expectedProfileRoot;
   try {
     await access(manifest.path);
     launcherExists = true;
@@ -453,7 +495,10 @@ const resolveInstallDiagnostics = async (
     launcherPath: manifest.path,
     launcherExists,
     bundleRuntimePath,
-    bundleRuntimeExists
+    bundleRuntimeExists,
+    launcherProfileRoot,
+    expectedProfileRoot,
+    profileRootMatches
   };
 };
 
@@ -581,7 +626,10 @@ export const buildIdentityPreflightError = (
     launcher_path: result.installDiagnostics.launcherPath,
     launcher_exists: result.installDiagnostics.launcherExists,
     bundle_runtime_path: result.installDiagnostics.bundleRuntimePath,
-    bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists
+    bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists,
+    launcher_profile_root: result.installDiagnostics.launcherProfileRoot,
+    expected_profile_root: result.installDiagnostics.expectedProfileRoot,
+    profile_root_matches: result.installDiagnostics.profileRootMatches
   };
 
   if (result.failureReason === "BOOTSTRAP_PENDING") {
@@ -728,7 +776,7 @@ export const runIdentityPreflight = async (input: {
     });
   }
   const manifest = await readNativeHostManifest(manifestPath);
-  const installDiagnostics = await resolveInstallDiagnostics(manifest);
+  const installDiagnostics = await resolveInstallDiagnostics(manifest, profileDir ?? null);
   if (!manifest) {
     return buildBlockingResult({
       mode: "official_chrome_persistent_extension",
@@ -749,6 +797,7 @@ export const runIdentityPreflight = async (input: {
   }
   const installBroken =
     installDiagnostics.launcherExists === false ||
+    installDiagnostics.profileRootMatches === false ||
     (installDiagnostics.launcherExists === true &&
       installDiagnostics.bundleRuntimePath !== null &&
       installDiagnostics.bundleRuntimeExists === false);

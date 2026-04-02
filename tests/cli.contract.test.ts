@@ -4102,6 +4102,112 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("blocks a previously bound worktree after another worktree replaces the shared native-host registration", async () => {
+    const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const profile = "shared_registration_profile";
+    const env = {
+      ...defaultRuntimeEnv(repositoryCwd),
+      WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot,
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    };
+
+    const firstInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-shared-registration-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      repositoryCwd,
+      env
+    );
+    expect(firstInstall.status).toBe(0);
+    const firstSummary = parseSingleJsonLine(firstInstall.stdout).summary as Record<string, unknown>;
+
+    await seedInstalledPersistentExtension({
+      cwd: repositoryCwd,
+      profile
+    });
+    const firstStart = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-install-shared-registration-002",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: firstSummary.manifest_path
+          }
+        })
+      ],
+      repositoryCwd,
+      env
+    );
+    expect(firstStart.status).toBe(0);
+
+    const secondInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-shared-registration-003",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      linkedWorktreeCwd,
+      {
+        ...env,
+        WEBENVOY_BROWSER_MOCK_LOG: path.join(linkedWorktreeCwd, ".browser-launch.log")
+      }
+    );
+    expect(secondInstall.status).toBe(0);
+    const secondSummary = parseSingleJsonLine(secondInstall.stdout).summary as Record<string, unknown>;
+
+    await seedInstalledPersistentExtension({
+      cwd: repositoryCwd,
+      profile
+    });
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-install-shared-registration-002"
+      ],
+      repositoryCwd,
+      env
+    );
+    expect(status.status).toBe(0);
+    expect(parseSingleJsonLine(status.stdout)).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "mismatch",
+        runtimeReadiness: "blocked",
+        identityPreflight: {
+          manifestPath: firstSummary.manifest_path,
+          manifestSource: "binding",
+          failureReason: "IDENTITY_MANIFEST_MISSING",
+          installDiagnostics: {
+            launcherProfileRoot: path.join(linkedWorktreeCwd, ".webenvoy", "profiles"),
+            expectedProfileRoot: path.join(repositoryCwd, ".webenvoy", "profiles"),
+            profileRootMatches: false
+          }
+        }
+      }
+    });
+  });
+
   it("removes the currently registered managed launcher from another cwd when runtime.uninstall omits launcher_path", async () => {
     const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
     const install = runCli(
