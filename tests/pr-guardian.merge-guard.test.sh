@@ -3271,7 +3271,65 @@ EOF
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
 }
 
-test_run_codex_review_accepts_plain_text_native_review_output() {
+test_run_codex_review_accepts_code_fenced_native_json_output() {
+  setup_case_dir "run-code-fenced-native-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-320"
+  PR_TITLE="code fenced review"
+  PR_URL="https://example.test/pr/40"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.txt"
+  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+Review summary before payload.
+
+```json
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found."}
+```
+EOF
+  export MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 40
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review -"
+  assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
+}
+
+test_run_codex_review_falls_back_when_native_review_output_is_plain_text() {
   setup_case_dir "run-plain-text-review"
 
   BASE_REF="main"
@@ -4082,7 +4140,8 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unless_caveat
   test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
-  test_run_codex_review_accepts_plain_text_native_review_output
+  test_run_codex_review_accepts_code_fenced_native_json_output
+  test_run_codex_review_falls_back_when_native_review_output_is_plain_text
   test_run_codex_review_adds_fallback_finding_for_structured_reject_without_findings
   test_run_codex_review_fails_closed_when_native_review_command_fails
   test_main_review_mode_does_not_fail_on_mode_expansion_after_summary

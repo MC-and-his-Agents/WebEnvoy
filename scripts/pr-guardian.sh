@@ -1798,6 +1798,10 @@ normalize_native_review_result() {
     return
   fi
 
+  if [[ "${PR_GUARDIAN_REQUIRE_STRUCTURED_NATIVE_JSON:-0}" == "1" ]]; then
+    return 1
+  fi
+
   jq -Rn -c -e --rawfile text "${raw_result_file}" '
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
@@ -2078,8 +2082,8 @@ run_codex_review() {
     -o "${RAW_RESULT_FILE}" \
     review \
     - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${native_error_file}"; then
-    if jq -e 'type == "object"' "${RAW_RESULT_FILE}" >/dev/null 2>&1 \
-      && normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"; then
+    if PR_GUARDIAN_REQUIRE_STRUCTURED_NATIVE_JSON=1 \
+      normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"; then
       :
     else
       warn "原生 review 未返回可接受的结构化结果，已回退到 guardian schema 审查路径。"
