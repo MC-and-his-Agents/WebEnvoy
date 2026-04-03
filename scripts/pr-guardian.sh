@@ -1683,6 +1683,7 @@ normalize_native_review_result() {
           or ($lower | test("^looks fine to me[.!]?$"))
           or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
           or ($lower | test("^no issues detected[.!]?$"))
+          or ($lower | test("^(?:this|the) (?:pr|patch|change) cleanly reverts? (?:#[0-9]+|commit [a-f0-9]{7,40}|`[^`]+`)[.!]?$"))
           or ($lower | test("^(?:i didn.t|i did not|did not) find any new blocking issues(?: in this (?:change|patch|pr))?[.!]?$"))
           or ($lower | test("^(?:this pr cleanly reverts? .+[,;:][[:space:]]*)?(?:i )?did not find any extra delta or partial rollback that would introduce a new merge-blocking issue[.!]?$"))
           or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
@@ -1706,7 +1707,7 @@ normalize_native_review_result() {
           or ($lower | test("^the resulting tree matches the parent .* exactly[.!]?$"))
           or ($lower | test("^it restores? .+ to the pre-merge state[.!]?$"))
           or (($sentence | trim_text) | test("^该 ?[Pp][Rr] 是对 .+ 的干净回滚[。！!]*$"))
-          or (($sentence | trim_text) | test("^将 .+ 与该提交的父提交比较后没有残留差异[，,]说明它准确恢复到了 .+ 状态[。！!]*$"));
+          or (($sentence | trim_text) | test("^将 .*没有残留差异[，,]说明它准确恢复到了 .*状态[。！!]*$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1833,6 +1834,7 @@ normalize_native_review_result() {
         or ($lower | test("^looks fine to me[.!]?$"))
         or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
         or ($lower | test("^no issues detected[.!]?$"))
+        or ($lower | test("^(?:this|the) (?:pr|patch|change) cleanly reverts? (?:#[0-9]+|commit [a-f0-9]{7,40}|`[^`]+`)[.!]?$"))
         or ($lower | test("^(?:i didn.t|i did not|did not) find any new blocking issues(?: in this (?:change|patch|pr))?[.!]?$"))
         or ($lower | test("^(?:this pr cleanly reverts? .+[,;:][[:space:]]*)?(?:i )?did not find any extra delta or partial rollback that would introduce a new merge-blocking issue[.!]?$"))
         or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
@@ -1856,7 +1858,7 @@ normalize_native_review_result() {
         or ($lower | test("^the resulting tree matches the parent .* exactly[.!]?$"))
         or ($lower | test("^it restores? .+ to the pre-merge state[.!]?$"))
         or ($sentence | trim | test("^该 ?[Pp][Rr] 是对 .+ 的干净回滚[。！!]*$"))
-        or ($sentence | trim | test("^将 .+ 与该提交的父提交比较后没有残留差异[，,]说明它准确恢复到了 .+ 状态[。！!]*$"));
+        or ($sentence | trim | test("^将 .*没有残留差异[，,]说明它准确恢复到了 .*状态[。！!]*$"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
