@@ -1683,11 +1683,13 @@ normalize_native_review_result() {
           or ($lower | test("^looks fine to me[.!]?$"))
           or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
           or ($lower | test("^no issues detected[.!]?$"))
+          or ($lower | test("^(?:i didn.t|i did not|did not) find any new blocking issues(?: in this (?:change|patch|pr))?[.!]?$"))
           or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+          or ($trimmed | test("^我没有在.*(?:这次变更|当前变更|这个 PR|该 PR|当前 PR).*发现新的阻断性问题[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1700,12 +1702,11 @@ normalize_native_review_result() {
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
-          or ($lower | test("cleanly reverts? "))
-          or ($lower | test("matches the parent .* exactly"))
-          or ($lower | test("restores? .* to (?:the )?pre-merge state"))
-          or (($sentence | trim_text) | test("干净回滚"))
-          or (($sentence | trim_text) | test("没有残留差异"))
-          or (($sentence | trim_text) | test("准确恢复到.+状态"));
+          or ($lower | test("^(?:this|the) (?:pr|patch|change) cleanly reverts? .+[.!]?$"))
+          or ($lower | test("^the resulting tree matches the parent .* exactly[.!]?$"))
+          or ($lower | test("^it restores? .+ to the pre-merge state[.!]?$"))
+          or (($sentence | trim_text) | test("^该 ?[Pp][Rr] 是对 .+ 的干净回滚[。！!]*$"))
+          or (($sentence | trim_text) | test("^将 .+ 与该提交的父提交比较后没有残留差异[，,]说明它准确恢复到了 .+ 状态[。！!]*$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1832,11 +1833,13 @@ normalize_native_review_result() {
         or ($lower | test("^looks fine to me[.!]?$"))
         or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
         or ($lower | test("^no issues detected[.!]?$"))
+        or ($lower | test("^(?:i didn.t|i did not|did not) find any new blocking issues(?: in this (?:change|patch|pr))?[.!]?$"))
         or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
         or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
         or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
         or ($trimmed | test("^未发现阻断问题[。！!]*$"))
         or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^我没有在.*(?:这次变更|当前变更|这个 PR|该 PR|当前 PR).*发现新的阻断性问题[。！!]*$"))
         or ($trimmed | test("^没有合并阻断[。！!]*$"))
         or ($trimmed | test("^可以合并[。！!]*$"))
         or ($trimmed | test("^可合并[。！!]*$"))
@@ -1849,12 +1852,11 @@ normalize_native_review_result() {
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
         or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
-        or ($lower | test("cleanly reverts? "))
-        or ($lower | test("matches the parent .* exactly"))
-        or ($lower | test("restores? .* to (?:the )?pre-merge state"))
-        or ($sentence | trim | test("干净回滚"))
-        or ($sentence | trim | test("没有残留差异"))
-        or ($sentence | trim | test("准确恢复到.+状态"));
+        or ($lower | test("^(?:this|the) (?:pr|patch|change) cleanly reverts? .+[.!]?$"))
+        or ($lower | test("^the resulting tree matches the parent .* exactly[.!]?$"))
+        or ($lower | test("^it restores? .+ to the pre-merge state[.!]?$"))
+        or ($sentence | trim | test("^该 ?[Pp][Rr] 是对 .+ 的干净回滚[。！!]*$"))
+        or ($sentence | trim | test("^将 .+ 与该提交的父提交比较后没有残留差异[，,]说明它准确恢复到了 .+ 状态[。！!]*$"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
