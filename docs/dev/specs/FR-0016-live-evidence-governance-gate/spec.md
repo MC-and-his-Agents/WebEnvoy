@@ -76,6 +76,7 @@
 - 其余明确不在上述范围内的 PR，不要求为了 FR-0016 额外携带 `gate_applicability` 元数据。
 - shared contract 还必须冻结独立于作者自报 lane 的 `classification_scope` 判定输入，至少覆盖：
   - `spec_suite_root`
+  - `spec_contract_targets`
   - `governance_issue_ref`
   - `governance_scope_targets`
 - 对落入专项门禁的 PR，描述中还必须提供结构化 `live_evidence_record` 区块。
@@ -141,7 +142,7 @@
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 - `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
-- 若同一 PR 同时改动 `docs/dev/specs/FR-0016-live-evidence-governance-gate/**`，且又命中“五处治理落库目标文件 + `#310` issue 引用”这一 FR-0016 落库条件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；formal spec review PR 与治理落库 PR 不得在同一条高风险链路重新混线。
+- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，且又命中“五处治理落库目标文件 + `#310` issue 引用”这一 FR-0016 落库条件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；纯 `TODO.md` 进度回写不计入该阻断。
 
 ## GWT 验收场景
 
@@ -204,6 +205,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
 5. reviewer / guardian 文档任一处出现缩窄或放宽触发集合：视为治理基线不一致，必须阻断。
 6. formal spec review PR 与治理落库 PR 混在同一条高风险链路：视为流程违规，必须拆分。
 7. 未来其他事项若单独修改 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 或 `.github/PULL_REQUEST_TEMPLATE.md`，但不承载 `#310` 的 FR-0016 落库闭环：不得被误判为 `governance_landing_pr`。
+8. 治理落库 PR 若仅随手回写 FR-0016 `TODO.md` 的非语义进度状态：不应因此触发 `mixed_spec_and_governance_scope`。
 
 ## 验收标准
 

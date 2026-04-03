@@ -25,6 +25,14 @@ FR-0016 的机器判定输入至少包含以下对象：
 {
   "classification_scope": {
     "spec_suite_root": "docs/dev/specs/FR-0016-live-evidence-governance-gate/",
+    "spec_contract_targets": [
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/spec.md",
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/plan.md",
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/contracts/live-evidence-gate.md",
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/data-model.md",
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/research.md",
+      "docs/dev/specs/FR-0016-live-evidence-governance-gate/risks.md"
+    ],
     "governance_issue_ref": "#310",
     "governance_scope_targets": [
       "AGENTS.md",
@@ -41,9 +49,10 @@ FR-0016 的机器判定输入至少包含以下对象：
 
 1. `classification_scope` 是 FR-0016 共享 contract 的固定判定输入，不依赖作者自报 `review_lane`。
 2. reviewer / guardian 若发现 PR 实际变更命中 `spec_suite_root`，必须先视为 formal spec 相关链路。
-3. `governance_issue_ref` 固定为 `#310`，用于限定 FR-0016 治理落库链路的 issue 上下文，避免把未来其他治理文案修订误判为本 FR 的 landing PR。
-4. reviewer / guardian 只有在 PR 同时满足“实际变更命中 `governance_scope_targets` 中任一目标文件”与“PR 元数据显式引用 `governance_issue_ref`”时，才能先视为治理落库相关链路。
-5. 若同一 PR 同时命中 `spec_suite_root` 与已命中的 FR-0016 治理落库条件，必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
+3. `spec_contract_targets` 冻结 formal spec 中承载正式契约语义的文件集合；`TODO.md` 不在其中，因为仓库基线允许非语义进度回写随落库 PR 同行。
+4. `governance_issue_ref` 固定为 `#310`，用于限定 FR-0016 治理落库链路的 issue 上下文，避免把未来其他治理文案修订误判为本 FR 的 landing PR。
+5. reviewer / guardian 只有在 PR 同时满足“实际变更命中 `governance_scope_targets` 中任一目标文件”与“PR 元数据显式引用 `governance_issue_ref`”时，才能先视为治理落库相关链路。
+6. 若同一 PR 同时命中 `spec_contract_targets` 中任一正式契约文件与已命中的 FR-0016 治理落库条件，必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
 
 当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出还至少包含以下对象：
 
@@ -230,7 +239,7 @@ FR-0016 的机器判定输入至少包含以下对象：
 4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 默认允许为 `n_a`、`refs_only` 或 `fixes_allowed`，但若 `gate_applicability.review_lane=formal_spec_review_pr`，则只允许为 `refs_only`，不得使用 `n_a` 或 `fixes_allowed`。
 5. `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
 6. 只有当 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
-7. 若同一 PR 同时改动 `classification_scope.spec_suite_root`，且又满足“命中 `classification_scope.governance_scope_targets` + 引用 `classification_scope.governance_issue_ref`”的 FR-0016 治理落库条件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
+7. 若同一 PR 同时改动 `classification_scope.spec_contract_targets` 中任一正式契约文件，且又满足“命中 `classification_scope.governance_scope_targets` + 引用 `classification_scope.governance_issue_ref`”的 FR-0016 治理落库条件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
 
 ## 兼容性约束
 

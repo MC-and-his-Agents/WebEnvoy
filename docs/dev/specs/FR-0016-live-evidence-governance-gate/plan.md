@@ -55,6 +55,7 @@
   - 高风险治理套件已补齐 `contracts/`、`data-model.md`、`research.md`、`risks.md`
 3. 规约一致性检查：
   - `classification_scope` 足以让 reviewer / guardian 在不信任作者自报 lane 的前提下，先判定 spec 套件命中与治理落库目标命中
+  - `mixed_spec_and_governance_scope` 只针对 `spec_contract_targets` 生效，不误伤仓库已允许与落库 PR 同行的纯 `TODO.md` 进度回写
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
