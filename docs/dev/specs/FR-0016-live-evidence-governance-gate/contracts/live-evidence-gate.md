@@ -83,6 +83,7 @@
     "page_url": "https://example.com/editor",
     "target_tab_id": 321,
     "run_id": "run_20260401_001",
+    "evidence_collected_at": "2026-04-01T10:12:33Z",
     "relay_path": "cli->native-messaging->extension->content-script",
     "editor_locator": "[data-testid='editor']",
     "success_signals": [
@@ -116,10 +117,12 @@
 
 1. `latest_head_sha` 必须对应当前 PR latest head。
 2. `execution_surface=real_browser` 才可能成为有效 live evidence；其余枚举默认无效。
-3. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
-4. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
-5. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
-6. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
+3. `evidence_collected_at` 必须填写当前 latest head 这次 fresh rerun 的 RFC 3339 UTC 时间戳；不得复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
+4. `run_id`、`evidence_collected_at` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun；若同一 head 上存在多次历史 run，旧 run 的 artifact 仍视为 `stale_head_or_artifact`。
+5. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
+6. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
+7. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
+8. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
 
 ## gate_verdict
 
@@ -172,5 +175,5 @@
 ## 兼容性约束
 
 1. 新增触发原因或阻断原因只能追加，不能改变既有语义。
-2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
+2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
 3. 若未来新增自动校验器，也必须消费同一套共享对象，而不是自创另一套触发集合。

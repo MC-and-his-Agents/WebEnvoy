@@ -24,6 +24,7 @@
   - 第一轮指出触发条件不一致
   - 第二轮指出最低字段缺少 `latest_head_sha` 与 `execution_surface`
   - #322 第一轮 guardian 又指出 contract 兼容规则不能只保护这两个核心字段，必须把已冻结最低字段全集都设为不可删减
+  - #322 最新 guardian 又指出：仅靠 `latest_head_sha` + 自由文本 `artifact_log_ref` 仍无法区分“当前 head fresh rerun”和“同一 head 的历史 artifact”
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -85,7 +86,7 @@
 | ID | Claim/Unknown | Evidence Artifact | Method | Maturity | Confidence | Notes |
 |---|---|---|---|---|---|---|
 | U1 | 专项门禁必须覆盖“以 live evidence 请求 merge 放行”的场景 | `#311` 前两轮 review + 现有文档回写 | review diff 对照 | M3 | 95% | 已有 reviewer 明确阻断过一次 |
-| U2 | `live_evidence_record` 已冻结字段全集都必须保持必填且不可删减，`latest_head_sha` 与 `execution_surface` 是其中两个关键复核字段 | `#311` 第三轮 review + `#322` guardian review | review blocker 对照 | M3 | 98% | 只保护两个字段会把 `profile/run_id/page_url/minimum_replay/artifact_log_ref` 等字段降成可删项 |
+| U2 | `live_evidence_record` 已冻结字段全集都必须保持必填且不可删减，并且必须包含足以区分同一 head 下 fresh rerun 与历史 artifact 的 freshness 字段 | `#311` 第三轮 review + `#322` guardian review | review blocker 对照 | M3 | 98% | 只保护两个字段会把 `profile/run_id/page_url/minimum_replay/artifact_log_ref` 等字段降成可删项；缺少 freshness 字段则无法挡住 same-head stale artifact |
 | U3 | `#310` 需要 formal spec review | `#311` 最新 review + `spec_review.md` | 流程基线对照 | M3 | 99% | 已是当前唯一 blocker |
 | U4 | formal spec review PR 与治理落库 PR 必须拆开 | `docs/dev/AGENTS.md` + `spec_review.md` + `#311` 最新 guardian/review blocker | 高风险事项规则对照 | M3 | 99% | 对 `#310 / FR-0016` 已冻结为必须拆分，不再保留 reviewer 例外口径 |
 

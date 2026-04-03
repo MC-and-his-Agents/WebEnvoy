@@ -77,6 +77,7 @@
   - `page_url`
   - `target_tab_id`
   - `run_id`
+  - `evidence_collected_at`
   - `relay_path`
   - `editor_locator` 或等价交互定位
   - `success_signals`
@@ -85,6 +86,7 @@
   - `failure_reason`
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
+- `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
 - 若 evidence 失败或阻断，`failure_reason` 与 `blocker_level` 必须填写非空原因和阻断层级，不得用 `N/A` 规避。
 - 只有在 PR 明确不落入专项门禁时，才允许将整块字段写为 `N/A`。

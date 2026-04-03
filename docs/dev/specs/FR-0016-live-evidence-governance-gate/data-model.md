@@ -34,6 +34,7 @@
   - `page_url`
   - `target_tab_id`
   - `run_id`
+  - `evidence_collected_at`
   - `relay_path`
   - `editor_locator`
   - `success_signals`
@@ -45,6 +46,7 @@
   - 该对象是条件必选对象：`gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时必须提供；`in_scope=false && n_a_allowed=true` 时允许省略或置为 `null`。
   - 上述字段均属于已冻结最低字段集，只可追加新字段，不得删除、重命名或降格为可选。
   - `latest_head_sha` 必须对应当前 PR latest head。
+  - `evidence_collected_at` 必须记录当前 latest head 这次 fresh rerun 的采集时间；若同一 head 下复用历史 artifact，该对象仍视为 stale。
   - 只有 `execution_surface=real_browser` 才可能成为有效 evidence 来源。
   - 成功态下 `failure_reason` / `blocker_level` 必须为 `N/A`；失败或阻断态下二者必须填写非空内容。
 - 生命周期：

@@ -18,12 +18,15 @@
 
 - 触发条件：
   - `contracts/live-evidence-gate.md` 已冻结的任一 `live_evidence_record` 字段被删除、重命名、降格为可选，或只保留 `latest_head_sha` / `execution_surface` 两个核心字段
+  - 缺少能区分同一 head 下 fresh rerun 与历史 artifact 的 freshness 字段，例如 `evidence_collected_at`
 - 影响：
   - reviewer 无法稳定判断 evidence 是否来自当前 latest head
+  - reviewer / guardian 无法稳定判断 evidence 是否真的是当前 latest head 的 fresh rerun，而不是同一 head 的历史 artifact
   - guardian 无法稳定判断 evidence 是否来自真实浏览器执行面
-  - 缺少 `profile`、`run_id`、`page_url`、`minimum_replay`、`artifact_log_ref` 等字段时，复核者无法稳定复现或追溯 evidence
+  - 缺少 `profile`、`run_id`、`evidence_collected_at`、`page_url`、`minimum_replay`、`artifact_log_ref` 等字段时，复核者无法稳定复现或追溯 evidence
 - 缓解：
   - 在 shared contract 中把 `live_evidence_record` 的全部已冻结字段都定义为只可追加、不可删减、不可降格为可选
+  - 把 `evidence_collected_at` 与 `run_id`、`artifact_log_ref` 组合起来，作为“fresh rerun 而非 same-head 历史 artifact”的最小复核线索
   - 任何删减、重命名或降格都视为阻断性改动
 - 回滚：
   - 保持 `refs_only` 与 `merge_ready=false`，直到字段恢复
@@ -82,6 +85,7 @@
 - `closing_semantics` 可按普通 Issue 闭环语义选择 `fixes_allowed` 或继续保持 `refs_only`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`
 - `merge_ready=true`
 - `live_evidence_record` 已完整提供，`latest_head_sha` 对应当前 PR latest head，`execution_surface=real_browser`，`success_signals` 能证明真实页面交互或真实闭环结果
+- `run_id`、`evidence_collected_at` 与 `artifact_log_ref` 能共同指向当前 latest head 的 fresh rerun，而不是同一 head 的历史 artifact
 - reviewer / guardian 未标记 evidence 缺失、旧 head、非真实执行面或控制面-only 信号
 
 ### blocked
