@@ -635,6 +635,49 @@ describe("native messaging contract", () => {
     }
   });
 
+  it("rejects profile-mismatched opens when dual-env root-preferred launchers are pinned to an install profile", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "wv-nmr-pin-"));
+    const pinnedProfile = "p";
+    const legacyProfileDir = path.join(profileRoot, pinnedProfile);
+    await rm(legacyProfileDir, { recursive: true, force: true });
+    tempDirs.push(profileRoot);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE: PROFILE_MODE_ROOT_PREFERRED
+      }
+    });
+
+    try {
+      const responsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-dual-env-root-preferred-profile-mismatch-001",
+          method: "bridge.open",
+          profile: "other-profile",
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await responsePromise).toMatchObject({
+        status: "error",
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: `native bridge explicit launcher is pinned to profile ${pinnedProfile}`
+        }
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
   it("keeps dual-env root-preferred launchers on canonical root transport semantics", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-mode-boot-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-mode-boot-legacy-"));

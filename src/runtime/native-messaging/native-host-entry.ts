@@ -54,6 +54,28 @@ const usesRootPreferredDualEnvRouting = (): boolean =>
 const usesLegacyProfileDirRouting = (): boolean =>
   LEGACY_PROFILE_DIR.length > 0 && !usesRootPreferredDualEnvRouting();
 
+const resolvePinnedExplicitProfile = (): { profileDir: string; profileKey: string } | null => {
+  if (!usesRootPreferredDualEnvRouting() || LEGACY_PROFILE_DIR.length === 0) {
+    return null;
+  }
+
+  const profileRoot = resolve(PROFILE_ROOT);
+  const profileDir = resolve(LEGACY_PROFILE_DIR);
+  if (!isPathInside(profileRoot, profileDir)) {
+    return null;
+  }
+
+  const profileKey = relative(profileRoot, profileDir);
+  if (profileKey.length === 0 || profileKey.startsWith("..") || isAbsolute(profileKey)) {
+    return null;
+  }
+
+  return {
+    profileDir,
+    profileKey
+  };
+};
+
 const resolveProfileRootSocketTarget = (
   request: Pick<BridgeRequestEnvelope, "profile">
 ): { profileDir: string; socketPath: string } | null => {
@@ -61,10 +83,16 @@ const resolveProfileRootSocketTarget = (
 
   if (PROFILE_ROOT) {
     const profileRoot = resolve(PROFILE_ROOT);
+    const pinnedExplicitProfile = resolvePinnedExplicitProfile();
     if (profileName) {
       const profileDir = resolve(profileRoot, profileName);
       if (!isPathInside(profileRoot, profileDir)) {
         throw new Error("native bridge profile escapes controlled root");
+      }
+      if (pinnedExplicitProfile && profileDir !== pinnedExplicitProfile.profileDir) {
+        throw new Error(
+          `native bridge explicit launcher is pinned to profile ${pinnedExplicitProfile.profileKey}`
+        );
       }
       return {
         profileDir,
