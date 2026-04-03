@@ -2943,6 +2943,36 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
+test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence() {
+  setup_case_dir "normalize-native-text-review-context-incomplete-evidence"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Reviewed the diff against origin/main, and tests were not run in this environment. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix() {
+  setup_case_dir "normalize-native-text-chinese-incomplete-evidence-prefix"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+仅基于静态阅读，没有发现当前 PR 新引入、足以阻止合并的离散问题。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase() {
   setup_case_dir "normalize-native-text-approve-polite"
 
@@ -3980,6 +4010,8 @@ main() {
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
+  test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
+  test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
   test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase

@@ -1689,8 +1689,9 @@ normalize_native_review_result() {
           or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^.*未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-          or ($trimmed | test("^.*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+          or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+          or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+          or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1700,10 +1701,8 @@ normalize_native_review_result() {
       def review_context_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
-        | ($lower | test("^based on the diff against [^,]+, .+review"))
-          or ($lower | test("^reviewed the diff against [^,]+(?:,| and)"))
-          or ($trimmed | test("^审查了相对 .+ 的实际差异[，,、 ]*并对照相关.+检查了.+$"))
-          or ($trimmed | test("^基于相对 .+ 的 diff 审查[，,、 ].+$"));
+        | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
+          or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+收敛[。！!]*$"));
       def neutral_safe_sentence($sentence):
         ($sentence | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
@@ -1843,8 +1842,9 @@ normalize_native_review_result() {
         or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
         or ($trimmed | test("^未发现阻断问题[。！!]*$"))
         or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-        or ($trimmed | test("^.*未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-        or ($trimmed | test("^.*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+        or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+        or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+        or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^没有合并阻断[。！!]*$"))
         or ($trimmed | test("^可以合并[。！!]*$"))
         or ($trimmed | test("^可合并[。！!]*$"))
@@ -1854,10 +1854,8 @@ normalize_native_review_result() {
     def review_context_sentence($sentence):
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
-      | ($lower | test("^based on the diff against [^,]+, .+review"))
-        or ($lower | test("^reviewed the diff against [^,]+(?:,| and)"))
-        or ($trimmed | test("^审查了相对 .+ 的实际差异[，,、 ]*并对照相关.+检查了.+$"))
-        or ($trimmed | test("^基于相对 .+ 的 diff 审查[，,、 ].+$"));
+      | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
+        or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+收敛[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
