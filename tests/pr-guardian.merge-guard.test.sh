@@ -2973,6 +2973,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence() {
+  setup_case_dir "normalize-native-text-chinese-review-context-unfinished-convergence"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+审查了相对 origin/main 的实际差异，并对照相关架构/审查基线检查了 readiness、lock 与 attach/status 路径仍未收敛。本次改动看起来保持了既有语义，没有发现当前 PR 新引入、足以阻止合并的离散问题。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase() {
   setup_case_dir "normalize-native-text-approve-polite"
 
@@ -4012,6 +4027,7 @@ main() {
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
+  test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
   test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase

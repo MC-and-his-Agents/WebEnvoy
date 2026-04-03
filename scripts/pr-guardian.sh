@@ -1702,7 +1702,7 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
-          or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+收敛[。！!]*$"));
+          or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+行为收敛[。！!]*$"));
       def neutral_safe_sentence($sentence):
         ($sentence | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
@@ -1855,7 +1855,7 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
-        or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+收敛[。！!]*$"));
+        or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+行为收敛[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
