@@ -70,25 +70,41 @@
 
 ## 最小门禁矩阵
 
+本节只做 `contracts/live-evidence-gate.md` 的状态镜像摘要，帮助 reviewer 按风险视角快速判定 `ready / blocked / not_applicable`；若与 contract 条款存在任何冲突，以 `contracts/live-evidence-gate.md` 为准，并先回到 contract 修正单一真源。
+
 ### ready
 
-- PR 落入专项门禁
-- latest head 新鲜有效 evidence 已补齐
-- `execution_surface=real_browser`
-- reviewer / guardian 未标记 evidence 缺失、失效或边界不符
+- `status=ready`
+- `gate_applicability.in_scope=true`
+- `gate_applicability.trigger_reasons` 非空
+- `gate_applicability.n_a_allowed=false`
+- `blocking_reasons=[]`
+- `closing_semantics` 可按普通 Issue 闭环语义选择 `fixes_allowed` 或继续保持 `refs_only`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`
+- `merge_ready=true`
+- `live_evidence_record` 已完整提供，`latest_head_sha` 对应当前 PR latest head，`execution_surface=real_browser`，`success_signals` 能证明真实页面交互或真实闭环结果
+- reviewer / guardian 未标记 evidence 缺失、旧 head、非真实执行面或控制面-only 信号
 
 ### blocked
 
-- 缺少 latest head 新鲜复验
-- evidence 来源不是 `real_browser`
-- 只有控制面信号
-- 最低字段缺失
-- formal spec review 未通过
+- `status=blocked`
+- `blocking_reasons` 非空
+- `closing_semantics=refs_only`
+- `merge_ready=false`
+- 常见阻断原因包括缺少 latest head 新鲜复验、evidence 来源不是 `real_browser`、只有控制面信号、最低字段缺失、旧 head / 旧 artifact 复用
+- formal spec review 未通过时，治理落库 PR 即使 `gate_applicability.in_scope=false`，也必须把 `spec_review_not_completed` 放入 `blocking_reasons`，并保持 `status=blocked`
 
 ### not_applicable
 
-- PR 属于 formal spec / 治理前置 / 纯文档 / 纯研究范围
-- PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据；一旦命中任一触发原因，就必须回到 `in_scope=true`，不得仅凭文档 / 研究 / 规约属性判为 `not_applicable`
+- `status=not_applicable`
+- `gate_applicability.in_scope=false`
+- `gate_applicability.trigger_reasons=[]`
+- `gate_applicability.n_a_allowed=true`
+- `blocking_reasons=[]`
+- `merge_ready=true`
+- `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，不受 live evidence 专项门禁额外收窄
+- `live_evidence_record` 允许省略或置为 `null`
+- PR 明确不命中任一 `trigger_reasons`，且不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据；formal spec / 治理前置 / 纯文档 / 纯研究 PR 只是典型非适用场景，不是唯一入口
+- 一旦命中任一 `trigger_reasons`，就必须回到 `in_scope=true`，不得仅凭文档 / 研究 / 规约属性判为 `not_applicable`
 
 ## 最小恢复路径
 
