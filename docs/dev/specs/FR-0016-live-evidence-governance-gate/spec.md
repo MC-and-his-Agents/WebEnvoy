@@ -47,10 +47,10 @@
   - 把 live evidence 作为判定“已完成”核心依据的 PR
   - 把 live evidence 作为请求 merge 放行核心依据的 PR
 - 非适用范围必须至少包含：
-  - 纯文档 PR
-  - 纯研究 / spike PR
-  - formal spec / design input PR
-  - 不以真实 live evidence 作为关闭或放行依据的治理前置 PR
+  - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的纯文档 PR
+  - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的纯研究 / spike PR
+  - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec / design input PR
+  - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的治理前置 PR
 - 同一套触发条件必须在根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板之间保持一致，不允许某一处缩窄或放宽。
 
 ### 2. 有效 / 无效 evidence 边界冻结
@@ -130,7 +130,7 @@ And 不得因为“没有使用 Fixes”而规避 live evidence 披露
 ### 场景 2：formal spec / 治理前置 PR 可以明确填写 N/A
 
 Given 一个 PR 只起草 formal spec 或其他治理前置输入
-And 它不以真实 live evidence 作为关闭或放行依据
+And 它不以真实 live evidence 作为关闭、完成或 merge 放行依据
 When 作者填写 PR 模板
 Then Live Evidence 区块可以整体填写 `N/A`
 And reviewer / guardian 不得错误要求其补 runtime live evidence
@@ -172,7 +172,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
 1. 新提交导致 latest head 改变：旧 evidence 自动失效，必须重新复验。
 2. PR 使用 live evidence 作为“阶段完成”论据，但不关闭 issue：仍属于专项门禁范围，不得按非适用处理。
 3. PR 描述提供了失败 evidence：允许作为阻断证据存在，但字段仍必须完整，且必须显式给出失败原因与阻断层级。
-4. PR 只引用历史 artifact 作为背景说明，而不作为关闭或放行依据：可以不落入专项门禁，但必须避免把历史 artifact 写成当前有效 evidence。
+4. PR 只引用历史 artifact 作为背景说明，而不作为关闭、完成或 merge 放行依据：可以不落入专项门禁，但必须避免把历史 artifact 写成当前有效 evidence。
 5. reviewer / guardian 文档任一处出现缩窄或放宽触发集合：视为治理基线不一致，必须阻断。
 6. formal spec review PR 与治理落库 PR 混在同一条高风险链路：视为流程违规，必须拆分。
 

@@ -15,7 +15,7 @@
 - [ ] `contracts/live-evidence-gate.md` 已冻结最低字段、适用范围与无效 evidence 集合，不再依赖口头补充。
 - [ ] 当前 `#311` 已根据 formal 结论做出后续动作：关闭、转 Draft，或拆成新的治理落库 PR；不得继续以“缺 formal 输入”的状态申报可合并。
 - [ ] 后续治理落库 PR 已明确只承接 `.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`code_review.md`、`docs/dev/AGENTS.md`、`docs/dev/review/guardian-review-addendum.md` 五处同类回写，不混入其他治理事项。
-- [ ] 后续治理落库 PR 的 closing semantics 继续使用 `Refs #310`，直到治理文案实际落库完成。
+- [ ] 后续治理落库 PR 的 closing semantics 已按实际闭环程度选择：未完整满足 `#310` 关闭条件时使用 `Refs #310`；若已完整落库五处治理文案并满足关闭条件，则使用 `Fixes #310`。
 
 ## 实现停点
 

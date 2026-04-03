@@ -18,6 +18,7 @@
 - 约束：
   - `in_scope=true` 时，`trigger_reasons` 必须非空，且 `n_a_allowed=false`。
   - `in_scope=false` 时，`trigger_reasons=[]`，且 `n_a_allowed=true`。
+  - 只有在 PR 不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；纯文档、纯研究 / spike、formal spec / design input 不是无条件豁免项。
 - 生命周期：
   - 由作者 PR 描述、reviewer 判断和 guardian 判定共同消费。
   - 仅在 PR review / merge 决策窗口内有效；PR head、关闭语义或 evidence 依据变化后必须重新判定。

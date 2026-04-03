@@ -87,5 +87,5 @@
 1. FR-0016 的 formal spec review 已通过，reviewer 明确认可其足以支撑 `#310` 治理落库。
 2. `contracts/live-evidence-gate.md` 与 `risks.md` 已被 reviewer 认可，能够解释适用范围、最低字段、无效 evidence 与阻断条件。
 3. 后续治理落库 PR 明确只更新 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 与 `.github/PULL_REQUEST_TEMPLATE.md`，不混入其他治理或 runtime 改动。
-4. 后续治理落库 PR 使用 `Refs #310`，直到实际治理文案落库完成前不使用 `Fixes #310`。
+4. 后续治理落库 PR 若尚未完整满足 `#310` 关闭条件，继续使用 `Refs #310`；若该 PR 已按 FR-0016 完整落库五处治理文案并满足 `#310` 关闭条件，则必须改用 `Fixes #310`，不保留“已闭环但仍用 Refs”的例外口径。
 5. 在这些条件满足前，当前 `#311` 或其替代 PR 不得申报 `merge-ready`。

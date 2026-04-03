@@ -67,6 +67,7 @@
 2. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
 3. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
 4. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
+5. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
 
 ## live_evidence_record
 
