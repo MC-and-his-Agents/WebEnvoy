@@ -24,6 +24,7 @@
 - 生命周期：
   - 由作者 PR 描述、reviewer 判断和 guardian 判定共同消费。
   - 仅在 PR review / merge 决策窗口内有效；PR head、关闭语义或 evidence 依据变化后必须重新判定。
+  - 仅要求专项门禁 PR、formal spec review PR 与 governance landing PR 显式承载；不把 FR-0016 扩成所有 PR 的 repo-wide 元数据要求。
 
 ### live_evidence_record
 
@@ -39,7 +40,7 @@
   - `evidence_collected_at`
   - `artifact_identity`
   - `relay_path`
-  - `editor_locator`
+  - `interaction_locator`
   - `success_signals`
   - `minimum_replay`
   - `artifact_log_ref`
@@ -52,6 +53,7 @@
   - `run_id` 必须是 provider-scoped 的稳定执行标识，不得退化为自由文本标签。
   - `evidence_collected_at` 必须记录当前 latest head 这次 fresh rerun 的采集时间；若同一 head 下复用历史 artifact，该对象仍视为 stale。
   - `artifact_identity` 必须是 provider-scoped 的稳定 artifact 标识，用来区分同一 head 下不同 rerun 的产物身份。
+  - `interaction_locator` 必须是与当前 evidence 场景匹配的中性定位字段，既能承载写路径交互定位，也能承载 read/runtime-only 复核入口。
   - 只有 `execution_surface=real_browser` 才可能成为有效 evidence 来源。
   - 成功态下 `failure_reason` / `blocker_level` 必须为 `N/A`；失败或阻断态下二者必须填写非空内容。
 - 生命周期：

@@ -13,7 +13,7 @@
 
 ## 共享对象
 
-门禁共享输出至少包含以下对象：
+当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出至少包含以下对象：
 
 1. `gate_applicability`
 2. `gate_verdict`
@@ -95,7 +95,7 @@
     "evidence_collected_at": "2026-04-01T10:12:33Z",
     "artifact_identity": "gha:23953203650:1:live-evidence.log",
     "relay_path": "cli->native-messaging->extension->content-script",
-    "editor_locator": "[data-testid='editor']",
+    "interaction_locator": "[data-testid='editor']",
     "success_signals": [
       "editor_updated",
       "page_reflected_change"
@@ -133,8 +133,9 @@
 6. `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun；若同一 head 上存在多次历史 run，旧 run 的 artifact 仍视为 `stale_head_or_artifact`。
 7. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
 8. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
-9. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
-10. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
+9. `interaction_locator` 必须提供与当前 live evidence 相匹配的最小交互或观测定位；不得强制要求 write-flow 专用字段去适配 runtime-only 或 read-only 场景。
+10. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
+11. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
 
 ## gate_verdict
 
@@ -187,5 +188,5 @@
 ## 兼容性约束
 
 1. 新增触发原因或阻断原因只能追加，不能改变既有语义。
-2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
+2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`interaction_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
 3. 若未来新增自动校验器，也必须消费同一套共享对象，而不是自创另一套触发集合。

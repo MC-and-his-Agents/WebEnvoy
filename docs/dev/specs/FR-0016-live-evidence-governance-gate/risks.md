@@ -6,6 +6,7 @@
   - 根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板对适用范围写出不同集合
   - “以 live evidence 请求 merge 放行”再次被遗漏
   - PR 侧元数据没有稳定承载 `gate_applicability`，导致 reviewer / guardian 被迫回退到标题、路径或人工上下文 heuristics
+  - `gate_applicability` 被错误扩成所有 reviewed PR 的 repo-wide 必填元数据
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -13,6 +14,7 @@
   - formal contract 中显式冻结触发原因枚举
   - formal contract 中显式冻结 `review_lane`
   - formal spec 明确要求 PR 描述显式承载 `gate_applicability`
+  - formal spec 明确限制 `gate_applicability` 只作用于专项门禁 PR、formal spec review PR 与 governance landing PR
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
@@ -26,7 +28,7 @@
   - reviewer 无法稳定判断 evidence 是否来自当前 latest head
   - reviewer / guardian 无法稳定判断 evidence 是否真的是当前 latest head 的 fresh rerun，而不是同一 head 的历史 artifact
   - guardian 无法稳定判断 evidence 是否来自真实浏览器执行面
-  - 缺少 `profile`、`run_id`、`evidence_collected_at`、`artifact_identity`、`page_url`、`minimum_replay`、`artifact_log_ref` 等字段时，复核者无法稳定复现或追溯 evidence
+  - 缺少 `profile`、`run_id`、`evidence_collected_at`、`artifact_identity`、`page_url`、`interaction_locator`、`minimum_replay`、`artifact_log_ref` 等字段时，复核者无法稳定复现或追溯 evidence
 - 缓解：
   - 在 shared contract 中把 `live_evidence_record` 的全部已冻结字段都定义为只可追加、不可删减、不可降格为可选
   - 把 `evidence_collected_at`、`artifact_identity`、`run_id` 与 `artifact_log_ref` 组合起来，作为“fresh rerun 而非 same-head 历史 artifact”的最小复核线索
@@ -89,6 +91,7 @@
 - `merge_ready=true`
 - `live_evidence_record` 已完整提供，`latest_head_sha` 对应当前 PR latest head，`execution_surface=real_browser`，`success_signals` 能证明真实页面交互或真实闭环结果
 - `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同指向当前 latest head 的 fresh rerun，而不是同一 head 的历史 artifact
+- `interaction_locator` 与当前 evidence 场景相匹配，不要求 write-flow 专用占位字段
 - reviewer / guardian 未标记 evidence 缺失、旧 head、非真实执行面或控制面-only 信号
 
 ### blocked

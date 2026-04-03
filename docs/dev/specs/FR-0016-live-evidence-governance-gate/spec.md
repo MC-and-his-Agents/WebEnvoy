@@ -69,7 +69,11 @@
 
 ### 3. PR 元数据契约冻结
 
-- 对所有进入 reviewer / guardian 评估的相关 PR，描述中必须提供结构化 `gate_applicability` 区块。
+- 对以下 PR，描述中必须提供结构化 `gate_applicability` 区块：
+  - 落入 live evidence 专项门禁的 PR
+  - FR-0016 的 formal spec review PR
+  - 基于 FR-0016 结论推进的 governance landing PR
+- 其余明确不在上述范围内的 PR，不要求为了 FR-0016 额外携带 `gate_applicability` 元数据。
 - 对落入专项门禁的 PR，描述中还必须提供结构化 `live_evidence_record` 区块。
 - `gate_applicability` 必须至少包含：
   - `review_lane`
@@ -87,14 +91,14 @@
   - `evidence_collected_at`
   - `artifact_identity`
   - `relay_path`
-  - `editor_locator` 或等价交互定位
+  - `interaction_locator` 或等价交互定位
   - `success_signals`
   - `minimum_replay`
   - `artifact_log_ref`
   - `failure_reason`
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
-- `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，`review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed` 也仍必须作为结构化 PR 元数据提供，供 reviewer / guardian 机器化判定。
+- `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 也仍必须提供 `review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed`，供 reviewer / guardian 机器化判定。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
