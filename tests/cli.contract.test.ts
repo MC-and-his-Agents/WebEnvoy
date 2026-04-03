@@ -3712,7 +3712,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("keeps runtime.ping working through an explicit launcher with profile_dir compatibility", async () => {
+  it("keeps repo-owned explicit launchers on the canonical profile-root env contract", async () => {
     const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-live-"));
     tempDirs.push(runtimeCwd);
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -3746,25 +3746,22 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(install.status).toBe(0);
-
-    const ping = runCli(
-      ["runtime.ping", "--run-id", "run-contract-explicit-host-profile-dir-live-001"],
-      runtimeCwd,
-      {
-        WEBENVOY_NATIVE_HOST_CMD: JSON.stringify(launcherPath)
-      }
+    const launcherRaw = await readFile(launcherPath, "utf8");
+    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
+    const expectedProfileRootSummary = path.join(runtimeCwd, ".webenvoy", "profiles");
+    expect(launcherRaw).toContain(
+      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
     );
+    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
 
-    expect(ping.status).toBe(0);
-    expect(parseSingleJsonLine(ping.stdout)).toMatchObject({
-      command: "runtime.ping",
+    expect(parseSingleJsonLine(install.stdout)).toMatchObject({
+      command: "runtime.install",
       status: "success",
       summary: {
-        message: "pong",
-        transport: {
-          protocol: "webenvoy.native-bridge.v1",
-          relay_path: "host>background>content-script>background>host"
-        }
+        host_command_source: "explicit",
+        profile_root: expectedProfileRootSummary,
+        profile_dir: profileDir,
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
   });

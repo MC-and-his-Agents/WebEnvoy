@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -257,6 +257,56 @@ const ensureBundledNativeHostRuntime = async (channelRoot: string): Promise<stri
 
 export const resolveRepoOwnedNativeHostEntryPath = (): string =>
   resolveCurrentBuildNativeHostRuntimePaths().entryPath;
+
+const resolveComparablePath = async (cwd: string, filePath: string): Promise<string> => {
+  const absolutePath = asAbsolutePath(cwd, filePath);
+  try {
+    return await realpath(absolutePath);
+  } catch {
+    return resolve(absolutePath);
+  }
+};
+
+const resolveExplicitHostEntryCandidate = (tokens: string[]): string | null => {
+  if (tokens.length === 0) {
+    return null;
+  }
+  if (tokens.length === 1) {
+    return tokens[0];
+  }
+
+  for (const token of tokens.slice(1)) {
+    if (!token.startsWith("-")) {
+      return token;
+    }
+  }
+
+  return null;
+};
+
+const shouldExportLegacyProfileDirForExplicitHost = async (input: {
+  command: "runtime.install" | "runtime.uninstall";
+  cwd: string;
+  hostCommand: string;
+  profileDir: string | null | undefined;
+}): Promise<boolean> => {
+  if (!input.profileDir) {
+    return false;
+  }
+
+  const tokens = tokenizeHostCommand(input.command, input.hostCommand);
+  const explicitEntryCandidate = resolveExplicitHostEntryCandidate(tokens);
+  if (!explicitEntryCandidate) {
+    return true;
+  }
+
+  const [candidatePath, repoOwnedEntryPath] = await Promise.all([
+    resolveComparablePath(input.cwd, explicitEntryCandidate),
+    resolveComparablePath(input.cwd, resolveRepoOwnedNativeHostEntryPath())
+  ]);
+
+  return candidatePath !== repoOwnedEntryPath;
+};
 
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
@@ -585,13 +635,24 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     hostCommandSource === "explicit"
       ? input.hostCommand!.trim()
       : `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath!)}`;
+  const legacyProfileDir =
+    hostCommandSource === "explicit"
+      ? await shouldExportLegacyProfileDirForExplicitHost({
+          command: "runtime.install",
+          cwd: resolvedPaths.worktreePath,
+          hostCommand,
+          profileDir
+        })
+        ? profileDir
+        : undefined
+      : undefined;
   await writeFile(
     resolvedPaths.launcherPath,
     buildLauncherScript({
       command: "runtime.install",
       hostCommand,
       profileRoot,
-      legacyProfileDir: hostCommandSource === "explicit" ? profileDir : undefined
+      legacyProfileDir
     }),
     "utf8"
   );
