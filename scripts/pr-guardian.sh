@@ -1661,7 +1661,7 @@ normalize_native_review_result() {
       def has_contrast($sentence):
         ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
       def has_condition($sentence):
-        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
+        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当.+时"));
       def has_followup($sentence):
         ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
@@ -1669,6 +1669,7 @@ normalize_native_review_result() {
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
           or ($lower | test("^no blocking issues found[.!]?$"))
           or ($lower | test("^no blockers(?: found)?[.!]?$"))
@@ -1688,18 +1689,28 @@ normalize_native_review_result() {
           or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+          or ($trimmed | test("^.*未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+          or ($trimmed | test("^.*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
           or ($trimmed | test("^可以批准[。！!]*$"))
           or ($trimmed | test("^建议批准[。！!]*$"))
           or ($trimmed | test("^审查通过[。！!]*$"));
+      def review_context_sentence($sentence):
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | ascii_downcase) as $lower
+        | ($lower | test("^based on the diff against [^,]+, .+review"))
+          or ($lower | test("^reviewed the diff against [^,]+(?:,| and)"))
+          or ($trimmed | test("^审查了相对 .+ 的实际差异[，,、 ]*并对照相关.+检查了.+$"))
+          or ($trimmed | test("^基于相对 .+ 的 diff 审查[，,、 ].+$"));
       def neutral_safe_sentence($sentence):
         ($sentence | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
-          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+          or review_context_sentence($sentence);
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1806,12 +1817,13 @@ normalize_native_review_result() {
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
-      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
+      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当.+时"));
     def strong_safe_sentence($sentence):
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
         or ($lower | test("^no blocking issues found[.!]?$"))
         or ($lower | test("^no blockers(?: found)?[.!]?$"))
@@ -1831,18 +1843,28 @@ normalize_native_review_result() {
         or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
         or ($trimmed | test("^未发现阻断问题[。！!]*$"))
         or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^.*未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+        or ($trimmed | test("^.*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^没有合并阻断[。！!]*$"))
         or ($trimmed | test("^可以合并[。！!]*$"))
         or ($trimmed | test("^可合并[。！!]*$"))
         or ($trimmed | test("^可以批准[。！!]*$"))
         or ($trimmed | test("^建议批准[。！!]*$"))
         or ($trimmed | test("^审查通过[。！!]*$"));
+    def review_context_sentence($sentence):
+      ($sentence | trim) as $trimmed
+      | ($trimmed | ascii_downcase) as $lower
+      | ($lower | test("^based on the diff against [^,]+, .+review"))
+        or ($lower | test("^reviewed the diff against [^,]+(?:,| and)"))
+        or ($trimmed | test("^审查了相对 .+ 的实际差异[，,、 ]*并对照相关.+检查了.+$"))
+        or ($trimmed | test("^基于相对 .+ 的 diff 审查[，,、 ].+$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
-        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+        or review_context_sentence($sentence);
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
