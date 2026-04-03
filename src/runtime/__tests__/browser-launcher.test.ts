@@ -280,6 +280,16 @@ describe("browser-launcher", () => {
     expect(versionOutput).toBe("Chromium 146.0.0.0");
   });
 
+  it("resolves preferred browser version truth source from an explicit named browser command", async () => {
+    const commandDir = await createVersionCommand("browser-wrapper", "Chromium 146.0.0.0");
+    process.env.PATH = commandDir;
+    process.env.WEBENVOY_BROWSER_PATH = "browser-wrapper";
+
+    const truthSource = await resolvePreferredBrowserVersionTruthSource();
+    expect(truthSource.executablePath).toBe(join(commandDir, "browser-wrapper"));
+    expect(truthSource.browserVersion).toBe("Chromium 146.0.0.0");
+  });
+
   it("launches browser executable with profile user-data-dir args", async () => {
     const { scriptPath, logPath } = await createMockBrowserExecutable();
     const profileBaseDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-profile-"));
