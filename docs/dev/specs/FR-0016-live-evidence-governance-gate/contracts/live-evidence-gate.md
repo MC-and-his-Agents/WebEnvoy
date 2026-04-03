@@ -148,10 +148,11 @@
 
 约束：
 
-1. `gate_applicability.in_scope=true` 且存在任一 `blocking_reasons` 时，`status` 必须为 `blocked`。
+1. 只要 `blocking_reasons` 非空，`status` 就必须为 `blocked`；不得因为 `gate_applicability.in_scope=false` 而把 `spec_review_not_completed` 等阻断原因降格为 `not_applicable`。
 2. `status=blocked` 时，`closing_semantics` 必须为 `refs_only`，且 `merge_ready=false`。
 3. 只有 `status=ready` 时，`closing_semantics` 才允许为 `fixes_allowed`。
-4. formal spec review 未通过时，治理落库 PR 必须包含 `spec_review_not_completed`。
+4. `status=not_applicable` 时，`blocking_reasons` 必须为空，且 `gate_applicability.in_scope=false`。
+5. formal spec review 未通过时，治理落库 PR 即使 `gate_applicability.in_scope=false`，也必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
 
 ## 兼容性约束
 
