@@ -1,6 +1,6 @@
 import { access, chmod, copyFile, lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "../core/errors.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
@@ -216,34 +216,45 @@ const resolveComparablePath = async (cwd, filePath) => {
         return resolve(absolutePath);
     }
 };
-const resolveExplicitHostEntryCandidate = (tokens) => {
-    if (tokens.length === 0) {
-        return null;
+const NATIVE_HOST_ENTRY_BASENAME = "native-host-entry.js";
+const isEnvironmentAssignmentToken = (token) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+const isManagedNativeHostEntryPath = (entryPath) => {
+    const normalizedEntryPath = resolve(entryPath);
+    if (basename(normalizedEntryPath) !== NATIVE_HOST_ENTRY_BASENAME) {
+        return false;
     }
-    if (tokens.length === 1) {
-        return tokens[0];
+    const nativeMessagingDir = dirname(normalizedEntryPath);
+    if (basename(nativeMessagingDir) !== "native-messaging") {
+        return false;
     }
-    for (const token of tokens.slice(1)) {
-        if (!token.startsWith("-")) {
-            return token;
-        }
+    const runtimeRoot = dirname(nativeMessagingDir);
+    if (basename(runtimeRoot) !== "runtime") {
+        return false;
     }
-    return null;
+    const managedInstall = inspectManagedNativeHostInstall(join(dirname(runtimeRoot), "bin", "detector"));
+    return managedInstall?.runtimeRoot === runtimeRoot;
+};
+const isRepoOwnedNativeHostEntryPath = async (cwd, filePath) => {
+    const [candidatePath, repoOwnedEntryPath] = await Promise.all([
+        resolveComparablePath(cwd, filePath),
+        resolveComparablePath(cwd, resolveRepoOwnedNativeHostEntryPath())
+    ]);
+    return candidatePath === repoOwnedEntryPath || isManagedNativeHostEntryPath(candidatePath);
 };
 const shouldExportLegacyProfileDirForExplicitHost = async (input) => {
     if (!input.profileDir) {
         return false;
     }
     const tokens = tokenizeHostCommand(input.command, input.hostCommand);
-    const explicitEntryCandidate = resolveExplicitHostEntryCandidate(tokens);
-    if (!explicitEntryCandidate) {
-        return true;
+    for (const token of tokens) {
+        if (token.startsWith("-") || isEnvironmentAssignmentToken(token)) {
+            continue;
+        }
+        if (await isRepoOwnedNativeHostEntryPath(input.cwd, token)) {
+            return false;
+        }
     }
-    const [candidatePath, repoOwnedEntryPath] = await Promise.all([
-        resolveComparablePath(input.cwd, explicitEntryCandidate),
-        resolveComparablePath(input.cwd, resolveRepoOwnedNativeHostEntryPath())
-    ]);
-    return candidatePath !== repoOwnedEntryPath;
+    return true;
 };
 export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 export const resolveProfileRoot = (cwd) => resolve(cwd, ".webenvoy", "profiles");
@@ -489,7 +500,9 @@ export const installNativeHost = async (input) => {
         allowed_origins: [allowedOrigin]
     };
     await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    if (previousManagedInstall && previousManagedInstall.channelRoot !== resolvedPaths.channelRoot) {
+    if (previousManagedInstall &&
+        normalizePathForBoundaryCheck(previousManagedInstall.channelRoot) !==
+            normalizePathForBoundaryCheck(resolvedPaths.channelRoot)) {
         await rm(previousManagedInstall.channelRoot, { recursive: true, force: true });
     }
     if (previousLegacyLauncherPath) {
