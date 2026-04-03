@@ -589,62 +589,329 @@ const commandTextReferencesRepoOwnedNativeHost = async (input: {
   return false;
 };
 
-const parseLiteralJavascriptAssignment = (
+const stripTrailingJavascriptPunctuation = (value: string): string => value.trim().replace(/[;,]+$/g, "");
+
+const stripBalancedOuterParentheses = (value: string): string => {
+  let current = value.trim();
+  while (current.startsWith("(") && current.endsWith(")")) {
+    let depth = 0;
+    let quote: "'" | '"' | "`" | null = null;
+    let escaped = false;
+    let isBalanced = true;
+
+    for (let index = 0; index < current.length; index += 1) {
+      const char = current[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote) {
+        if (char === "\\") {
+          escaped = true;
+        } else if (char === quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (char === "'" || char === '"' || char === "`") {
+        quote = char;
+        continue;
+      }
+      if (char === "(") {
+        depth += 1;
+        continue;
+      }
+      if (char === ")") {
+        depth -= 1;
+        if (depth === 0 && index !== current.length - 1) {
+          isBalanced = false;
+          break;
+        }
+      }
+    }
+
+    if (!isBalanced || depth !== 0) {
+      break;
+    }
+
+    current = current.slice(1, -1).trim();
+  }
+
+  return current;
+};
+
+const splitTopLevelJavascriptExpressions = (text: string): string[] => {
+  const expressions: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | "`" | null = null;
+  let escaped = false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (quote) {
+      current += char;
+      if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (char === "(") {
+      parenDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === ")") {
+      parenDepth -= 1;
+      current += char;
+      continue;
+    }
+    if (char === "[") {
+      bracketDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === "]") {
+      bracketDepth -= 1;
+      current += char;
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      current += char;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth -= 1;
+      current += char;
+      continue;
+    }
+
+    if (char === "," && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      if (current.trim().length > 0) {
+        expressions.push(current.trim());
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim().length > 0) {
+    expressions.push(current.trim());
+  }
+
+  return expressions;
+};
+
+const parseJavascriptAssignmentExpression = (
   line: string
 ): {
   name: string;
-  value: string;
+  expression: string;
 } | null => {
-  const match = line.trim().match(/^(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(["'`])([^"'`$]*)\2\s*;?$/);
+  const match = line.trim().match(/^(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+?)\s*;?$/);
   if (!match) {
     return null;
   }
 
   return {
     name: match[1],
-    value: match[3]
+    expression: match[2]
   };
 };
 
-const resolveJavascriptExpressionCandidate = (
+const resolveJavascriptPathPart = (
   expression: string,
-  variables: Map<string, string>
+  variables: Map<string, string>,
+  currentScriptDir: string
 ): string | null => {
-  const trimmed = expression.trim().replace(/[),;\]]+$/g, "");
+  const trimmed = stripBalancedOuterParentheses(stripTrailingJavascriptPunctuation(expression));
+  if (trimmed === "__dirname" || trimmed === "import.meta.dirname" || trimmed === "dirname(fileURLToPath(import.meta.url))") {
+    return currentScriptDir;
+  }
+
   const literalMatch = trimmed.match(/^(["'`])([^"'`$]*)\1$/);
   if (literalMatch) {
     return literalMatch[2];
   }
+
   return variables.get(trimmed) ?? null;
 };
 
-const extractJavascriptExecutionCandidates = (line: string, variables: Map<string, string>): string[] => {
+const resolveJavascriptExpressionCandidates = (
+  expression: string,
+  variables: Map<string, string>,
+  currentScriptDir: string
+): string[] => {
+  const trimmed = stripBalancedOuterParentheses(stripTrailingJavascriptPunctuation(expression));
+  const directPart = resolveJavascriptPathPart(trimmed, variables, currentScriptDir);
+  if (directPart) {
+    return [directPart];
+  }
+
+  const fileUrlToPathMatch = trimmed.match(/^fileURLToPath\((.+)\)$/);
+  if (fileUrlToPathMatch) {
+    return resolveJavascriptExpressionCandidates(fileUrlToPathMatch[1], variables, currentScriptDir);
+  }
+
+  const newUrlMatch = trimmed.match(/^new URL\((.+)\)$/);
+  if (newUrlMatch) {
+    const args = splitTopLevelJavascriptExpressions(newUrlMatch[1]);
+    if (args.length >= 2 && args[1].trim() === "import.meta.url") {
+      return resolveJavascriptExpressionCandidates(args[0], variables, currentScriptDir).map((candidate) =>
+        asAbsolutePath(currentScriptDir, candidate)
+      );
+    }
+  }
+
+  const pathCallMatch = trimmed.match(/^(?:path\.)?(join|resolve)\((.+)\)$/);
+  if (pathCallMatch) {
+    const [, method, rawArgs] = pathCallMatch;
+    const args = splitTopLevelJavascriptExpressions(rawArgs);
+    const parts: string[] = [];
+    for (const arg of args) {
+      const resolvedPart =
+        resolveJavascriptPathPart(arg, variables, currentScriptDir) ??
+        (() => {
+          const nestedCandidates = resolveJavascriptExpressionCandidates(arg, variables, currentScriptDir);
+          return nestedCandidates.length === 1 ? nestedCandidates[0] : null;
+        })();
+      if (!resolvedPart) {
+        return [];
+      }
+      parts.push(resolvedPart);
+    }
+    return [method === "resolve" ? resolve(...parts) : join(...parts)];
+  }
+
+  return [];
+};
+
+const extractJavascriptCallArguments = (
+  line: string,
+  calleePattern: RegExp
+): string[] | null => {
+  const match = calleePattern.exec(line);
+  if (!match || typeof match.index !== "number") {
+    return null;
+  }
+
+  const openParenIndex = line.indexOf("(", match.index);
+  if (openParenIndex < 0) {
+    return null;
+  }
+
+  let quote: "'" | '"' | "`" | null = null;
+  let escaped = false;
+  let depth = 0;
+  let endIndex = -1;
+
+  for (let index = openParenIndex; index < line.length; index += 1) {
+    const char = line[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (quote) {
+      if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        endIndex = index;
+        break;
+      }
+    }
+  }
+
+  if (endIndex < 0) {
+    return null;
+  }
+
+  return splitTopLevelJavascriptExpressions(line.slice(openParenIndex + 1, endIndex));
+};
+
+const extractJavascriptArrayItems = (expression: string): string[] => {
+  const trimmed = stripBalancedOuterParentheses(stripTrailingJavascriptPunctuation(expression));
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return [];
+  }
+
+  return splitTopLevelJavascriptExpressions(trimmed.slice(1, -1)).filter((item) => !item.startsWith("..."));
+};
+
+const extractJavascriptExecutionCandidates = (
+  line: string,
+  variables: Map<string, string>,
+  currentScriptDir: string
+): string[] => {
   const candidates = new Set<string>();
   const addExpression = (expression: string | undefined) => {
     if (!expression) {
       return;
     }
-    const resolved = resolveJavascriptExpressionCandidate(expression, variables);
-    if (resolved) {
+    for (const resolved of resolveJavascriptExpressionCandidates(expression, variables, currentScriptDir)) {
       candidates.add(resolved);
     }
   };
 
-  const importFromMatch = line.match(/\bimport\s+.+?\s+from\s+((["'`])[^"'`$]+\2)/);
+  const importFromMatch = line.match(/\bimport\s+.+?\s+from\s+(.+?)\s*;?$/);
   addExpression(importFromMatch?.[1]);
 
-  for (const match of line.matchAll(/\b(?:await\s+)?import\(\s*([^)]+?)\s*\)/g)) {
-    addExpression(match[1]);
-  }
-  for (const match of line.matchAll(/\brequire\(\s*([^)]+?)\s*\)/g)) {
-    addExpression(match[1]);
+  const dynamicImportArgs = extractJavascriptCallArguments(line, /\b(?:await\s+)?import\s*\(/);
+  if (dynamicImportArgs && dynamicImportArgs.length > 0) {
+    addExpression(dynamicImportArgs[0]);
   }
 
-  if (/\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\(/.test(line)) {
-    for (const match of line.matchAll(/(["'`])([^"'`$]+)\1|\b([A-Za-z_$][A-Za-z0-9_$]*)\b/g)) {
-      const expression =
-        typeof match[3] === "string" && match[3].length > 0 ? match[3] : `${match[1]}${match[2]}${match[1]}`;
-      addExpression(expression);
+  const requireArgs = extractJavascriptCallArguments(line, /\brequire\s*\(/);
+  if (requireArgs && requireArgs.length > 0) {
+    addExpression(requireArgs[0]);
+  }
+
+  const forkArgs = extractJavascriptCallArguments(line, /\bfork\s*\(/);
+  if (forkArgs && forkArgs.length > 0) {
+    addExpression(forkArgs[0]);
+  }
+
+  const spawnArgs = extractJavascriptCallArguments(line, /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(/);
+  if (spawnArgs) {
+    addExpression(spawnArgs[0]);
+    if (spawnArgs.length > 1) {
+      for (const item of extractJavascriptArrayItems(spawnArgs[1])) {
+        addExpression(item);
+      }
     }
   }
 
@@ -665,12 +932,19 @@ const javascriptTextReferencesRepoOwnedNativeHost = async (input: {
       continue;
     }
 
-    const assignment = parseLiteralJavascriptAssignment(line);
+    const assignment = parseJavascriptAssignmentExpression(line);
     if (assignment) {
-      variables.set(assignment.name, assignment.value);
+      const resolvedAssignment = resolveJavascriptExpressionCandidates(
+        assignment.expression,
+        variables,
+        input.baseDir
+      );
+      if (resolvedAssignment.length === 1) {
+        variables.set(assignment.name, resolvedAssignment[0]);
+      }
     }
 
-    for (const candidate of extractJavascriptExecutionCandidates(line, variables)) {
+    for (const candidate of extractJavascriptExecutionCandidates(line, variables, input.baseDir)) {
       if (
         await candidatePathReferencesRepoOwnedNativeHost({
           command: input.command,
