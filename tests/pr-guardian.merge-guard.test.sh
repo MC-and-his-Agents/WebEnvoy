@@ -2772,6 +2772,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_request_changes_verdict_when_summary_is_safe() {
+  setup_case_dir "normalize-native-schema-request-changes-safe-summary"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat() {
   setup_case_dir "normalize-native-schema-explanation-caveat"
 
