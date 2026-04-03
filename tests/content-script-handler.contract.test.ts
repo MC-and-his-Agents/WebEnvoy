@@ -704,6 +704,17 @@ describe("content-script handler contract", () => {
     expect(resolved).toEqual(fingerprintContext);
   });
 
+  it("normalizes fingerprint_runtime from command params when fingerprint_context is absent", () => {
+    const fingerprintRuntime = createFingerprintContext();
+    const resolved = resolveFingerprintContextForContract({
+      commandParams: {
+        fingerprint_runtime: fingerprintRuntime
+      },
+      fingerprintContext: null
+    });
+    expect(resolved).toEqual(fingerprintRuntime);
+  });
+
   it("prefers the top-level fingerprintContext over commandParams fallback", () => {
     const directFingerprintContext = createFingerprintContext();
     const fallbackFingerprintContext = {

@@ -129,6 +129,18 @@ const buildFailedFingerprintInjectionContext = (
   };
 };
 
+const hasInstalledFingerprintInjection = (
+  fingerprintRuntime: FingerprintRuntimeContext
+): boolean => {
+  const existingInjection = asRecord(
+    (fingerprintRuntime as unknown as Record<string, unknown>).injection
+  );
+  return (
+    existingInjection?.installed === true &&
+    asStringArray(existingInjection.missing_required_patches).length === 0
+  );
+};
+
 const resolveMissingRequiredFingerprintPatches = (
   fingerprintRuntime: Record<string, unknown>
 ): string[] => {
@@ -496,6 +508,21 @@ const resolveRequiredFingerprintPatches = (
 ): string[] =>
   asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
 
+const installFingerprintRuntimeWithVerification = async (
+  fingerprintRuntime: FingerprintRuntimeContext
+): Promise<Record<string, unknown>> => {
+  const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+  const preInstallAudioSample = requiredPatches.includes("audio_context")
+    ? await probeAudioFirstSample()
+    : null;
+  const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
+  return await verifyFingerprintInstallResult({
+    fingerprintRuntime,
+    installResult: asRecord(installResult),
+    preInstallAudioSample
+  });
+};
+
 const probeAudioFirstSample = async (): Promise<number | null> => {
   const offlineAudioCtor =
     typeof window.OfflineAudioContext === "function"
@@ -525,6 +552,26 @@ const probeAudioFirstSample = async (): Promise<number | null> => {
     return null;
   }
 };
+
+const buildRuntimeBootstrapAckPayload = (input: {
+  version: string;
+  runId: string;
+  runtimeContextId: string;
+  profile: string;
+  attested: boolean;
+  runtimeWithInjection: Record<string, unknown> | null;
+}): Record<string, unknown> => ({
+  method: "runtime.bootstrap.ack",
+  result: {
+    version: input.version,
+    run_id: input.runId,
+    runtime_context_id: input.runtimeContextId,
+    profile: input.profile,
+    status: input.attested ? "ready" : "pending"
+  },
+  runtime_bootstrap_attested: input.attested,
+  ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
+});
 
 const probeBatteryApi = async (): Promise<boolean> => {
   const getBattery = (window.navigator as Navigator & { getBattery?: () => Promise<unknown> })
@@ -766,27 +813,12 @@ export class ContentScriptHandler {
     if (!fingerprintRuntime) {
       return null;
     }
-    const existingInjection = asRecord(
-      (fingerprintRuntime as unknown as Record<string, unknown>).injection
-    );
-    if (
-      existingInjection?.installed === true &&
-      asStringArray(existingInjection.missing_required_patches).length === 0
-    ) {
+    if (hasInstalledFingerprintInjection(fingerprintRuntime)) {
       return fingerprintRuntime as unknown as Record<string, unknown>;
     }
 
     try {
-      const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
-      const preInstallAudioSample = requiredPatches.includes("audio_context")
-        ? await probeAudioFirstSample()
-        : null;
-      const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
-      const verifiedInjection = await verifyFingerprintInstallResult({
-        fingerprintRuntime,
-        installResult: asRecord(installResult),
-        preInstallAudioSample
-      });
+      const verifiedInjection = await installFingerprintRuntimeWithVerification(fingerprintRuntime);
       return {
         ...fingerprintRuntime,
         injection: verifiedInjection
@@ -876,18 +908,14 @@ export class ContentScriptHandler {
         );
     const injection = asRecord(runtimeWithInjection?.injection);
     const attested = injection?.installed === true;
-    const ackPayload = {
-      method: "runtime.bootstrap.ack",
-      result: {
-        version,
-        run_id: runId,
-        runtime_context_id: runtimeContextId,
-        profile,
-        status: attested ? "ready" : "pending"
-      },
-      runtime_bootstrap_attested: attested,
-      ...(runtimeWithInjection ? { fingerprint_runtime: runtimeWithInjection } : {})
-    };
+    const ackPayload = buildRuntimeBootstrapAckPayload({
+      version,
+      runId,
+      runtimeContextId,
+      profile,
+      attested,
+      runtimeWithInjection
+    });
     if (!attested) {
       this.#emit({
         kind: "result",
