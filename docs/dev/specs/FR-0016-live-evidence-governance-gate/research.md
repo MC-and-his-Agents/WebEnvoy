@@ -31,6 +31,7 @@
   - #322 最新 guardian 继续指出：仅靠作者自报 `review_lane` 仍可让治理落库 PR 伪装成 `general_pr`，需要冻结可校验的 `governance_scope_targets`
   - #322 最新 guardian 继续指出：formal spec review PR 与治理落库目标文件重新混线时缺少结构化 blocker，且 formal spec lane 仍需禁止 `Fixes`
   - #322 最新 guardian 继续指出：lane 判定仍需独立于作者自报元数据存在；formal spec lane 也必须强制 `Refs`，不能退成 `n_a`
+  - #322 最新 guardian 继续指出：若只按五个治理文件路径命中就判成 `governance_landing_pr`，会把未来无关治理修订误吸进 FR-0016 专项门禁
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -101,6 +102,7 @@
 | U8 | `governance_landing_pr` 必须通过 `governance_scope_targets` 与实际变更目标文件共同校验，不能只靠作者自报 `review_lane` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若没有结构化目标文件集合，治理落库 lane 仍可被自报 `general_pr` 绕过 |
 | U9 | formal spec review PR 与治理落库文件重新混线时必须有结构化 blocker，且 formal spec lane 不得使用 `Fixes` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少 `mixed_spec_and_governance_scope` 与 lane-specific closing semantics，split 规则仍会被实现层绕过 |
 | U10 | lane 判定必须先消费独立的 `classification_scope`，且 formal spec lane 必须强制 `Refs` 而不是 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若仍要先相信作者自报 `review_lane`，或允许 formal spec lane 走 `n_a`，就会继续和仓库 merge 元数据基线冲突 |
+| U11 | `governance_landing_pr` 判定不能只靠五个治理目标文件路径命中；还必须同时命中 FR-0016 的 `#310` issue 上下文 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若仅按路径命中分类，就会把未来其他治理文案修订误吸进 FR-0016 专项门禁，违背“非 repo-wide 门禁”的非目标 |
 
 ## Gate Status
 
