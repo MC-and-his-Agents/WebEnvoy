@@ -26,6 +26,7 @@
   - #322 第一轮 guardian 又指出 contract 兼容规则不能只保护这两个核心字段，必须把已冻结最低字段全集都设为不可删减
   - #322 最新 guardian 又指出：仅靠 `latest_head_sha` + 自由文本 `artifact_log_ref` 仍无法区分“当前 head fresh rerun”和“同一 head 的历史 artifact”
   - #322 最新 guardian 还指出：`spec_review_not_completed` 需要 contract 内部可机器判定的治理落库 lane，不能靠 PR 标题或路径猜测
+  - #322 最新 guardian 继续指出：若 PR 侧元数据没有显式承载 `gate_applicability`，治理落库 PR 仍会被迫回退到标题/路径 heuristics
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -91,6 +92,7 @@
 | U3 | `#310` 需要 formal spec review | `#311` 最新 review + `spec_review.md` | 流程基线对照 | M3 | 99% | 已是当前唯一 blocker |
 | U4 | formal spec review PR 与治理落库 PR 必须拆开 | `docs/dev/AGENTS.md` + `spec_review.md` + `#311` 最新 guardian/review blocker | 高风险事项规则对照 | M3 | 99% | 对 `#310 / FR-0016` 已冻结为必须拆分，不再保留 reviewer 例外口径 |
 | U5 | `spec_review_not_completed` 只能通过 contract 内部结构化 lane 对治理落库 PR 触发，不能依赖外部 heuristics | `#322` guardian review | review blocker 对照 | M3 | 95% | 若不冻结 lane，未来 reviewer / guardian 会各自用标题、路径或人工上下文猜测治理落库身份 |
+| U6 | `gate_applicability` 必须作为 PR 侧结构化元数据显式承载，即使 `live_evidence_record` 为 `N/A` 也不能省略 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只冻结 `live_evidence_record`，治理落库 PR 仍无法机器化表达 `review_lane/in_scope` |
 
 ## Gate Status
 

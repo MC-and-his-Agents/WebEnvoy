@@ -57,10 +57,12 @@
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`
+  - PR 描述中的结构化元数据必须同时承载 `gate_applicability` 与条件化 `live_evidence_record`，不能只冻结后者
   - `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同区分“当前 latest head fresh rerun”与“同一 head 的历史 artifact”
 4. 后续治理落库 PR 的最小验证要求：
   - 根级规范、开发区规范、review 基线与 PR 模板使用同一触发集合
   - guardian 常驻审查摘要 `docs/dev/review/guardian-review-addendum.md` 与上述治理文案使用同一触发集合和阻断口径
+  - 即使 live evidence 区块填写 `N/A`，治理落库 PR 也必须显式提供 `gate_applicability.review_lane/in_scope/trigger_reasons/n_a_allowed`
   - 最低字段清单必须完整覆盖 `contracts/live-evidence-gate.md` 已冻结的全部 `live_evidence_record` 字段，且只可追加、不可删减或降格为可选
   - reviewer / guardian 必须能用 `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 排除“同一 latest head 下复用历史 artifact”的假新鲜复验
   - `N/A` 仅在非适用 PR 中出现
