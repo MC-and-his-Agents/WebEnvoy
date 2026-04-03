@@ -100,7 +100,8 @@
   - live evidence 字段缺失或与 latest head 不一致
 - 对落入专项门禁的 PR：
   - 只有 latest head 的新鲜有效 live evidence 齐备后，才允许使用 `Fixes #...`
-  - 否则必须继续使用 `Refs #...`
+  - 若 latest head 的新鲜有效 live evidence 不足，必须继续使用 `Refs #...`
+  - 若 evidence 已齐备但本次 PR 只阶段性引用 issue、不构成完整关闭，仍可继续使用 `Refs #...`，不得被 live evidence 专项门禁强制改成 `Fixes #...`
   - 只有 reviewer / guardian 未标记 evidence 缺失、失效或边界不符时，才允许进入 `merge-ready`
 
 ### 5. formal spec review 与治理落库 PR 的拆分冻结
