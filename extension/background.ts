@@ -2937,25 +2937,72 @@ class ChromeBackgroundBridge {
     });
   }
 
-  async #buildEditorInputFocusAttestation(tabId: number): Promise<EditorInputFocusAttestation> {
+  async #attachEditorInputDebugger(tabId: number): Promise<boolean> {
     const debuggerApi = this.chromeApi.debugger;
     if (!debuggerApi) {
-      return this.#buildEditorInputFailureAttestation(tabId, "DEBUGGER_ATTACH_FAILED");
+      return false;
     }
 
+    try {
+      await debuggerApi.attach({ tabId }, debuggerProtocolVersion);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #resolveEditorInputAttestationAfterAttach(
+    tabId: number,
+    input: {
+      editableState: "already_ready" | "entered";
+      entryButton: EditorInputProbeTarget | null;
+      editor: EditorInputProbeTarget | null;
+    }
+  ): Promise<EditorInputFocusAttestation> {
+    const { editableState } = input;
+    let entryButton = input.entryButton;
+    let editor = input.editor;
+
+    if (!editor) {
+      return this.#buildEditorInputFailureAttestation(tabId, "EDITOR_ENTRY_NOT_VISIBLE", {
+        editableState,
+        entryButton,
+        editor
+      });
+    }
+
+    await this.#dispatchEditorInputDebuggerClick(tabId, editor);
+    await this.#sleep(50);
+    const finalProbe = await this.#probeEditorInputTargets(tabId);
+    const focusConfirmed = finalProbe?.editorFocused === true;
+    const finalEditor = finalProbe?.editor ?? editor;
+
+    if (!focusConfirmed) {
+      return this.#buildEditorInputFailureAttestation(tabId, "EDITOR_FOCUS_NOT_ATTESTED", {
+        editableState,
+        entryButton,
+        editor: finalEditor
+      });
+    }
+
+    return this.#buildEditorInputSuccessAttestation(tabId, {
+      editableState,
+      entryButton,
+      editor: finalEditor
+    });
+  }
+
+  async #buildEditorInputFocusAttestation(tabId: number): Promise<EditorInputFocusAttestation> {
+    const debuggerApi = this.chromeApi.debugger;
     const initialProbe = await this.#probeEditorInputTargets(tabId);
     if (!initialProbe) {
       return this.#buildEditorInputFailureAttestation(tabId, "DEBUGGER_INTERACTION_FAILED");
     }
     let entryButton = initialProbe.entryButton;
-    let editor = initialProbe.editor;
+    const editor = initialProbe.editor;
     let editableState: "already_ready" | "entered" = "already_ready";
-    let attached = false;
-
-    try {
-      await debuggerApi.attach({ tabId }, debuggerProtocolVersion);
-      attached = true;
-    } catch {
+    const attached = await this.#attachEditorInputDebugger(tabId);
+    if (!attached) {
       return this.#buildEditorInputFailureAttestation(tabId, "DEBUGGER_ATTACH_FAILED", {
         entryButton,
         editor
@@ -2973,7 +3020,7 @@ class ChromeBackgroundBridge {
         await this.#dispatchEditorInputDebuggerClick(tabId, entryButton);
         await this.#sleep(editorInputDebuggerProbeWaitMs);
         const postEntryProbe = await this.#probeEditorInputTargets(tabId);
-        if (!postEntryProbe || !postEntryProbe.editor) {
+        if (!postEntryProbe?.editor) {
           return this.#buildEditorInputFailureAttestation(tabId, "EDITOR_ENTRY_NOT_VISIBLE", {
             entryButton,
             editor
@@ -2981,35 +3028,17 @@ class ChromeBackgroundBridge {
         }
         editableState = "entered";
         entryButton = postEntryProbe.entryButton ?? entryButton;
-        editor = postEntryProbe.editor;
-      }
-
-      if (!editor) {
-        return this.#buildEditorInputFailureAttestation(tabId, "EDITOR_ENTRY_NOT_VISIBLE", {
+        return await this.#resolveEditorInputAttestationAfterAttach(tabId, {
           editableState,
           entryButton,
-          editor
+          editor: postEntryProbe.editor
         });
       }
 
-      await this.#dispatchEditorInputDebuggerClick(tabId, editor);
-      await this.#sleep(50);
-      const finalProbe = await this.#probeEditorInputTargets(tabId);
-      const focusConfirmed = finalProbe?.editorFocused === true;
-      const finalEditor = finalProbe?.editor ?? editor;
-
-      if (!focusConfirmed) {
-        return this.#buildEditorInputFailureAttestation(tabId, "EDITOR_FOCUS_NOT_ATTESTED", {
-          editableState,
-          entryButton,
-          editor: finalEditor
-        });
-      }
-
-      return this.#buildEditorInputSuccessAttestation(tabId, {
+      return await this.#resolveEditorInputAttestationAfterAttach(tabId, {
         editableState,
         entryButton,
-        editor: finalEditor
+        editor
       });
     } catch {
       return this.#buildEditorInputFailureAttestation(tabId, "DEBUGGER_INTERACTION_FAILED", {
@@ -3020,7 +3049,7 @@ class ChromeBackgroundBridge {
     } finally {
       if (attached) {
         try {
-          await debuggerApi.detach({ tabId });
+          await debuggerApi?.detach({ tabId });
         } catch {
           // Swallow detach errors to avoid overriding primary failure semantics.
         }
