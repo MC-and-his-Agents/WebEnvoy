@@ -13,11 +13,14 @@
 - 职责：描述当前 PR 是否落入真实 live evidence 专项门禁，以及 `N/A` 是否允许出现。
 - 关键字段：
   - `review_lane`
+  - `governance_scope_targets`
   - `in_scope`
   - `trigger_reasons`
   - `n_a_allowed`
 - 约束：
   - `review_lane` 必须显式填写，枚举为 `general_pr`、`formal_spec_review_pr`、`governance_landing_pr`。
+  - `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须显式列出 FR-0016 冻结的五个治理落库目标文件；其他 lane 必须为空数组。
+  - reviewer / guardian 若发现 PR 实际变更命中上述任一冻结目标文件，必须按 `governance_landing_pr` 处理，不得被自报 lane 绕过。
   - `in_scope=true` 时，`trigger_reasons` 必须非空，且 `n_a_allowed=false`。
   - `in_scope=false` 时，`trigger_reasons=[]`，且 `n_a_allowed=true`。
   - 只有在 PR 不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；纯文档、纯研究 / spike、formal spec / design input 不是无条件豁免项。

@@ -77,6 +77,7 @@
 - 对落入专项门禁的 PR，描述中还必须提供结构化 `live_evidence_record` 区块。
 - `gate_applicability` 必须至少包含：
   - `review_lane`
+  - `governance_scope_targets`
   - `in_scope`
   - `trigger_reasons`
   - `n_a_allowed`
@@ -99,6 +100,7 @@
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
 - `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 也仍必须提供 `review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed`，供 reviewer / guardian 机器化判定。
+- 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 若发现实际变更命中这些目标文件，就必须按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
@@ -150,7 +152,8 @@ And 不得因为“没有使用 Fixes”而规避 live evidence 披露
 Given 一个 PR 只起草 formal spec 或其他治理前置输入
 And 它不以真实 live evidence 作为关闭、完成或 merge 放行依据
 When 作者填写 PR 模板
-Then Live Evidence 区块可以整体填写 `N/A`
+Then `live_evidence_record` 区块可以整体填写 `N/A`
+And `gate_applicability` 仍必须以结构化元数据显式提供
 And reviewer / guardian 不得错误要求其补 runtime live evidence
 
 ### 场景 3：stub 或控制面信号不能被当作真实闭环证据

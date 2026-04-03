@@ -31,6 +31,7 @@
 {
   "gate_applicability": {
     "review_lane": "general_pr",
+    "governance_scope_targets": [],
     "in_scope": true,
     "trigger_reasons": [
       "merge_unblock_by_live_evidence",
@@ -47,6 +48,7 @@
 {
   "gate_applicability": {
     "review_lane": "formal_spec_review_pr",
+    "governance_scope_targets": [],
     "in_scope": false,
     "trigger_reasons": [],
     "n_a_allowed": true
@@ -69,14 +71,24 @@
 - `formal_spec_review_pr`
 - `governance_landing_pr`
 
+`governance_scope_targets` 仅在 `review_lane=governance_landing_pr` 时允许非空，目标集合冻结为：
+
+- `AGENTS.md`
+- `docs/dev/AGENTS.md`
+- `code_review.md`
+- `docs/dev/review/guardian-review-addendum.md`
+- `.github/PULL_REQUEST_TEMPLATE.md`
+
 约束：
 
 1. `review_lane` 必须显式填写，不得依赖 PR 标题、路径或人工上下文推断。
-2. `in_scope=true` 时，`trigger_reasons` 必须非空。
-3. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
-4. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
-5. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
-6. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
+2. `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须非空，且只能由上述五个冻结目标文件组成；其他 lane 必须填写空数组。
+3. 若 PR 实际变更命中 `governance_scope_targets` 中任一冻结目标文件，reviewer / guardian 必须按 `governance_landing_pr` 处理，不得被作者自报的其他 lane 覆盖。
+4. `in_scope=true` 时，`trigger_reasons` 必须非空。
+5. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
+6. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
+7. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
+8. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
 
 ## live_evidence_record
 

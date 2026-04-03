@@ -7,6 +7,7 @@
   - “以 live evidence 请求 merge 放行”再次被遗漏
   - PR 侧元数据没有稳定承载 `gate_applicability`，导致 reviewer / guardian 被迫回退到标题、路径或人工上下文 heuristics
   - `gate_applicability` 被错误扩成所有 reviewed PR 的 repo-wide 必填元数据
+  - `governance_landing_pr` 只靠作者自报 `review_lane`，没有冻结可校验的目标文件集合
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -15,6 +16,7 @@
   - formal contract 中显式冻结 `review_lane`
   - formal spec 明确要求 PR 描述显式承载 `gate_applicability`
   - formal spec 明确限制 `gate_applicability` 只作用于专项门禁 PR、formal spec review PR 与 governance landing PR
+  - formal contract 中显式冻结 `governance_scope_targets`，并要求 reviewer / guardian 用其校验治理落库 lane
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
