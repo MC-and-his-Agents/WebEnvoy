@@ -200,6 +200,84 @@ spec review 的执行约束：
 
 - 实现闭环并在本 PR 合入后应关闭 issue：使用 `Fixes #<issue-number>`
 - Spike、规约、研究或仅部分完成闭环：使用 `Refs #<issue-number>`，不要提前关闭
+- 若 PR 声称完成真实 runtime / 真实页面交互 / 真实 live read-write 闭环，或把 live evidence 作为关闭 issue、判定“已完成”或请求 merge 放行的核心依据，只有 latest head 上的新鲜有效 live evidence 已齐备，才允许使用 `Fixes #<issue-number>`；否则一律使用 `Refs #<issue-number>`
+
+## 真实 Live Evidence 专项门禁
+
+以下门禁不是所有 PR 的统一要求，只适用于满足任一条件的 PR：
+
+- 声称完成 official runtime 闭环
+- 声称完成真实页面交互或真实 live read/write 闭环
+- 把 live evidence 作为关闭 issue、判定“已完成”或请求 merge 放行的核心依据
+
+以下 PR 不适用本专项门禁：
+
+- 纯文档、纯重构、普通单测补强
+- 非 live 路径的小修复
+- 不把真实 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
+- 不把真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec review PR 或治理前置 PR
+
+当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库 PR 时，PR 描述必须显式提供结构化 `gate_applicability` 区块，至少包含：
+
+- `review_lane`
+- `governance_scope_targets`
+- `in_scope`
+- `trigger_reasons`
+- `n_a_allowed`
+
+其中，`review_lane=governance_landing_pr` 不是作者自报即可成立；reviewer / guardian 必须同时确认：
+
+- PR 元数据显式引用 `#310`
+- PR 实际变更精确等于以下五处冻结治理落库目标文件：
+  - `AGENTS.md`
+  - `docs/dev/AGENTS.md`
+  - `code_review.md`
+  - `docs/dev/review/guardian-review-addendum.md`
+  - `.github/PULL_REQUEST_TEMPLATE.md`
+- 若只命中上述目标文件子集，或在五处目标文件之外再夹带其他实质性改动，必须直接阻断，不得退回普通 PR
+
+若 PR 实际变更命中 FR-0016 `spec_contract_targets` 中任一正式契约文件，或命中 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又命中任一治理落库目标文件，必须按 `mixed_spec_and_governance_scope` 直接阻断，不得继续占用 `formal_spec_review_pr` 或 `governance_landing_pr` lane。
+
+只有当 `gate_applicability.in_scope=true` 时，才必须进一步提供完整 `live_evidence_record`；若 `in_scope=false && n_a_allowed=true`，`live_evidence_record` 才允许整块写 `N/A` 或 `null`。
+
+专项门禁下，有效证据必须同时满足：
+
+- 来自当前 PR latest head 的 fresh rerun；历史 run、旧 head、旧 artifact 或同一 head 的历史 artifact 都不能替代当前复验
+- 来自真实浏览器执行面，而不是 repo-owned native host stub、本地 fake host 或其他仓库自带替身路径
+- 能证明真实页面交互或真实闭环结果，而不只是控制面存活
+
+专项门禁下，以下证据默认无效，不能用于放行：
+
+- 仅有 `runtime.ping` 成功
+- 仅有 `runtime.bootstrap` ack
+- 仅能证明 stub/fake host 成功、但不能证明 official Chrome 或真实浏览器执行面成功
+- 旧 head、旧 run、旧日志、旧 artifact，或同一 latest head 下的历史 artifact 被直接复用为当前 evidence
+
+落入专项门禁的 PR 的描述必须显式提供 `live_evidence_record` 区块，至少包含：
+
+- `latest_head_sha`
+- `profile`
+- `browser_channel`
+- `execution_surface`
+- `page_url`
+- `target_tab_id`
+- `run_id`
+- `evidence_collected_at`
+- `artifact_identity`
+- `relay_path`
+- `interaction_locator` 或等价交互定位
+- `success_signals`
+- `minimum_replay`
+- `artifact_log_ref`
+- `failure_reason`
+- `blocker_level`
+
+补充约束：
+
+- `execution_surface=real_browser` 才可能成为有效 live evidence
+- `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun
+- 成功态必须把 `failure_reason` 与 `blocker_level` 写为 `N/A`
+- 失败或阻断态必须显式填写失败原因与阻断层级，不得用 `N/A` 规避披露
 
 ## Review 与合并底线
 
@@ -214,6 +292,8 @@ spec review 的执行约束：
 3. merge 前必须同时满足：
    - latest guardian verdict 为 `APPROVE`
    - GitHub checks 全绿（不是只看 required checks）
+   - 若 PR 属于 `governance_landing_pr`，则 formal spec review 已先通过；未通过前必须按 `spec_review_not_completed` 继续阻断，不得因为 `in_scope=false` 或 `live_evidence_record=N/A` 提前放行
+   - 若 PR 落入“真实 Live Evidence 专项门禁”，则 latest head 上的新鲜有效 live evidence 已在 PR 中完整给出，且 reviewer / guardian 未标记 evidence 缺失、失效或边界不符
 4. 在 private free repo 下，不得把 GitHub Required Checks 视为唯一硬门禁；必须保留 guardian + GitHub checks 双门禁。
 
 ## Review guidelines
@@ -227,6 +307,9 @@ spec review 的执行约束：
 - 如果对应 GitHub Issue 已存在，PR 描述应显式包含正确的关闭语义：
   - 完整实现闭环使用 `Fixes #<issue-number>`
   - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
+- 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head fresh rerun、证据来自 stub/fake host、只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号，或缺少必需的 `gate_applicability` / `live_evidence_record` 元数据时，reviewer 必须直接阻断，不按“建议补充”处理
+- 若 PR 自报 `governance_landing_pr`，但未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过，reviewer 必须直接阻断，不得按普通 PR 放行
+- 若同一 PR 同时触碰 FR-0016 正式契约文件或 `TODO.md` handoff 文件，以及任一治理落库目标文件，reviewer 必须按 `mixed_spec_and_governance_scope` 直接阻断
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责
