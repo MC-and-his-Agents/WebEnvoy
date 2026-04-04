@@ -1606,7 +1606,7 @@ normalize_native_review_result() {
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
-          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing .+ while only extracting (?:them|it) into helpers[.!]?$"))
+          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?!.*(?:based on static reading|static reading|static analysis only))(.+) while only extracting (?:them|it) into helpers[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
@@ -1779,7 +1779,7 @@ normalize_native_review_result() {
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
-          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing .+ while only extracting (?:them|it) into helpers[.!]?$"))
+          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?!.*(?:based on static reading|static reading|static analysis only))(.+) while only extracting (?:them|it) into helpers[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
           or review_context_sentence($sentence);
       def harmless_tail_sentence($sentence):
@@ -1938,7 +1938,7 @@ normalize_native_review_result() {
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
-        or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing .+ while only extracting (?:them|it) into helpers[.!]?$"))
+        or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?!.*(?:based on static reading|static reading|static analysis only))(.+) while only extracting (?:them|it) into helpers[.!]?$"))
         or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
         or review_context_sentence($sentence);
     def harmless_tail_sentence($sentence):
