@@ -58,6 +58,9 @@
   - `mixed_spec_and_governance_scope` 只针对 `spec_contract_targets` 生效，不误伤仓库已允许与落库 PR 同行的纯 `TODO.md` 进度回写
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
   - `governance_landing_pr` 必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
+  - formal spec review PR、governance landing PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补
+  - `TODO.md` 只有在非语义进度回写时才允许同行；一旦改动准入条件、阻断规则或治理结论，就要回到 formal spec 线
+  - `governance_landing_pr` 必须是精确五文件落库范围，不能夹带其他实质性改动
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`

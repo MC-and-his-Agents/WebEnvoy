@@ -14,6 +14,9 @@
   - `mixed_spec_and_governance_scope` 若覆盖整个 spec 套件目录，会误伤仓库已允许同行的纯 `TODO.md` 进度回写
   - `formal_spec_review_pr` 若继续按整棵 spec 目录命中，仍会误伤只同行 `TODO.md` 的治理落库 PR
   - `governance_landing_pr` 若允许部分五文件子集触发，仍会给不完整落库 PR 留下提前关闭 `#310` 的空间
+  - 必需的 `gate_applicability` 元数据若缺失却不显式 blocked，reviewer/guardian 仍可回到启发式放行
+  - `TODO.md` 若被无条件豁免，后续语义改动会绕开 formal spec / mixed-scope 门禁
+  - 治理落库 PR 若允许在五文件之外夹带其他实质性改动，split 规则仍不可机器执行
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -28,6 +31,9 @@
   - formal contract 中显式冻结 `governance_issue_ref=#310`，要求治理落库 lane 只能在“目标文件命中 + issue 上下文命中”时成立
   - formal contract 中显式冻结 `spec_contract_targets`，只把正式契约文件纳入 mixed-scope blocker，排除纯 `TODO.md` 回写
   - formal contract 中显式要求 formal spec lane 只由 `spec_contract_targets` 触发，治理落库 lane 只在完整五文件集合落库时成立
+  - formal contract 中显式冻结 `missing_gate_applicability_metadata` blocker，禁止 reviewer/guardian 以启发式替代必需元数据
+  - formal contract 中显式限定 `TODO.md` 只有非语义进度回写可同行，语义变更仍回 formal spec 线
+  - formal contract 中显式限定治理落库线为精确五文件范围，排除其他实质性夹带改动
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
