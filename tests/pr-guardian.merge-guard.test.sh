@@ -3005,6 +3005,22 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
+test_normalize_native_review_result_accepts_diff_only_guardian_summary_variant() {
+  setup_case_dir "normalize-native-text-diff-only-guardian-summary-variant"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+相对 origin/main 的变更仅扩展了 guardian 对两类中文安全摘要的归一化规则，并补上了对应回归测试。基于当前 diff，未发现会错误放行阻断性评论或引入明显行为回归的可操作问题。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+  assert_file_contains "${result_file}" '"findings":[]'
+}
+
 test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence() {
   setup_case_dir "normalize-native-text-review-context-incomplete-evidence"
 
