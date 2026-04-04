@@ -3021,6 +3021,36 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
+test_normalize_native_review_result_fails_closed_for_arbitrary_merge_base_preface_with_blocker() {
+  setup_case_dir "normalize-native-text-arbitrary-merge-base-preface-with-blocker"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+基于 merge-base `bc253d2f2dee41827a41a516d572eb38d97bb387` 的 diff 审查，这个 PR 仍会把 gate_applicability 缺失视为可合并。未定位到可证实的行为回归。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_behavior_regression_free_phrase_only() {
+  setup_case_dir "normalize-native-text-behavior-regression-free-phrase-only"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+未定位到可证实的行为回归。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence() {
   setup_case_dir "normalize-native-text-review-context-incomplete-evidence"
 
@@ -4270,6 +4300,10 @@ main() {
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
   test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase
+  test_normalize_native_review_result_accepts_merge_base_safe_summary_variant
+  test_normalize_native_review_result_accepts_diff_only_guardian_summary_variant
+  test_normalize_native_review_result_fails_closed_for_arbitrary_merge_base_preface_with_blocker
+  test_normalize_native_review_result_fails_closed_for_behavior_regression_free_phrase_only
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
   test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
   test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary

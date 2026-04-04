@@ -1578,6 +1578,7 @@ normalize_native_review_result() {
           or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
+          or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
           or ($lower | test("^no blocking issues found[.!]?$"))
           or ($lower | test("^no blockers(?: found)?[.!]?$"))
@@ -1597,10 +1598,9 @@ normalize_native_review_result() {
           or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^(?:基于[^。！？!]*[、，, ]|相对[^。！？!]*[、，, ])?(?:未发现|没有发现).*(?:阻断性?问题|阻断问题|足以阻止合并的离散(?:问题|缺陷)|可操作问题)[。！!]*$"))
           or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
           or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^未定位到可证实的行为回归[。！!]*$"))
+          or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1615,8 +1615,7 @@ normalize_native_review_result() {
           or ($lower | test("does not affect .*runtime behavior"))
           or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
-          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+[。！!]*$"))
-          or ($trimmed | test("^相对 .+ 的变更仅.+(?:回归测试|测试).*[。！!]*$"))
+          or ($trimmed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*$"))
           or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
@@ -1774,10 +1773,9 @@ normalize_native_review_result() {
           or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-          or ($trimmed | test("^(?:基于[^。！？!]*[、，, ]|相对[^。！？!]*[、，, ])?(?:未发现|没有发现).*(?:阻断性?问题|阻断问题|足以阻止合并的离散(?:问题|缺陷)|可操作问题)[。！!]*$"))
           or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
           or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^未定位到可证实的行为回归[。！!]*$"))
+          or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1798,8 +1796,7 @@ normalize_native_review_result() {
           or ($lower | test("does not affect .*runtime behavior"))
           or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
-          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+[。！!]*$"))
-          or ($trimmed | test("^相对 .+ 的变更仅.+(?:回归测试|测试).*[。！!]*$"))
+          or ($trimmed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*$"))
           or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"))
           or review_context_sentence($sentence);
       def harmless_tail_sentence($sentence):
@@ -1943,10 +1940,9 @@ normalize_native_review_result() {
         or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-        or ($trimmed | test("^(?:基于[^。！？!]*[、，, ]|相对[^。！？!]*[、，, ])?(?:未发现|没有发现).*(?:阻断性?问题|阻断问题|足以阻止合并的离散(?:问题|缺陷)|可操作问题)[。！!]*$"))
         or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
         or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-        or ($trimmed | test("^未定位到可证实的行为回归[。！!]*$"))
+        or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
         or ($trimmed | test("^没有合并阻断[。！!]*$"))
         or ($trimmed | test("^可以合并[。！!]*$"))
         or ($trimmed | test("^可合并[。！!]*$"))
@@ -1967,8 +1963,7 @@ normalize_native_review_result() {
         or ($lower | test("does not affect .*runtime behavior"))
         or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
         or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
-        or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+[。！!]*$"))
-        or ($trimmed | test("^相对 .+ 的变更仅.+(?:回归测试|测试).*[。！!]*$"))
+        or ($trimmed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*$"))
         or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"))
         or review_context_sentence($sentence);
     def harmless_tail_sentence($sentence):
