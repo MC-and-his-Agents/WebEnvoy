@@ -3214,6 +3214,36 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_fails_closed_for_discrete_merge_blocking_regression_phrase_with_static_reading_caveat() {
+  setup_case_dir "normalize-native-text-discrete-merge-blocking-regression-static-reading-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify a discrete, merge-blocking regression in the PR diff relative to origin/main based on static reading only.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_preserve_summary_with_pending_pass_caveat() {
+  setup_case_dir "normalize-native-text-preserve-summary-pending-pass-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the patch appears to preserve the existing attach logic pending another pass on Windows while only extracting it into helpers. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_accepts_lgtm_phrase() {
   setup_case_dir "normalize-native-text-approve-lgtm"
 
@@ -4223,6 +4253,8 @@ main() {
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
   test_normalize_native_review_result_accepts_concrete_merge_blocking_regression_free_phrase
   test_normalize_native_review_result_accepts_discrete_merge_blocking_regression_free_phrase
+  test_normalize_native_review_result_fails_closed_for_discrete_merge_blocking_regression_phrase_with_static_reading_caveat
+  test_normalize_native_review_result_fails_closed_for_preserve_summary_with_pending_pass_caveat
   test_normalize_native_review_result_accepts_lgtm_phrase
   test_normalize_native_review_result_fails_closed_for_chinese_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_condition
