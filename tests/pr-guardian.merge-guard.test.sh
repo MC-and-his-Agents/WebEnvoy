@@ -2718,6 +2718,23 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_coerces_sparse_guardian_schema_findings() {
+  setup_case_dir "normalize-guardian-schema-sparse-findings"
+
+  local raw_file="${TMP_DIR}/guardian-review.json"
+  local result_file="${TMP_DIR}/normalized-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"Need follow-up before merge.","findings":[{"details":"Missing explicit title and code location."}],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass coerce_review_result_shape "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"title":"Native review finding"'
+  assert_file_contains "${result_file}" '"required_actions":["修复：Native review finding"]'
+}
+
 test_normalize_native_review_result_coerces_stringified_guardian_schema_numbers() {
   setup_case_dir "normalize-guardian-schema-stringified-numbers"
 
@@ -3818,6 +3835,67 @@ EOF
   assert_file_contains "${err_file}" "Codex 审查结果格式化失败"
 }
 
+test_run_codex_review_coerces_sparse_formatter_schema_output() {
+  setup_case_dir "run-review-sparse-formatter-schema"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-654"
+  PR_TITLE="sparse formatter schema"
+  PR_URL="https://example.test/pr/6"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  local native_review_text="${TMP_DIR}/native-review.txt"
+  local formatted_schema_json="${TMP_DIR}/formatted-review.json"
+  local output_sequence_file="${TMP_DIR}/codex-output-sequence.txt"
+  cat > "${native_review_text}" <<'EOF'
+The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+EOF
+  cat > "${formatted_schema_json}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"Need follow-up before merge.","findings":[{"details":"Missing explicit title and location."}],"required_actions":[]}
+EOF
+  printf '%s\n%s\n' "${native_review_text}" "${formatted_schema_json}" > "${output_sequence_file}"
+  export MOCK_CODEX_OUTPUT_SEQUENCE_FILE="${output_sequence_file}"
+  unset MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 6
+  assert_pass validate_review_result_shape "${RESULT_FILE}"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${RESULT_FILE}" '"title":"Native review finding"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: REQUEST_CHANGES"
+}
+
 test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
   setup_case_dir "main-review-mode"
 
@@ -4395,6 +4473,7 @@ main() {
   test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_coerces_stringified_legacy_schema_numbers
   test_normalize_native_review_result_accepts_guardian_schema_json
+  test_normalize_native_review_result_coerces_sparse_guardian_schema_findings
   test_normalize_native_review_result_coerces_stringified_guardian_schema_numbers
   test_normalize_native_review_result_fails_closed_for_inconsistent_guardian_schema_json
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
@@ -4451,6 +4530,7 @@ main() {
   test_run_codex_review_formats_plain_text_native_review_output_to_schema
   test_run_codex_review_fails_closed_when_native_review_command_fails
   test_run_codex_review_fails_closed_when_formatter_command_fails
+  test_run_codex_review_coerces_sparse_formatter_schema_output
   test_main_review_mode_does_not_fail_on_mode_expansion_after_summary
   test_fetch_issue_summary_fails_closed_when_issue_lookup_fails
 
