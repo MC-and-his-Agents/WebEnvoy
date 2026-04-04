@@ -315,6 +315,7 @@ const XHS_SCOPE_CONTEXT = {
   domain_mixing_forbidden: true
 } as const;
 const XHS_GATE_CONTRACT_MARKERS = {
+  conditional_actions: "conditional_actions",
   recovery_requirements: "recovery_requirements",
   session_rhythm_policy: "session_rhythm_policy",
   session_rhythm: "session_rhythm"
