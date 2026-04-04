@@ -2265,10 +2265,122 @@ add_fallback_finding_for_unstructured_rejection() {
   mv "${temp_file}" "${result_file}"
 }
 
+coerce_review_result_shape() {
+  local result_file="$1"
+  local fallback_path=""
+  local temp_file="${result_file}.tmp"
+
+  fallback_path="$(first_changed_file_absolute_path)"
+
+  jq -c \
+    --arg fallback_path "${fallback_path}" \
+    '
+      def trim_text:
+        tostring | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+      def to_int_or($default):
+        if . == null then $default
+        elif type == "number" then floor
+        elif type == "string" and test("^[0-9]+$") then tonumber
+        else $default
+        end;
+      def to_number_or($default):
+        if . == null then $default
+        elif type == "number" then .
+        elif type == "string" and test("^[0-9]+(?:\\.[0-9]+)?$") then tonumber
+        else $default
+        end;
+      def to_bool_or($default):
+        if type == "boolean" then .
+        elif type == "string" then
+          if ascii_downcase == "true" then true
+          elif ascii_downcase == "false" then false
+          else $default
+          end
+        else $default
+        end;
+      def priority_num:
+        if . == 0 or . == "0" or . == "P0" or . == "critical" then 0
+        elif . == 1 or . == "1" or . == "P1" or . == "high" then 1
+        elif . == 2 or . == "2" or . == "P2" or . == "medium" then 2
+        else 3
+        end;
+      def severity_for($priority):
+        if $priority == 0 then "critical"
+        elif $priority == 1 then "high"
+        elif $priority == 2 then "medium"
+        else "low"
+        end;
+      def normalized_findings($entries):
+        ($entries // [])
+        | if type == "array" then . else [] end
+        | map(
+            . as $entry
+            | (($entry.priority // $entry.severity // 2) | priority_num | to_int_or(2)) as $priority
+            | (($entry.title // $entry.summary // $entry.message // $entry.details // "Native review finding") | trim_text) as $title
+            | (($entry.details // $entry.body // $entry.summary // $entry.message // $title) | trim_text) as $details
+            | ((($entry.code_location.absolute_file_path // $entry.absolute_file_path // "") | trim_text) as $path
+              | if ($path | length) > 0 then $path else $fallback_path end) as $absolute_path
+            | ((($entry.code_location.line_range.start // $entry.line // 1) | to_int_or(1))) as $line_start
+            | {
+                severity: severity_for($priority),
+                title: (if ($title | length) > 0 then $title else "Native review finding" end),
+                details: (if ($details | length) > 0 then $details else (if ($title | length) > 0 then $title else "Native review finding" end) end),
+                code_location: {
+                  absolute_file_path: $absolute_path,
+                  line_range: {
+                    start: $line_start,
+                    end: (($entry.code_location.line_range.end // $entry.end_line // $line_start) | to_int_or($line_start))
+                  }
+                },
+                confidence_score: (($entry.confidence_score // $entry.confidence // 0.5) | to_number_or(0.5)),
+                priority: $priority
+              }
+          );
+      (normalized_findings(.findings)) as $findings
+      | ((.required_actions // [])
+        | if type == "array" then . else [] end
+        | map(trim_text)
+        | map(select(length > 0 and . != "修复：" and . != "修复:"))
+        | unique) as $required_actions
+      | ((.summary // "") | trim_text) as $summary
+      | ((.verdict // "") | trim_text) as $raw_verdict
+      | ((.safe_to_merge // false) | to_bool_or(false)) as $raw_safe
+      | ($raw_verdict == "APPROVE" and ($findings | length) == 0 and ($required_actions | length) == 0 and $raw_safe) as $can_approve
+      | {
+          verdict: (if $can_approve then "APPROVE" else "REQUEST_CHANGES" end),
+          safe_to_merge: $can_approve,
+          summary: (
+            if ($summary | length) > 0 then
+              $summary
+            elif $can_approve then
+              "未发现新的阻断性问题。"
+            else
+              "发现会阻止当前 PR 合并的阻断性问题。"
+            end
+          ),
+          findings: $findings,
+          required_actions: (
+            if ($required_actions | length) > 0 then
+              $required_actions
+            elif $can_approve then
+              []
+            elif ($findings | length) > 0 then
+              ($findings | map("修复：" + .title) | unique)
+            else
+              ["澄清 native review 结论"]
+            end
+          )
+        }
+    ' "${result_file}" > "${temp_file}" \
+    || die "guardian 审查结果修复失败。"
+
+  mv "${temp_file}" "${result_file}"
+}
+
 validate_review_result_shape() {
   local result_file="$1"
 
-  jq -e '
+  if jq -e '
     (.verdict == "APPROVE" or .verdict == "REQUEST_CHANGES")
     and (.safe_to_merge | type == "boolean")
     and (.summary | type == "string" and length > 0)
@@ -2285,8 +2397,12 @@ validate_review_result_shape() {
       and (.confidence_score | type == "number" and . >= 0 and . <= 1)
       and (.priority | type == "number" and floor == . and . >= 0 and . <= 3)
     )
-  ' "${result_file}" >/dev/null 2>&1 \
-    || die "guardian 审查结果不符合 ${SCHEMA_FILE} 约束。"
+  ' "${result_file}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  sed 's/^/  /' "${result_file}" >&2 || true
+  die "guardian 审查结果不符合 ${SCHEMA_FILE} 约束。"
 }
 
 run_codex_review() {
@@ -2312,7 +2428,9 @@ run_codex_review() {
       normalization_source_file="${formatted_result_file}"
     fi
     normalize_native_review_result "${normalization_source_file}" "${RESULT_FILE}"
+    coerce_review_result_shape "${RESULT_FILE}"
     add_fallback_finding_for_unstructured_rejection "${RESULT_FILE}"
+    coerce_review_result_shape "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"
   else
     sed 's/^/  /' "${native_error_file}" >&2 || true
