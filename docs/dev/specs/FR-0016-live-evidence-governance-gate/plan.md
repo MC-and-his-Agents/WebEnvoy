@@ -63,6 +63,7 @@
   - `governance_landing_pr` 必须是精确五文件落库范围，不能夹带其他实质性改动
   - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，也必须直接 blocked，不能降格成普通 PR
   - `governance_landing_pr` 即使 `not_applicable`，closing semantics 也只能是 `Refs #310` 或 `Fixes #310`，不得退成 `n_a`
+  - 带 `#310` 上下文但只命中治理目标文件子集、或在五文件之外扩 scope 的 PR，也必须直接 blocked，不能退回普通 PR
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`

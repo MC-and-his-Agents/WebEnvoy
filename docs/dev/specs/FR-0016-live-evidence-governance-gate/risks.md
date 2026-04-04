@@ -19,6 +19,7 @@
   - 治理落库 PR 若允许在五文件之外夹带其他实质性改动，split 规则仍不可机器执行
   - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，若不显式 blocked，仍可绕开治理落库前置门禁
   - `governance_landing_pr` 若允许 `n_a` closing semantics，仍可绕开仓库要求的 `Refs/Fixes #310` metadata
+  - 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，仍可能绕开治理前置门禁
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -38,6 +39,7 @@
   - formal contract 中显式限定治理落库线为精确五文件范围，排除其他实质性夹带改动
   - formal contract 中显式冻结 `missing_governance_issue_ref` blocker，禁止精确命中治理落库集合的 PR 通过漏写 `#310` 引用来绕路
   - formal contract 中显式限定 `governance_landing_pr` 即使 `not_applicable` 也不得使用 `n_a` closing semantics
+  - formal contract 中显式冻结 `invalid_governance_landing_scope` blocker，禁止带 `#310` 上下文的子集/超集治理改动退回普通 PR
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract

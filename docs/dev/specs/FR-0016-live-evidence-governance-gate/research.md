@@ -37,6 +37,7 @@
   - #322 最新 guardian 继续指出：仍需把 `gate_applicability` 缺失显式建模为 blocker；`TODO.md` 只应豁免非语义进度回写；治理落库线还要要求精确五文件范围，不能夹带其他实质性改动
   - #322 最新 guardian 继续指出：即使精确命中五个治理落库目标文件，若漏掉 `#310` 引用，也必须有结构化 blocker，不能退回普通 PR
   - #322 最新 guardian 继续指出：`governance_landing_pr` 即使是 `not_applicable` 也不能允许 `n_a` closing semantics，必须保留 `Refs/Fixes #310`
+  - #322 最新 guardian 继续指出：若带 `#310` 上下文的治理落库 PR 只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked，不能退回 `general_pr`
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -113,6 +114,7 @@
 | U14 | 缺失必需 `gate_applicability` 元数据必须显式 blocked，且 `TODO.md` 仅豁免非语义进度回写、治理落库线必须是精确五文件范围 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少结构化 blocker 与精确范围约束，reviewer/guardian 仍可靠启发式放行缺失元数据或夹带改动的 PR |
 | U15 | 精确命中五个治理落库目标文件但缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，formal spec review 通过前的落库 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U16 | `governance_landing_pr` 即使 `not_applicable`，closing semantics 也必须保留 `Refs/Fixes #310`，不得使用 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若允许 `n_a`，治理落库 PR 仍可绕开仓库要求的 issue closing metadata |
+| U17 | 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只对“精确五文件”建模，子集/超集治理改动仍可绕开 `spec_review_not_completed` 与 metadata 门禁 |
 
 ## Gate Status
 
