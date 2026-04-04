@@ -108,6 +108,11 @@ interface BrowserInstanceState {
   launchedAt: string;
 }
 
+interface BrowserInstanceArtifactPaths {
+  stateFilePath: string;
+  controlFilePath: string;
+}
+
 interface SupervisorShutdownCommand {
   action: "shutdown";
   launchToken: string;
@@ -282,11 +287,6 @@ const waitForProcessExit = async (pid: number, deadlineMs: number): Promise<bool
   return !isProcessAlive(pid);
 };
 
-const cleanupSupervisorArtifacts = async (profileDir: string): Promise<void> => {
-  await deleteFileQuietly(getStateFilePath(profileDir));
-  await deleteFileQuietly(getControlFilePath(profileDir));
-};
-
 const terminateBrowserPid = async (browserPid: number, timeoutMs: number): Promise<boolean> => {
   if (!isProcessAlive(browserPid)) {
     return true;
@@ -320,10 +320,18 @@ const terminateBrowserPid = async (browserPid: number, timeoutMs: number): Promi
   return waitForProcessExit(browserPid, Date.now() + 1_000);
 };
 
-const getStateFilePath = (profileDir: string): string => join(profileDir, BROWSER_STATE_FILENAME);
-const getControlFilePath = (profileDir: string): string => join(profileDir, BROWSER_CONTROL_FILENAME);
+const getBrowserInstanceArtifactPaths = (profileDir: string): BrowserInstanceArtifactPaths => ({
+  stateFilePath: join(profileDir, BROWSER_STATE_FILENAME),
+  controlFilePath: join(profileDir, BROWSER_CONTROL_FILENAME)
+});
 
-const parseInstanceState = (raw: string): BrowserInstanceState | null => {
+const cleanupSupervisorArtifacts = async (profileDir: string): Promise<void> => {
+  const artifactPaths = getBrowserInstanceArtifactPaths(profileDir);
+  await deleteFileQuietly(artifactPaths.stateFilePath);
+  await deleteFileQuietly(artifactPaths.controlFilePath);
+};
+
+const parseBrowserInstanceState = (raw: string): BrowserInstanceState | null => {
   const parsed = JSON.parse(raw) as Partial<BrowserInstanceState>;
   if (
     parsed.schemaVersion !== 1 ||
@@ -340,10 +348,10 @@ const parseInstanceState = (raw: string): BrowserInstanceState | null => {
   return parsed as BrowserInstanceState;
 };
 
-const readInstanceState = async (path: string): Promise<BrowserInstanceState | null> => {
+const readBrowserInstanceState = async (path: string): Promise<BrowserInstanceState | null> => {
   try {
     const raw = await readFile(path, "utf8");
-    return parseInstanceState(raw);
+    return parseBrowserInstanceState(raw);
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === "ENOENT") {
@@ -380,6 +388,16 @@ const resolveCommandFromPath = async (command: string): Promise<string | null> =
     }
   }
   return null;
+};
+
+const resolveBrowserExecutableCandidatePath = async (candidate: string): Promise<string | null> => {
+  if (isAbsolute(candidate) || hasPathSegment(candidate)) {
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+    return null;
+  }
+  return resolveCommandFromPath(candidate);
 };
 
 const resolveExplicitBrowserPathFromEnv = async (): Promise<string | null> => {
@@ -470,14 +488,7 @@ const resolveExecutablePath = async (
   let brandedChromeRejected = false;
 
   for (const candidate of candidates) {
-    let resolvedCandidate: string | null = null;
-    if (isAbsolute(candidate) || hasPathSegment(candidate)) {
-      if (await pathExists(candidate)) {
-        resolvedCandidate = candidate;
-      }
-    } else {
-      resolvedCandidate = await resolveCommandFromPath(candidate);
-    }
+    const resolvedCandidate = await resolveBrowserExecutableCandidatePath(candidate);
     if (resolvedCandidate === null) {
       continue;
     }
@@ -539,14 +550,7 @@ interface ResolvedExecutableCandidate {
 const resolveExecutableCandidate = async (
   candidate: string
 ): Promise<ResolvedExecutableCandidate | null> => {
-  let executablePath: string | null = null;
-  if (isAbsolute(candidate) || hasPathSegment(candidate)) {
-    if (await pathExists(candidate)) {
-      executablePath = candidate;
-    }
-  } else {
-    executablePath = await resolveCommandFromPath(candidate);
-  }
+  const executablePath = await resolveBrowserExecutableCandidatePath(candidate);
   if (executablePath === null) {
     return null;
   }
@@ -579,10 +583,7 @@ export const resolvePreferredBrowserVersionTruthSource = async (
   }
 
   const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-  const candidates = [
-    explicitFromEnv,
-    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-  ].filter((item): item is string => item !== null);
+  const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
   let officialChromePreferred: ResolvedExecutableCandidate | null = null;
   let fallbackCandidate: ResolvedExecutableCandidate | null = null;
 
@@ -668,6 +669,70 @@ const resolveSharedSourceDir = async (extensionSourceDir: string): Promise<strin
     "BROWSER_LAUNCH_FAILED",
     "缺少 shared 指纹/risk-state 构建产物，无法生成 staged content script bundle"
   );
+};
+
+const buildExtensionBootstrapEnvelope = (input: {
+  runId: string;
+  extensionBootstrap: Record<string, unknown> | null;
+}): ExtensionBootstrapEnvelope => ({
+  schemaVersion: 1,
+  runId: input.runId,
+  writtenAt: new Date().toISOString(),
+  extension_bootstrap: input.extensionBootstrap
+});
+
+const writeExtensionBootstrapFiles = async (input: {
+  stagedExtensionDir: string;
+  runId: string;
+  bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
+}): Promise<{ bootstrapPath: string; bootstrapScriptPath: string }> => {
+  const bootstrapPath = join(input.stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
+  await writeFile(
+    bootstrapPath,
+    `${JSON.stringify(
+      buildExtensionBootstrapEnvelope({
+        runId: input.runId,
+        extensionBootstrap: input.extensionBootstrap
+      }),
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const bootstrapScriptPath = join(input.stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+  await writeFile(
+    bootstrapScriptPath,
+    buildBootstrapScriptSource({
+      payload: buildBridgeBootstrapPayload({
+        bridgeSecret: input.bridgeSecret,
+        extensionBootstrap: input.extensionBootstrap
+      })
+    }),
+    "utf8"
+  );
+
+  return { bootstrapPath, bootstrapScriptPath };
+};
+
+const rewriteExtensionStagingArtifacts = async (input: {
+  stagedExtensionDir: string;
+  extensionSourceDir: string;
+  bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
+}): Promise<void> => {
+  await rewriteStagedContentScriptForRuntime({
+    stagedExtensionDir: input.stagedExtensionDir,
+    extensionSourceDir: input.extensionSourceDir,
+    bridgeSecret: input.bridgeSecret,
+    extensionBootstrap: input.extensionBootstrap
+  });
+  await rewriteStagedMainWorldBridgeForRuntime({
+    stagedExtensionDir: input.stagedExtensionDir,
+    bridgeSecret: input.bridgeSecret
+  });
+  await injectBootstrapScriptIntoManifest(join(input.stagedExtensionDir, "manifest.json"));
 };
 
 const resolveExtensionBootstrapPayload = (input: BrowserLaunchInput): Record<string, unknown> | null => {
@@ -1102,39 +1167,18 @@ const stageExtensionForRun = async (input: {
   await rm(stagedExtensionDir, { recursive: true, force: true });
   await cp(extensionSourceDir, stagedExtensionDir, { recursive: true });
   const bridgeSecret = randomUUID();
-
-  const bootstrapPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
-  const envelope: ExtensionBootstrapEnvelope = {
-    schemaVersion: 1,
+  const { bootstrapPath, bootstrapScriptPath } = await writeExtensionBootstrapFiles({
+    stagedExtensionDir,
     runId: input.runId,
-    writtenAt: new Date().toISOString(),
-    extension_bootstrap: input.extensionBootstrap
-  };
-  await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
-
-  const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
-  const bootstrapScriptPayload = buildBridgeBootstrapPayload({
     bridgeSecret,
     extensionBootstrap: input.extensionBootstrap
   });
-  await writeFile(
-    bootstrapScriptPath,
-    buildBootstrapScriptSource({
-      payload: bootstrapScriptPayload
-    }),
-    "utf8"
-  );
-  await rewriteStagedContentScriptForRuntime({
+  await rewriteExtensionStagingArtifacts({
     stagedExtensionDir,
     extensionSourceDir,
     bridgeSecret,
     extensionBootstrap: input.extensionBootstrap
   });
-  await rewriteStagedMainWorldBridgeForRuntime({
-    stagedExtensionDir,
-    bridgeSecret
-  });
-  await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
 
   return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };
 };
@@ -1185,26 +1229,6 @@ const waitForBrowserReady = async (
   }
 
   throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
-};
-
-const waitForSupervisorState = async (input: {
-  stateFilePath: string;
-  expectedToken: string;
-  expectedControllerPid: number;
-}): Promise<BrowserInstanceState> => {
-  for (let attempt = 0; attempt < SUPERVISOR_STATE_WAIT_ATTEMPTS; attempt += 1) {
-    const state = await readInstanceState(input.stateFilePath);
-    if (
-      state &&
-      state.launchToken === input.expectedToken &&
-      state.controllerPid === input.expectedControllerPid &&
-      state.browserPid > 0
-    ) {
-      return state;
-    }
-    await sleep(SUPERVISOR_STATE_WAIT_INTERVAL_MS);
-  }
-  throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
 };
 
 const launchProcess = async (
@@ -1284,6 +1308,33 @@ const launchProcess = async (
   };
 };
 
+const prepareBrowserInstanceArtifacts = async (profileDir: string): Promise<void> => {
+  const artifactPaths = getBrowserInstanceArtifactPaths(profileDir);
+  await mkdir(profileDir, { recursive: true });
+  await deleteFileQuietly(artifactPaths.stateFilePath);
+  await deleteFileQuietly(artifactPaths.controlFilePath);
+};
+
+const waitForBrowserInstanceState = async (input: {
+  stateFilePath: string;
+  expectedToken: string;
+  expectedControllerPid: number;
+}): Promise<BrowserInstanceState> => {
+  for (let attempt = 0; attempt < SUPERVISOR_STATE_WAIT_ATTEMPTS; attempt += 1) {
+    const state = await readBrowserInstanceState(input.stateFilePath);
+    if (
+      state &&
+      state.launchToken === input.expectedToken &&
+      state.controllerPid === input.expectedControllerPid &&
+      state.browserPid > 0
+    ) {
+      return state;
+    }
+    await sleep(SUPERVISOR_STATE_WAIT_INTERVAL_MS);
+  }
+  throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
+};
+
 export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserLaunchResult> => {
   const launchMode = input.launchMode ?? "load_extension";
   const executablePath = await resolveExecutablePath(input.params, {
@@ -1321,24 +1372,21 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
   launchArgs.push(startUrl);
 
   const launchToken = randomUUID();
-  const stateFilePath = getStateFilePath(input.profileDir);
-  const controlFilePath = getControlFilePath(input.profileDir);
+  const artifactPaths = getBrowserInstanceArtifactPaths(input.profileDir);
   let controllerPid: number | null = null;
   let launchSucceeded = false;
   try {
-    await mkdir(input.profileDir, { recursive: true });
-    await deleteFileQuietly(stateFilePath);
-    await deleteFileQuietly(controlFilePath);
+    await prepareBrowserInstanceArtifacts(input.profileDir);
     const launched = await launchProcess(supervisorScriptPath, executablePath, launchArgs, {
-      stateFilePath,
-      controlFilePath,
+      stateFilePath: artifactPaths.stateFilePath,
+      controlFilePath: artifactPaths.controlFilePath,
       launchToken,
       profileDir: input.profileDir,
       runId: input.runId
     });
     controllerPid = launched.pid;
-    const state = await waitForSupervisorState({
-      stateFilePath,
+    const state = await waitForBrowserInstanceState({
+      stateFilePath: artifactPaths.stateFilePath,
       expectedToken: launchToken,
       expectedControllerPid: launched.pid
     });
@@ -1374,9 +1422,8 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
 
 export const shutdownBrowserSession = async (input: BrowserShutdownInput): Promise<void> => {
   const timeoutMs = input.timeoutMs ?? SUPERVISOR_SHUTDOWN_TIMEOUT_MS;
-  const stateFilePath = getStateFilePath(input.profileDir);
-  const controlFilePath = getControlFilePath(input.profileDir);
-  const state = await readInstanceState(stateFilePath);
+  const artifactPaths = getBrowserInstanceArtifactPaths(input.profileDir);
+  const state = await readBrowserInstanceState(artifactPaths.stateFilePath);
   if (!state) {
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器实例状态缺失，无法安全停止");
   }
@@ -1400,12 +1447,12 @@ export const shutdownBrowserSession = async (input: BrowserShutdownInput): Promi
     launchToken: state.launchToken,
     requestedAt: new Date().toISOString()
   };
-  await writeFile(controlFilePath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
+  await writeFile(artifactPaths.controlFilePath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const controllerAlive = isProcessAlive(input.controllerPid);
-    const nextState = await readInstanceState(stateFilePath);
+    const nextState = await readBrowserInstanceState(artifactPaths.stateFilePath);
     if (!controllerAlive && nextState === null) {
       await cleanupStagedExtensions(input.profileDir);
       return;
@@ -1424,7 +1471,7 @@ export const shutdownBrowserSession = async (input: BrowserShutdownInput): Promi
   const gracefulDeadline = Date.now() + 1_000;
   while (Date.now() < gracefulDeadline) {
     const controllerAlive = isProcessAlive(input.controllerPid);
-    const nextState = await readInstanceState(stateFilePath);
+    const nextState = await readBrowserInstanceState(artifactPaths.stateFilePath);
     if (!controllerAlive && nextState === null) {
       await cleanupStagedExtensions(input.profileDir);
       return;
