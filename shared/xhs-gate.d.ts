@@ -187,7 +187,7 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
   read_execution_policy: XhsReadExecutionPolicy;
   issue_action_matrix: IssueActionMatrixEntry;
   write_interaction_tier: WriteInteractionTier;
-  write_action_matrix_decisions: WriteActionMatrixDecisionsOutput;
+  write_action_matrix_decisions: WriteActionMatrixDecisionsOutput | null;
   gate_input: {
     issue_scope: IssueScope;
     target_domain: string | null;
@@ -214,7 +214,7 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     effective_execution_mode: ExecutionMode | null;
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];
-    write_interaction_tier: string;
+    write_interaction_tier: string | null;
   };
   approval_record: XhsApprovalRecord;
 };

@@ -524,8 +524,8 @@ const createBackgroundXhsGatePayload = (input) => {
         gate_reasons: input.gateReasons,
         approver: input.approvalRecord.approver,
         approved_at: input.approvalRecord.approved_at,
-        write_interaction_tier: input.writeActionMatrixDecisions.write_interaction_tier,
-        write_matrix_decision: input.writeMatrixDecision.decision,
+        write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+        write_matrix_decision: input.writeMatrixDecision?.decision ?? null,
         recorded_at: recordedAt,
         next_state: input.riskTransitionAudit.next_state,
         transition_trigger: input.riskTransitionAudit.trigger
@@ -3055,7 +3055,7 @@ class ChromeBackgroundBridge {
             gate_reasons: finalizedGate.gateReasons,
             fingerprint_gate_decision: fingerprintGateDecision,
             fingerprint_reason_codes: resolvedFingerprintReasonCodes,
-            write_interaction_tier: gateState.writeActionMatrixDecisions.write_interaction_tier
+            write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
         };
         const runId = String(request.params.run_id ?? request.id);
         const sessionId = String(request.params.session_id ?? this.#sessionId);
@@ -3078,8 +3078,8 @@ class ChromeBackgroundBridge {
             gate_reasons: finalizedGate.gateReasons,
             approver: approvalRecord.approver,
             approved_at: approvalRecord.approved_at,
-            write_interaction_tier: gateState.writeActionMatrixDecisions.write_interaction_tier,
-            write_matrix_decision: gateState.writeMatrixDecision.decision,
+            write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+            write_matrix_decision: gateState.writeMatrixDecision?.decision ?? null,
             recorded_at: recordedAt
         };
         const riskTransitionAudit = buildRiskTransitionAudit({

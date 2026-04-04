@@ -86,12 +86,20 @@ const resolveXhsIssueActionMatrixEntry = (issueScope, state) => {
   return getIssueActionMatrixEntry(issueScope, state);
 };
 
+const resolveXhsWriteActionMatrixDecisions = (issueScope, actionType, requestedExecutionMode) =>
+  actionType === null ? null : getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
+
 const resolveXhsWriteMatrixDecision = (output, state) =>
   output.decisions.find((entry) => entry.state === state) ?? {
     state,
     decision: "blocked",
     requires: []
   };
+
+const resolveXhsWriteTierReason = (writeActionMatrixDecisions) =>
+  writeActionMatrixDecisions === null
+    ? null
+    : `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
 
 const resolveXhsApprovalRequirementGaps = (requirements, approvalRecord) => {
   const gaps = [];
@@ -150,21 +158,24 @@ const evaluateXhsGateCore = (input) => {
   const abilityAction = asString(input.abilityAction ?? input.abilityActionType);
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
   const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
-  const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
+  const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
     issueScope,
-    actionType ?? "read",
+    actionType,
     requestedExecutionMode
   );
-  const writeMatrixDecision = resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
+  const writeMatrixDecision =
+    writeActionMatrixDecisions === null
+      ? null
+      : resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
   const issue208WriteGateOnly =
     issueScope === "issue_208" &&
     actionType !== null &&
+    writeActionMatrixDecisions !== null &&
     writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
   const issue208EditorInputValidation = input.issue208EditorInputValidation === true;
   const fallbackMode = resolveXhsFallbackMode(requestedExecutionMode, riskState);
   const gateReasons = [];
-  const writeTierReason =
-    `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
+  const writeTierReason = resolveXhsWriteTierReason(writeActionMatrixDecisions);
   const isLiveReadMode =
     requestedExecutionMode === "live_read_limited" ||
     requestedExecutionMode === "live_read_high_risk";
@@ -271,9 +282,9 @@ const evaluateXhsGateCore = (input) => {
       writeGateOnlyDecision = {
         issue_scope: issueScope,
         state: riskState,
-        write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+        write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null,
         matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
-        matrix_actions: writeActionMatrixDecisions.matrix_actions,
+        matrix_actions: writeActionMatrixDecisions?.matrix_actions ?? [],
         required_approval: writeGateOnlyEligible ? [...XHS_WRITE_APPROVAL_REQUIREMENTS] : [],
         approval_satisfied: approvalSatisfied,
         approval_missing_requirements: approvalRequirementGaps,
@@ -421,18 +432,21 @@ const buildXhsGatePolicyState = (input) => {
   const actionType = resolveXhsActionType(input.actionType);
   const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
   const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
-  const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
+  const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
     issueScope,
-    actionType ?? "read",
+    actionType,
     requestedExecutionMode
   );
-  const writeMatrixDecision = resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
+  const writeMatrixDecision =
+    writeActionMatrixDecisions === null
+      ? null
+      : resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
   const issue208WriteGateOnly =
     issueScope === "issue_208" &&
     actionType !== null &&
+    writeActionMatrixDecisions !== null &&
     writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
-  const writeTierReason =
-    `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
+  const writeTierReason = resolveXhsWriteTierReason(writeActionMatrixDecisions);
   const isLiveReadMode =
     requestedExecutionMode === "live_read_limited" ||
     requestedExecutionMode === "live_read_high_risk";
@@ -550,8 +564,8 @@ const collectXhsMatrixGateReasons = (input) => {
       );
       const approvalSatisfied = approvalRequirementGaps.length === 0;
       if (
-        state.writeMatrixDecision.decision === "blocked" ||
-        state.writeMatrixDecision.decision === "not_applicable"
+        state.writeMatrixDecision?.decision === "blocked" ||
+        state.writeMatrixDecision?.decision === "not_applicable"
       ) {
         if (input.issue208EditorInputValidation !== true) {
           pushReason(gateReasons, "EDITOR_INPUT_VALIDATION_REQUIRED");
@@ -588,9 +602,9 @@ const collectXhsMatrixGateReasons = (input) => {
       writeGateOnlyDecision = {
         issue_scope: state.issueScope,
         state: state.riskState,
-        write_interaction_tier: state.writeActionMatrixDecisions.write_interaction_tier,
+        write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null,
         matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
-        matrix_actions: state.writeActionMatrixDecisions.matrix_actions,
+        matrix_actions: state.writeActionMatrixDecisions?.matrix_actions ?? [],
         required_approval: writeGateOnlyEligible ? [...XHS_WRITE_APPROVAL_REQUIREMENTS] : [],
         approval_satisfied: approvalSatisfied,
         approval_missing_requirements: approvalRequirementGaps,
@@ -706,7 +720,7 @@ const evaluateXhsGate = (input) => {
       effective_execution_mode: outcome.effectiveExecutionMode,
       gate_decision: outcome.gateDecision,
       gate_reasons: outcome.gateReasons,
-      write_interaction_tier: state.writeActionMatrixDecisions.write_interaction_tier
+      write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null
     },
     approval_record: approvalRecord
   };

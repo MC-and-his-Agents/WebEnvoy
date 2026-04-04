@@ -70,7 +70,7 @@ const buildLoopbackAuditRecord = (input) => ({
     gate_reasons: input.gate.consumerGateResult.gate_reasons,
     approver: input.gate.approvalRecord.approver,
     approved_at: input.gate.approvalRecord.approved_at,
-    write_interaction_tier: input.gate.writeActionMatrixDecisions.write_interaction_tier,
+    write_interaction_tier: input.gate.writeActionMatrixDecisions?.write_interaction_tier ?? null,
     write_action_matrix_decisions: input.gate.writeActionMatrixDecisions,
     recorded_at: "2026-03-23T10:00:00.000Z"
 });
