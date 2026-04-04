@@ -2,13 +2,6 @@
 
 > GitHub Issue / PR / Project 是进度真相源。
 > 本文件只保留 FR-0015 formal blocker、进入实现前条件和实现停点，不承载本地 closeout 状态账本。
-> 现状说明：本地已落地 official Chrome 持久扩展主路径的核心能力与合同测试，以下未勾选项主要是 formal review / GitHub 同步与治理收口，不代表能力未落地。
-
-## 本地实现现状（已落地）
-
-- [x] identity preflight 与 persistent extension 绑定持久化链路已实现。
-- [x] `runtime_bootstrap_envelope` 生成与 `runtime.readiness`/`runtime.status` 读模型已实现。
-- [x] stale ack、identity mismatch、ready-signal 冲突等失败路径已在合同测试覆盖。
 
 ## Review 阶段待办
 
@@ -19,7 +12,6 @@
 
 ## 进入实现前条件
 
-- [x] 若后续实现需要新增最小 persistent identity 持久字段，必须先补实现级 spec review、字段约束与回滚说明；当前已冻结 `__webenvoy_meta.json.persistentExtensionBinding` 的最小字段、生命周期与回滚边界。
 - [ ] 如后续实现继续改 `runtime.status` 或 `runtime_bootstrap_envelope`，先核对 `contracts/` 中已冻结的状态语义与错误分类，避免通过 TODO 临时改口径。
 - [ ] 如进入实现阶段需要推进恢复链路、健康矩阵或 stop-ship 规则，先确认对应验证入口、失败回退与证据产物已在 formal 文档中冻结，而不是通过 `TODO.md` 临时补约束。
 - [ ] 开始第一刀前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
