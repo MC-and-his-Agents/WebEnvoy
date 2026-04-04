@@ -3034,6 +3034,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_fails_closed_for_generic_should_followup() {
+  setup_case_dir "normalize-native-text-generic-should-followup"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The refactor does not affect code paths and should get another pass on Windows before merge. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix() {
   setup_case_dir "normalize-native-text-chinese-incomplete-evidence-prefix"
 
@@ -4106,6 +4121,7 @@ main() {
   test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
   test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary
   test_normalize_native_review_result_fails_closed_for_after_reviewing_diff_static_reading_caveat
+  test_normalize_native_review_result_fails_closed_for_generic_should_followup
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
   test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
