@@ -5532,6 +5532,56 @@ describe("extension service worker recovery contract", () => {
     }
   });
 
+  it("stops heartbeat on disconnect and restarts it after recovery handshake", async () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const ports = [createMockPort(), createMockPort()];
+      const { chromeApi } = createChromeApi(ports);
+
+      startChromeBackgroundBridge(chromeApi, {
+        heartbeatIntervalMs: 10_000,
+        recoveryRetryIntervalMs: 5,
+        recoveryWindowMs: 100
+      });
+
+      respondHandshake(ports[0]);
+      await Promise.resolve();
+
+      expect(
+        setIntervalSpy.mock.calls.filter(([, intervalMs]) => intervalMs === 10_000)
+      ).toHaveLength(1);
+      expect(
+        setIntervalSpy.mock.calls.filter(([, intervalMs]) => intervalMs === 5)
+      ).toHaveLength(0);
+
+      ports[0].onDisconnectListeners[0]?.();
+      await Promise.resolve();
+
+      expect(clearIntervalSpy.mock.calls).toHaveLength(1);
+      expect(
+        setIntervalSpy.mock.calls.filter(([, intervalMs]) => intervalMs === 5)
+      ).toHaveLength(1);
+
+      vi.advanceTimersByTime(5);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      respondHandshake(ports[1]);
+      await Promise.resolve();
+
+      expect(
+        setIntervalSpy.mock.calls.filter(([, intervalMs]) => intervalMs === 10_000)
+      ).toHaveLength(2);
+      expect(clearIntervalSpy.mock.calls).toHaveLength(2);
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("fails only when recovery queue exceeds limit", async () => {
     const ports = [createMockPort(), createMockPort()];
     const { chromeApi } = createChromeApi(ports);
