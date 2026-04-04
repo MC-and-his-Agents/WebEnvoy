@@ -2787,6 +2787,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_request_changes_verdict_when_summary_uses_merge_blocking_regression_free_phrase() {
+  setup_case_dir "normalize-native-schema-request-changes-merge-blocking-regression-free"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"I did not find a concrete merge-blocking regression or safety hole introduced by this PR.","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat() {
   setup_case_dir "normalize-native-schema-explanation-caveat"
 
@@ -3004,6 +3019,96 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary() {
+  setup_case_dir "normalize-native-text-after-reviewing-diff-preserve"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the refactor appears to preserve the existing readiness, lock-inspection, and attach/status behaviors while only extracting them into helpers. I did not identify any actionable correctness regressions in the changed code that should block merging this PR.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_fails_closed_for_after_reviewing_diff_static_reading_caveat() {
+  setup_case_dir "normalize-native-text-after-reviewing-diff-static-reading-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the patch appears to preserve behavior based on static reading only. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_preserve_summary_with_static_reading_disclaimer() {
+  setup_case_dir "normalize-native-text-preserve-summary-static-reading-disclaimer"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the patch appears to preserve the existing attach logic based on static reading while only extracting it into helpers. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_static_reading_in_review_preface() {
+  setup_case_dir "normalize-native-text-static-reading-in-review-preface"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main based on static reading only, the patch appears to preserve the existing attach logic while only extracting it into helpers. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_generic_should_followup() {
+  setup_case_dir "normalize-native-text-generic-should-followup"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The refactor does not affect code paths and should get another pass on Windows before merge. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_should_block_merge_until_caveat() {
+  setup_case_dir "normalize-native-text-should-block-merge-until-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The refactor does not affect code paths and should block merging this PR until the release note is restored. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix() {
   setup_case_dir "normalize-native-text-chinese-incomplete-evidence-prefix"
 
@@ -3077,6 +3182,66 @@ EOF
   assert_pass validate_review_result_shape "${result_file}"
   assert_file_contains "${result_file}" '"verdict":"APPROVE"'
   assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_accepts_concrete_merge_blocking_regression_free_phrase() {
+  setup_case_dir "normalize-native-text-approve-concrete-merge-blocking-regression-free"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not find a concrete merge-blocking regression or safety hole introduced by this PR.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_accepts_discrete_merge_blocking_regression_free_phrase() {
+  setup_case_dir "normalize-native-text-approve-discrete-merge-blocking-regression-free"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify a discrete, merge-blocking regression in the PR diff relative to origin/main.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_fails_closed_for_discrete_merge_blocking_regression_phrase_with_static_reading_caveat() {
+  setup_case_dir "normalize-native-text-discrete-merge-blocking-regression-static-reading-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify a discrete, merge-blocking regression in the PR diff relative to origin/main based on static reading only.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_preserve_summary_with_pending_pass_caveat() {
+  setup_case_dir "normalize-native-text-preserve-summary-pending-pass-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the patch appears to preserve the existing attach logic pending another pass on Windows while only extracting it into helpers. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
 test_normalize_native_review_result_accepts_lgtm_phrase() {
@@ -4061,6 +4226,7 @@ main() {
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json
   test_normalize_native_review_result_accepts_relaxed_native_schema_correctness_phrase
+  test_normalize_native_review_result_accepts_request_changes_verdict_when_summary_uses_merge_blocking_regression_free_phrase
   test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat
   test_normalize_native_review_result_accepts_brace_bearing_preamble_json
   test_normalize_native_review_result_accepts_second_fenced_json_block
@@ -4074,11 +4240,21 @@ main() {
   test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
   test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
+  test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary
+  test_normalize_native_review_result_fails_closed_for_after_reviewing_diff_static_reading_caveat
+  test_normalize_native_review_result_fails_closed_for_preserve_summary_with_static_reading_disclaimer
+  test_normalize_native_review_result_fails_closed_for_static_reading_in_review_preface
+  test_normalize_native_review_result_fails_closed_for_generic_should_followup
+  test_normalize_native_review_result_fails_closed_for_should_block_merge_until_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
   test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
   test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
+  test_normalize_native_review_result_accepts_concrete_merge_blocking_regression_free_phrase
+  test_normalize_native_review_result_accepts_discrete_merge_blocking_regression_free_phrase
+  test_normalize_native_review_result_fails_closed_for_discrete_merge_blocking_regression_phrase_with_static_reading_caveat
+  test_normalize_native_review_result_fails_closed_for_preserve_summary_with_pending_pass_caveat
   test_normalize_native_review_result_accepts_lgtm_phrase
   test_normalize_native_review_result_fails_closed_for_chinese_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_condition
