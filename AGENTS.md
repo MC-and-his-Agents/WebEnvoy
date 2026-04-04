@@ -215,10 +215,21 @@ spec review 的执行约束：
 - 纯文档、纯重构、普通单测补强
 - 非 live 路径的小修复
 - 不把真实 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
+- 不把真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec review PR 或治理前置 PR
+
+当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库 PR 时，PR 描述必须显式提供结构化 `gate_applicability` 区块，至少包含：
+
+- `review_lane`
+- `governance_scope_targets`
+- `in_scope`
+- `trigger_reasons`
+- `n_a_allowed`
+
+只有当 `gate_applicability.in_scope=true` 时，才必须进一步提供完整 `live_evidence_record`；若 `in_scope=false && n_a_allowed=true`，`live_evidence_record` 才允许整块写 `N/A` 或 `null`。
 
 专项门禁下，有效证据必须同时满足：
 
-- 来自当前 PR latest head 的重新复验，历史 run 或旧 head 证据不能替代 latest head evidence
+- 来自当前 PR latest head 的 fresh rerun；历史 run、旧 head、旧 artifact 或同一 head 的历史 artifact 都不能替代当前复验
 - 来自真实浏览器执行面，而不是 repo-owned native host stub、本地 fake host 或其他仓库自带替身路径
 - 能证明真实页面交互或真实闭环结果，而不只是控制面存活
 
@@ -227,23 +238,33 @@ spec review 的执行约束：
 - 仅有 `runtime.ping` 成功
 - 仅有 `runtime.bootstrap` ack
 - 仅能证明 stub/fake host 成功、但不能证明 official Chrome 或真实浏览器执行面成功
-- merged 前旧 run、旧日志、旧 artifact 被直接复用为 latest head evidence
+- 旧 head、旧 run、旧日志、旧 artifact，或同一 latest head 下的历史 artifact 被直接复用为当前 evidence
 
-专项门禁 PR 的描述必须显式提供 live evidence 区块，至少包含：
+落入专项门禁的 PR 的描述必须显式提供 `live_evidence_record` 区块，至少包含：
 
 - `latest_head_sha`
 - `profile`
-- `browser/channel`
+- `browser_channel`
 - `execution_surface`
-- `page URL`
+- `page_url`
 - `target_tab_id`
 - `run_id`
+- `evidence_collected_at`
+- `artifact_identity`
 - `relay_path`
-- `editor_locator` 或等价交互定位
+- `interaction_locator` 或等价交互定位
 - `success_signals`
 - `minimum_replay`
-- `artifact/log` 引用
-- 若失败，必须写明失败原因与阻断层级
+- `artifact_log_ref`
+- `failure_reason`
+- `blocker_level`
+
+补充约束：
+
+- `execution_surface=real_browser` 才可能成为有效 live evidence
+- `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun
+- 成功态必须把 `failure_reason` 与 `blocker_level` 写为 `N/A`
+- 失败或阻断态必须显式填写失败原因与阻断层级，不得用 `N/A` 规避披露
 
 ## Review 与合并底线
 
@@ -272,7 +293,7 @@ spec review 的执行约束：
 - 如果对应 GitHub Issue 已存在，PR 描述应显式包含正确的关闭语义：
   - 完整实现闭环使用 `Fixes #<issue-number>`
   - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
-- 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head 重新复验、证据来自 stub/fake host、或只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号时，reviewer 必须直接阻断，不按“建议补充”处理
+- 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head fresh rerun、证据来自 stub/fake host、只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号，或缺少必需的 `gate_applicability` / `live_evidence_record` 元数据时，reviewer 必须直接阻断，不按“建议补充”处理
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责

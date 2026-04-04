@@ -42,10 +42,21 @@
 - 纯文档、纯重构、普通单测补强
 - 非 live 路径的小修复
 - 不以 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
+- 不以真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec review PR 或治理前置 PR
+
+当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库 PR 时，PR 描述必须先显式提供结构化 `gate_applicability`，至少包含：
+
+- `review_lane`
+- `governance_scope_targets`
+- `in_scope`
+- `trigger_reasons`
+- `n_a_allowed`
+
+只有 `gate_applicability.in_scope=true` 时，才必须继续提供完整 `live_evidence_record`；若 `in_scope=false && n_a_allowed=true`，该对象才允许整块写 `N/A` 或 `null`。
 
 专项门禁下，有效证据必须同时满足：
 
-- 来自当前 PR latest head 的重新复验
+- 来自当前 PR latest head 的 fresh rerun
 - 来自真实浏览器执行面，而不是 repo-owned native host stub、本地 fake host 或其他替身路径
 - 能证明真实页面交互或真实闭环结果，而不只是控制面存活
 
@@ -53,7 +64,7 @@
 
 - 仅有 `runtime.ping` 成功
 - 仅有 `runtime.bootstrap` ack
-- 历史 run、旧日志、旧 artifact 被直接复用为 latest head evidence
+- 历史 run、旧日志、旧 artifact，或同一 latest head 下的历史 artifact 被直接复用为当前 evidence
 - stub/fake host 的成功结果被描述为 official Chrome live evidence
 
 ## 必查维度
@@ -73,7 +84,8 @@
   - 是否引入提示词注入、命令注入、越权执行、错误自动合并、敏感信息泄露或对不可信输入的错误信任
 - 流程与元数据合规
   - 是否满足提交信息规范、PR 描述规范、`Fixes #...` / `refs #...` 使用时机、目标分支与仓库合并策略
-  - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供 live evidence 区块，且字段、来源和 latest head 一致性可复核
+  - 若 PR 属于 formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供必需的结构化 `gate_applicability`
+  - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供 `live_evidence_record`，且字段、来源和 latest head 一致性可复核
 
 自动门禁优先负责低层问题，例如单元测试、集成测试、lint、type check、contract test、基础安全扫描与 CI 健康；代码审查重点判断“这段改动是否值得进入主干”。
 
@@ -91,7 +103,8 @@
 - 本地门禁可见性
   - 若 PR 声明通过本地创建脚本发起，是否在 PR 描述或评论中提供了可复核的门禁执行证据
 - live evidence 元数据完整性
-  - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser/channel`、`execution_surface`、`page URL`、`target_tab_id`、`run_id`、`relay_path`、`editor_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact/log` 引用；若失败，是否写明失败原因与阻断层级
+  - 对 formal spec review PR、治理落库 PR 与所有落入专项门禁的 PR，是否已显式提供 `gate_applicability`
+  - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`interaction_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`
 
 说明：
 
@@ -181,6 +194,7 @@
 - 高风险改动缺少关键验证或回滚说明
 - 存在安全、滥用、权限或数据风险
 - 流程与元数据不合规，且会影响合并判断，例如在 `spike/spec-ready` 阶段误用 `Fixes #...`
+- formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
 - 落入“真实 Live Evidence 专项门禁”的 PR 缺少 latest head 新鲜复验，或把 stub/fake host / `runtime.ping` / `runtime.bootstrap` 误写成真实闭环证据
 - 证据不足，无法支持放行
 
@@ -224,7 +238,8 @@ Findings 的写法要求：
 - GitHub checks 全绿（不只看 Required Checks）
 - 对普通或高风险 PR，已基于最新 head 成功执行本地 `scripts/pr-guardian.sh review <pr-number>`，且未出现新的阻断项
 - 若 PR head、目标基线或 Required Checks 状态发生变化，必须重新执行受影响的本地审查或验证
-- 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述中的 live evidence 必须与 latest head 对齐，且 reviewer / guardian 已确认不存在 evidence 缺失、证据失效、来源错误或闭环信号不足
+- 若 PR 属于 formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述中的 `gate_applicability` 必须完整且与 PR 实际职责一致
+- 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述中的 `live_evidence_record` 必须与 latest head 对齐，且 reviewer / guardian 已确认不存在 evidence 缺失、证据失效、来源错误或闭环信号不足
 - 目标分支允许按仓库策略合入
 
 ## FR 审查补充
@@ -263,7 +278,8 @@ Findings 的写法要求：
 - 如果证据不足，不要乐观放行
 - 如果实现与产品边界、架构原则或正式 spec 冲突，应直接指出
 - 如果关键测试、验证证据或合并元数据不足，应视为阻断性问题
-- 对落入“真实 Live Evidence 专项门禁”的 PR，必须核对 latest head、新鲜 live evidence、真实浏览器执行面来源，以及 PR 描述中的 live evidence 字段完整性；任一项不满足都应视为阻断
+- 对 formal spec review PR、治理落库 PR 与所有落入“真实 Live Evidence 专项门禁”的 PR，必须先核对 `gate_applicability`
+- 对落入“真实 Live Evidence 专项门禁”的 PR，必须核对 latest head、新鲜 live evidence、真实浏览器执行面来源，以及 PR 描述中的 `live_evidence_record` 字段完整性；任一项不满足都应视为阻断
 
 高风险改动：
 
