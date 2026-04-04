@@ -1268,7 +1268,6 @@ class ChromeBackgroundBridge {
     });
 
     this.#sendHandshakeOpen(port);
-    this.#startHeartbeatLoop();
   }
 
   #sendHandshakeOpen(port: ExtensionPort): void {
@@ -1343,12 +1342,20 @@ class ChromeBackgroundBridge {
     }, timeoutMs);
   }
 
-  #handleDisconnect(message: string): void {
+  #stopHeartbeatLoop(): void {
+    if (this.#heartbeatTimer) {
+      clearInterval(this.#heartbeatTimer);
+      this.#heartbeatTimer = null;
+    }
     this.#clearHeartbeatTimeout();
-    this.#clearHandshakeTimeout();
-    this.#pendingHandshakeId = null;
     this.#pendingHeartbeatId = null;
     this.#missedHeartbeatCount = 0;
+  }
+
+  #handleDisconnect(message: string): void {
+    this.#stopHeartbeatLoop();
+    this.#clearHandshakeTimeout();
+    this.#pendingHandshakeId = null;
     this.#clearTrustedFingerprintContexts();
     this.#clearRuntimeBootstrapStates();
     this.#failAllPending({
@@ -1422,6 +1429,7 @@ class ChromeBackgroundBridge {
     this.#state = "ready";
     this.#recoveryDeadlineMs = null;
     this.#stopRecoveryLoop();
+    this.#startHeartbeatLoop();
     void this.#recoveryState.replayQueuedForwards((request, deadlineMs) =>
       this.#dispatchForward(request, deadlineMs)
     );
