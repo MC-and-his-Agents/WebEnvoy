@@ -424,24 +424,33 @@ export class SQLiteRuntimeStore {
       this.#migrateV1ToV2();
       return;
     }
-    if (version === 2) {
-      this.#migrateV2ToV3();
-      return;
-    }
-    if (version === 3) {
-      this.#migrateV3ToV4();
-      return;
-    }
-    if (version === 4) {
-      this.#migrateV4ToV5();
-      return;
-    }
-    if (version === 5) {
-      this.#migrateV5ToV6();
-      return;
+
+    let currentVersion = version;
+    while (currentVersion !== SCHEMA_VERSION) {
+      if (currentVersion === 2) {
+        this.#migrateV2ToV3();
+        currentVersion = 3;
+        continue;
+      }
+      if (currentVersion === 3) {
+        this.#migrateV3ToV4();
+        currentVersion = 4;
+        continue;
+      }
+      if (currentVersion === 4) {
+        this.#migrateV4ToV5();
+        currentVersion = 5;
+        continue;
+      }
+      if (currentVersion === 5) {
+        this.#migrateV5ToV6();
+        currentVersion = 6;
+        continue;
+      }
+      break;
     }
 
-    if (version !== SCHEMA_VERSION) {
+    if (currentVersion !== SCHEMA_VERSION) {
       throw new RuntimeStoreError(
         "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
         `schema mismatch: ${row.value ?? "unknown"}`
@@ -501,20 +510,10 @@ export class SQLiteRuntimeStore {
     this.#db.exec(`
       ALTER TABLE runtime_gate_audit_records
       ADD COLUMN risk_state TEXT NOT NULL DEFAULT 'paused';
-      ALTER TABLE runtime_gate_audit_records
-      ADD COLUMN next_state TEXT NOT NULL DEFAULT 'paused';
-      ALTER TABLE runtime_gate_audit_records
-      ADD COLUMN transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation';
-      ALTER TABLE runtime_gate_audit_records
-      ADD COLUMN issue_scope TEXT;
-      UPDATE runtime_gate_audit_records
-      SET next_state = risk_state
-      WHERE next_state IS NULL OR next_state = '';
     `);
-    this.#backfillIssueScope();
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
-      .run(String(SCHEMA_VERSION));
+      .run("3");
   }
 
   #migrateV3ToV4(): void {
@@ -523,16 +522,13 @@ export class SQLiteRuntimeStore {
       ADD COLUMN next_state TEXT NOT NULL DEFAULT 'paused';
       ALTER TABLE runtime_gate_audit_records
       ADD COLUMN transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation';
-      ALTER TABLE runtime_gate_audit_records
-      ADD COLUMN issue_scope TEXT;
       UPDATE runtime_gate_audit_records
       SET next_state = risk_state
       WHERE next_state IS NULL OR next_state = '';
     `);
-    this.#backfillIssueScope();
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
-      .run(String(SCHEMA_VERSION));
+      .run("4");
   }
 
   #migrateV4ToV5(): void {
@@ -543,7 +539,7 @@ export class SQLiteRuntimeStore {
     this.#backfillIssueScope();
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
-      .run(String(SCHEMA_VERSION));
+      .run("5");
   }
 
   #migrateV5ToV6(): void {
