@@ -523,7 +523,11 @@ const collectXhsCommandGateReasons = (input) => {
   if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
     pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
   }
-  if (input.includeWriteInteractionTierReason === true && input.writeTierReason) {
+  if (
+    input.includeWriteInteractionTierReason === true &&
+    input.issue208WriteGateOnly === true &&
+    input.writeTierReason
+  ) {
     pushReason(gateReasons, input.writeTierReason);
   }
   return gateReasons;
