@@ -1576,6 +1576,7 @@ normalize_native_review_result() {
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
           or ($lower | test("^no blocking issues found[.!]?$"))
           or ($lower | test("^no blockers(?: found)?[.!]?$"))
