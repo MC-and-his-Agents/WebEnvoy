@@ -1569,7 +1569,7 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should(?!\\s+block\\s+merg(?:e|ing)\\s+(?:this\\s+)?pr\\b)|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
@@ -1618,11 +1618,14 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | if ($trimmed | length) == 0 then
             true
+          elif strong_safe_sentence($trimmed) then
+            ((has_contrast($trimmed) | not)
+            and (has_condition($trimmed) | not))
           else
             ((has_contrast($trimmed) | not)
             and (has_condition($trimmed) | not)
             and (has_followup($trimmed) | not)
-            and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+            and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
           end;
       def looks_like_safe_approve($summary):
         ($summary | trim_text) as $collapsed
@@ -1729,7 +1732,7 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should(?!\\s+block\\s+merg(?:e|ing)\\s+(?:this\\s+)?pr\\b)|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
@@ -1789,11 +1792,14 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | if ($trimmed | length) == 0 then
             true
+          elif strong_safe_sentence($trimmed) then
+            ((has_contrast($trimmed) | not)
+            and (has_condition($trimmed) | not))
           else
             ((has_contrast($trimmed) | not)
             and (has_condition($trimmed) | not)
             and (has_followup($trimmed) | not)
-            and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+            and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
           end;
       def looks_like_safe_approve($summary):
         ($summary | trim_text) as $collapsed
@@ -1881,7 +1887,7 @@ normalize_native_review_result() {
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def has_followup($sentence):
-      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should(?!\\s+block\\s+merg(?:e|ing)\\s+(?:this\\s+)?pr\\b)|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
@@ -1945,11 +1951,14 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | if ($trimmed | length) == 0 then
           true
+        elif strong_safe_sentence($trimmed) then
+          ((has_contrast($trimmed) | not)
+          and (has_condition($trimmed) | not))
         else
           ((has_contrast($trimmed) | not)
           and (has_condition($trimmed) | not)
           and (has_followup($trimmed) | not)
-          and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+          and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
         end;
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
