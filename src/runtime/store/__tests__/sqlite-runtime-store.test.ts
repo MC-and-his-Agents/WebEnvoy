@@ -45,6 +45,48 @@ const createTempCwd = async (): Promise<string> => {
   return cwd;
 };
 
+const expectLegacyMigrationAllowsNullActionTypeWrite = async (
+  store: SQLiteRuntimeStore,
+  input: {
+    runId: string;
+    sessionId: string;
+    profile: string;
+    issueScope: string;
+    riskState: string;
+    nextState: string;
+    targetDomain: string;
+    targetTabId: number;
+    targetPage: string;
+    requestedExecutionMode: string;
+    effectiveExecutionMode: string;
+    gateDecision: string;
+  }
+) => {
+  const appended = await store.appendGateAuditRecord({
+    eventId: `evt-null-action-${input.runId}`,
+    runId: input.runId,
+    sessionId: input.sessionId,
+    profile: input.profile,
+    issueScope: input.issueScope,
+    riskState: input.riskState,
+    nextState: input.nextState,
+    transitionTrigger: "gate_evaluation",
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
+    actionType: null,
+    requestedExecutionMode: input.requestedExecutionMode,
+    effectiveExecutionMode: input.effectiveExecutionMode,
+    gateDecision: input.gateDecision,
+    gateReasons: ["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"],
+    approver: null,
+    approvedAt: null,
+    recordedAt: "2026-03-23T10:59:59.000Z"
+  });
+
+  expect(appended.action_type).toBeNull();
+};
+
 describeWithSqlite("sqlite-runtime-store", () => {
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
@@ -828,6 +870,20 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const store = new SQLiteRuntimeStore(dbPath);
     const trail = await store.getAuditTrailByRunId("run-v2-read");
+    await expectLegacyMigrationAllowsNullActionTypeWrite(store, {
+      runId: "run-v2-read",
+      sessionId: "session-v2-read",
+      profile: "profile-a",
+      issueScope: "issue_209",
+      riskState: "allowed",
+      nextState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 11,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_write",
+      effectiveExecutionMode: "dry_run",
+      gateDecision: "blocked"
+    });
     store.close();
 
     expect(trail.audit_records[0]?.issue_scope).toBe("issue_209");
@@ -923,6 +979,20 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const store = new SQLiteRuntimeStore(dbPath);
     const trail = await store.getAuditTrailByRunId("run-v3-write");
+    await expectLegacyMigrationAllowsNullActionTypeWrite(store, {
+      runId: "run-v3-write",
+      sessionId: "session-v3-write",
+      profile: "profile-b",
+      issueScope: "issue_209",
+      riskState: "paused",
+      nextState: "paused",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 22,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_write",
+      effectiveExecutionMode: "dry_run",
+      gateDecision: "blocked"
+    });
     store.close();
 
     expect(trail.audit_records[0]?.issue_scope).toBeNull();
@@ -1022,6 +1092,20 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const store = new SQLiteRuntimeStore(dbPath);
     const trail = await store.getAuditTrailByRunId("run-v4-legacy-ambiguous-write");
+    await expectLegacyMigrationAllowsNullActionTypeWrite(store, {
+      runId: "run-v4-legacy-ambiguous-write",
+      sessionId: "session-v4-legacy-ambiguous-write",
+      profile: "profile-legacy",
+      issueScope: "issue_209",
+      riskState: "allowed",
+      nextState: "limited",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 52,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_write",
+      effectiveExecutionMode: "dry_run",
+      gateDecision: "blocked"
+    });
     store.close();
 
     expect(trail.audit_records[0]?.issue_scope).toBeNull();
