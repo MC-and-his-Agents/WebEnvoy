@@ -182,6 +182,8 @@ FR-0001 契约冻结后的并行实现边界：
 
 ## 进入实现前条件
 
+### 原始实现 gate（历史上下文）
+
 只有在以下条件满足后，才允许进入 `feat/FR-0001-*` 的实现工作：
 
 - 当前 spec-only 变更已经进入 Draft PR 或等价评审上下文
@@ -189,14 +191,23 @@ FR-0001 契约冻结后的并行实现边界：
 - `ready_for_implementation = true`
 - `contracts/cli-entry.md` 与 `risks.md` 已随正式套件一起评审
 - `TODO.md` 中的 spec review 阶段阻断项已清空
-- 若后续以 expanded suite 口径继续对外声明 FR-0001 仍处于 `implementation-ready`，则 `data-model.md` 也必须完成 formal review
 
-补充说明：
-
-- `#162` 进入实现时对应的是原始 FR-0001 正式套件；上方最后一条只约束 expanded suite 状态声明，不追溯改写当时已经成立的历史 implementation gate。
-
-在这些条件满足前，明确禁止：
+在上述条件满足前，明确禁止：
 
 - 编写 FR-0001 的运行时代码
 - 在 `#142`、`#143`、`#145` 中硬编码新的 CLI 外层契约
 - 把 spec 修订和实现代码混在同一个 PR
+
+## Expanded Suite 状态声明约束
+
+以下约束只用于 expanded suite 口径下的 `implementation-ready` / final close-out 状态重新声明，不扩展为对所有 FR-0001 runtime 变更的普遍阻断：
+
+- 当前 expanded suite formal review 已完成并收敛 findings / blockers
+- `contracts/cli-entry.md`、`risks.md` 与 `data-model.md` 已随 expanded suite 正式套件一起完成 formal review
+- expanded suite close-out 结论已回写到 `TODO.md`
+- 在 expanded suite 口径下形成 `APPROVE`
+- 在 expanded suite 口径下形成 `ready_for_implementation = true`
+
+补充说明：
+
+- `#162` 进入实现时对应的是原始 FR-0001 正式套件；上方 expanded suite 状态约束只约束后续状态声明，不追溯改写当时已经成立的历史 implementation gate。

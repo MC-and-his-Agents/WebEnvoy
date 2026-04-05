@@ -15,21 +15,29 @@
 - [ ] 完成当前 expanded suite formal review，并收敛所有 findings / blockers
 - [x] `data-model.md` 已纳入当前 expanded suite formal review 的审查范围
 
-## 进入实现前条件（门禁定义）
+## 门禁定义
+
+### 原始实现 gate（历史上下文）
 
 - 获得 `APPROVE`
 - 获得 `ready_for_implementation = true`
 - 确认 FR-0001 的实现 PR 与 spec PR 分离
-- 若按 expanded suite 口径继续对外声明 FR-0001 仍处于 `implementation-ready`，则 `data-model.md` 也必须完成 formal review
 
-本节保留为进入实现前的门禁定义，不在当前对齐 PR 中倒写为历史上已先行满足；最终 formal close-out 结论在本轮 review 合入后由后续回写单独收口。
+### Expanded Suite `implementation-ready` 状态 gate（当前对齐目标）
+
+- 完成当前 expanded suite formal review，并收敛所有 findings / blockers
+- `contracts/cli-entry.md`、`risks.md` 与 `data-model.md` 都已纳入正式套件审查并完成 formal review
+- 在 expanded suite 口径下形成 `APPROVE`
+- 在 expanded suite 口径下形成 `ready_for_implementation = true`
+
+原始实现 gate 对应 `#162` 的历史进入实现条件，不在当前对齐 PR 中被追溯性改写；当前 PR 只对齐 expanded suite 的 review scope 与状态 gate，这些 gate 仅约束 expanded suite 口径下的 `implementation-ready` / final close-out 状态重新声明，最终 formal close-out 结论在本轮 review 合入后由后续回写单独收口。
 
 ## Expanded Suite 现状记录
 
 - [x] `#160` 已给出原始 FR-0001 正式套件（当时不含 `data-model.md`）的 `APPROVE`
 - [x] `#160` 已给出原始 FR-0001 正式套件（当时不含 `data-model.md`）的 `ready_for_implementation = true`
 - [x] `#162` 已作为原始 FR-0001 套件的独立实现 PR 合入，说明当时的 spec PR 与实现 PR 分离已实际成立
-- [x] `data-model.md` 已在后续修订中加入正式套件，当前 PR 只负责把 expanded suite 的审查范围与 implementation gate 对齐
+- [x] `data-model.md` 已在后续修订中加入正式套件，当前 PR 只负责把 expanded suite 的审查范围与状态 gate 对齐
 
 ## Spec Review 通过后进入实现
 
