@@ -187,8 +187,13 @@ FR-0001 契约冻结后的并行实现边界：
 - 当前 spec-only 变更已经进入 Draft PR 或等价评审上下文
 - spec review 结论为 `APPROVE`
 - `ready_for_implementation = true`
-- `contracts/cli-entry.md` 与 `risks.md` 已随套件一起评审
+- `contracts/cli-entry.md` 与 `risks.md` 已随正式套件一起评审
 - `TODO.md` 中的 spec review 阶段阻断项已清空
+- 若后续以 expanded suite 口径继续对外声明 FR-0001 仍处于 `implementation-ready`，则 `data-model.md` 也必须完成 formal review
+
+补充说明：
+
+- `#162` 进入实现时对应的是原始 FR-0001 正式套件；上方最后一条只约束 expanded suite 状态声明，不追溯改写当时已经成立的历史 implementation gate。
 
 在这些条件满足前，明确禁止：
 

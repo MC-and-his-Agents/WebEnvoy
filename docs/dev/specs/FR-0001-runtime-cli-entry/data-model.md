@@ -12,6 +12,8 @@ FR-0001 不引入 SQLite schema、表结构迁移或其他持久化实体。
 
 这些模型都属于单次进程内瞬时数据，不构成持久化账本。
 
+本文件只补充字段、约束和生命周期层面的数据模型表达，不单独扩张 FR-0001 已冻结的命令面、错误壳或退出码语义；如与 `spec.md` 或 `contracts/cli-entry.md` 的外层契约表述冲突，以后两者为准。
+
 ## 实体 1：CliInvocationContext
 
 `CliInvocationContext` 是 CLI 在进入命令处理器前形成的标准化调用上下文。
