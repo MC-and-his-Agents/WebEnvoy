@@ -4,7 +4,7 @@
 
 本模型只覆盖 Phase 1 的运行证据与审计记录，不覆盖平台业务正文数据，不覆盖实时会话状态机。
 
-实时状态真相源仍是 `#143` 的 profile/session 路径；本模型只承载历史运行事实。
+实时状态真相源仍是 `#356` 的 profile/session 路径；本模型只承载历史运行事实。
 
 ## 核心实体
 
@@ -84,6 +84,6 @@
 
 ## 与其他 FR 的模型关系
 
-- 与 `#143`：共享 `profile_name`、`session_id` 引用字段，但不共享实时状态主表。
-- 与 `#154`：`diagnosis_category`、`failure_point` 与诊断摘要字段按最小映射对齐。
-- 与 `#159`：`run_id`、`command`、`status`、`ended_at` 作为能力执行证据最小输入。
+- 与 `#356`：共享 `profile_name`、`session_id` 引用字段，但不共享实时状态主表。
+- 与 `#357`：`diagnosis_category`、`failure_point` 与诊断摘要字段按最小映射对齐。
+- 与 `#360`：`run_id`、`command`、`status`、`ended_at` 作为能力执行证据最小输入；SQLite 不承接能力目录、版本或健康度真相源。
