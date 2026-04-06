@@ -33,7 +33,7 @@
   - `blocked_modes`
   - `manual_confirmation_required`
   - `manual_confirmation_checks`
-- 生命周期：作为 `#208/#209` 后续事项与后续读写实现的模式前置。
+- 生命周期：作为 `#208/#209` 后续 formal 套件、恢复讨论与后续读写实现的治理输入。
 - 说明：责任人与 formal closeout 留痕可在 GitHub issue / PR 中追溯，但这类记录不替代后续执行契约中的正式审批 / 审计载体。
 
 ## 实体 4：ResumeRequirements
