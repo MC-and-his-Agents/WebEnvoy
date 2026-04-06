@@ -17,14 +17,14 @@
 
 ## Formal Review 当前状态
 
-- [ ] external formal spec review 已完成并收敛 findings / blockers
-- [ ] formal 结论：`APPROVE`
-- [ ] formal 结论：`ready_for_implementation = true`
+- [x] external formal spec review 已完成并收敛 findings / blockers
+- [x] formal 结论：`APPROVE`
+- [x] formal 结论：`ready_for_implementation = true`
 
 当前状态说明：
 
 - FR-0007 的本地正式套件主体已收口；`#374` 承载 actual formal-review record，当前 `#360-finalize` 仅负责 final writeback-only。
-- 在 external formal review 明确给出结论前，FR-0007 仍保持 review open；现在保留的是完成态的写回，不改变 `APPROVE` / `ready_for_implementation = true` 的完成态勾选。
+- FR-0007 的 external formal review 已完成，`APPROVE` 与 `ready_for_implementation = true` 的完成态继续锚定在 `#374` 对应的 formal-review 记录上。
 
 ## 进入实现前条件（门禁定义）
 
