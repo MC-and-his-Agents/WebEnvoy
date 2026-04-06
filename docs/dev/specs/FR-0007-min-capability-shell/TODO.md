@@ -38,7 +38,7 @@
 - `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成本地文档阻塞。
 - `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成本地文档阻塞。
 - `#374` 是 actual formal-review record，本次 `#360-finalize` 仅负责 final writeback-only，不重开能力壳输入 / 输出 / 错误边界。
-- 当前可确认的是“本套件 formal verdict 已完成写回、上游 formal 基座不再构成本地文档阻塞”；最终审计仍以 `#374` 这条正式评审记录和当前 PR 的 writeback 记录共同对齐。
+- 当前可确认的是“本套件 formal verdict 的完成态由 `#374` 锚定，当前 PR 只把既有 verdict 写回 TODO”；最终审计仍以 `#374` 这条正式评审记录和当前 PR 的 writeback 记录共同对齐。
 
 ## Implementation Backlog
 
