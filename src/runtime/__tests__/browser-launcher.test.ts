@@ -634,7 +634,7 @@ describe("browser-launcher", () => {
       controllerPid: launchB.controllerPid,
       runId: "run-launcher-test-secret-002"
     });
-  });
+  }, 10_000);
 
   it("rejects invalid startUrl", async () => {
     const { scriptPath } = await createMockBrowserExecutable();

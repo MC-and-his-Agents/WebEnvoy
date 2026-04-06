@@ -502,9 +502,11 @@ class InMemoryContentScriptRuntime {
                             ? "账号异常，平台拒绝当前请求"
                             : simulated === "browser_env_abnormal"
                                 ? "浏览器环境异常，平台拒绝当前请求"
-                                : simulated === "signature_entry_missing"
-                                    ? "页面签名入口不可用"
-                                    : "网关调用失败，当前上下文不足以完成搜索请求"
+                                : simulated === "captcha_required"
+                                    ? "平台要求额外人机验证，无法继续执行"
+                                    : simulated === "signature_entry_missing"
+                                        ? "页面签名入口不可用"
+                                        : "网关调用失败，当前上下文不足以完成搜索请求"
                 },
                 payload: {
                     details: {
@@ -516,9 +518,11 @@ class InMemoryContentScriptRuntime {
                                 ? "ACCOUNT_ABNORMAL"
                                 : simulated === "browser_env_abnormal"
                                     ? "BROWSER_ENV_ABNORMAL"
-                                    : simulated === "signature_entry_missing"
-                                        ? "SIGNATURE_ENTRY_MISSING"
-                                        : "GATEWAY_INVOKER_FAILED"
+                                    : simulated === "captcha_required"
+                                        ? "CAPTCHA_REQUIRED"
+                                        : simulated === "signature_entry_missing"
+                                            ? "SIGNATURE_ENTRY_MISSING"
+                                            : "GATEWAY_INVOKER_FAILED"
                     },
                     ...gateBundle,
                     observability: {
@@ -530,25 +534,29 @@ class InMemoryContentScriptRuntime {
                             title: "Search Result",
                             ready_state: "complete"
                         },
-                        key_requests: [
-                            {
-                                request_id: "req-loopback-001",
-                                stage: "request",
-                                method: "POST",
-                                url: "/api/sns/web/v1/search/notes",
-                                outcome: "failed",
-                                status_code: simulated === "account_abnormal"
-                                    ? 461
-                                    : simulated === "browser_env_abnormal"
-                                        ? 200
-                                        : simulated === "gateway_invoker_failed"
-                                            ? 500
-                                            : undefined,
-                                failure_reason: simulated
-                            }
-                        ],
+                        key_requests: simulated === "signature_entry_missing"
+                            ? []
+                            : [
+                                {
+                                    request_id: "req-loopback-001",
+                                    stage: "request",
+                                    method: "POST",
+                                    url: "/api/sns/web/v1/search/notes",
+                                    outcome: "failed",
+                                    status_code: simulated === "account_abnormal"
+                                        ? 461
+                                        : simulated === "browser_env_abnormal"
+                                            ? 200
+                                            : simulated === "captcha_required"
+                                                ? 429
+                                                : simulated === "gateway_invoker_failed"
+                                                    ? 500
+                                                    : undefined,
+                                    failure_reason: simulated
+                                }
+                            ],
                         failure_site: {
-                            stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                            stage: simulated === "signature_entry_missing" ? "action" : "request",
                             component: simulated === "signature_entry_missing" ? "page" : "network",
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
@@ -558,10 +566,10 @@ class InMemoryContentScriptRuntime {
                     },
                     diagnosis: {
                         category: simulated === "signature_entry_missing" ? "page_changed" : "request_failed",
-                        stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                        stage: simulated === "signature_entry_missing" ? "action" : "request",
                         component: simulated === "signature_entry_missing" ? "page" : "network",
                         failure_site: {
-                            stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                            stage: simulated === "signature_entry_missing" ? "action" : "request",
                             component: simulated === "signature_entry_missing" ? "page" : "network",
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
