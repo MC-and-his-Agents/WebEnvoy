@@ -26,8 +26,10 @@
 - [x] 明确标记本轮为“部分完成”，非实现就绪
 - [x] 2026-04-06 中午已按 WebEnvoy-managed profile 口径复查本地执行现场；当时 `.webenvoy/profiles` 不存在可用于 XHS live 复核的已登录 profile
 - [x] 由于 2026-04-06 中午缺少 WebEnvoy-managed XHS 会话，本轮曾按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
-- [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；是否存在可用于 XHS live 复核的受管会话，改由每次执行前的 runtime/profile 准入预检即时判定
-- [ ] 在执行现场通过 WebEnvoy-managed XHS profile 准入预检后，继续补做 `search/detail/user_home` 的同口径 live 复核
+- [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；是否存在可用于 XHS live 复核的受管会话，只能通过仓库内可复核的 runtime/profile 准入预检证据来更新
+- [x] 截至当前 PR，仓库内仍未附带可复核的 WebEnvoy-managed XHS 准入预检 artifact 或链接；因此 `#358` 的当前正式状态仍按 `blocked_on_managed_profile_precheck_evidence` 处理
+- [ ] 先补齐并链接 WebEnvoy-managed XHS profile 的准入预检证据
+- [ ] 在上述准入预检证据齐备后，继续补做 `search/detail/user_home` 的同口径 live 复核
 
 ## #185 阻断点吸收（本次规约修订）
 
@@ -49,8 +51,8 @@
 ## 后续衔接
 
 - [x] 2026-04-06 中午已形成本轮 Go/No-Go 历史结论：`No-Go/paused`
-- [x] 上述 `No-Go/paused` 继续保留为带日期的历史 closeout；是否已恢复受管 XHS 会话，不在 formal spec 中写成静态现状，而由执行现场准入预检决定
-- [ ] 在执行现场通过 WebEnvoy-managed XHS profile 准入预检后，补齐 `search/detail/user_home` 的 API primary 复核，并重新判定当前 Go/No-Go
+- [x] 上述 `No-Go/paused` 继续保留为带日期的历史 closeout；在仓库内可复核的受管会话准入预检证据补齐前，当前正式状态仍保持 blocked
+- [ ] 先补齐 WebEnvoy-managed XHS profile 的准入预检证据，再补齐 `search/detail/user_home` 的 API primary 复核，并重新判定当前 Go/No-Go
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
 - [ ] 创建“小红书 L3 读适配实现 FR”并引用 FR-0005 已复核结论

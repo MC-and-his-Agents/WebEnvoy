@@ -55,6 +55,7 @@
 - 口径约束：
   - 作者本机 `.webenvoy/profiles/**` 的恢复状态，不在 formal spec 中写成静态当前事实
   - 若执行现场已恢复受管 XHS profile，应先把准入预检结果沉淀为仓库可复核 artifact 或可核对链接，再更新正式结论
+  - 在上述 artifact 或链接补齐前，formal FR 的当前状态仍按 `blocked_on_managed_profile_precheck_evidence` 处理
 - 回滚/降级：
   - 暂停本轮 issue 的 live 扩展
   - 待执行现场通过 WebEnvoy-managed XHS profile 准入预检后，再重新执行 `search/detail/user_home` 的同口径复核

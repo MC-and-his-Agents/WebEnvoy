@@ -377,19 +377,20 @@
 
 ### 5.1 2026-04-06 WebEnvoy-managed profile 准入预检
 
-2026-04-06 在仓库本地按 `#358` 的正式执行口径复查 `.webenvoy/profiles/**/__webenvoy_meta.json`：
+2026-04-06 中午在仓库本地按 `#358` 的正式执行口径复查 `.webenvoy/profiles/**/__webenvoy_meta.json`：
 
 - 当前仅存在 `fr0012_diag_stage` 与 `fr0012_diag_stage2` 两个诊断样本 profile。
 - 两个 profile 的 `lastLoginAt` 均为 `null`，且 profile 名称、用途与小红书 live 复核无关。
-- 当前仓库内不存在可由 WebEnvoy 接管、且保持有效登录态的小红书 profile，因此无法在 WebEnvoy-managed official runtime 边界内继续执行 `search/detail/user_home` 的同口径 live 复核。
+- 当时仓库内不存在可由 WebEnvoy 接管、且保持有效登录态的小红书 profile，因此无法在 WebEnvoy-managed official runtime 边界内继续执行 `search/detail/user_home` 的同口径 live 复核。
 
 由此得到的正式结论：
 
-- 2026-04-06 这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
+- 2026-04-06 中午这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
 - `search` 仍停留在 `observed_once` 的 `primary` 成功样本，尚缺 WebEnvoy-managed profile 下的多轮 replay 与 required headers 最小必要集。
 - `detail` 与 `user_home` 仍分别停留在 `fallback-only` 与 `candidate/failed` 组合，不满足进入实现 FR 的前提。
-- 本轮 Go/No-Go 结论固定为 `No-Go/paused`：不创建“小红书 L3 读适配实现 FR”，直到执行现场通过 WebEnvoy-managed XHS profile 准入预检，并完成剩余复核。
-- 若后续执行现场恢复了受管 XHS profile，应先把准入预检结果沉淀为仓库可复核 artifact 或可核对链接，再更新正式结论。
+- 上述快照支撑了 2026-04-06 中午的 `No-Go/paused` 历史 closeout。
+- 截至当前 PR，仓库内仍未附带可复核的后续准入预检 artifact 或链接；因此 formal FR 的当前状态仍保持 `blocked_on_managed_profile_precheck_evidence`。
+- 若后续执行现场恢复了受管 XHS profile，应先把准入预检结果沉淀为仓库可复核 artifact 或可核对链接，再更新正式结论并继续剩余复核。
 
 ## 未决项（进入下一轮复核前保留）
 
