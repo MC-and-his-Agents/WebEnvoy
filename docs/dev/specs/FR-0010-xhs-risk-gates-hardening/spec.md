@@ -57,6 +57,7 @@
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
 - `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效。
 - `live_read_limited` 只有在治理侧 `scope_context.limited_read_rollout_ready=true` 时才可进入受控读侧 staged rollout；该前置不得由调用方在 `gate_input` 自报。
+- 任意 live 恢复或扩展都必须同时满足治理侧 `scope_context.spec_review_passed=true` 与 `scope_context.risk_review_completed=true`；任一为 `false` 时必须阻断。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过
@@ -74,6 +75,7 @@
 - 任意 live 放行必须可追溯到审批记录。
 - `live_read_limited` 不得绕开审批记录、审计记录或冻结字段独立放行。
 - `approval_record` 与 `audit_record` 必须各自提供稳定记录标识，供 `FR-0009` 的 `approval_record_ref` / `audit_record_ref` 等价消费。
+- `audit_record` 必须显式回链到同一次 `gate_decision` 与 `approval_record`，保证 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
 
 ### 5. 与 #208 / #209 的统一约束
 
@@ -162,6 +164,8 @@ And 不存在某一事项绕过门禁的路径
 - 关系声明：`FR-0009` 继续作为治理基线；Sprint 2 实现与测试统一消费 `FR-0010` 契约对象。
 - 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接；后续 FR 只能在保持该对象单口径的前提下扩展受控 live 模式。
 - 替代细化：
+  - `FR-0009.resume_requirements.spec_review_passed` -> `FR-0010.scope_context.spec_review_passed`
+  - `FR-0009.resume_requirements.risk_review_completed` -> `FR-0010.scope_context.risk_review_completed`
   - `FR-0009.resume_requirements.limited_read_rollout_ready` -> `FR-0010.scope_context.limited_read_rollout_ready`
   - `FR-0009.resume_requirements.explicit_scope_for_209_extension` -> `FR-0010.scope_context.explicit_scope_for_209_extension`
   - `FR-0009.resume_requirements.explicit_scope_for_208` -> `FR-0010.scope_context.explicit_scope_for_208`

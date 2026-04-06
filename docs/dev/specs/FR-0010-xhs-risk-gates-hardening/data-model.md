@@ -10,6 +10,8 @@
 - `read_domain` string NOT NULL
 - `write_domain` string NOT NULL
 - `domain_mixing_forbidden` boolean NOT NULL
+- `spec_review_passed` boolean NOT NULL
+- `risk_review_completed` boolean NOT NULL
 - `limited_read_rollout_ready` boolean NOT NULL
 - `explicit_scope_for_209_extension` boolean NOT NULL
 - `explicit_scope_for_208` boolean NOT NULL
@@ -18,9 +20,10 @@
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
-3. `limited_read_rollout_ready` 是治理侧 staged rollout readiness gate，不得由调用方请求载荷直接声明。
-4. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
-5. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
+3. `spec_review_passed` 与 `risk_review_completed` 属于治理侧 hard gate，不得由调用方请求载荷直接声明。
+4. `limited_read_rollout_ready` 是治理侧 staged rollout readiness gate，不得由调用方请求载荷直接声明。
+5. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
+6. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
 
 ## 实体 2：GateInput
 
@@ -61,6 +64,7 @@
 ## 实体 4：ApprovalRecord
 
 - `approval_id` string PK
+- `decision_id` string NOT NULL
 - `run_id` string NOT NULL
 - `approved` boolean NOT NULL
 - `approver` string NULL
@@ -78,10 +82,13 @@
   - `action_type_confirmed` boolean
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，`ApprovalRecord` 不得缺失。
 4. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+5. `decision_id` 必须指向同一次 `GateDecision`，保证 live 放行的审批记录可定位到唯一门禁决策。
 
 ## 实体 5：AuditRecord
 
 - `event_id` string PK
+- `decision_id` string NOT NULL
+- `approval_id` string NULL
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
@@ -105,14 +112,16 @@
 4. `gate_decision=allowed` 时，`approver` 与 `approved_at` 必填。
 5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，审计记录必须能独立证明审批已完成。
 6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+7. `decision_id` 必须指向同一次 `GateDecision`，保证审计记录能回链到唯一门禁结论。
+8. `approval_id` 在 live 放行时必填，且必须引用对应 `ApprovalRecord.approval_id`，确保 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
 
 ## 生命周期
 
 1. 先加载治理侧 `ScopeContext`。
 2. 接收执行请求后生成 `GateInput`。
 3. 计算门禁后生成 `GateDecision`。
-4. 若请求 live 升级，生成或更新 `ApprovalRecord`。
-5. 不论放行或阻断，写入 `AuditRecord`。
+4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
+5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
 
 ## 与现有 FR 对齐
 
@@ -129,6 +138,8 @@
 | `risk_state.live_experiment_status` | `GateInput.risk_state` | 状态输入保持一致语义 |
 | `execution_mode_gate`（整体） | `GateInput + GateDecision` | 拆分为“请求模式”与“生效模式” |
 | `resume_requirements` | `ApprovalRecord + AuditRecord` | 恢复前置改为审批与审计可检索记录 |
+| `resume_requirements.spec_review_passed` | `ScopeContext.spec_review_passed` | formal spec review 已通过的治理侧前置 |
+| `resume_requirements.risk_review_completed` | `ScopeContext.risk_review_completed` | 风险审查已完成的治理侧前置 |
 | `resume_requirements.limited_read_rollout_ready` | `ScopeContext.limited_read_rollout_ready` | 受控读侧 staged rollout 的治理侧前置 |
 | `resume_requirements.explicit_scope_for_209_extension` | `ScopeContext.explicit_scope_for_209_extension` | 读侧扩展的显式 scope gate |
 | `resume_requirements.explicit_scope_for_208` | `ScopeContext.explicit_scope_for_208` | 写侧真实交互的显式 scope gate |

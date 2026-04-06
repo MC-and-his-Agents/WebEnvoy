@@ -31,6 +31,8 @@
     "read_domain": "www.xiaohongshu.com",
     "write_domain": "creator.xiaohongshu.com",
     "domain_mixing_forbidden": true,
+    "spec_review_passed": true,
+    "risk_review_completed": true,
     "limited_read_rollout_ready": false,
     "explicit_scope_for_209_extension": false,
     "explicit_scope_for_208": false
@@ -42,7 +44,7 @@
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
-3. `limited_read_rollout_ready`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
+3. `spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
 
 ## gate_input
 
@@ -99,7 +101,8 @@
 4. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
 5. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
 6. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
-7. 若 `scope_context.limited_read_rollout_ready=false`、`scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
+7. 若 `scope_context.spec_review_passed=false` 或 `scope_context.risk_review_completed=false`，必须阻断任意 live 恢复或扩展。
+8. 若 `scope_context.limited_read_rollout_ready=false`、`scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
 
 ## approval_record
 
@@ -107,6 +110,7 @@
 {
   "approval_record": {
     "approval_id": "approval_run_001",
+    "decision_id": "gate_decision_001",
     "approved": false,
     "approver": null,
     "approved_at": null,
@@ -127,6 +131,7 @@
 2. `checks` 任一项为 `false`，不得放行 live。
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，必须存在完整审批证据。
 4. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+5. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审批记录可回链到唯一门禁结论。
 
 ## audit_record
 
@@ -134,6 +139,8 @@
 {
   "audit_record": {
     "event_id": "gate_evt_001",
+    "decision_id": "gate_decision_001",
+    "approval_id": null,
     "run_id": "run_001",
     "session_id": "nm-session-001",
     "profile": "xhs_account_001",
@@ -163,6 +170,8 @@
 4. 若 `gate_decision=allowed`，`approver` 与 `approved_at` 必填；若为阻断，可为空。
 5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，审计记录必须能独立证明审批已完成。
 6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+7. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
+8. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
 
 ## consumer_gate_result
 
