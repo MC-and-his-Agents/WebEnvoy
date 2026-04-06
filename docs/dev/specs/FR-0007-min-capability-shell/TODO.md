@@ -24,7 +24,7 @@
 当前状态说明：
 
 - FR-0007 的本地正式套件主体已收口；`#374` 承载 actual formal-review record，当前 `#360-finalize` 仅负责 final writeback-only。
-- FR-0007 的 external formal review 已完成，`APPROVE` 与 `ready_for_implementation = true` 的完成态继续锚定在 `#374` 对应的 formal-review 记录上；该 PR 在受控合并前已获得 guardian `APPROVE`，并于 `2026-04-06T08:11:48Z` 合入主干，merge commit 为 `cb6262d1e39eef3048030074267ca62a221fc24c`。
+- FR-0007 的 external formal review 已完成，`APPROVE` 与 `ready_for_implementation = true` 的完成态继续锚定在 `#374` 对应的 formal-review 记录上；该 PR 在受控合并前已获得 guardian `APPROVE` 且 GitHub checks 全绿，并于 `2026-04-06T08:11:48Z` 合入主干，merge commit 为 `cb6262d1e39eef3048030074267ca62a221fc24c`。
 
 ## 进入实现前条件（门禁定义）
 
@@ -38,7 +38,7 @@
 - `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成本地文档阻塞。
 - `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成本地文档阻塞。
 - `#374` 是 actual formal-review record，本次 `#360-finalize` 仅负责 final writeback-only，不重开能力壳输入 / 输出 / 错误边界。
-- 当前可确认的是“本套件 formal verdict 的完成态由 `#374` 锚定，当前 PR 只把既有 verdict 写回 TODO”；最终审计以 `#374` 的 guardian 通过结论、mergedAt `2026-04-06T08:11:48Z` 与 merge commit `cb6262d1e39eef3048030074267ca62a221fc24c` 为稳定锚点。
+- 当前可确认的是“本套件 formal verdict 的完成态由 `#374` 锚定，当前 PR 只把既有 verdict 写回 TODO”；最终审计以 `#374` 的 guardian 通过结论、GitHub checks 全绿、mergedAt `2026-04-06T08:11:48Z` 与 merge commit `cb6262d1e39eef3048030074267ca62a221fc24c` 为稳定锚点。
 
 ## Implementation Backlog
 
