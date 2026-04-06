@@ -29,7 +29,7 @@
 依赖：
 
 - `#354` 已收口 FR-0001 的 CLI 契约
-- FR-0003 的场景、状态和代理边界已经在 formal closeout 中对齐
+- FR-0003 的场景、状态和代理边界仍需在 formal review 中对齐
 
 ### 阶段 B：Profile 启动与锁模型
 
@@ -129,7 +129,7 @@
 - Profile 生命周期测试通过
 - 锁与代理绑定测试通过
 - `docs-guard` 通过
-- 本 FR 的 spec review 通过
+- 本 FR 的 spec review 结论已归档
 
 ## TDD 范围
 
@@ -174,7 +174,7 @@
 
 ## 进入实现前条件
 
-只有在以下条件满足后，才允许进入 `feat/FR-0003-*` 的实现工作：
+以下条件属于进入 `feat/FR-0003-*` 实现工作的未来门禁；在它们满足前，不应开始实现：
 
 - 当前 spec-only 变更已经进入 Draft PR 或等价评审上下文
 - spec review 结论为 `APPROVE`
