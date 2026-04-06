@@ -12,7 +12,7 @@
 - [x] 本地运行文档相关最小校验
 - [x] 在 GitHub Issue `#141` 中绑定 `FR-0001`
 - [x] 创建仅包含规约文档的 Draft PR
-- [ ] 完成当前 expanded suite formal review，并收敛所有 findings / blockers
+- [x] 完成当前 expanded suite formal review，并收敛所有 findings / blockers
 - [x] `data-model.md` 已纳入当前 expanded suite formal review 的审查范围
 
 ## 门禁定义
@@ -30,14 +30,17 @@
 - 在 expanded suite 口径下形成 `APPROVE`
 - 在 expanded suite 口径下形成 `ready_for_implementation = true`
 
-原始实现 gate 对应 `#162` 的历史进入实现条件，不在当前对齐 PR 中被追溯性改写；当前 PR 只对齐 expanded suite 的 review scope 与状态 gate，这些 gate 仅约束 expanded suite 口径下的 `implementation-ready` / final close-out 状态重新声明，最终 formal close-out 结论在本轮 review 合入后由后续回写单独收口。
+原始实现 gate 对应 `#162` 的历史进入实现条件，不在当前对齐 PR 中被追溯性改写；expanded suite 状态 gate 仅约束 expanded suite 口径下的 `implementation-ready` / final close-out 状态重新声明；当前 PR 基于 `#369` 已合入的 formal review alignment 回写最终 close-out 结论。
 
 ## Expanded Suite 现状记录
 
 - [x] `#160` 已给出原始 FR-0001 正式套件（当时不含 `data-model.md`）的 `APPROVE`
 - [x] `#160` 已给出原始 FR-0001 正式套件（当时不含 `data-model.md`）的 `ready_for_implementation = true`
 - [x] `#162` 已作为原始 FR-0001 套件的独立实现 PR 合入，说明当时的 spec PR 与实现 PR 分离已实际成立
-- [x] `data-model.md` 已在后续修订中加入正式套件，当前 PR 只负责把 expanded suite 的审查范围与状态 gate 对齐
+- [x] `data-model.md` 已在后续修订中加入正式套件，且其 expanded suite formal review coverage 已通过 `#369` 对齐并落地
+- [x] `#369` 已合入，说明当前 expanded suite formal review 已完成并收敛 findings / blockers
+- [x] 基于 `#369` 合入后的 latest guardian `APPROVE` 与已落地的 expanded suite 状态 gate，FR-0001 现可在 expanded suite 口径下正式记录为 `APPROVE`
+- [x] 基于 `#369` 合入后已齐备的正式套件审查范围与状态 gate，FR-0001 现可在 expanded suite 口径下正式记录为 `ready_for_implementation = true`
 
 ## Spec Review 通过后进入实现
 
