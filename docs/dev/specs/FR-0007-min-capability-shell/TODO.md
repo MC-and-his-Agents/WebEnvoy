@@ -17,14 +17,14 @@
 
 ## Formal Review 当前状态
 
-- [ ] external formal spec review 已完成并收敛 findings / blockers
-- [ ] formal 结论：`APPROVE`
-- [ ] formal 结论：`ready_for_implementation = true`
+- [x] external formal spec review 已完成并收敛 findings / blockers
+- [x] formal 结论：`APPROVE`
+- [x] formal 结论：`ready_for_implementation = true`
 
 当前状态说明：
 
-- FR-0007 的本地正式套件主体已收口，可进入 formal review；相邻 FR 边界在实现承接时继续复核，不作为当前 closeout 的完成门禁。
-- 在 external formal review 明确给出结论前，FR-0007 仍保持 review open，不宣称 `APPROVE` 已成立，也不宣称 `ready_for_implementation = true` 已成立。
+- FR-0007 的本地正式套件主体已收口；`#374` 承载 actual formal-review record，当前 `#360-finalize` 仅负责 final writeback-only。
+- FR-0007 的 external formal review 已完成，`APPROVE` 与 `ready_for_implementation = true` 的完成态继续锚定在 `#374` 对应的 formal-review 记录上；其最终 guardian `APPROVE` review artifact 为 `https://github.com/mcontheway/WebEnvoy/pull/374#pullrequestreview-4060962402`，该 artifact 于 `2026-04-06T08:11:40Z` 提交，并锚定到 commit `15440dc07dbab3a6f1e3d1426255f53988f2ee79`。该 PR 在受控合并前 GitHub checks 全绿，并于 `2026-04-06T08:11:48Z` 合入主干，merge commit 为 `cb6262d1e39eef3048030074267ca62a221fc24c`。
 
 ## 进入实现前条件（门禁定义）
 
@@ -37,8 +37,8 @@
 
 - `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成本地文档阻塞。
 - `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成本地文档阻塞。
-- 本次 `#360` 仅回写 FR-0007 formal 文档收口状态，不重开能力壳输入 / 输出 / 错误边界，也不把 closeout 结论伪装成新的外部审批事实。
-- 当前可确认的是“本套件 formal review 输入已收口、上游 formal 基座不再构成本地文档阻塞”；外部 formal review 通过与 `ready_for_implementation` 结论仍需在后续 review 链路中明确给出。
+- `#374` 是 actual formal-review record，本次 `#360-finalize` 仅负责 final writeback-only，不重开能力壳输入 / 输出 / 错误边界。
+- 当前可确认的是“本套件 formal verdict 的完成态由 `#374` 锚定，当前 PR 只把既有 verdict 写回 TODO”；最终审计以 `#374` 的 `APPROVE` review artifact `https://github.com/mcontheway/WebEnvoy/pull/374#pullrequestreview-4060962402`、GitHub checks 全绿、mergedAt `2026-04-06T08:11:48Z` 与 merge commit `cb6262d1e39eef3048030074267ca62a221fc24c` 为稳定锚点。
 
 ## Implementation Backlog
 
