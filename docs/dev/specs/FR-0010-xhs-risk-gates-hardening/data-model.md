@@ -10,18 +10,12 @@
 - `read_domain` string NOT NULL
 - `write_domain` string NOT NULL
 - `domain_mixing_forbidden` boolean NOT NULL
-- `spec_review_passed` boolean NOT NULL
-- `risk_review_completed` boolean NOT NULL
-- `explicit_scope_for_209_extension` boolean NOT NULL
-- `explicit_scope_for_208` boolean NOT NULL
 
 约束：
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
-3. `spec_review_passed` 与 `risk_review_completed` 属于治理侧 hard gate，不得由调用方请求载荷直接声明。
-4. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展。
-5. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
+3. `FR-0009.resume_requirements` 中的治理侧 gate 不在本实体冻结；它们属于进入运行时门禁前的上游准入条件，而不是运行时直接产出的 `scope_context` 字段。
 
 ## 实体 2：GateInput
 
@@ -137,10 +131,6 @@
 | `risk_state.live_experiment_status` | `GateInput.risk_state` | 状态输入保持一致语义 |
 | `execution_mode_gate`（整体） | `GateInput + GateDecision` | 拆分为“请求模式”与“生效模式” |
 | `resume_requirements` | `ApprovalRecord + AuditRecord` | 恢复前置改为审批与审计可检索记录 |
-| `resume_requirements.spec_review_passed` | `ScopeContext.spec_review_passed` | formal spec review 已通过的治理侧前置 |
-| `resume_requirements.risk_review_completed` | `ScopeContext.risk_review_completed` | 风险审查已完成的治理侧前置 |
-| `resume_requirements.explicit_scope_for_209_extension` | `ScopeContext.explicit_scope_for_209_extension` | 读侧扩展的显式 scope gate |
-| `resume_requirements.explicit_scope_for_208` | `ScopeContext.explicit_scope_for_208` | 写侧真实交互的显式 scope gate |
 | `resume_requirements.approval_record_ref` | `ApprovalRecord.approval_id` | 审批记录稳定引用 |
 | `resume_requirements.audit_record_ref` | `AuditRecord.event_id` | 审计记录稳定引用 |
 
@@ -148,5 +138,5 @@
 
 1. FR-0010 不与 FR-0009 并存双套可执行机器字段；Sprint 2 实现按 FR-0010 单口径消费。
 2. `live_read_limited` 的 Sprint 3 readiness 字段与放行条件不在本 FR 冻结；在 `FR-0011` formal 收口前，本 FR 只承接其默认阻断语义。
-3. `FR-0009.resume_requirements.limited_read_rollout_ready` 仍保留为治理前置，但其正式机器承载不在本 FR 冻结；在 `FR-0011` 提供对应契约前，Sprint 2 只能继续阻断 `live_read_limited`。
+3. `FR-0009.resume_requirements.spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension` 与 `explicit_scope_for_208` 继续保留为治理前置，但其正式机器承载不在本 FR 冻结。
 4. 旧字段兼容若有需要，应在实现 PR 做显式映射层，不回灌到 FR-0010 正式字段命名。

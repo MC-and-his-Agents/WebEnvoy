@@ -30,11 +30,7 @@
     "platform": "xhs",
     "read_domain": "www.xiaohongshu.com",
     "write_domain": "creator.xiaohongshu.com",
-    "domain_mixing_forbidden": true,
-    "spec_review_passed": true,
-    "risk_review_completed": true,
-    "explicit_scope_for_209_extension": false,
-    "explicit_scope_for_208": false
+    "domain_mixing_forbidden": true
   }
 }
 ```
@@ -43,7 +39,7 @@
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
-3. `spec_review_passed`、`risk_review_completed`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
+3. `FR-0009.resume_requirements` 中的治理 gate 不在本契约冻结；运行时只消费已经通过上游治理准入后的请求。
 4. `live_read_limited` 在本 FR 中只保留为被阻断的兼容占位值；其正式公开模式语义仍由 `FR-0011` 单独冻结。
 
 ## gate_input
@@ -102,9 +98,7 @@
 4. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
 5. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
 6. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
-7. 若 `scope_context.spec_review_passed=false` 或 `scope_context.risk_review_completed=false`，必须阻断任意 live 恢复或扩展。
-8. 若请求或生效模式命中 `live_read_limited`，在 `FR-0011` 未完成 formal 收口前必须阻断。
-9. 若 `scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
+7. 若请求或生效模式命中 `live_read_limited`，在 `FR-0011` 未完成 formal 收口前必须阻断。
 
 ## approval_record
 
