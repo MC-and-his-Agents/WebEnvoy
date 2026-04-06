@@ -20,13 +20,12 @@
 - [x] external formal spec review 已完成并收敛 findings / blockers
 - [x] formal 结论：`APPROVE`
 - [x] formal 结论：`ready_for_implementation = true`
-- [x] PR `#374` 的 latest guardian review 在 commit `15440dc07dbab3a6f1e3d1426255f53988f2ee79` 上于 `2026-04-06T08:11:40Z` 明确给出 `APPROVE`
 
 当前状态说明：
 
 - FR-0007 的 final formal verdict 已回写为完成；相邻 FR 边界的实现承接复核不再构成本次 closeout 的门禁。
-- PR `#374` 已合入主干，merge commit 为 `cb6262d1e39eef3048030074267ca62a221fc24c`，mergedAt 为 `2026-04-06T08:11:48Z`，可作为本次最终 formal verdict 的可核实依据。
-- 该 verdict 的可核实链路为：`#374` latest guardian review 在 `15440dc07dbab3a6f1e3d1426255f53988f2ee79` 上于 `2026-04-06T08:11:40Z` 明确给出 `APPROVE`，随后该 PR 于 `2026-04-06T08:11:48Z` 合入主干。
+- 本文件只保留已回写的完成态，不再把 `#374` 作为当前完成依据。
+- 当前 PR 只回写 formal verdict，最终审计链路以本 PR latest head 的 guardian/reviewer 结论与受控合并记录为准。
 
 ## 进入实现前条件（门禁定义）
 
@@ -39,8 +38,8 @@
 
 - `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成本地文档阻塞。
 - `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成本地文档阻塞。
-- `#374` 已完成 FR-0007 的 formal verdict 回写，因此本次 `#360` 已完成 closeout，不再把结论伪装成新的外部审批事实。
-- 当前可确认的是“本套件 formal verdict 已回写、上游 formal 基座不再构成本地文档阻塞”；`APPROVE` 与 `ready_for_implementation` 结论已在本文件中落为完成态。
+- 本次 `#360` 仅回写 FR-0007 formal verdict，不再把旧 PR 的 review / merge 记录当作当前完成依据。
+- 当前可确认的是“本套件 formal verdict 已回写、上游 formal 基座不再构成本地文档阻塞”；`APPROVE` 与 `ready_for_implementation` 结论已在本文件中落为完成态，最终审计仍以当前 PR 的 latest head 记录为准。
 
 ## Implementation Backlog
 
