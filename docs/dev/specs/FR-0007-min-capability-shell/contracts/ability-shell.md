@@ -15,6 +15,8 @@
 - 平台业务字段字典
 - 能力分享、导入、分发与版本仓库
 - Native Messaging 消息体细节
+- `observability` / `error.diagnosis` 诊断结构
+- SQLite 持久化 schema 或能力证据表
 
 ## 生产者 / 消费者
 
@@ -22,10 +24,11 @@
   - CLI 命令处理器（能力执行层）
   - 首个平台样本能力处理器（`#145`）
 - 直接消费者：
-- 上层 Agent / 自动化脚本
-- CLI 契约测试
+  - 上层 Agent / 自动化脚本
+  - CLI 契约测试
 - 间接消费者：
   - `#357` 诊断与观察链路
+  - `#359` 能力证据字段映射链路
   - Phase 2 能力复用与验证机制
 
 ## 输入契约
@@ -107,6 +110,11 @@ webenvoy <command> --params '<json>' [--profile <profile>] [--run-id <run_id>]
   - `data_ref`
   - `metrics`
 
+补充规则：
+
+- `data_ref` 只承载 opaque reference，不承诺具体持久化 schema、查询接口或回读能力。
+- 若同一成功响应同时携带 FR-0004 的 `observability`，该对象仍位于外层 `observability`，不得并入 `summary.capability_result`。
+
 ## 错误 / 状态契约（失败）
 
 失败路径复用 FR-0001 外层错误壳，能力细节在 `error.details`：
@@ -141,6 +149,7 @@ webenvoy <command> --params '<json>' [--profile <profile>] [--run-id <run_id>]
 - 外层 `error.code` 继续遵循 FR-0001 语义。
 - 能力细分原因放在 `error.details.reason`，不新增平行错误壳。
 - 成功和失败路径都必须带 `run_id`。
+- 若同一失败响应同时携带 FR-0004 的 `error.diagnosis`，其职责仍是诊断分类与证据摘要；`error.details` 只表达能力层上下文，不得替代 `error.diagnosis`。
 
 ## 兼容策略
 

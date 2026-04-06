@@ -69,6 +69,7 @@
 - `ability_id/layer/action/outcome` 为最小必填字段。
 - 不允许直接承载大体量原始业务结果。
 - `data_ref` 只承载引用型摘要，不承载原文载荷。
+- `data_ref` 只表达能力层引用，不隐含 SQLite schema、查询接口或证据表设计。
 
 ### 4. `CapabilityErrorDetails`
 
@@ -85,7 +86,8 @@
 约束：
 
 - 不得替代 FR-0001 外层 `error.code`。
-- 必须与同一次运行的 `run_id` 一起出现，供诊断链路串联。
+- 不得替代 FR-0004 的 `error.diagnosis`；二者并存时，`CapabilityErrorDetails` 只表达能力层上下文。
+- 必须与同一次运行的 `run_id` 一起出现，供能力调用上下文串联。
 - `reason` 可细分，但不得变成无结构自由文本堆砌。
 
 ## 生命周期
@@ -93,11 +95,11 @@
 1. CLI 解析 `--params` 后，首先生成并校验 `AbilityInputEnvelope`。
 2. 执行成功时，在 FR-0001 成功壳的 `summary.capability_result` 中生成 `CapabilityResult`。
 3. 执行失败时，在 FR-0001 错误壳的 `error.details` 中生成 `CapabilityErrorDetails`。
-4. 上层调用方通过 `run_id + ability_id` 串联一次能力执行的成功、失败与诊断信息。
+4. 上层调用方可通过 `run_id + ability_id` 串联一次能力调用自身的成功 / 失败上下文；FR-0004 的通用诊断关联仍以 `run_id` 为主，不额外要求诊断结构必须携带 `ability_id`。
 
 ## 与其他 FR 的模型关系
 
 - 与 `FR-0001`：复用 `run_id`、外层成功壳、外层错误壳和退出码。
-- 与 `FR-0004`：复用 `run_id` 串联 `observability/diagnosis`，但不重定义其结构。
+- 与 `FR-0004`：复用 `run_id` 串联 `observability/diagnosis`，但不重定义其结构；`CapabilityErrorDetails` 不替代 `error.diagnosis`。
 - 与 `FR-0005`：首个平台样本能力必须将业务输出映射到 `CapabilityResult`。
-- 与 `FR-0006`：若后续需要落持久层，应复用 `run_id` 和能力壳关键字段，而不是重建标识体系。
+- 与 `FR-0006`：若后续需要落持久层，应复用 `run_id` 和能力壳关键字段做映射，而不是重建标识体系，也不把 SQLite 提升为能力响应真相源。
