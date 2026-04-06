@@ -11,11 +11,9 @@
 
 ## GitHub backlog 承接
 
-- `#361` 是 FR-0015 当前 implementation-prep 第一刀 backlog 的 GitHub 真相源。
-- `#361` 承接的第一刀 scope 固定为：identity preflight、`runtime_bootstrap_envelope` contract、`runtime.status` read model，以及 bootstrap 失败后的 stop/retry/recover 边界；不得外扩到安装器产品化、candidate 分发或 `#239` 验证体系。
-- `#361` 对应的 stop-ship 触发条件继续以 `risks.md` 为准：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败。
-- `#361` 对应的验证入口继续以 `implementation-prep.md` 第 5 节与 `plan.md` 的测试/健康矩阵为准：`tests/cli.contract.test.ts` 并发/恢复契约、runtime status contract 回读、bootstrap ack/失败注入、断连恢复与幂等 stop/start 证据。
-- 历史实现链路继续以 `#281` 及其已合并 PR 为准；后续任何仍承接 FR-0015 第一刀实现或验证 follow-up 的 issue / PR，都应显式挂接 `#361`。
+- `#281` 继续作为 FR-0015 runtime migration 的主线约束 issue；`#361` 只承接当前 implementation-prep 第一刀 backlog 的 GitHub 回写，不替代 `#281` 的对应关系。
+- `#361` 的 scope、stop-ship、验证入口、关闭条件与下游挂接关系，必须与 `spec.md`、`plan.md`、`implementation-prep.md`、`contracts/`、`risks.md` 以及 issue 正文保持一致；本文件不再重复维护一份缩写版 contract。
+- 历史实现链路继续以 `#281` 及其已合并 PR 为准；后续任何仍承接 FR-0015 第一刀实现或验证 follow-up 的 issue / PR，都应在不外扩 scope 的前提下显式挂接 `#361`。
 
 ## 进入实现前条件
 

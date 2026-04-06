@@ -17,7 +17,7 @@
 
 因此本 FR 的任务不是直接实现迁移，而是把 `#279` 已冻结的上位边界转成 `#281` 可直接消费的 implementation-prep 输入。
 
-在 formal 文档之外，GitHub backlog 由 `#361` 承接 FR-0015 当前仍需对外可消费的 implementation-prep 第一刀停点。`#281` 保留为 official Chrome runtime migration 的历史实现主线，`#361` 负责把第一刀 scope、stop-ship、验证入口与下游挂接关系回写到 GitHub backlog，而不是继续停留在本地 `TODO.md`。
+在 formal 文档之外，GitHub backlog 由 `#361` 承接 FR-0015 当前仍需对外可消费的 implementation-prep 第一刀停点。`#281` 继续作为 FR-0015 official Chrome runtime migration 的主线约束 issue，`#361` 只负责把仍需对外可消费的停点、关闭条件与下游挂接关系回写到 GitHub backlog，而不是替代 `#281` 的对应关系或继续让本地 `TODO.md` 承担 backlog 真相源。
 
 ## 目标
 
