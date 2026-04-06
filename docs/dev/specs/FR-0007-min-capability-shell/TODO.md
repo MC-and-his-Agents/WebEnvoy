@@ -17,6 +17,15 @@
 - [x] formal 结论：`ready_for_implementation = true`
 - [x] 确认 FR-0007 的实现链路必须保持 spec / impl 分离
 
+## Formal 收口依据
+
+- 历史规约评审 PR `#179` 已 merged，可作为 FR-0007 formal spec review 已完成的依据。
+- `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成阻塞。
+- `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成阻塞。
+- 本次 `#360` 仅回写 FR-0007 formal 收口状态，不重开能力壳输入 / 输出 / 错误边界，也不把 closeout 结论伪装成新的外部 PR 事实。
+- FR-0007 当前可正式记录为 `APPROVE`。
+- FR-0007 当前可正式记录为 `ready_for_implementation = true`。
+
 ## Implementation Backlog
 
 - [ ] 建立能力输入壳解析与校验模块
