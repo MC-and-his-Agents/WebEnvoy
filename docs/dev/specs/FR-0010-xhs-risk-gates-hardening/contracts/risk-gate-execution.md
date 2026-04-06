@@ -30,7 +30,10 @@
     "platform": "xhs",
     "read_domain": "www.xiaohongshu.com",
     "write_domain": "creator.xiaohongshu.com",
-    "domain_mixing_forbidden": true
+    "domain_mixing_forbidden": true,
+    "limited_read_rollout_ready": false,
+    "explicit_scope_for_209_extension": false,
+    "explicit_scope_for_208": false
   }
 }
 ```
@@ -39,6 +42,7 @@
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
+3. `limited_read_rollout_ready`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
 
 ## gate_input
 
@@ -53,8 +57,7 @@
     "target_page": "search_result_tab",
     "action_type": "read",
     "requested_execution_mode": "live_read_high_risk",
-    "risk_state": "paused",
-    "limited_read_rollout_ready": false
+    "risk_state": "paused"
   }
 }
 ```
@@ -70,7 +73,6 @@
 1. `target_tab_id` 与 `target_page` 必须共同表达“目标 tab + 页面语义”；不允许只给页面类型字符串替代 tab 选择边界。
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
-4. `limited_read_rollout_ready` 表示 `live_read_limited` 是否已满足 staged rollout 前置；当请求或生效模式命中 `live_read_limited` 时，该字段不得缺失。
 
 ## gate_outcome
 
@@ -97,6 +99,7 @@
 4. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
 5. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
 6. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
+7. 若 `scope_context.limited_read_rollout_ready=false`、`scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
 
 ## approval_record
 

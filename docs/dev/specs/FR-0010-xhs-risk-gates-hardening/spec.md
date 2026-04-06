@@ -56,7 +56,7 @@
 - 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
 - `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效。
-- `live_read_limited` 只有在 `limited_read_rollout_ready=true` 时才可进入受控读侧 staged rollout；缺失该前置时必须阻断。
+- `live_read_limited` 只有在治理侧 `scope_context.limited_read_rollout_ready=true` 时才可进入受控读侧 staged rollout；该前置不得由调用方在 `gate_input` 自报。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过
@@ -162,7 +162,9 @@ And 不存在某一事项绕过门禁的路径
 - 关系声明：`FR-0009` 继续作为治理基线；Sprint 2 实现与测试统一消费 `FR-0010` 契约对象。
 - 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接；后续 FR 只能在保持该对象单口径的前提下扩展受控 live 模式。
 - 替代细化：
-  - `FR-0009.resume_requirements.limited_read_rollout_ready` -> `FR-0010.gate_input.limited_read_rollout_ready`
+  - `FR-0009.resume_requirements.limited_read_rollout_ready` -> `FR-0010.scope_context.limited_read_rollout_ready`
+  - `FR-0009.resume_requirements.explicit_scope_for_209_extension` -> `FR-0010.scope_context.explicit_scope_for_209_extension`
+  - `FR-0009.resume_requirements.explicit_scope_for_208` -> `FR-0010.scope_context.explicit_scope_for_208`
   - `FR-0009.resume_requirements.approval_record_ref` -> `FR-0010.approval_record.approval_id`
   - `FR-0009.resume_requirements.audit_record_ref` -> `FR-0010.audit_record.event_id`
 - 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段。

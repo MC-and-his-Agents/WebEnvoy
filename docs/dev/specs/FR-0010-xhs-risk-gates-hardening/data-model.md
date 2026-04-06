@@ -4,7 +4,25 @@
 
 定义 Sprint 2 门禁执行最小共享实体，确保 `#208/#209` 与后续实现可稳定消费门禁结果。
 
-## 实体 1：GateInput
+## 实体 1：ScopeContext
+
+- `platform` string NOT NULL
+- `read_domain` string NOT NULL
+- `write_domain` string NOT NULL
+- `domain_mixing_forbidden` boolean NOT NULL
+- `limited_read_rollout_ready` boolean NOT NULL
+- `explicit_scope_for_209_extension` boolean NOT NULL
+- `explicit_scope_for_208` boolean NOT NULL
+
+约束：
+
+1. 读写域必须显式存在，不允许隐式继承。
+2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
+3. `limited_read_rollout_ready` 是治理侧 staged rollout readiness gate，不得由调用方请求载荷直接声明。
+4. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
+5. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
+
+## 实体 2：GateInput
 
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
@@ -15,7 +33,6 @@
 - `action_type` ENUM NOT NULL (`read` | `write` | `irreversible_write`)
 - `requested_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`)
 - `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
-- `limited_read_rollout_ready` boolean NOT NULL
 - `created_at` datetime NOT NULL
 
 约束：
@@ -23,9 +40,8 @@
 1. 所有门禁请求都必须提供 `target_tab_id` 与 `target_page`，不得在非 live 请求中留空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
-4. `requested_execution_mode=live_read_limited` 时，必须同时提供 `limited_read_rollout_ready`；若后续门禁要放行 `live_read_limited`，该字段必须为 `true`。
 
-## 实体 2：GateDecision
+## 实体 3：GateDecision
 
 - `decision_id` string PK
 - `run_id` string NOT NULL
@@ -42,7 +58,7 @@
 3. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
 4. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
 
-## 实体 3：ApprovalRecord
+## 实体 4：ApprovalRecord
 
 - `approval_id` string PK
 - `run_id` string NOT NULL
@@ -63,7 +79,7 @@
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，`ApprovalRecord` 不得缺失。
 4. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 
-## 实体 4：AuditRecord
+## 实体 5：AuditRecord
 
 - `event_id` string PK
 - `run_id` string NOT NULL
@@ -92,10 +108,11 @@
 
 ## 生命周期
 
-1. 接收执行请求后生成 `GateInput`。
-2. 计算门禁后生成 `GateDecision`。
-3. 若请求 live 升级，生成或更新 `ApprovalRecord`。
-4. 不论放行或阻断，写入 `AuditRecord`。
+1. 先加载治理侧 `ScopeContext`。
+2. 接收执行请求后生成 `GateInput`。
+3. 计算门禁后生成 `GateDecision`。
+4. 若请求 live 升级，生成或更新 `ApprovalRecord`。
+5. 不论放行或阻断，写入 `AuditRecord`。
 
 ## 与现有 FR 对齐
 
@@ -112,7 +129,9 @@
 | `risk_state.live_experiment_status` | `GateInput.risk_state` | 状态输入保持一致语义 |
 | `execution_mode_gate`（整体） | `GateInput + GateDecision` | 拆分为“请求模式”与“生效模式” |
 | `resume_requirements` | `ApprovalRecord + AuditRecord` | 恢复前置改为审批与审计可检索记录 |
-| `resume_requirements.limited_read_rollout_ready` | `GateInput.limited_read_rollout_ready` | 受控读侧 staged rollout 的显式前置 |
+| `resume_requirements.limited_read_rollout_ready` | `ScopeContext.limited_read_rollout_ready` | 受控读侧 staged rollout 的治理侧前置 |
+| `resume_requirements.explicit_scope_for_209_extension` | `ScopeContext.explicit_scope_for_209_extension` | 读侧扩展的显式 scope gate |
+| `resume_requirements.explicit_scope_for_208` | `ScopeContext.explicit_scope_for_208` | 写侧真实交互的显式 scope gate |
 | `resume_requirements.approval_record_ref` | `ApprovalRecord.approval_id` | 审批记录稳定引用 |
 | `resume_requirements.audit_record_ref` | `AuditRecord.event_id` | 审计记录稳定引用 |
 
