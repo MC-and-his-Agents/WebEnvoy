@@ -388,24 +388,8 @@
 - 2026-04-06 这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
 - `search` 仍停留在 `observed_once` 的 `primary` 成功样本，尚缺 WebEnvoy-managed profile 下的多轮 replay 与 required headers 最小必要集。
 - `detail` 与 `user_home` 仍分别停留在 `fallback-only` 与 `candidate/failed` 组合，不满足进入实现 FR 的前提。
-- 本轮 Go/No-Go 结论固定为 `No-Go/paused`：不创建“小红书 L3 读适配实现 FR”，直到可用的 WebEnvoy-managed 小红书 profile 恢复并完成剩余复核。
-
-### 5.2 2026-04-06 晚间后续更新：`xhs_001` 已恢复
-
-2026-04-06 晚间，在仓库主目录下已创建并确认 `xhs_001`：
-
-- profile 路径固定为 `.webenvoy/profiles/xhs_001`
-- `persistentExtensionBinding` 已写回 `__webenvoy_meta.json`
-- profile 级 native host manifest 已落在 `.webenvoy/profiles/xhs_001/NativeMessagingHosts/com.webenvoy.host.json`
-- `runtime.login --confirm` 已成功回写 `lastLoginAt=2026-04-06T14:13:38.670Z`
-- profile 当前持久态已收敛为 `profileState=ready`
-
-由此得到的更新结论：
-
-- “缺少 WebEnvoy-managed XHS profile” 这一项 blocker 已在 2026-04-06 晚间解除。
-- 2026-04-06 中午形成的 `No-Go/paused` 仍保留为历史 closeout 记录，但不应再被解读为“当前本地仍无受管 XHS 会话”。
-- FR-0005 当前状态应从“因缺少受管 profile 而暂停”更新为“受管 profile 已恢复，待继续执行 `search/detail/user_home` 的同口径复核”。
-- 这次恢复只解除账号/环境前置，不自动把 FR-0005 升级为 `Go`；是否进入“小红书 L3 读适配实现 FR”，仍取决于 `search/detail/user_home` 三类场景的 API primary 复核是否补齐。
+- 本轮 Go/No-Go 结论固定为 `No-Go/paused`：不创建“小红书 L3 读适配实现 FR”，直到执行现场通过 WebEnvoy-managed XHS profile 准入预检，并完成剩余复核。
+- 若后续执行现场恢复了受管 XHS profile，应先把准入预检结果沉淀为仓库可复核 artifact 或可核对链接，再更新正式结论。
 
 ## 未决项（进入下一轮复核前保留）
 
