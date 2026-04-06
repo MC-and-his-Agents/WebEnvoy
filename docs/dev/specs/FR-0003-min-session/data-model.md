@@ -69,6 +69,45 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 }
 ```
 
+### FR-0003 顶层字段白名单
+
+FR-0003 基线下，`__webenvoy_meta.json` 只允许以下顶层字段：
+
+- `schemaVersion`
+- `profileName`
+- `profileDir`
+- `profileState`
+- `proxyBinding`
+- `fingerprintSeeds`
+- `localStorageSnapshots`
+- `createdAt`
+- `updatedAt`
+- `lastStartedAt`
+- `lastLoginAt`
+- `lastStoppedAt`
+- `lastDisconnectedAt`
+
+补充约束：
+
+- 本白名单是 FR-0003 的默认允许集；未被后续 formal spec 明确冻结的额外顶层字段，都视为越界字段。
+- 当前已冻结的唯一后续加项例外是 FR-0015 的 `persistentExtensionBinding`；该字段不属于 FR-0003 原生白名单。
+- `run_id`、`session_id`、transport session、bootstrap envelope、账号健康、矩阵调度、代理池状态都不得作为 FR-0003 顶层字段进入 `__webenvoy_meta.json`。
+
+### 嵌套字段最小白名单
+
+- `proxyBinding`
+  - `url`
+  - `boundAt`
+- `fingerprintSeeds`
+  - `audioNoiseSeed`
+  - `canvasNoiseSeed`
+- `localStorageSnapshots[]`
+  - `origin`
+  - `entries`
+- `localStorageSnapshots[].entries[]`
+  - `key`
+  - `value`
+
 ### 关键约束
 
 - `schemaVersion` 只允许单调递增，不允许向下兼容地改写旧语义。
@@ -77,6 +116,7 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
 - `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话摘要 / 恢复输入，不得膨胀为账号资产总表。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
+- `run_id` 只属于 FR-0001 定义的单次 CLI 调用上下文；即使实现会把命令级 `run_id` 写入锁文件审计，也不得把它持久化为 `ProfileMeta` 字段。
 - 后续 FR 只能以“加性可选字段”方式扩展 `ProfileMeta`；新增字段必须在对应 formal spec / data-model 中冻结字段边界、生命周期、非法值处理与回滚策略，且不得改写 FR-0003 基线字段语义。
 - 在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `persistentExtensionBinding`；该字段不属于 FR-0003 原生基线字段，只在 FR-0015 formal 边界内有效。
 
