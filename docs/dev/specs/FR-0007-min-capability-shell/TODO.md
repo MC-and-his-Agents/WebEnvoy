@@ -1,8 +1,8 @@
 # FR-0007 TODO
 
-> 本文件记录 FR-0007 formal closeout 后的本地套件状态。外部 issue / PR / review / guardian 事实仅在可核实时回写，不在此伪造。
+> 本文件记录 FR-0007 当前 formal review 准备状态。外部 issue / PR / review / guardian 事实仅在可核实时回写，不在此伪造。
 
-## Formal Closeout Snapshot
+## Formal Review Preparation Snapshot
 
 - [x] `spec.md` 的 GWT 验收场景与异常 / 边界场景已补齐并冻结
 - [x] 冻结能力壳最小输入结构（`ability` / `input` / `options`）
@@ -13,10 +13,19 @@
 - [x] 历史 issue `#159` 仅保留来源引用，不再作为当前 formal closeout 承接 issue
 - [x] 与 `#357` 的最小诊断 / `run_id` 关联边界已冻结，且 FR-0007 不重定义 `observability` / `error.diagnosis`
 - [x] 与 `#359` 的能力结果 / 错误落库映射边界已冻结，且 FR-0007 不引入持久化真相源
-- [x] formal 结论：`APPROVE`
-- [x] formal 结论：`ready_for_implementation = true`
 - [x] 确认 FR-0007 的实现链路必须保持 spec / impl 分离
 - [x] 已形成可供 issue `#360` 后续 external formal review 使用的正式套件基线
+
+## Formal Review 当前状态
+
+- [ ] external formal spec review 已完成并收敛 findings / blockers
+- [ ] formal 结论：`APPROVE`
+- [ ] formal 结论：`ready_for_implementation = true`
+
+当前状态说明：
+
+- FR-0007 的本地正式套件边界已收口，可进入 issue `#360` 后续 formal review。
+- 在 external formal review 明确给出结论前，FR-0007 仍保持 review open，不宣称 `APPROVE` 已成立，也不宣称 `ready_for_implementation = true` 已成立。
 
 ## 进入实现前条件（门禁定义）
 
@@ -30,7 +39,7 @@
 - `#354` 已完成 FR-0001 的 formal 收口回写，因此 FR-0007 依赖的 CLI 外层契约基座已不再构成本地文档阻塞。
 - `#355` 已完成 FR-0002 的 formal 收口回写，因此 FR-0007 依赖的最小通信闭环 formal 基座已不再构成本地文档阻塞。
 - 本次 `#360` 仅回写 FR-0007 formal 文档收口状态，不重开能力壳输入 / 输出 / 错误边界，也不把 closeout 结论伪装成新的外部审批事实。
-- FR-0007 当前可在本地正式套件口径下记录为 `APPROVE`、`ready_for_implementation = true` 与 `formal_closeout = complete`。
+- 当前可确认的是“formal review 输入已收口、上游 formal 基座不再构成本地文档阻塞”；外部 formal review 通过与 `ready_for_implementation` 结论仍需在后续 review 链路中明确给出。
 
 ## Implementation Backlog
 
