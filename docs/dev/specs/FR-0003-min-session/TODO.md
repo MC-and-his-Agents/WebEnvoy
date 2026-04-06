@@ -21,7 +21,16 @@
 - [x] 冻结 FR-0003 会话层错误码白名单，并与 FR-0001 / FR-0002 的错误分层解耦
 - [x] 明确 `localStorageSnapshots` 在 FR-0003 中仅作为最小会话摘要 / 恢复输入，不要求自动回写浏览器会话
 - [x] 完成 `#356` 要求的 formal closeout 文档回写，并清空当前套件内的文档 blocker
+- [x] formal 结论：`APPROVE`
+- [x] formal 结论：`ready_for_implementation = true`
 - [x] 确认 FR-0003 的实现链路必须保持 spec / impl 分离
+
+## 进入实现前条件（门禁定义）
+
+- 获得 `APPROVE`
+- 获得 `ready_for_implementation = true`
+- 确认 FR-0003 的实现链路保持 spec / impl 分离
+- 确认 FR-0003 与 FR-0001 / FR-0002 / FR-0006 / FR-0015 的正式边界已冻结
 
 ## Formal 收口依据
 
