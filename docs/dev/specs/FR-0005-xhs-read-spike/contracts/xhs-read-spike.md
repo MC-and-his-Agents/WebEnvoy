@@ -67,7 +67,7 @@ Spike 输出必须包含以下三个对象：
     ]
   },
   "success_signal": "HTTP 200 + business code success | 页面命中 + __INITIAL_STATE__ 可读 + 关键 store 存在",
-  "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha", "session_expired", "invalid_sign"]
+  "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha_required", "session_expired", "invalid_sign"]
 }
 ```
 
