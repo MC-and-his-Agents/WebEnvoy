@@ -33,7 +33,8 @@
   - `blocked_modes`
   - `manual_confirmation_required`
   - `manual_confirmation_checks`
-- 生命周期：作为 `#208` 与后续读写实现的模式前置。
+- 生命周期：作为 `#208/#209` 后续事项与后续读写实现的模式前置。
+- 说明：责任人、PR review artifact 与 issue comment 作为规约阶段审批留痕，不在本实体中扩展为新的持久化字段。
 
 ## 实体 4：ResumeRequirements
 
@@ -45,10 +46,10 @@
   - `explicit_scope_for_209_extension`
   - `approver_recorded`
 - 生命周期：全部满足前，live 不得放行。
+- 说明：`approver_recorded` 的完成依据是 GitHub issue / PR 中存在可复核的审批与同步记录，而不是运行时数据库或新的审计对象。
 
 ## 约束与一致性
 
 1. 四实体字段语义与 `contracts/risk-gates.md` 一致。
 2. 任一实体缺失时，判定为“门禁输入不完整”，不得放行 live。
 3. 本 FR 不新增数据库字段；后续若落地持久化，需在实现 FR 中补迁移方案。
-

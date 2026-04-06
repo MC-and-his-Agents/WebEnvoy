@@ -87,6 +87,8 @@
 
 1. `default_mode` 在本 FR 生效阶段必须是 `dry_run` 或 `recon`。
 2. 若 `manual_confirmation_required=true`，检查项必须非空。
+3. 规约阶段的人工确认责任人默认是发起本次 live 恢复 / 扩展请求的实现负责人。
+4. 审批记录必须能回链到对应 PR review artifact 与 issue comment；本 FR 不承接运行时持久化审计 schema。
 
 ## resume_requirements
 
@@ -108,10 +110,11 @@
 
 1. 任一字段为 `false` 时，不得进入 live 放行。
 2. 必须保留审批记录，且可被后续事项引用。
+3. `approver_recorded=true` 仅表示 GitHub issue / PR 中存在可复核的审批与同步记录，不表示运行时已经具备落盘审计能力。
 
 ## 兼容性约束
 
 1. 新增字段可追加，不允许改变既有字段语义。
 2. `blocked_modes` 减少项必须在 spec review 中显式说明理由。
 3. 任何“恢复 live”结论必须同步更新 `resume_requirements` 证据状态。
-
+4. 本契约仅冻结规约阶段稳定输出对象，不提前吸收 `FR-0010` 的统一消费字段。
