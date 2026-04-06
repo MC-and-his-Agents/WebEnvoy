@@ -293,6 +293,8 @@ And 本 FR 不要求自动把该快照回写到浏览器会话
   - `docs/dev/specs/FR-0001-runtime-cli-entry/spec.md`
   - `docs/dev/specs/FR-0001-runtime-cli-entry/contracts/cli-entry.md`
 - Governing issue：
+  - `#143`
+- Formal review issue：
   - `#356`
 - 前置能力：
   - `#354` 已收口 FR-0001 的 CLI 最小入口与可集成契约
