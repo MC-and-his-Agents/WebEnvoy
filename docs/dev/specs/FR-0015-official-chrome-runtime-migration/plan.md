@@ -139,6 +139,6 @@
 
 1. FR-0015 的 spec review 通过，且 reviewer 明确认可其足以支撑 `#281` implementation-prep。
 2. `contracts/runtime-bootstrap.md`、`contracts/runtime-readiness-status.md`、`data-model.md` 与 `risks.md` 被 reviewer 认可，能解释 bootstrap / identity / readiness 的共享边界。
-3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，使用 `Refs #281`，不混入 `#239`、安装器产品化或 candidate 分发产品化。
+3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，同时使用 `Refs #281` 与 `Refs #361`；其中 `#281` 保留主线约束归属，`#361` 承接当前 backlog 挂接，不混入 `#239`、安装器产品化或 candidate 分发产品化。
 4. 后续实现 PR 预先声明 stop-ship 条件、回滚入口与最小验证矩阵。
 5. 在这些条件满足前，禁止把 `#281` 视为已闭环，也禁止使用 `Fixes #281`。
