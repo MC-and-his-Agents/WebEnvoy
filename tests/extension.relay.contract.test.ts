@@ -257,6 +257,141 @@ describe("extension background relay contract", () => {
     expect(capturedHeaders?.["X-S-Common"]).toBe("{}");
   });
 
+  it.each([
+    {
+      simulateResult: "login_required",
+      reason: "SESSION_EXPIRED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "account_abnormal",
+      reason: "ACCOUNT_ABNORMAL",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "browser_env_abnormal",
+      reason: "BROWSER_ENV_ABNORMAL",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "gateway_invoker_failed",
+      reason: "GATEWAY_INVOKER_FAILED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "captcha_required",
+      reason: "CAPTCHA_REQUIRED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "signature_entry_missing",
+      reason: "SIGNATURE_ENTRY_MISSING",
+      category: "page_changed",
+      failureTarget: "window._webmsxyw",
+      failureStage: "action",
+      keyRequestCount: 0
+    }
+  ])(
+    "returns structured xhs.search failure for $simulateResult at relay layer",
+    async ({
+      simulateResult,
+      reason,
+      category,
+      failureTarget,
+      failureStage,
+      keyRequestCount
+    }) => {
+      const contentScript = new ContentScriptHandler({
+        xhsEnv: {
+          now: () => 1_000,
+          randomId: () => `relay-${simulateResult}-id`,
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=valid;",
+          callSignature: async () => ({
+            "X-s": "signed",
+            "X-t": "1"
+          }),
+          fetchJson: async () => ({
+            status: 200,
+            body: {
+              code: 0,
+              data: { items: [] }
+            }
+          })
+        }
+      });
+      const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+      const responsePromise = waitForResponse(relay);
+      relay.onNativeRequest({
+        id: `forward-xhs-${simulateResult}-001`,
+        method: "bridge.forward",
+        params: {
+          session_id: "nm-session-001",
+          run_id: `run-xhs-${simulateResult}-001`,
+          command: "xhs.search",
+          command_params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              ...approvedLiveOptions,
+              simulate_result: simulateResult
+            }
+          },
+          cwd: "/workspace/WebEnvoy"
+        },
+        profile: "profile-a",
+        timeout_ms: 200
+      });
+
+      const response = await responsePromise;
+      expect(response.status).toBe("error");
+      const payload = asRecord(response.payload) ?? {};
+      const observability = asRecord(payload.observability) ?? {};
+      const failureSite = asRecord(observability.failure_site) ?? {};
+      const diagnosis = asRecord(payload.diagnosis) ?? {};
+      const keyRequests = Array.isArray(observability.key_requests)
+        ? (observability.key_requests as Array<Record<string, unknown>>)
+        : [];
+
+      expect(payload).toMatchObject({
+        details: {
+          reason
+        },
+        diagnosis: {
+          category
+        }
+      });
+      expect((asRecord(diagnosis.failure_site) ?? {}).target).toBe(failureTarget);
+      expect(failureSite.target).toBe(failureTarget);
+      expect(failureSite.stage).toBe(failureStage);
+      expect(keyRequests).toHaveLength(keyRequestCount);
+    }
+  );
+
   it("blocks xhs.search when execution mode is omitted", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {

@@ -1062,6 +1062,130 @@ describe("content-script handler contract", () => {
     });
   });
 
+  it.each([
+    {
+      simulateResult: "login_required",
+      reason: "SESSION_EXPIRED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "account_abnormal",
+      reason: "ACCOUNT_ABNORMAL",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "browser_env_abnormal",
+      reason: "BROWSER_ENV_ABNORMAL",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "gateway_invoker_failed",
+      reason: "GATEWAY_INVOKER_FAILED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "captcha_required",
+      reason: "CAPTCHA_REQUIRED",
+      category: "request_failed",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "signature_entry_missing",
+      reason: "SIGNATURE_ENTRY_MISSING",
+      category: "page_changed",
+      failureTarget: "window._webmsxyw",
+      failureStage: "action",
+      keyRequestCount: 0
+    }
+  ])(
+    "returns structured xhs.search failure for $simulateResult at content-script layer",
+    async ({
+      simulateResult,
+      reason,
+      category,
+      failureTarget,
+      failureStage,
+      keyRequestCount
+    }) => {
+      await withMockMainWorld(async () => {
+        const handler = new ContentScriptHandler();
+        const results: Array<Record<string, unknown>> = [];
+        handler.onResult((message) => {
+          results.push(message as unknown as Record<string, unknown>);
+        });
+
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: `run-xhs-simulated-${simulateResult}-001`,
+          runId: `run-xhs-simulated-${simulateResult}-001`,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.search",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              simulate_result: simulateResult,
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              approval_record: createApprovedReadApprovalRecord()
+            }
+          },
+          fingerprintContext: createFingerprintContext()
+        });
+
+        await waitForResult(results);
+
+        expect(results[0]?.ok).toBe(false);
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const details = payload?.details as Record<string, unknown>;
+        const observability = payload?.observability as Record<string, unknown>;
+        const diagnosis = payload?.diagnosis as Record<string, unknown>;
+        const failureSite = observability?.failure_site as Record<string, unknown>;
+        const keyRequests = Array.isArray(observability?.key_requests)
+          ? (observability.key_requests as Array<Record<string, unknown>>)
+          : [];
+
+        expect(details?.reason).toBe(reason);
+        expect(diagnosis?.category).toBe(category);
+        expect((diagnosis?.failure_site as Record<string, unknown>)?.target).toBe(failureTarget);
+        expect(failureSite?.target).toBe(failureTarget);
+        expect(failureSite?.stage).toBe(failureStage);
+        expect(keyRequests).toHaveLength(keyRequestCount);
+      });
+    }
+  );
+
   it("keeps audio noise stable across repeated runtime.ping fingerprint installs", async () => {
     await withMockMainWorld(async ({ mockWindow }) => {
       const handler = new ContentScriptHandler();

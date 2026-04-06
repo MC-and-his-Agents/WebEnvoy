@@ -2778,69 +2778,141 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("returns structured execution details for xhs.search login-required path", () => {
-    const result = runCli([
-      "xhs.search",
-      "--profile",
-      "xhs_account_001",
-      "--params",
-      JSON.stringify({
-        ability: {
-          id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read"
-        },
-        input: {
-          query: "露营装备"
-        },
-        options: {
-          ...scopedReadGateOptions,
-          simulate_result: "login_required",
-          requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed",
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-23T10:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
+  it.each([
+    {
+      simulateResult: "login_required",
+      reason: "SESSION_EXPIRED",
+      category: "request_failed",
+      pageKind: "login",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "account_abnormal",
+      reason: "ACCOUNT_ABNORMAL",
+      category: "request_failed",
+      pageKind: "search",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "browser_env_abnormal",
+      reason: "BROWSER_ENV_ABNORMAL",
+      category: "request_failed",
+      pageKind: "search",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "gateway_invoker_failed",
+      reason: "GATEWAY_INVOKER_FAILED",
+      category: "request_failed",
+      pageKind: "search",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "captcha_required",
+      reason: "CAPTCHA_REQUIRED",
+      category: "request_failed",
+      pageKind: "search",
+      failureTarget: "/api/sns/web/v1/search/notes",
+      failureStage: "request",
+      keyRequestCount: 1
+    },
+    {
+      simulateResult: "signature_entry_missing",
+      reason: "SIGNATURE_ENTRY_MISSING",
+      category: "page_changed",
+      pageKind: "search",
+      failureTarget: "window._webmsxyw",
+      failureStage: "action",
+      keyRequestCount: 0
+    }
+  ])(
+    "returns structured execution details for xhs.search $simulateResult path",
+    ({
+      simulateResult,
+      reason,
+      category,
+      pageKind,
+      failureTarget,
+      failureStage,
+      keyRequestCount
+    }) => {
+      const result = runCli([
+        "xhs.search",
+        "--profile",
+        "xhs_account_001",
+        "--params",
+        JSON.stringify({
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...scopedReadGateOptions,
+            simulate_result: simulateResult,
+            requested_execution_mode: "live_read_high_risk",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
             }
           }
-        }
-      })
-    ], repoRoot, {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
-    expect(result.status).toBe(6);
-    const body = parseSingleJsonLine(result.stdout);
-    expect(body).toMatchObject({
-      command: "xhs.search",
-      status: "error",
-      error: {
-        code: "ERR_EXECUTION_FAILED",
-        details: {
-          ability_id: "xhs.note.search.v1",
-          stage: "execution",
-          reason: "SESSION_EXPIRED"
+        })
+      ], repoRoot, {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      });
+      expect(result.status).toBe(6);
+      const body = parseSingleJsonLine(result.stdout);
+      const observability = asRecord(body.observability);
+      const failureSite = asRecord(observability?.failure_site);
+      const keyRequests = Array.isArray(observability?.key_requests)
+        ? (observability?.key_requests as Array<Record<string, unknown>>)
+        : [];
+      expect(body).toMatchObject({
+        command: "xhs.search",
+        status: "error",
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          details: {
+            ability_id: "xhs.note.search.v1",
+            stage: "execution",
+            reason
+          },
+          diagnosis: {
+            category
+          }
         },
-        diagnosis: {
-          category: "request_failed"
+        observability: {
+          page_state: {
+            page_kind: pageKind
+          }
         }
-      },
-      observability: {
-        page_state: {
-          page_kind: "login"
-        },
-        failure_site: {
-          target: "/api/sns/web/v1/search/notes"
-        }
-      }
-    });
-  });
+      });
+      expect((asRecord(asRecord(body.error)?.diagnosis)?.failure_site)?.target).toBe(failureTarget);
+      expect(failureSite?.target).toBe(failureTarget);
+      expect(failureSite?.stage).toBe(failureStage);
+      expect(keyRequests).toHaveLength(keyRequestCount);
+    }
+  );
 
   it("returns structured output mapping details for xhs.search bad output path", () => {
     const result = runCli([

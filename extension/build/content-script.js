@@ -1274,6 +1274,57 @@ const classifyPageKind = (href) => {
     }
     return "unknown";
 };
+const DIAGNOSIS_SEMANTICS = {
+    SIGNATURE_ENTRY_MISSING: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "window._webmsxyw",
+        includeKeyRequest: false
+    },
+    SESSION_EXPIRED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    ACCOUNT_ABNORMAL: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    BROWSER_ENV_ABNORMAL: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    GATEWAY_INVOKER_FAILED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    CAPTCHA_REQUIRED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    }
+};
+const resolveDiagnosisSemantics = (reason, fallbackCategory) => DIAGNOSIS_SEMANTICS[reason] ?? {
+    category: fallbackCategory ?? "request_failed",
+    stage: "request",
+    component: "network",
+    target: SEARCH_ENDPOINT,
+    includeKeyRequest: true
+};
 const createObservability = (input) => ({
     page_state: {
         page_kind: classifyPageKind(input.href),
@@ -1281,38 +1332,43 @@ const createObservability = (input) => ({
         title: input.title,
         ready_state: input.readyState
     },
-    key_requests: [
-        {
-            request_id: input.requestId,
-            stage: "request",
-            method: "POST",
-            url: SEARCH_ENDPOINT,
-            outcome: input.outcome,
-            ...(typeof input.statusCode === "number" ? { status_code: input.statusCode } : {}),
-            ...(input.failureReason ? { failure_reason: input.failureReason, request_class: "xhs.search" } : {})
-        }
-    ],
+    key_requests: input.includeKeyRequest === false
+        ? []
+        : [
+            {
+                request_id: input.requestId,
+                stage: "request",
+                method: "POST",
+                url: SEARCH_ENDPOINT,
+                outcome: input.outcome,
+                ...(typeof input.statusCode === "number" ? { status_code: input.statusCode } : {}),
+                ...(input.failureReason ? { failure_reason: input.failureReason, request_class: "xhs.search" } : {})
+            }
+        ],
     failure_site: input.outcome === "failed"
-        ? {
+        ? (input.failureSite ?? {
             stage: "request",
             component: "network",
             target: SEARCH_ENDPOINT,
             summary: input.failureReason ?? "request failed"
-        }
+        })
         : null
 });
-const createDiagnosis = (input) => ({
-    category: input.category,
-    stage: input.category === "page_changed" ? "execution" : "request",
-    component: input.category === "page_changed" ? "page" : "network",
-    failure_site: {
-        stage: input.category === "page_changed" ? "execution" : "request",
-        component: input.category === "page_changed" ? "page" : "network",
-        target: input.category === "page_changed" ? "window._webmsxyw" : SEARCH_ENDPOINT,
-        summary: input.summary
-    },
-    evidence: [input.reason, input.summary]
-});
+const createDiagnosis = (input) => {
+    const semantics = resolveDiagnosisSemantics(input.reason, input.category);
+    return {
+        category: semantics.category,
+        stage: semantics.stage,
+        component: semantics.component,
+        failure_site: {
+            stage: semantics.stage,
+            component: semantics.component,
+            target: semantics.target,
+            summary: input.summary
+        },
+        evidence: [input.reason, input.summary]
+    };
+};
 const createFailure = (code, message, details, observability, diagnosis, gate, auditRecord) => ({
     ok: false,
     error: {
@@ -1424,22 +1480,14 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
         return null;
     }
     const requestId = `req-${env.randomId()}`;
-    const observability = createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId,
-        outcome: simulated === "success" ? "completed" : "failed",
-        statusCode: simulated === "account_abnormal"
-            ? 461
-            : simulated === "browser_env_abnormal"
-                ? 200
-                : simulated === "gateway_invoker_failed"
-                    ? 500
-                    : undefined,
-        failureReason: simulated === "success" ? undefined : simulated
-    });
     if (simulated === "success") {
+        const observability = createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId,
+            outcome: "completed"
+        });
         return {
             ok: true,
             payload: {
@@ -1465,36 +1513,59 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
     const reasonMap = {
         login_required: {
             reason: "SESSION_EXPIRED",
-            message: "登录态缺失，无法执行 xhs.search",
-            category: "request_failed"
+            message: "登录态缺失，无法执行 xhs.search"
         },
         signature_entry_missing: {
             reason: "SIGNATURE_ENTRY_MISSING",
-            message: "页面签名入口不可用",
-            category: "page_changed"
+            message: "页面签名入口不可用"
         },
         account_abnormal: {
             reason: "ACCOUNT_ABNORMAL",
-            message: "账号异常，平台拒绝当前请求",
-            category: "request_failed"
+            message: "账号异常，平台拒绝当前请求"
         },
         browser_env_abnormal: {
             reason: "BROWSER_ENV_ABNORMAL",
-            message: "浏览器环境异常，平台拒绝当前请求",
-            category: "request_failed"
+            message: "浏览器环境异常，平台拒绝当前请求"
+        },
+        captcha_required: {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
         },
         gateway_invoker_failed: {
             reason: "GATEWAY_INVOKER_FAILED",
-            message: "网关调用失败，当前上下文不足以完成搜索请求",
-            category: "request_failed"
+            message: "网关调用失败，当前上下文不足以完成搜索请求"
         }
     };
     const mapped = reasonMap[simulated] ?? reasonMap.gateway_invoker_failed;
+    const semantics = resolveDiagnosisSemantics(mapped.reason);
+    const observability = createObservability({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId,
+        outcome: "failed",
+        statusCode: simulated === "account_abnormal"
+            ? 461
+            : simulated === "browser_env_abnormal"
+                ? 200
+                : simulated === "captcha_required"
+                    ? 429
+                    : simulated === "gateway_invoker_failed"
+                        ? 500
+                        : undefined,
+        failureReason: simulated,
+        includeKeyRequest: semantics.includeKeyRequest,
+        failureSite: {
+            stage: semantics.stage,
+            component: semantics.component,
+            target: semantics.target,
+            summary: mapped.message
+        }
+    });
     return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
         stage: "execution",
         reason: mapped.reason
     }, observability, createDiagnosis({
-        category: mapped.category,
         reason: mapped.reason,
         summary: mapped.message
     }));
@@ -1796,7 +1867,6 @@ const executeXhsSearch = async (input, env) => {
             outcome: "failed",
             failureReason: "SESSION_EXPIRED"
         }), createDiagnosis({
-            category: "request_failed",
             reason: "SESSION_EXPIRED",
             summary: "登录态缺失，无法执行 xhs.search"
         }), gate, auditRecord);
@@ -1825,9 +1895,15 @@ const executeXhsSearch = async (input, env) => {
             readyState,
             requestId,
             outcome: "failed",
-            failureReason: message
+            failureReason: message,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "window._webmsxyw",
+                summary: "页面签名入口不可用"
+            }
         }), createDiagnosis({
-            category: "page_changed",
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用"
         }), gate, auditRecord);
@@ -1865,7 +1941,6 @@ const executeXhsSearch = async (input, env) => {
             outcome: "failed",
             failureReason: failure.detail
         }), createDiagnosis({
-            category: "request_failed",
             reason: failure.reason,
             summary: failure.message
         }), gate, auditRecord);
@@ -1887,7 +1962,6 @@ const executeXhsSearch = async (input, env) => {
             statusCode: response.status,
             failureReason: failure.reason
         }), createDiagnosis({
-            category: "request_failed",
             reason: failure.reason,
             summary: failure.message
         }), gate, auditRecord);
