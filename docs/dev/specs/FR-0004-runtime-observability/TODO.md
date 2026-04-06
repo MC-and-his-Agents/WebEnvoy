@@ -4,8 +4,8 @@
 
 ## 进入实现前条件（未来门禁）
 
-- 待获得 `APPROVE`
-- 待获得 `ready_for_implementation = true`
+- 已获得 `APPROVE`
+- 已获得 `ready_for_implementation = true`
 - 在后续实现前确认 FR-0004 的实现工作承接 FR-0001 外层壳与 FR-0002 transport 边界，不重写上游契约
 - 在后续 formal review 通过后，确认 `contracts/runtime-observability.md`、`plan.md`、`risks.md` 已随套件一起完成 formal closeout 审查
 
@@ -21,13 +21,14 @@
 - [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
+- [x] `#373` 已合入主干，merge commit 为 `3f16de8d8525aa36e77eaa16dfc028c0163ff016`，mergedAt 为 `2026-04-06T06:36:14Z`，可作为 FR-0004 最终 formal verdict 的可核实回写依据。
 
 ## 当前 review 状态
 
 - [x] `#357` 当前只回写 FR-0004 正式套件的 review 状态，不重开 FR-0004 边界或实现范围。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `APPROVE`。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `ready_for_implementation = true`。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `formal_closeout = complete`。
+- [x] FR-0004 已记录为 `APPROVE`。
+- [x] FR-0004 已记录为 `ready_for_implementation = true`。
+- [x] FR-0004 已记录为 `formal_closeout = complete`。
 
 ## 进入实现后由后续事项承接
 
