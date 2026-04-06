@@ -1,26 +1,47 @@
 # FR-0003 TODO
 
-## Spec Review 阶段
+## Formal Review Gate
+
+- [x] 明确 FR-0003 只覆盖浏览器启动、Named Profile、基础状态流转、代理绑定、并发保护与最小持久化边界
+- [x] 明确 FR-0003 承接 FR-0001 的 CLI 外层契约与命令级 `run_id`，但不重写 CLI 错误壳、退出码和 argv 语法
+- [x] 明确 FR-0003 不承接 FR-0002 的握手、心跳、转发与 `ERR_TRANSPORT_*` 通信层错误
+- [x] 明确 FR-0003 不承接 FR-0006 的 SQLite 历史证据 / 诊断真相源角色
+- [x] 明确 FR-0003 只为后续 formal FR 预留受控加项入口，不提前吸收 bootstrap / readiness / persistent extension identity 等后续语义
+
+## Formal Review Snapshot
 
 - [x] 明确浏览器启动、Named Profile、基础状态流转、代理绑定、并发保护与最小持久化边界
 - [x] 冻结 `runtime.start`、`runtime.login`、`runtime.status`、`runtime.stop` 的最小语义
 - [x] 补齐 GWT 验收场景与异常 / 边界场景
 - [x] 补齐 `plan.md` 的 7 个必答章节
 - [x] 补齐 `contracts/`、`data-model.md`、`risks.md`
+- [x] 明确 FR-0003 与 FR-0001 / FR-0002 / FR-0006 / FR-0015 的边界分工，并与 `#354` / `#355` 收口语境对齐
+- [x] 冻结命令级 `run_id` 口径：复用 FR-0001 单次调用 `run_id`，不引入 Profile 级或持久化第二套运行标识
+- [x] 冻结 `__webenvoy_meta.json` 最小字段白名单（含嵌套字段最小白名单）
+- [x] 冻结 FR-0003 会话层错误码白名单，并与 FR-0001 / FR-0002 的错误分层解耦
 - [x] 明确 `localStorageSnapshots` 在 FR-0003 中仅作为最小会话摘要 / 恢复输入，不要求自动回写浏览器会话
-- [ ] 完成 spec review，并收敛所有 findings / blockers
-- [ ] 确认 `#143` 与 `#141`、`#142`、`#144` 的边界分工
+- [ ] 完成 `#356` 要求的 formal review 文档回写，并清空当前套件内的文档 blocker
+- [ ] formal 结论：`APPROVE`
+- [ ] formal 结论：`ready_for_implementation = true`
+- [x] 确认 FR-0003 的实现链路必须保持 spec / impl 分离
 
-## 进入实现前条件
+## 进入实现前条件（未来门禁定义）
 
-- [ ] 获得 `APPROVE`
-- [ ] 获得 `ready_for_implementation = true`
-- [ ] 确认 FR-0003 的实现 PR 与 spec PR 分离
-- [ ] 确认 `__webenvoy_meta.json` 最小字段与错误码口径已冻结
+- 等待 `APPROVE`
+- 等待 `ready_for_implementation = true`
+- 确认 FR-0003 的实现链路保持 spec / impl 分离
+- 确认 FR-0003 与 FR-0001 / FR-0002 / FR-0006 / FR-0015 的正式边界已冻结
 
-在以上条件完成前，不启动 FR-0003 的实现代码。
+## Formal Review 参考依据
 
-## Spec Review 通过后进入实现
+- `#168` 作为 FR-0003 的正式契约同步 issue 持续保留，且已有“FR-0003 已完成并进入主干；对应规约与实现已合并”的历史记录，可作为本次 review 参考存量之一。
+- `#167` 作为 FR-0003 的独立规约评审 PR 存在，说明 FR-0003 的 formal spec review 链路已经实际存在。
+- `#171/#181` 作为独立实现 PR 的历史记录存在，说明 FR-0003 的 spec / impl 分离策略已经实际成立。
+- `#182` 进一步收紧 `localStorageSnapshots` 的最小边界，说明 `__webenvoy_meta.json` 中该字段的“最小会话摘要 / 恢复输入”口径已经在正式链路中得到补强。
+- `#354/#355` 已完成 formal 收口，FR-0003 承接的 CLI 外层契约与最小通信基座已不再构成当前 review 阻塞。
+- 本次 `#356` 仅回写 FR-0003 formal review 所需的正式文档边界，不追溯伪造外部 guardian verdict 或补录不存在的审批事实；以上状态以“formal review 链路已存在 + 独立实现已成立 + 上游基座已完成收口”为参考，而非已批准结论。
+
+## Implementation Backlog
 
 - [ ] 初始化浏览器启动与 Profile 管理相关实现骨架
 - [ ] 建立 Profile 独占锁

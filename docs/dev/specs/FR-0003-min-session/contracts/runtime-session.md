@@ -18,6 +18,15 @@
 - 直接消费者：后续平台读取命令、测试程序、人工 smoke 流程
 - 间接消费者：`#145`、`#146`、`#148`
 
+## 运行标识兼容边界
+
+- 所有 `runtime.start` / `runtime.login` / `runtime.status` / `runtime.stop` 命令都复用 FR-0001 已冻结的外层 `run_id`。
+- FR-0003 不另起第二套运行标识体系，也不把 `run_id` 写成 Profile 元数据主键。
+- `run_id` 是单次命令调用标识，不是浏览器实例 ID、Profile ID 或长期 session ID。
+- 同一 Profile 上的连续 `start/login/status/stop` 调用必须各自拥有独立 `run_id`，即使它们操作的是同一浏览器目录与同一锁文件。
+- `ProfileLock.ownerRunId` 仅用于锁审计、陈旧锁识别和异常恢复，不对外替代 FR-0001 的命令级 `run_id` 语义。
+- FR-0002 的握手字段不承载 `run_id`；FR-0015 的 bootstrap 字段虽然会使用 `run_id`，但它仍属于单次运行上下文，不能回写成 FR-0003 的持久化身份字段。
+
 ## 状态模型
 
 ### Profile 状态
@@ -38,7 +47,7 @@ disconnected -> starting
 
 - `uninitialized` 表示该 Profile 目录和最小元数据尚未形成稳定初始化结果。
 - `starting` 表示浏览器正在启动并绑定该 Profile。
-- `ready` 表示浏览器已可用，Profile 可被后续命令复用。
+- `ready` 表示浏览器已可用，Profile 可被后续命令复用；它只表达 FR-0003 的本地 lifecycle ready，不等同于 FR-0002 transport ready 或 FR-0015 runtime readiness ready。
 - `logging_in` 表示用户正在通过可见浏览器完成一次手动登录。
 - `disconnected` 表示浏览器进程退出、连接断开或异常中止。
 - `stopping` 表示正在主动关闭当前浏览器实例。
@@ -59,7 +68,7 @@ disconnected -> starting
 
 - `absent` 表示当前没有活动浏览器实例
 - `starting` 表示浏览器正在拉起
-- `ready` 表示浏览器可用并可接收后续命令
+- `ready` 表示浏览器在本地生命周期层面可用并可接收 FR-0003 范围内的后续命令；它不单独证明 transport/bootstrap/readiness 全部就绪
 - `logging_in` 表示可见浏览器正处于手动登录流程
 - `stopping` 表示浏览器正在主动关闭
 - `disconnected` 表示活动浏览器曾存在，但当前已断连或异常退出
@@ -173,7 +182,7 @@ disconnected -> starting
 
 ## 错误语义
 
-本契约冻结以下最小错误码：
+本契约冻结以下最小错误码白名单：
 
 - `ERR_PROFILE_INVALID`
 - `ERR_PROFILE_LOCKED`
@@ -182,6 +191,13 @@ disconnected -> starting
 - `ERR_BROWSER_LAUNCH_FAILED`
 - `ERR_PROFILE_LOGIN_TIMEOUT`
 - `ERR_PROFILE_STATE_CONFLICT`
+
+白名单约束：
+
+- FR-0003 只冻结上述七个最小错误码；实现不得在 formal 收口前把其他 Profile / session 错误码当作默认稳定契约。
+- 这些错误码属于 FR-0001 CLI 错误响应壳内部的 `error.code` 值扩展，不改写 FR-0001 的 `status/error/timestamp/run_id` 外层结构。
+- FR-0002 的 `ERR_TRANSPORT_*` 属于通信层错误码，不纳入本白名单。
+- 若后续 FR 需要新增会话相关错误码，必须以加性方式进入对应 formal contract，且不得改写上述七个基线错误的语义。
 
 语义要求：
 
@@ -211,6 +227,8 @@ disconnected -> starting
 - `lastStoppedAt`
 - `lastDisconnectedAt`
 
+上述字段构成 FR-0003 的默认顶层字段白名单；在未被后续 formal spec 明确新增前，不得额外持久化其他顶层字段。
+
 其中 `proxyBinding` 结构至少包含：
 
 - `url`
@@ -221,7 +239,23 @@ disconnected -> starting
 - `audioNoiseSeed`
 - `canvasNoiseSeed`
 
+并且 `fingerprintSeeds` 只允许承载稳定 seed，不得承载以下 FR-0015 单次运行 bootstrap 字段：
+
+- `runtime_bootstrap_envelope`
+- `fingerprint_runtime`
+- `fingerprint_patch_manifest`
+- `main_world_secret`
+
 其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节；在 FR-0003 中它只作为最小会话摘要 / 恢复输入，不要求自动回写到后续浏览器会话。
+
+禁止持久化项：
+
+- `run_id`
+- `session_id`
+- Native Messaging `session_id`
+- bootstrap envelope / ack 字段
+- transport readiness 缓存
+- 账号健康度、矩阵调度、代理池状态
 
 后续 FR 如需增加新的可选字段，必须满足以下条件：
 
@@ -229,7 +263,7 @@ disconnected -> starting
 - 必须在对应 formal spec / data-model 中明确字段边界、生命周期、非法值处理与回滚策略
 - 未被后续 formal spec 冻结前，不得把新的 profile meta 字段写成默认允许项
 
-在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `__webenvoy_meta.json.persistentExtensionBinding`，但仅限其 formal 文档定义的最小子集与回读边界，不得外推为更宽的安装/运行时状态仓库。
+后续 FR 如需新增 `__webenvoy_meta.json` 字段，必须先在各自正式套件中完成 formal 审批并冻结最小子集与回读边界；在此之前，不得把新增字段写成默认允许项，也不得外推为更宽的安装/运行时状态仓库。
 
 ## 兼容策略
 

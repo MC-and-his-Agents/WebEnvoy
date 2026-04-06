@@ -14,7 +14,7 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 
 - `profileName`：Profile 的稳定名称
 - `profileDir`：Profile 目录绝对路径
-- `browserChannel`：浏览器通道标识
+- `browserChannel`：浏览器通道标识；这里只表示目录 / 运行时上下文属性，不代表它属于 FR-0003 `__webenvoy_meta.json` 基线白名单
 - `createdAt`：目录首次稳定初始化时间
 
 约束：
@@ -69,6 +69,45 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 }
 ```
 
+### FR-0003 顶层字段白名单
+
+FR-0003 基线下，`__webenvoy_meta.json` 只允许以下顶层字段：
+
+- `schemaVersion`
+- `profileName`
+- `profileDir`
+- `profileState`
+- `proxyBinding`
+- `fingerprintSeeds`
+- `localStorageSnapshots`
+- `createdAt`
+- `updatedAt`
+- `lastStartedAt`
+- `lastLoginAt`
+- `lastStoppedAt`
+- `lastDisconnectedAt`
+
+补充约束：
+
+- 本白名单是 FR-0003 的默认允许集；未被后续 formal spec 明确冻结的额外顶层字段，都视为越界字段。
+- 后续 FR 如需新增 profile meta 字段，必须在各自 formal 套件中完成批准并冻结边界；在此之前，这些字段都不属于 FR-0003 原生白名单。
+- `run_id`、`session_id`、transport session、bootstrap envelope、账号健康、矩阵调度、代理池状态都不得作为 FR-0003 顶层字段进入 `__webenvoy_meta.json`。
+
+### 嵌套字段最小白名单
+
+- `proxyBinding`
+  - `url`
+  - `boundAt`
+- `fingerprintSeeds`
+  - `audioNoiseSeed`
+  - `canvasNoiseSeed`
+- `localStorageSnapshots[]`
+  - `origin`
+  - `entries`
+- `localStorageSnapshots[].entries[]`
+  - `key`
+  - `value`
+
 ### 关键约束
 
 - `schemaVersion` 只允许单调递增，不允许向下兼容地改写旧语义。
@@ -76,9 +115,11 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 - `proxyBinding.url` 为空表示直连，不代表缺失或待定。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
 - `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话摘要 / 恢复输入，不得膨胀为账号资产总表。
+- `fingerprintSeeds` 只承载稳定 seed，不承载 `runtime_bootstrap_envelope`、`fingerprint_runtime`、`fingerprint_patch_manifest`、`main_world_secret` 等 FR-0015 单次运行 bootstrap 字段。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
+- `run_id` 只属于 FR-0001 定义的单次 CLI 调用上下文；即使实现会把命令级 `run_id` 写入锁文件审计，也不得把它持久化为 `ProfileMeta` 字段。
 - 后续 FR 只能以“加性可选字段”方式扩展 `ProfileMeta`；新增字段必须在对应 formal spec / data-model 中冻结字段边界、生命周期、非法值处理与回滚策略，且不得改写 FR-0003 基线字段语义。
-- 在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `persistentExtensionBinding`；该字段不属于 FR-0003 原生基线字段，只在 FR-0015 formal 边界内有效。
+- 如后续 FR 需要新增 `persistentExtensionBinding` 等 profile meta 字段，必须先在各自 formal 套件中完成审批并冻结边界；在此之前，这些字段都不属于 FR-0003 原生基线字段。
 
 ### `localStorageSnapshots` 语义约束
 
@@ -113,6 +154,7 @@ ProfileLock 表示同一 Profile 的独占占用关系。
 约束：
 
 - 同一时刻只能有一个有效锁持有者
+- `ownerRunId` 只作为锁审计与恢复输入，不替代 FR-0001 的命令级 `run_id`
 - 锁必须能在进程异常退出后被识别为陈旧锁
 - 锁的存在必须优先于元数据写入，避免并发覆盖
 
