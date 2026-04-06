@@ -12,6 +12,7 @@
 ## Formal 收口依据
 
 - [x] `spec.md` 已收敛到 Phase 1 所需的最小观察与诊断面，没有把完整 pause / resume 系统混进来。
+- [x] `plan.md` 已随正式套件完成 formal closeout 审查，不再保留未记录的收口前置。
 - [x] `contracts/runtime-observability.md` 已与 FR-0001 外层壳兼容，且没有改写 FR-0002 已冻结的 transport 承载边界。
 - [x] `#354` 已完成 FR-0001 formal 收口，因此 FR-0004 依赖的 CLI 外层响应壳与错误码兼容基线已冻结。
 - [x] `spec.md` 与 `contracts/runtime-observability.md` 已冻结 `page_state`、`key_requests`、`failure_site`、`error.diagnosis` 的最小字段与最小枚举。
@@ -21,7 +22,7 @@
 - [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
-- [x] `#373` 承载 FR-0004 actual formal-review record；可核实的 guardian / merge facts 可回写到本 TODO 作为 finalization evidence。
+- [x] `#373` 承载 FR-0004 actual formal-review record；其 latest guardian review 已在 commit `14633757ea67b6e01d6ffc97bdef3650bf624fa7` 上于 `2026-04-06T06:36:05Z` 明确给出 `APPROVE`，随后该 PR 于 `2026-04-06T06:36:14Z` 合入主干，merge commit 为 `3f16de8d8525aa36e77eaa16dfc028c0163ff016`。
 
 ## 当前 review 状态
 
