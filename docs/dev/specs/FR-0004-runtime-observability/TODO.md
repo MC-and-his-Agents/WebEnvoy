@@ -1,40 +1,36 @@
 # FR-0004 TODO
 
-> 本文件记录 FR-0004 formal closeout 结论，不追溯外部 Draft PR 载体事实。
-
-## Formal Closeout Snapshot
-
-- [x] 确认 `spec.md` 只覆盖 Phase 1 所需的最小观察与诊断面
-- [x] 确认 `spec.md` 没有把完整 pause / resume 系统混进来
-- [x] 确认 `contracts/runtime-observability.md` 与 FR-0001 外层壳兼容
-- [x] 确认 `risks.md` 覆盖敏感信息泄露、误分类和载荷膨胀
-- [x] 冻结页面状态、关键请求和失败位置的最小字段
-- [x] 冻结诊断分类与证据格式
-- [x] 确认 FR-0001 与 FR-0004 的职责边界没有交叉冲突
-- [x] 确认 `#355` 的通信链路能够承载诊断字段
-- [x] 确认与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结
-- [x] 收敛 formal spec review findings 与 blockers
-- [x] formal 结论：`APPROVE`
-- [x] formal 结论：`ready_for_implementation = true`
+> 本文件只记录 FR-0004 的 formal closeout 状态与实现消费边界，不追溯外部 Draft PR、guardian、merge 或审批载体事实。
 
 ## 进入实现前条件（门禁定义）
 
 - 获得 `APPROVE`
 - 获得 `ready_for_implementation = true`
-- 确认 FR-0001 与 FR-0004 的职责边界没有交叉冲突
-- 确认 `#355` 的通信链路能够承载诊断字段
-- 确认 FR-0004 的实现链路保持 spec / impl 分离
+- 确认 FR-0004 的实现工作承接 FR-0001 外层壳与 FR-0002 transport 边界，不重写上游契约
+- 确认 `contracts/runtime-observability.md`、`plan.md`、`risks.md` 已随套件一起完成 formal closeout 审查
 
 ## Formal 收口依据
 
-- `#165` 已完成 FR-0004 的历史规约评审链路，且该 PR 已 merged。
-- `#354` 已完成 FR-0001 formal 收口，因此 FR-0004 依赖的 CLI 外层响应壳与错误码兼容基线已冻结。
-- `#355` 已完成 FR-0002 formal 收口，因此 FR-0004 依赖的最小通信链路承载基线已冻结。
-- FR-0004 当前 closeout 只回写最小观察、结构化诊断与共享边界的正式结论，不重新开启 pause / resume、长期观测平台或实现范围扩张。
-- 以上依据共同支撑 FR-0004 当前可正式记录为 `APPROVE` 与 `ready_for_implementation = true`。
+- [x] `spec.md` 已收敛到 Phase 1 所需的最小观察与诊断面，没有把完整 pause / resume 系统混进来。
+- [x] `contracts/runtime-observability.md` 已与 FR-0001 外层壳兼容，且没有改写 FR-0002 已冻结的 transport 承载边界。
+- [x] `#354` 已完成 FR-0001 formal 收口，因此 FR-0004 依赖的 CLI 外层响应壳与错误码兼容基线已冻结。
+- [x] `spec.md` 与 `contracts/runtime-observability.md` 已冻结 `page_state`、`key_requests`、`failure_site`、`error.diagnosis` 的最小字段与最小枚举。
+- [x] URL 净化、脱敏与截断边界已冻结，不再把这部分留给实现时临场判断。
+- [x] `risks.md` 已覆盖敏感信息泄露、误分类、载荷膨胀与处理顺序错误的核心风险。
+- [x] FR-0001 与 FR-0004 的职责边界没有交叉冲突。
+- [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
+- [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
+- [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
 
-## Implementation Backlog
+## 当前 closeout 记录
+
+- [x] `#357` 当前只回写 FR-0004 正式套件的 formal closeout 状态，不重开 FR-0004 边界或实现范围。
+- [x] FR-0004 当前可在本地正式套件口径下记录为 `APPROVE`。
+- [x] FR-0004 当前可在本地正式套件口径下记录为 `ready_for_implementation = true`。
+- [x] FR-0004 当前可在本地正式套件口径下记录为 `formal_closeout = complete`。
+
+## 进入实现后由后续事项承接
 
 - [ ] 接入成功 / 错误响应的结构化输出
-- [ ] 接入脱敏与截断规则
+- [ ] 接入 URL 净化、脱敏与截断规则
 - [ ] 补齐诊断分类、契约和边界测试
