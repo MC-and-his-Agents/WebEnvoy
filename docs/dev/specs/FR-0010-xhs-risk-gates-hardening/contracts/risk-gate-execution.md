@@ -53,7 +53,8 @@
     "target_page": "search_result_tab",
     "action_type": "read",
     "requested_execution_mode": "live_read_high_risk",
-    "risk_state": "paused"
+    "risk_state": "paused",
+    "limited_read_rollout_ready": false
   }
 }
 ```
@@ -69,6 +70,7 @@
 1. `target_tab_id` 与 `target_page` 必须共同表达“目标 tab + 页面语义”；不允许只给页面类型字符串替代 tab 选择边界。
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
+4. `limited_read_rollout_ready` 表示 `live_read_limited` 是否已满足 staged rollout 前置；当请求或生效模式命中 `live_read_limited` 时，该字段不得缺失。
 
 ## gate_outcome
 
@@ -101,6 +103,7 @@
 ```json
 {
   "approval_record": {
+    "approval_id": "approval_run_001",
     "approved": false,
     "approver": null,
     "approved_at": null,
@@ -120,6 +123,7 @@
 1. `approved=true` 时，`approver` 与 `approved_at` 必填。
 2. `checks` 任一项为 `false`，不得放行 live。
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，必须存在完整审批证据。
+4. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 
 ## audit_record
 
@@ -155,6 +159,7 @@
 3. `gate_reasons` 不得为空，必须能独立解释本次放行或阻断原因。
 4. 若 `gate_decision=allowed`，`approver` 与 `approved_at` 必填；若为阻断，可为空。
 5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，审计记录必须能独立证明审批已完成。
+6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 
 ## consumer_gate_result
 
@@ -197,3 +202,4 @@
 2. FR-0009 作为治理基线保留；Sprint 2 实现统一消费本契约对象。
 3. `gate_decision` 枚举值变更必须经过独立 spec review。
 4. `gate_reasons` 的新增代码允许追加，不允许复用同义码造成歧义。
+5. `FR-0009` 新增的 live-resume 前置若继续保留，必须在本契约中给出等价机器承载，不得形成 contract drift。
