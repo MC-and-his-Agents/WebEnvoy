@@ -6,7 +6,7 @@
 - [x] 明确 FR-0003 承接 FR-0001 的 CLI 外层契约与命令级 `run_id`，但不重写 CLI 错误壳、退出码和 argv 语法
 - [x] 明确 FR-0003 不承接 FR-0002 的握手、心跳、转发与 `ERR_TRANSPORT_*` 通信层错误
 - [x] 明确 FR-0003 不承接 FR-0006 的 SQLite 历史证据 / 诊断真相源角色
-- [x] 明确 FR-0003 只为 FR-0015 预留受控加项入口，不提前吸收 bootstrap / readiness / persistent extension identity 语义
+- [x] 明确 FR-0003 只为后续 formal FR 预留受控加项入口，不提前吸收 bootstrap / readiness / persistent extension identity 等后续语义
 
 ## Formal Review Snapshot
 
