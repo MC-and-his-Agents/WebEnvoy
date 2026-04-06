@@ -17,6 +17,23 @@
 - [x] formal 结论：`APPROVE`
 - [x] formal 结论：`ready_for_implementation = true`
 
+## 进入实现前条件（门禁定义）
+
+- 获得 `APPROVE`
+- 获得 `ready_for_implementation = true`
+- 确认与 `#356` 的 `run_id/session_id/profile` 复用边界已冻结
+- 确认与 `#357` 的诊断字段映射边界已冻结
+- 确认与 `#360` 的能力证据字段映射边界已冻结
+
+## Formal 收口依据
+
+- 历史规约评审 PR `#174` 已完成并合入，FR-0006 的 formal spec review 结论已不再停留在本地 TODO 语境。
+- `#354/#355` 已完成 formal 收口，FR-0006 承接的 CLI 外层契约与最小通信基座已不再构成当前 closeout 阻塞。
+- FR-0006 当前套件已在本地回写并对齐与 `#356/#357/#360` 的共享边界，且 `docs-guard` 校验通过。
+- 当前 issue `#359` 只负责 formal closeout 回写，不重开 FR-0006 的正式边界，也不扩写到实现代码或完整业务仓库。
+- 因此，FR-0006 当前可正式记录为 `APPROVE`。
+- 因此，FR-0006 当前可正式记录为 `ready_for_implementation = true`。
+
 ## Implementation Backlog
 
 - [ ] 实现 SQLite 初始化、WAL 启用与 schema 版本校验
