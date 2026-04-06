@@ -66,8 +66,9 @@
 - 即使上述治理前置成立，任何 live 恢复仍只是“可进入后续执行门禁评审”的前提，不等于可绕过 Sprint 2 的可执行门禁。
 - 如需恢复 `limited` live（受控读侧 live）：
   - `FR-0010` 必须先完成 formal spec review，并作为可执行门禁替代契约成立
+  - `FR-0011` 必须先完成 formal spec review，并冻结 `live_read_limited` 的正式公开模式语义与 live-entry 前置
   - 必须至少完成 `#209` 扩展边界的正式收口
-  - 不得因 `#208` 仍未完成正式验证就单独否决未来的读侧 staged rollout 讨论，但在 `FR-0010` 未成立前不得恢复任何 `live_read_limited`
+  - 不得因 `#208` 仍未完成正式验证就单独否决未来的读侧 staged rollout 讨论，但在 `FR-0010` 未成立、或 `FR-0011` 未冻结 Sprint 3 live-entry 前置前，不得恢复任何 `live_read_limited`
 - 如需恢复 `allowed` live 或任何写侧真实交互：
   - `FR-0010` 必须先完成 formal spec review，并由其可执行门禁对象承接 live 放行
   - `#208` 的动作边界必须已在其正式评审链路中完成收口

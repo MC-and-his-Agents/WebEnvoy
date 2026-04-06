@@ -55,8 +55,9 @@
 - 门禁生效模式必须写入 `effective_execution_mode`。
 - 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
-- `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效。
-- `live_read_limited` 只有在治理侧 `scope_context.limited_read_rollout_ready=true` 时才可进入受控读侧 staged rollout；该前置不得由调用方在 `gate_input` 自报。
+- `live_read_limited` 在本 FR 中只保留为 Sprint 3 兼容占位值；其正式公开模式语义与 live-entry 条件仍由 `FR-0011` 单独冻结。
+- `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效；在 `FR-0011` 未完成 formal 收口前，本 FR 必须默认阻断该模式。
+- `live_read_limited` 只有在治理侧 `scope_context.sprint3_live_entry_ready=true` 与 `scope_context.limited_read_rollout_ready=true` 时才可能进入受控读侧 staged rollout；这些前置都不得由调用方在 `gate_input` 自报。
 - 任意 live 恢复或扩展都必须同时满足治理侧 `scope_context.spec_review_passed=true` 与 `scope_context.risk_review_completed=true`；任一为 `false` 时必须阻断。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
@@ -155,7 +156,7 @@ And 不存在某一事项绕过门禁的路径
 4. 显式目标域/目标页确认（含 `target_tab_id`）、人工确认、审计记录要求均已冻结。
 5. `#208` 与 `#209` 的后续 live 扩展前置条件已统一。
 6. 输出对象可被实现层与当前已明确的 `#208/#209` 稳定消费。
-7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义，且其正式枚举已覆盖 `live_read_limited`。
+7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义；`live_read_limited` 在本 FR 中仅作 Sprint 3 兼容占位，不单独冻结其公开模式语义。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
 
@@ -166,12 +167,13 @@ And 不存在某一事项绕过门禁的路径
 - 替代细化：
   - `FR-0009.resume_requirements.spec_review_passed` -> `FR-0010.scope_context.spec_review_passed`
   - `FR-0009.resume_requirements.risk_review_completed` -> `FR-0010.scope_context.risk_review_completed`
+  - `FR-0009.resume_requirements.sprint3_live_entry_ready` -> `FR-0010.scope_context.sprint3_live_entry_ready`
   - `FR-0009.resume_requirements.limited_read_rollout_ready` -> `FR-0010.scope_context.limited_read_rollout_ready`
   - `FR-0009.resume_requirements.explicit_scope_for_209_extension` -> `FR-0010.scope_context.explicit_scope_for_209_extension`
   - `FR-0009.resume_requirements.explicit_scope_for_208` -> `FR-0010.scope_context.explicit_scope_for_208`
   - `FR-0009.resume_requirements.approval_record_ref` -> `FR-0010.approval_record.approval_id`
   - `FR-0009.resume_requirements.audit_record_ref` -> `FR-0010.audit_record.event_id`
-- 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段。
+- 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段；`live_read_limited` 的正式公开语义仍以 `FR-0011` 为唯一来源。
 - 迁移完成判定：`#218/#219/#221/#208/#209` 仅消费 FR-0010 冻结字段后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
 
 ## 依赖与前置条件

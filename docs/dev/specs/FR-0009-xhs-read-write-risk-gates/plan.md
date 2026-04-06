@@ -60,6 +60,7 @@
 - 串行：
   - `FR-0009` spec review 通过前，`#208` 的后续事项不得继续高风险 live 正式验证。
   - `FR-0009` spec review 通过前，`#209` 的后续事项不得新增高风险 live 扩展实验。
+  - `FR-0011` 未完成 formal 收口前，任何 `live_read_limited` 恢复讨论都不得跳过 Sprint 3 live-entry 前置。
   - `FR-0009` 的 formal closeout 必须先完成，之后才能把其治理结论同步到 `#201/#208/#209`。
   - `FR-0009` 的结论写回必须晚于 canonical formal-review PR 合入与 guardian `APPROVE`。
 - 可并行：

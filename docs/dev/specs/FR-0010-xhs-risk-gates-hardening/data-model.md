@@ -12,6 +12,7 @@
 - `domain_mixing_forbidden` boolean NOT NULL
 - `spec_review_passed` boolean NOT NULL
 - `risk_review_completed` boolean NOT NULL
+- `sprint3_live_entry_ready` boolean NOT NULL
 - `limited_read_rollout_ready` boolean NOT NULL
 - `explicit_scope_for_209_extension` boolean NOT NULL
 - `explicit_scope_for_208` boolean NOT NULL
@@ -21,9 +22,10 @@
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
 3. `spec_review_passed` 与 `risk_review_completed` 属于治理侧 hard gate，不得由调用方请求载荷直接声明。
-4. `limited_read_rollout_ready` 是治理侧 staged rollout readiness gate，不得由调用方请求载荷直接声明。
-5. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
-6. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
+4. `sprint3_live_entry_ready` 是 Sprint 3 live-entry readiness 的治理侧 gate；在其为 `false` 时，任何 `live_read_limited` 请求都必须阻断，且该模式的正式公开语义仍由 `FR-0011` 单独冻结。
+5. `limited_read_rollout_ready` 是治理侧 staged rollout readiness gate，不得由调用方请求载荷直接声明。
+6. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
+7. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互。
 
 ## 实体 2：GateInput
 
@@ -43,6 +45,7 @@
 1. 所有门禁请求都必须提供 `target_tab_id` 与 `target_page`，不得在非 live 请求中留空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
+4. 在 `ScopeContext.sprint3_live_entry_ready=false` 时，`requested_execution_mode=live_read_limited` 只能得到 `blocked` 结果，不得被视为 Sprint 2 已拥有的公开 live 模式。
 
 ## 实体 3：GateDecision
 
@@ -140,6 +143,7 @@
 | `resume_requirements` | `ApprovalRecord + AuditRecord` | 恢复前置改为审批与审计可检索记录 |
 | `resume_requirements.spec_review_passed` | `ScopeContext.spec_review_passed` | formal spec review 已通过的治理侧前置 |
 | `resume_requirements.risk_review_completed` | `ScopeContext.risk_review_completed` | 风险审查已完成的治理侧前置 |
+| `resume_requirements.sprint3_live_entry_ready` | `ScopeContext.sprint3_live_entry_ready` | Sprint 3 live-entry readiness 的治理侧前置 |
 | `resume_requirements.limited_read_rollout_ready` | `ScopeContext.limited_read_rollout_ready` | 受控读侧 staged rollout 的治理侧前置 |
 | `resume_requirements.explicit_scope_for_209_extension` | `ScopeContext.explicit_scope_for_209_extension` | 读侧扩展的显式 scope gate |
 | `resume_requirements.explicit_scope_for_208` | `ScopeContext.explicit_scope_for_208` | 写侧真实交互的显式 scope gate |
