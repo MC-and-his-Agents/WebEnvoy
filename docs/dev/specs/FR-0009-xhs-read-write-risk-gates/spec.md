@@ -71,6 +71,7 @@
   - 不得因 `#208` 仍未完成正式验证就单独否决未来的读侧 staged rollout 讨论，但在 `FR-0010` 未成立、或 `FR-0011` 未冻结 Sprint 3 live-entry 前置前，不得恢复任何 `live_read_limited`
 - 如需恢复 `allowed` live 或任何写侧真实交互：
   - `FR-0010` 必须先完成 formal spec review，并由其可执行门禁对象承接 live 放行
+  - `FR-0011` 必须先完成 formal spec review，并冻结 `paused/limited/allowed` 状态机与 `#208` 的 `editor_input` 真实验证边界
   - `#208` 的动作边界必须已在其正式评审链路中完成收口
   - `#209` 的扩展边界仍需保持与同一门禁语义一致
 
