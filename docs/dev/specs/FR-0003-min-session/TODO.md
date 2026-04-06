@@ -1,5 +1,13 @@
 # FR-0003 TODO
 
+## Formal Closeout Gate
+
+- [x] 明确 FR-0003 只覆盖浏览器启动、Named Profile、基础状态流转、代理绑定、并发保护与最小持久化边界
+- [x] 明确 FR-0003 承接 FR-0001 的 CLI 外层契约与命令级 `run_id`，但不重写 CLI 错误壳、退出码和 argv 语法
+- [x] 明确 FR-0003 不承接 FR-0002 的握手、心跳、转发与 `ERR_TRANSPORT_*` 通信层错误
+- [x] 明确 FR-0003 不承接 FR-0006 的 SQLite 历史证据 / 诊断真相源角色
+- [x] 明确 FR-0003 只为 FR-0015 预留受控加项入口，不提前吸收 bootstrap / readiness / persistent extension identity 语义
+
 ## Formal Closeout Snapshot
 
 - [x] 明确浏览器启动、Named Profile、基础状态流转、代理绑定、并发保护与最小持久化边界
@@ -7,13 +15,19 @@
 - [x] 补齐 GWT 验收场景与异常 / 边界场景
 - [x] 补齐 `plan.md` 的 7 个必答章节
 - [x] 补齐 `contracts/`、`data-model.md`、`risks.md`
+- [x] 明确 FR-0003 与 FR-0001 / FR-0002 / FR-0006 / FR-0015 的边界分工，并与 `#354` / `#355` 收口语境对齐
+- [x] 冻结命令级 `run_id` 口径：复用 FR-0001 单次调用 `run_id`，不引入 Profile 级或持久化第二套运行标识
+- [x] 冻结 `__webenvoy_meta.json` 最小字段白名单（含嵌套字段最小白名单）
+- [x] 冻结 FR-0003 会话层错误码白名单，并与 FR-0001 / FR-0002 的错误分层解耦
 - [x] 明确 `localStorageSnapshots` 在 FR-0003 中仅作为最小会话摘要 / 恢复输入，不要求自动回写浏览器会话
-- [x] 完成 formal spec review 收口，并清空当前套件 blocker
-- [x] 确认 FR-0003 与 `#354`、`#355`、`#359`、`#361` 的边界分工
-- [x] 冻结 `__webenvoy_meta.json` 最小字段白名单与错误码口径
-- [x] formal 结论：`APPROVE`
-- [x] formal 结论：`ready_for_implementation = true`
+- [x] 完成 `#356` 要求的 formal closeout 文档回写，并清空当前套件内的文档 blocker
 - [x] 确认 FR-0003 的实现链路必须保持 spec / impl 分离
+
+## Formal 收口说明
+
+- 本次 `#356` 仅回写 FR-0003 formal closeout 所需的正式文档边界，不新增或追溯填写外部 PR、guardian verdict、merge 或审批编号。
+- 外部 review / 审批 / 合入事实仍以 GitHub issue、PR 与 review 记录为准，不在本地 `TODO.md` 伪造补录。
+- FR-0003 的后续实现仍必须走独立实现 PR，并继续遵守 spec / impl 分离。
 
 ## Implementation Backlog
 
