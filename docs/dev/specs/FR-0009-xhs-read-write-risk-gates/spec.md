@@ -78,7 +78,7 @@
   - 动作类型确认（读、写、不可逆写）
 - 必须定义人工确认流程中的最小责任与留痕：
   - 规约阶段默认责任人是发起本次 live 恢复 / 扩展请求的实现负责人
-  - formal closeout 的 review / sync 记录可保留在 GitHub issue / PR 中，供历史追溯与 review 复核
+  - formal closeout 的 review / sync 记录可保留在 GitHub issue / PR 中，供历史追溯与 review 复核，但这些记录不单独满足 `approver_recorded=true`
   - 后续 limited / allowed live 的审批与审计正式载体由执行层契约承接；本 FR 不把 GitHub review/comment 升格为未来运行时审批通道
 - 必须定义 dry-run/侦察门禁，至少覆盖：
   - 默认模式
@@ -168,6 +168,6 @@ And 每条差距都说明了与当前风险预警的直接关联
 
 ## 依赖与前置条件
 
-- 输入事项：`#201`、`#208`、`#209`、`#213`
+- 输入事项：`#201`、`#208`、`#209`、`#215`
 - 侦察输入：`#146`、`FR-0008`
 - 架构约束：`docs/dev/architecture/anti-detection.md`、`docs/dev/architecture/system-design/read-write.md`
