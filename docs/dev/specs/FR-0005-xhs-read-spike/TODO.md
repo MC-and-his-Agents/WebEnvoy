@@ -24,9 +24,11 @@
 
 - [x] 触发账号异常（`code=300011`）后已暂停 live XHS 交互，避免继续放大风控
 - [x] 明确标记本轮为“部分完成”，非实现就绪
-- [x] 2026-04-06 已按 WebEnvoy-managed profile 口径复查本地执行现场；当前 `.webenvoy/profiles` 不存在可用于 XHS live 复核的已登录 profile
-- [x] 由于缺少 WebEnvoy-managed XHS 会话，本轮按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
-- [ ] 恢复可用账号/会话后再继续同口径复核
+- [x] 2026-04-06 中午已按 WebEnvoy-managed profile 口径复查本地执行现场；当时 `.webenvoy/profiles` 不存在可用于 XHS live 复核的已登录 profile
+- [x] 由于 2026-04-06 中午缺少 WebEnvoy-managed XHS 会话，本轮曾按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
+- [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；正式状态只跟随 FR-0005 已收口的 managed-profile 同口径复核结论变化
+- [x] 当前 formal FR 的本地停点仍是：`search/detail/user_home` 在 WebEnvoy-managed profile 下的同口径复核尚未作为正式结论收口
+- [ ] 在 WebEnvoy-managed profile 下继续补做 `search/detail/user_home` 的同口径 live 复核
 
 ## #185 阻断点吸收（本次规约修订）
 
@@ -47,8 +49,9 @@
 
 ## 后续衔接
 
-- [x] 2026-04-06 已形成本轮 Go/No-Go 结论：`No-Go/paused`
-- [x] 本轮不创建“小红书 L3 读适配实现 FR”；等待 WebEnvoy-managed XHS 会话恢复并补齐 `search/detail/user_home` 的 API primary 复核后再重新评估
+- [x] 2026-04-06 中午已形成本轮 Go/No-Go 历史结论：`No-Go/paused`
+- [x] 上述 `No-Go/paused` 继续保留为带日期的历史 closeout；当前 formal FR 何时解除停点，取决于 WebEnvoy-managed profile 下剩余同口径复核是否补齐
+- [ ] 补齐 `search/detail/user_home` 的 API primary 复核，并重新判定当前 Go/No-Go
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
 - [ ] 创建“小红书 L3 读适配实现 FR”并引用 FR-0005 已复核结论

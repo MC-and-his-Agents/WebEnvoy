@@ -22,6 +22,7 @@
 - 第一手证据优先用于描述“本轮已发生事实”。
 - 历史基线仅作为候选参考，不能覆盖第一手失败证据。
 - 本轮已触发风控/账号异常，浏览器内 live 复核已暂停；本文件不是“实现就绪”结论。
+- 作者本机 `.webenvoy/profiles/**` 的恢复状态属于执行现场事实；只有在 WebEnvoy-managed profile 下的同口径复核结论正式收口后，才会改变 formal spec 的当前状态。
 
 ## 1. 浏览器内第一手复核证据（新增）
 
@@ -376,18 +377,20 @@
 
 ### 5.1 2026-04-06 WebEnvoy-managed profile 准入预检
 
-2026-04-06 在仓库本地按 `#358` 的正式执行口径复查 `.webenvoy/profiles/**/__webenvoy_meta.json`：
+2026-04-06 中午在仓库本地按 `#358` 的正式执行口径复查 `.webenvoy/profiles/**/__webenvoy_meta.json`：
 
 - 当前仅存在 `fr0012_diag_stage` 与 `fr0012_diag_stage2` 两个诊断样本 profile。
 - 两个 profile 的 `lastLoginAt` 均为 `null`，且 profile 名称、用途与小红书 live 复核无关。
-- 当前仓库内不存在可由 WebEnvoy 接管、且保持有效登录态的小红书 profile，因此无法在 WebEnvoy-managed official runtime 边界内继续执行 `search/detail/user_home` 的同口径 live 复核。
+- 当时仓库内不存在可由 WebEnvoy 接管、且保持有效登录态的小红书 profile，因此无法在 WebEnvoy-managed official runtime 边界内继续执行 `search/detail/user_home` 的同口径 live 复核。
 
 由此得到的正式结论：
 
-- 2026-04-06 这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
+- 2026-04-06 中午这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
 - `search` 仍停留在 `observed_once` 的 `primary` 成功样本，尚缺 WebEnvoy-managed profile 下的多轮 replay 与 required headers 最小必要集。
 - `detail` 与 `user_home` 仍分别停留在 `fallback-only` 与 `candidate/failed` 组合，不满足进入实现 FR 的前提。
-- 本轮 Go/No-Go 结论固定为 `No-Go/paused`：不创建“小红书 L3 读适配实现 FR”，直到可用的 WebEnvoy-managed 小红书 profile 恢复并完成剩余复核。
+- 上述快照支撑了 2026-04-06 中午的 `No-Go/paused` 历史 closeout。
+- 截至当前 PR，WebEnvoy-managed profile 下的后续同口径复核尚未作为正式结论收口；因此 formal FR 的当前状态仍保持 blocked。
+- 若后续执行现场已恢复受管 XHS profile，应继续补齐 `search/detail/user_home` 的同口径复核，并在结论收口后再更新正式状态。
 
 ## 未决项（进入下一轮复核前保留）
 
