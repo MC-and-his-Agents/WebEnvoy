@@ -263,7 +263,7 @@ disconnected -> starting
 - 必须在对应 formal spec / data-model 中明确字段边界、生命周期、非法值处理与回滚策略
 - 未被后续 formal spec 冻结前，不得把新的 profile meta 字段写成默认允许项
 
-在后续已冻结的 FR 中，可以按受控加项方式新增 `__webenvoy_meta.json` 字段；例如 `FR-0015` 可新增 `persistentExtensionBinding`，`FR-0012` 可新增其 formal 套件定义的指纹一致性字段，但都仅限各自文档定义的最小子集与回读边界，不得外推为更宽的安装/运行时状态仓库。
+后续 FR 如需新增 `__webenvoy_meta.json` 字段，必须先在各自正式套件中完成 formal 审批并冻结最小子集与回读边界；在此之前，不得把新增字段写成默认允许项，也不得外推为更宽的安装/运行时状态仓库。
 
 ## 兼容策略
 

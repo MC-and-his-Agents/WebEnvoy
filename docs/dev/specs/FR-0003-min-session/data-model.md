@@ -90,7 +90,7 @@ FR-0003 基线下，`__webenvoy_meta.json` 只允许以下顶层字段：
 补充约束：
 
 - 本白名单是 FR-0003 的默认允许集；未被后续 formal spec 明确冻结的额外顶层字段，都视为越界字段。
-- FR-0015 的 `persistentExtensionBinding` 以及 FR-0012 formal 套件另行定义的指纹一致性字段，都是后续 formal 加项案例；这些字段都不属于 FR-0003 原生白名单。
+- 后续 FR 如需新增 profile meta 字段，必须在各自 formal 套件中完成批准并冻结边界；在此之前，这些字段都不属于 FR-0003 原生白名单。
 - `run_id`、`session_id`、transport session、bootstrap envelope、账号健康、矩阵调度、代理池状态都不得作为 FR-0003 顶层字段进入 `__webenvoy_meta.json`。
 
 ### 嵌套字段最小白名单
