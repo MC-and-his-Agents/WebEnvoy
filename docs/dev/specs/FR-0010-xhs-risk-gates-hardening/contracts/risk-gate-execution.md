@@ -185,13 +185,44 @@
 {
   "risk_state_output": {
     "current_state": "paused",
-    "next_state": "paused",
-    "transition_trigger": "gate_evaluation",
-    "audit_records": [
+    "session_rhythm_policy": {
+      "min_action_interval_ms": 3000,
+      "min_experiment_interval_ms": 30000,
+      "cooldown_strategy": "exponential_backoff",
+      "cooldown_base_minutes": 30,
+      "cooldown_cap_minutes": 720,
+      "resume_probe_mode": "recon_only"
+    },
+    "session_rhythm": {
+      "state": "paused",
+      "triggered_by": "GATE_BLOCKED",
+      "cooldown_until": null,
+      "recovery_started_at": null,
+      "last_event_at": "2026-03-23T10:00:00.000Z",
+      "source_event_id": "gate_evt_001"
+    },
+    "risk_state_machine": {
+      "states": ["paused", "limited", "allowed"],
+      "transitions": [],
+      "hard_block_when_paused": ["live_read_high_risk", "live_write"]
+    },
+    "issue_action_matrix": [
       {
-        "event_id": "gate_evt_001"
+        "issue_scope": "issue_208",
+        "risk_state": "paused",
+        "allowed_actions": ["dry_run"],
+        "conditional_actions": [],
+        "blocked_actions": ["live_write"]
+      },
+      {
+        "issue_scope": "issue_209",
+        "risk_state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "conditional_actions": [],
+        "blocked_actions": ["live_read_high_risk", "live_read_limited"]
       }
-    ]
+    ],
+    "recovery_requirements": ["audit_record_present"]
   }
 }
 ```
@@ -199,11 +230,12 @@
 约束：
 
 1. `risk_state_output` 只承载统一状态机输出，不替代 `gate_input`、`gate_outcome`、`approval_record`、`audit_record` 或 `consumer_gate_result`。
-2. `current_state` 与 `next_state` 枚举固定为 `paused | limited | allowed`。
-3. `transition_trigger` 必须提供稳定原因字符串，至少能区分 `gate_evaluation` 与其他后续 FR 新增的状态迁移来源。
-4. `audit_records` 必须引用同一次门禁判定已生成的审计记录；在 FR-0010 基线下至少包含 `event_id`。
-5. 如运行时未对外发布统一状态机结果，可整体省略 `risk_state_output`；一旦发布，则上述字段都视为稳定输出字段。
-6. service-worker / relay 若对外暴露状态机结果，也必须复用本对象，而不是新增并行状态输出字段。
+2. `current_state` 枚举固定为 `paused | limited | allowed`，表示当前统一状态机对外公开的状态。
+3. `session_rhythm_policy`、`session_rhythm`、`risk_state_machine`、`issue_action_matrix` 与 `recovery_requirements` 一旦对外发布，都视为稳定输出字段，不得在 formal review 之外改写语义。
+4. `session_rhythm.source_event_id` 必须能够回链到当前状态输出所依据的审计事件；FR-0010 不要求在 `risk_state_output` 内内联完整 `audit_record`。
+5. `issue_action_matrix` 在 FR-0010 基线下必须按 `issue_208`、`issue_209` 两个 issue scope 输出统一状态机下的动作矩阵，不得额外增加并行门禁对象。
+6. 如运行时未对外发布统一状态机结果，可整体省略 `risk_state_output`；一旦发布，则上述字段都视为稳定输出字段。
+7. service-worker / relay 若对外暴露状态机结果，也必须复用本对象，而不是新增并行状态输出字段。
 
 ## consumer_gate_result
 

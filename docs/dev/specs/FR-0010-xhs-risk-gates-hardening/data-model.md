@@ -115,16 +115,19 @@
 ## 实体 6：RiskStateOutput
 
 - `current_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
-- `next_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
-- `transition_trigger` string NOT NULL
-- `audit_records` JSON array NOT NULL
+- `session_rhythm_policy` JSON object NOT NULL
+- `session_rhythm` JSON object NOT NULL
+- `risk_state_machine` JSON object NOT NULL
+- `issue_action_matrix` JSON array NOT NULL
+- `recovery_requirements` JSON array NOT NULL
 
 约束：
 
 1. `RiskStateOutput` 只承载统一状态机输出，不替代 `GateInput` 或 `AuditRecord` 的状态字段。
-2. `audit_records` 至少要能回链到当前门禁判定的 `AuditRecord.event_id`。
-3. `RiskStateOutput` 在 FR-0010 中属于可选公开对象；如果实现选择输出，就必须完整满足上述字段要求。
-4. service-worker / relay 若需要对外暴露状态机结果，必须复用同一对象结构，不得新增并行状态输出契约。
+2. `session_rhythm.source_event_id` 至少要能回链到当前门禁判定的 `AuditRecord.event_id`。
+3. `issue_action_matrix` 在 FR-0010 基线下输出 `issue_208` 与 `issue_209` 两个 scope 的统一状态机动作矩阵。
+4. `RiskStateOutput` 在 FR-0010 中属于可选公开对象；如果实现选择输出，就必须完整满足上述字段要求。
+5. service-worker / relay 若需要对外暴露状态机结果，必须复用同一对象结构，不得新增并行状态输出契约。
 
 ## 生命周期
 
