@@ -100,7 +100,7 @@
 - 风险状态的正式归属固定如下：
   - 请求输入真相源：`gate_input.risk_state`
   - 审计真相源：`audit_record.risk_state`
-- `#208` 与 `#209` 不得定义私有门禁字段绕过上述对象。
+- `#208` 与 `#209` 必须以 `gate_input`、`gate_outcome`、`approval_record`、`audit_record`、`consumer_gate_result` 作为共同门禁基线；如需扩展，只能通过后续正式 FR / contract 增补，不得为同语义字段回退到 issue 私有解释。
 
 ### 7. #223 统一状态机与阻断策略归属锚点（规约层）
 
@@ -121,7 +121,7 @@
   - `approval_record` / `audit_record` 最小闭环
   - `decision_id`、`approval_id`、`event_id` 的唯一回链关系
   - live 放行必须可追溯到同一门禁结论与审批记录
-- 上述边界在本 FR 内收口后，`#208/#209` 只允许消费 FR-0010 冻结对象，不得回退到 issue 私有字段解释。
+- 上述边界在本 FR 内收口后，`#208/#209` 必须以 FR-0010 冻结字段作为共同基线；如需扩展，必须通过后续正式 FR / contract 增补，不得以 issue 私有字段解释替代正式契约。
 
 ## GWT 验收场景
 
@@ -191,7 +191,7 @@ And 不存在某一事项绕过门禁的路径
 - 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段；`live_read_limited` 的正式公开语义仍以 `FR-0011` 为唯一来源，FR-0010 在其 formal 收口前只承接“默认阻断”语义，不提前冻结 Sprint 3 readiness 字段。
 - 上游保留说明：`FR-0009.resume_requirements.limited_read_rollout_ready` 仍是受控读侧 staged rollout 的治理前置；其正式机器承载由 `FR-0011.issue_action_matrix.conditional_actions.requires += limited_read_rollout_ready_true` 提供。在 `FR-0011` formal 收口前，Sprint 2 消费者必须把 `live_read_limited` 视为默认阻断，而不是忽略该前置。
 - 治理分层说明：`FR-0009.resume_requirements` 中的治理 gate 继续作为进入执行门禁前的上游准入条件存在；FR-0010 当前只冻结运行时可拥有、可输出、可审计的执行对象，不要求 runtime 直接产出这些 governance booleans。
-- 迁移完成判定：`#218/#219/#221/#208/#209` 仅消费 FR-0010 冻结字段后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
+- 迁移完成判定：`#218/#219/#221` 已切换到 FR-0010 冻结字段，且 `#208/#209` 对同语义字段不再依赖 FR-0009 / issue 私有解释后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
 
 ## 依赖与前置条件
 
