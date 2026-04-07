@@ -83,6 +83,7 @@
 - `live_read_limited` 是正式公开的受控 live 读模式，可由外部请求方显式请求。
 - `live_read_limited` 与 `live_read_high_risk` 进入 live 前都必须满足 `live_entry_requirements`，且审批证据要求不可分叉。
 - `live_entry_requirements` 仅定义 live 读模式共享必备前置；其满足仅表示进入 live 判定所需必要条件，不表示在当前 `risk_state` 自动放行全部 live 读模式。
+- `limited_read_rollout_ready_true` 不属于所有 live 读模式共享前置；它作为 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件载体，只允许在 `issue_action_matrix` 中被 `live_read_limited` 的条件放行显式消费。
 - `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
 - `approval_record_approved_true` 表示 `FR-0010.approval_record.approved=true`；`approval_record_approver_present` / `approval_record_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_record_checks_all_true` 表示 `FR-0010.approval_record.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
@@ -218,6 +219,7 @@
           {
             "action": "live_read_limited",
             "requires": [
+              "limited_read_rollout_ready_true",
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
@@ -243,6 +245,7 @@
           {
             "action": "live_read_limited",
             "requires": [
+              "limited_read_rollout_ready_true",
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
@@ -280,6 +283,7 @@
 - `conditional_actions` 在所有 entry 中都必须显式出现；无条件动作场景下使用空数组，不得靠字段缺失表达“无条件动作”。
 - `allowed_actions` 仅表示无需额外审批前置即可执行的动作；`conditional_actions` 表示命中当前 `(issue_scope, state)` 后仍需满足 `requires` 中附加审批/审计条件的动作。
 - live 读模式不得以裸字符串形式出现在 `allowed_actions` 中；若需审批证据，必须落入 `conditional_actions` 并显式列出 `requires`。
+- `limited_read_rollout_ready_true` 是 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件名，只允许出现在 `live_read_limited` 的 `conditional_actions.requires` 中；`live_read_high_risk` 不得隐式继承该 staged rollout 前置。
 - `issue_209` 在 `limited` 下仅可通过 `conditional_actions` 放行 `live_read_limited`，不得放行 `live_read_high_risk`。
 - `upload_submit_publish_chain` 表示所有超出 `editor_input` 单动作验证边界的写链路集合；该集合在 `issue_208` 当前 formal contract freeze 中必须持续阻断。
 

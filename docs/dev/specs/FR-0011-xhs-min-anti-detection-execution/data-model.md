@@ -28,6 +28,7 @@
 - `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
 - `live_entry_requirements` 必须显式覆盖 `FR-0010.GateInput.risk_state` 的 live 准入边界、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、以及完整审批证据；审计要求继续作为门禁判定后的必写留痕，不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord` 的正式边界。
+- `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件载体不在本实体的共享 `live_entry_requirements` 中统一展开；它只允许在 `IssueActionMatrix.conditional_actions.requires` 中以 `limited_read_rollout_ready_true` 的条件名被 `live_read_limited` 显式消费。
 
 ## 实体 3：WriteInteractionTier
 
@@ -75,6 +76,7 @@
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
 - `conditional_actions` 的每个元素必须至少包含 `action` 与 `requires` 两个字段。
 - `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- `conditional_actions.requires` 允许额外引用 `limited_read_rollout_ready_true`；该条件名是 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式载体，且只允许与 `action=live_read_limited` 绑定。
 - 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
 - `issue_208` 在 `limited` 下当前只允许 `dry_run|recon` 与 gate-only 观测结果，不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`。
@@ -140,6 +142,7 @@
 - FR-0011 不新增 `requested_execution_mode`、`effective_execution_mode`、`gate_decision` 的并行实体定义；对应稳定字段与基础约束一律继承 `FR-0010.GateInput` / `FR-0010.GateDecision` / `FR-0010.ConsumerGateResult`。
 - 在继承 `FR-0010` 冻结对象的前提下，FR-0011 仅补充 Sprint 3 增量语义：
   - `live_read_limited` 作为正式公开的受控 live 模式存在，但只允许用于读动作。
+  - `FR-0009.resume_requirements.limited_read_rollout_ready` 在本 FR 中以 `IssueActionMatrix.conditional_actions.requires += limited_read_rollout_ready_true` 作为正式条件载体，只约束 `live_read_limited` 的 staged rollout。
   - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式。
   - `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，审批证据必须继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
   - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。

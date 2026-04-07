@@ -55,7 +55,10 @@
 - 门禁生效模式必须写入 `effective_execution_mode`。
 - 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
-- `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效。
+- `live_read_limited` 在本 FR 中只保留为 Sprint 3 兼容占位值；其正式公开模式语义与 live-entry 条件仍由 `FR-0011` 单独冻结。
+- `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效；在 `FR-0011` 未完成 formal 收口前，本 FR 必须默认阻断该模式。
+- `FR-0009.resume_requirements.limited_read_rollout_ready` 仍是 `live_read_limited` 的 staged rollout 治理前置；其正式条件载体由 `FR-0011` 以 `limited_read_rollout_ready_true` 冻结。在 `FR-0011` 未完成 formal 收口前，本 FR 只保留默认阻断，不把该前置冻结为 Sprint 2 契约字段。
+- `FR-0009` 中的 `spec_review_passed`、`risk_review_completed`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 与 `limited_read_rollout_ready` 继续作为上游治理前置存在；在进入 `FR-0010` 执行门禁前必须先由上游 review / governance 语义满足，但本 FR 不把这些治理 gate 冻结成运行时产出的机器字段。其中 `limited_read_rollout_ready` 只允许在 `FR-0011` 中以 `limited_read_rollout_ready_true` 被正式消费。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过
@@ -70,8 +73,11 @@
   - action_type / requested_execution_mode / effective_execution_mode
   - approver / approved_at
   - gate_decision / gate_reasons
+- `gate_outcome` 必须发布稳定 `decision_id`，供 `approval_record` 与 `audit_record` 用同一标识回链到唯一门禁结论。
 - 任意 live 放行必须可追溯到审批记录。
 - `live_read_limited` 不得绕开审批记录、审计记录或冻结字段独立放行。
+- `approval_record` 与 `audit_record` 必须各自提供稳定记录标识，供 `FR-0009` 的 `approval_record_ref` / `audit_record_ref` 等价消费。
+- `audit_record` 必须显式回链到同一次 `gate_decision` 与 `approval_record`，保证 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
 
 ### 5. 与 #208 / #209 的统一约束
 
@@ -151,7 +157,7 @@ And 不存在某一事项绕过门禁的路径
 4. 显式目标域/目标页确认（含 `target_tab_id`）、人工确认、审计记录要求均已冻结。
 5. `#208` 与 `#209` 的后续 live 扩展前置条件已统一。
 6. 输出对象可被实现层与当前已明确的 `#208/#209` 稳定消费。
-7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义，且其正式枚举已覆盖 `live_read_limited`。
+7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义；`live_read_limited` 在本 FR 中仅作 Sprint 3 兼容占位，不单独冻结其公开模式语义。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
 
@@ -159,7 +165,13 @@ And 不存在某一事项绕过门禁的路径
 
 - 关系声明：`FR-0009` 继续作为治理基线；Sprint 2 实现与测试统一消费 `FR-0010` 契约对象。
 - 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接；后续 FR 只能在保持该对象单口径的前提下扩展受控 live 模式。
-- 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段。
+- 替代细化：
+  - `FR-0009.resume_requirements.approval_record_ref` -> `FR-0010.approval_record.approval_id`
+  - `FR-0009.resume_requirements.audit_record_ref` -> `FR-0010.audit_record.event_id`
+- `FR-0010.gate_outcome.decision_id` -> `FR-0010.approval_record.decision_id` / `FR-0010.audit_record.decision_id`
+- 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段；`live_read_limited` 的正式公开语义仍以 `FR-0011` 为唯一来源，FR-0010 在其 formal 收口前只承接“默认阻断”语义，不提前冻结 Sprint 3 readiness 字段。
+- 上游保留说明：`FR-0009.resume_requirements.limited_read_rollout_ready` 仍是受控读侧 staged rollout 的治理前置；其正式机器承载由 `FR-0011.issue_action_matrix.conditional_actions.requires += limited_read_rollout_ready_true` 提供。在 `FR-0011` formal 收口前，Sprint 2 消费者必须把 `live_read_limited` 视为默认阻断，而不是忽略该前置。
+- 治理分层说明：`FR-0009.resume_requirements` 中的治理 gate 继续作为进入执行门禁前的上游准入条件存在；FR-0010 当前只冻结运行时可拥有、可输出、可审计的执行对象，不要求 runtime 直接产出这些 governance booleans。
 - 迁移完成判定：`#218/#219/#221/#208/#209` 仅消费 FR-0010 冻结字段后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
 
 ## 依赖与前置条件

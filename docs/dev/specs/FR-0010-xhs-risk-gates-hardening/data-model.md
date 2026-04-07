@@ -4,7 +4,20 @@
 
 定义 Sprint 2 门禁执行最小共享实体，确保 `#208/#209` 与后续实现可稳定消费门禁结果。
 
-## 实体 1：GateInput
+## 实体 1：ScopeContext
+
+- `platform` string NOT NULL
+- `read_domain` string NOT NULL
+- `write_domain` string NOT NULL
+- `domain_mixing_forbidden` boolean NOT NULL
+
+约束：
+
+1. 读写域必须显式存在，不允许隐式继承。
+2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
+3. `FR-0009.resume_requirements` 中的治理侧 gate 不在本实体冻结；它们属于进入运行时门禁前的上游准入条件，而不是运行时直接产出的 `scope_context` 字段。
+
+## 实体 2：GateInput
 
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
@@ -22,8 +35,9 @@
 1. 所有门禁请求都必须提供 `target_tab_id` 与 `target_page`，不得在非 live 请求中留空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
+4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前只能得到 `blocked` 结果，不得被视为 Sprint 2 已拥有的公开 live 模式。
 
-## 实体 2：GateDecision
+## 实体 3：GateDecision
 
 - `decision_id` string PK
 - `run_id` string NOT NULL
@@ -35,14 +49,16 @@
 
 约束：
 
-1. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
-2. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
-3. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
-4. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
+1. `decision_id` 必须稳定、唯一，并作为正式公开的 `gate_outcome.decision_id` 供审批记录与审计记录回链。
+2. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
+3. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
+4. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
+5. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
 
-## 实体 3：ApprovalRecord
+## 实体 4：ApprovalRecord
 
 - `approval_id` string PK
+- `decision_id` string NOT NULL
 - `run_id` string NOT NULL
 - `approved` boolean NOT NULL
 - `approver` string NULL
@@ -59,10 +75,14 @@
   - `risk_state_checked` boolean
   - `action_type_confirmed` boolean
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，`ApprovalRecord` 不得缺失。
+4. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+5. `decision_id` 必须指向同一次 `GateDecision`，保证 live 放行的审批记录可定位到唯一门禁决策。
 
-## 实体 4：AuditRecord
+## 实体 5：AuditRecord
 
 - `event_id` string PK
+- `decision_id` string NOT NULL
+- `approval_id` string NULL
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
@@ -85,13 +105,17 @@
 3. `gate_reasons` 必须至少包含 1 项，保证门禁审计可独立复盘。
 4. `gate_decision=allowed` 时，`approver` 与 `approved_at` 必填。
 5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，审计记录必须能独立证明审批已完成。
+6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
+7. `decision_id` 必须指向同一次 `GateDecision`，保证审计记录能回链到唯一门禁结论。
+8. `approval_id` 在 live 放行时必填，且必须引用对应 `ApprovalRecord.approval_id`，确保 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
 
 ## 生命周期
 
-1. 接收执行请求后生成 `GateInput`。
-2. 计算门禁后生成 `GateDecision`。
-3. 若请求 live 升级，生成或更新 `ApprovalRecord`。
-4. 不论放行或阻断，写入 `AuditRecord`。
+1. 先加载治理侧 `ScopeContext`。
+2. 接收执行请求后生成 `GateInput`。
+3. 计算门禁后生成 `GateDecision`。
+4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
+5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
 
 ## 与现有 FR 对齐
 
@@ -108,8 +132,12 @@
 | `risk_state.live_experiment_status` | `GateInput.risk_state` | 状态输入保持一致语义 |
 | `execution_mode_gate`（整体） | `GateInput + GateDecision` | 拆分为“请求模式”与“生效模式” |
 | `resume_requirements` | `ApprovalRecord + AuditRecord` | 恢复前置改为审批与审计可检索记录 |
+| `resume_requirements.approval_record_ref` | `ApprovalRecord.approval_id` | 审批记录稳定引用 |
+| `resume_requirements.audit_record_ref` | `AuditRecord.event_id` | 审计记录稳定引用 |
 
 约束：
 
 1. FR-0010 不与 FR-0009 并存双套可执行机器字段；Sprint 2 实现按 FR-0010 单口径消费。
-2. 旧字段兼容若有需要，应在实现 PR 做显式映射层，不回灌到 FR-0010 正式字段命名。
+2. `live_read_limited` 的 Sprint 3 readiness 字段与放行条件不在本 FR 冻结；在 `FR-0011` formal 收口前，本 FR 只承接其默认阻断语义。
+3. `FR-0009.resume_requirements.spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension` 与 `explicit_scope_for_208` 继续保留为治理前置，但其正式机器承载不在本 FR 冻结；其中 `limited_read_rollout_ready` 仅允许在 `FR-0011.issue_action_matrix.conditional_actions.requires` 中以 `limited_read_rollout_ready_true` 作为正式条件名被消费。
+4. 旧字段兼容若有需要，应在实现 PR 做显式映射层，不回灌到 FR-0010 正式字段命名。
