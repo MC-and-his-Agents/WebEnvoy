@@ -82,11 +82,6 @@ const deriveApprovalId = (input, decisionId) => {
     return recordApprovalId;
   }
 
-  const runId = asString(input.runId);
-  if (runId) {
-    return `gate_appr_${runId}`;
-  }
-
   return `gate_appr_${decisionId}`;
 };
 

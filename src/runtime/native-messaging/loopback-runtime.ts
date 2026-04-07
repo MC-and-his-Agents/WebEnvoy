@@ -54,11 +54,12 @@ const buildLoopbackXhsSearchGateBundle = (input: {
   payload: Record<string, unknown>;
 } => {
   const approvalRecord = resolveApprovalRecord(input.options);
+  const decisionId =
+    asString(approvalRecord?.decision_id) ?? `gate_decision_${input.runId}_${input.requestId}`;
   const gate = buildLoopbackGate(input.options, input.abilityAction, {
     runId: input.runId,
-    decisionId:
-      asString(approvalRecord?.decision_id) ?? `gate_decision_${input.runId}_${input.requestId}`,
-    approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${input.runId}`
+    decisionId,
+    approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${decisionId}`
   });
   const auditRecord = buildLoopbackAuditRecord({
     runId: input.runId,

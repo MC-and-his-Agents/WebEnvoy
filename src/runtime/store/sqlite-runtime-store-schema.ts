@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 9;
 
 interface InitializeRuntimeStoreSchemaInput {
   db: DatabaseSync;
@@ -217,6 +217,109 @@ const migrateV6ToV7 = (db: DatabaseSync): void => {
     WHERE decision_id IS NULL OR decision_id = '';
   `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
+    "7"
+  );
+};
+
+const migrateV7ToV8 = (db: DatabaseSync): void => {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE runtime_gate_approvals_v8 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      approval_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    INSERT INTO runtime_gate_approvals_v8(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    FROM runtime_gate_approvals;
+    INSERT INTO runtime_gate_approvals_v8(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      runtime_gate_audit_records.approval_id,
+      runtime_gate_audit_records.run_id,
+      runtime_gate_audit_records.decision_id,
+      CASE
+        WHEN (runtime_gate_audit_records.approver IS NOT NULL AND runtime_gate_audit_records.approver != '')
+          OR (runtime_gate_audit_records.approved_at IS NOT NULL AND runtime_gate_audit_records.approved_at != '')
+        THEN 1
+        ELSE 0
+      END,
+      runtime_gate_audit_records.approver,
+      runtime_gate_audit_records.approved_at,
+      '{}',
+      runtime_gate_audit_records.recorded_at,
+      runtime_gate_audit_records.recorded_at
+    FROM runtime_gate_audit_records
+    WHERE runtime_gate_audit_records.approval_id IS NOT NULL
+      AND runtime_gate_audit_records.approval_id != ''
+      AND runtime_gate_audit_records.decision_id IS NOT NULL
+      AND runtime_gate_audit_records.decision_id != ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM runtime_gate_approvals_v8
+        WHERE runtime_gate_approvals_v8.decision_id = runtime_gate_audit_records.decision_id
+      );
+    DROP TABLE runtime_gate_approvals;
+    ALTER TABLE runtime_gate_approvals_v8 RENAME TO runtime_gate_approvals;
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
+    PRAGMA foreign_keys = ON;
+  `);
+  db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("8");
+};
+
+const migrateV8ToV9 = (db: DatabaseSync): void => {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE runtime_gate_approvals_v9 (
+      approval_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    INSERT INTO runtime_gate_approvals_v9(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      CASE
+        WHEN approval_id IS NULL OR approval_id = '' OR approval_id = 'gate_appr_' || run_id
+          THEN 'gate_appr_' || decision_id
+        ELSE approval_id
+      END,
+      run_id,
+      decision_id,
+      approved,
+      approver,
+      approved_at,
+      checks_json,
+      created_at,
+      updated_at
+    FROM runtime_gate_approvals;
+    DROP TABLE runtime_gate_approvals;
+    ALTER TABLE runtime_gate_approvals_v9 RENAME TO runtime_gate_approvals;
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
+    PRAGMA foreign_keys = ON;
+  `);
+  db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
     String(SCHEMA_VERSION)
   );
 };
@@ -260,8 +363,8 @@ export const initializeRuntimeStoreSchema = ({
       ON runtime_events(run_id, event_time ASC);
     CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
       approval_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL UNIQUE,
-      decision_id TEXT,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
       approved INTEGER NOT NULL,
       approver TEXT,
       approved_at TEXT,
@@ -270,6 +373,8 @@ export const initializeRuntimeStoreSchema = ({
       updated_at TEXT NOT NULL,
       FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
     );
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
       event_id TEXT PRIMARY KEY,
       decision_id TEXT,
@@ -344,6 +449,16 @@ export const initializeRuntimeStoreSchema = ({
     if (currentVersion === 6) {
       migrateV6ToV7(db);
       currentVersion = 7;
+      continue;
+    }
+    if (currentVersion === 7) {
+      migrateV7ToV8(db);
+      currentVersion = 8;
+      continue;
+    }
+    if (currentVersion === 8) {
+      migrateV8ToV9(db);
+      currentVersion = 9;
       continue;
     }
     break;

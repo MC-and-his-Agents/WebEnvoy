@@ -13,7 +13,7 @@ export const buildLoopbackAuditRecord = (input: {
 }): Record<string, unknown> => {
   const clone = <T>(value: T): T => structuredClone(value);
   const decisionId = String(input.gate.gateOutcome.decision_id ?? `gate_decision_${input.runId}`);
-  const approvalId = String(input.gate.approvalRecord.approval_id ?? `gate_appr_${input.runId}`);
+  const approvalId = String(input.gate.approvalRecord.approval_id ?? `gate_appr_${decisionId}`);
 
   return {
     event_id: `gate_evt_${decisionId}`,

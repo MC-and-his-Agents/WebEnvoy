@@ -434,7 +434,7 @@ const createRelayXhsGatePayload = (input) => {
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
     const decisionId = `gate_decision_${runId}_${input.request.id}`;
-    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${runId}`;
+    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
     const approvalRecord = {
         ...input.approvalRecord,
         approval_id: approvalId,
@@ -520,7 +520,7 @@ const createBackgroundXhsGatePayload = (input) => {
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
     const recordedAt = new Date().toISOString();
     const decisionId = `gate_decision_${runId}_${input.request.id}`;
-    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${runId}`;
+    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
     const approvalRecord = {
         ...input.approvalRecord,
         approval_id: approvalId,

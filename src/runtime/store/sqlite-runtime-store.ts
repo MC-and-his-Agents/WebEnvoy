@@ -448,15 +448,16 @@ export class SQLiteRuntimeStore {
       const approvalId =
         typeof input.approvalId === "string" && input.approvalId.trim().length > 0
           ? input.approvalId.trim()
-          : `gate_appr_${input.runId}`;
+          : `gate_appr_${input.decisionId}`;
       this.#db
         .prepare(
           `
           INSERT INTO runtime_gate_approvals(
             approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(run_id) DO UPDATE SET
+          ON CONFLICT(decision_id) DO UPDATE SET
             approval_id = excluded.approval_id,
+            run_id = excluded.run_id,
             decision_id = excluded.decision_id,
             approved = excluded.approved,
             approver = excluded.approver,
@@ -477,7 +478,7 @@ export class SQLiteRuntimeStore {
           nowIso
         );
 
-      return this.#getGateApprovalByRunId(input.runId);
+      return this.#getGateApprovalByDecisionId(input.decisionId);
     } catch (error) {
       throw this.#toStoreDbError(error);
     }
@@ -595,9 +596,18 @@ export class SQLiteRuntimeStore {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
     }
 
+    const auditRecords = this.#listGateAuditRecords({ runId });
+    const latestDecisionId =
+      auditRecords.find(
+        (record): record is GateAuditRecord & { decision_id: string } =>
+          typeof record.decision_id === "string" && record.decision_id.length > 0
+      )?.decision_id ?? null;
+
     return {
-      approvalRecord: this.#getOptionalGateApprovalByRunId(runId),
-      auditRecords: this.#listGateAuditRecords({ runId })
+      approvalRecord: latestDecisionId
+        ? this.#getOptionalGateApprovalByDecisionId(latestDecisionId)
+        : this.#getOptionalGateApprovalByRunId(runId),
+      auditRecords
     };
   }
 
@@ -683,6 +693,8 @@ export class SQLiteRuntimeStore {
              , decision_id
       FROM runtime_gate_approvals
       WHERE run_id = ?
+      ORDER BY updated_at DESC
+      LIMIT 1
     `
       )
       .get(runId) as
@@ -699,8 +711,33 @@ export class SQLiteRuntimeStore {
     return mapGateApprovalRecordRow(row);
   }
 
-  #getGateApprovalByRunId(runId: string): GateApprovalRecord {
-    const record = this.#getOptionalGateApprovalByRunId(runId);
+  #getOptionalGateApprovalByDecisionId(decisionId: string): GateApprovalRecord | null {
+    const row = this.#db
+      .prepare(
+        `
+      SELECT approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
+             , decision_id
+      FROM runtime_gate_approvals
+      WHERE decision_id = ?
+      LIMIT 1
+    `
+      )
+      .get(decisionId) as
+      | (Omit<GateApprovalRecord, "approved" | "checks"> & {
+          approved: number;
+          checks_json: string;
+        })
+      | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return mapGateApprovalRecordRow(row);
+  }
+
+  #getGateApprovalByDecisionId(decisionId: string): GateApprovalRecord {
+    const record = this.#getOptionalGateApprovalByDecisionId(decisionId);
     if (!record) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "gate approval not found");
     }

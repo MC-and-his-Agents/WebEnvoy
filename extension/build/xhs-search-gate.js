@@ -16,7 +16,7 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const buildGateDecisionId = (context) => context.requestId
     ? `gate_decision_${context.runId}_${context.requestId}`
     : `gate_decision_${context.runId}`;
-const buildGateApprovalId = (context) => `gate_appr_${context.runId}`;
+const buildGateApprovalId = (decisionId) => `gate_appr_${decisionId}`;
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
@@ -40,25 +40,28 @@ export const resolveActualTargetGateReasons = (options) => {
     }
     return gateReasons;
 };
-export const resolveGate = (options, context) => evaluateXhsGate({
-    issueScope: options.issue_scope,
-    riskState: options.risk_state,
-    targetDomain: options.target_domain,
-    targetTabId: options.target_tab_id,
-    targetPage: options.target_page,
-    actualTargetDomain: options.actual_target_domain,
-    actualTargetTabId: options.actual_target_tab_id,
-    actualTargetPage: options.actual_target_page,
-    requireActualTargetPage: true,
-    actionType: options.action_type,
-    abilityAction: options.ability_action,
-    requestedExecutionMode: options.requested_execution_mode,
-    approvalRecord: options.approval_record ?? options.approval,
-    decisionId: buildGateDecisionId(context),
-    approvalId: buildGateApprovalId(context),
-    issue208EditorInputValidation: isIssue208EditorInputValidation(options),
-    treatMissingEditorValidationAsUnsupported: true
-});
+export const resolveGate = (options, context) => {
+    const decisionId = buildGateDecisionId(context);
+    return evaluateXhsGate({
+        issueScope: options.issue_scope,
+        riskState: options.risk_state,
+        targetDomain: options.target_domain,
+        targetTabId: options.target_tab_id,
+        targetPage: options.target_page,
+        actualTargetDomain: options.actual_target_domain,
+        actualTargetTabId: options.actual_target_tab_id,
+        actualTargetPage: options.actual_target_page,
+        requireActualTargetPage: true,
+        actionType: options.action_type,
+        abilityAction: options.ability_action,
+        requestedExecutionMode: options.requested_execution_mode,
+        approvalRecord: options.approval_record ?? options.approval,
+        decisionId,
+        approvalId: buildGateApprovalId(decisionId),
+        issue208EditorInputValidation: isIssue208EditorInputValidation(options),
+        treatMissingEditorValidationAsUnsupported: true
+    });
+};
 export const createAuditRecord = (context, gate, env) => {
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;

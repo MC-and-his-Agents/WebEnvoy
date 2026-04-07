@@ -46,7 +46,7 @@ const extractGateApprovalInput = (source) => {
         `gate_decision_${runId}`;
     const checksObject = asObject(approvalRecord.checks) ?? {};
     return {
-        approvalId: asString(approvalRecord.approval_id) ?? `gate_appr_${runId}`,
+        approvalId: asString(approvalRecord.approval_id) ?? `gate_appr_${decisionId}`,
         runId,
         decisionId,
         approved: asBoolean(approvalRecord.approved),
@@ -118,7 +118,10 @@ const extractGateAuditRecordInput = (source) => {
         (runId ? `gate_decision_${runId}` : null);
     const approvalId = asString(auditRecord.approval_id) ??
         asString((asObject(source.approval_record) ?? {}).approval_id) ??
-        (runId && asObject(source.approval_record) ? `gate_appr_${runId}` : null);
+        (decisionId &&
+            (asObject(source.approval_record) || asString(auditRecord.approver) || asString(auditRecord.approved_at))
+            ? `gate_appr_${decisionId}`
+            : null);
     const recordedAt = asString(auditRecord.recorded_at);
     const gateReasons = Array.isArray(auditRecord.gate_reasons)
         ? auditRecord.gate_reasons.filter((item) => typeof item === "string" && item.trim().length > 0)
