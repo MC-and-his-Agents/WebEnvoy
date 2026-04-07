@@ -349,6 +349,96 @@ describe("extension background relay contract / gate matrix", () => {
     });
   });
 
+  it("blocks stale approval_record reuse in relay gate bundles", async () => {
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-live-stale-approval-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => ({
+          items: []
+        })
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-live-stale-approval-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-stale-approval-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...approvedLimitedLiveOptions,
+            approval_record: {
+              ...approvedLimitedLiveOptions.approval_record,
+              approval_id: "gate_appr_previous_relay_request",
+              decision_id: "gate_decision_previous_relay_request"
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      },
+      gate_outcome: {
+        effective_execution_mode: "recon",
+        gate_decision: "blocked"
+      },
+      consumer_gate_result: {
+        requested_execution_mode: "live_read_limited",
+        effective_execution_mode: "recon",
+        gate_decision: "blocked",
+        gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
+      },
+      approval_record: {
+        approval_id: null
+      },
+      audit_record: {
+        approval_id: null
+      },
+      summary: {
+        gate_outcome: {
+          effective_execution_mode: "recon",
+          gate_decision: "blocked"
+        },
+        approval_record: {
+          approval_id: null
+        },
+        audit_record: {
+          approval_id: null
+        }
+      }
+    });
+  });
+
   it("blocks live_read_high_risk in limited risk state and falls back to recon", async () => {
     let fetchCalled = false;
     const contentScript = new ContentScriptHandler({

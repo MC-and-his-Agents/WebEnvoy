@@ -33,7 +33,9 @@ describe("native messaging loopback gate payload", () => {
       profile: "profile-a",
       gate,
       auditRecord: {
-        event_id: "gate_evt_run-001",
+        event_id: "gate_evt_gate_decision_run-001",
+        decision_id: "gate_decision_run-001",
+        approval_id: "gate_appr_run-001",
         run_id: "run-001",
         session_id: "session-001",
         profile: "profile-a",
@@ -77,7 +79,9 @@ describe("native messaging loopback gate payload", () => {
         }
       },
       audit_record: {
-        event_id: "gate_evt_run-001",
+        event_id: "gate_evt_gate_decision_run-001",
+        decision_id: "gate_decision_run-001",
+        approval_id: "gate_appr_run-001",
         next_state: "paused"
       },
       risk_transition_audit: {

@@ -13,6 +13,10 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
+const buildGateDecisionId = (context) => context.requestId
+    ? `gate_decision_${context.runId}_${context.requestId}`
+    : `gate_decision_${context.runId}`;
+const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
     const targetDomain = asNonEmptyString(options.target_domain);
@@ -35,23 +39,31 @@ export const resolveActualTargetGateReasons = (options) => {
     }
     return gateReasons;
 };
-export const resolveGate = (options) => evaluateXhsGate({
-    issueScope: options.issue_scope,
-    riskState: options.risk_state,
-    targetDomain: options.target_domain,
-    targetTabId: options.target_tab_id,
-    targetPage: options.target_page,
-    actualTargetDomain: options.actual_target_domain,
-    actualTargetTabId: options.actual_target_tab_id,
-    actualTargetPage: options.actual_target_page,
-    requireActualTargetPage: true,
-    actionType: options.action_type,
-    abilityAction: options.ability_action,
-    requestedExecutionMode: options.requested_execution_mode,
-    approvalRecord: options.approval_record ?? options.approval,
-    issue208EditorInputValidation: isIssue208EditorInputValidation(options),
-    treatMissingEditorValidationAsUnsupported: true
-});
+export const resolveGate = (options, context) => {
+    const providedApprovalRecord = (options.approval_record ?? options.approval);
+    const approvalRecord = asRecord(providedApprovalRecord);
+    const decisionId = buildGateDecisionId(context);
+    const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
+    return evaluateXhsGate({
+        issueScope: options.issue_scope,
+        riskState: options.risk_state,
+        targetDomain: options.target_domain,
+        targetTabId: options.target_tab_id,
+        targetPage: options.target_page,
+        actualTargetDomain: options.actual_target_domain,
+        actualTargetTabId: options.actual_target_tab_id,
+        actualTargetPage: options.actual_target_page,
+        requireActualTargetPage: true,
+        actionType: options.action_type,
+        abilityAction: options.ability_action,
+        requestedExecutionMode: options.requested_execution_mode,
+        approvalRecord: providedApprovalRecord,
+        decisionId,
+        approvalId,
+        issue208EditorInputValidation: isIssue208EditorInputValidation(options),
+        treatMissingEditorValidationAsUnsupported: true
+    });
+};
 export const createAuditRecord = (context, gate, env) => {
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;
@@ -63,7 +75,9 @@ export const createAuditRecord = (context, gate, env) => {
         gate.gate_input.risk_state === "limited" &&
         liveModeRequested;
     const auditRecord = {
-        event_id: `gate_evt_${env.randomId()}`,
+        event_id: buildGateEventId(gate.gate_outcome.decision_id),
+        decision_id: gate.gate_outcome.decision_id,
+        approval_id: gate.approval_record.approval_id,
         run_id: context.runId,
         session_id: context.sessionId,
         profile: context.profile,

@@ -6,8 +6,15 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
 const buildLoopbackXhsSearchGateBundle = (input) => {
-    const gate = buildLoopbackGate(input.options, input.abilityAction);
+    const approvalRecord = resolveApprovalRecord(input.options);
+    const decisionId = `gate_decision_${input.runId}_${input.requestId}`;
+    const gate = buildLoopbackGate(input.options, input.abilityAction, {
+        runId: input.runId,
+        decisionId,
+        approvalId: asString(approvalRecord?.approval_id) ?? undefined
+    });
     const auditRecord = buildLoopbackAuditRecord({
         runId: input.runId,
         sessionId: input.sessionId,
@@ -211,6 +218,7 @@ class InMemoryContentScriptRuntime {
             options,
             abilityAction: asString(ability.action),
             runId: message.runId,
+            requestId: message.id,
             sessionId: message.sessionId,
             profile: "loopback_profile"
         });
@@ -541,6 +549,7 @@ class InMemoryBackgroundRelay {
                     options,
                     abilityAction: asString(ability.action),
                     runId,
+                    requestId: request.id,
                     sessionId,
                     profile: "loopback_profile"
                 });

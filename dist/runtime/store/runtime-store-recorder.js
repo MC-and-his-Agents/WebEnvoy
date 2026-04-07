@@ -1,4 +1,4 @@
-import { getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
+import { APPROVAL_CHECK_KEYS, getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "./sqlite-runtime-store.js";
 const resolveSessionId = (summary) => {
     const directSession = summary.sessionId;
@@ -25,6 +25,21 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
+const REQUIRED_APPROVAL_CHECK_KEYS = APPROVAL_CHECK_KEYS;
+const hasRealApprovalRecord = (approvalRecord) => {
+    if (!approvalRecord || !asBoolean(approvalRecord.approved)) {
+        return false;
+    }
+    if (!asString(approvalRecord.approver) || !asString(approvalRecord.approved_at)) {
+        return false;
+    }
+    const checksObject = asObject(approvalRecord.checks);
+    return REQUIRED_APPROVAL_CHECK_KEYS.every((key) => checksObject?.[key] === true);
+};
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const requiresApprovalIdForAudit = (input) => input.gateDecision === "allowed" &&
+    (LIVE_EXECUTION_MODES.has(input.requestedExecutionMode) ||
+        LIVE_EXECUTION_MODES.has(input.effectiveExecutionMode));
 const buildEvent = (context, input) => ({
     runId: context.run_id,
     eventTime: new Date().toISOString(),
@@ -32,7 +47,7 @@ const buildEvent = (context, input) => ({
 });
 const extractGateApprovalInput = (source) => {
     const approvalRecord = asObject(source.approval_record);
-    if (!approvalRecord) {
+    if (!approvalRecord || !hasRealApprovalRecord(approvalRecord)) {
         return null;
     }
     const runId = asString(source.run_id) ??
@@ -41,13 +56,29 @@ const extractGateApprovalInput = (source) => {
     if (!runId) {
         return null;
     }
-    const checksObject = asObject(approvalRecord.checks) ?? {};
+    const approvalDecisionId = asString(approvalRecord.decision_id);
+    const currentDecisionId = asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
+        asString((asObject(source.audit_record) ?? {}).decision_id) ??
+        `gate_decision_${runId}`;
+    if (!approvalDecisionId || approvalDecisionId !== currentDecisionId) {
+        return null;
+    }
+    const decisionId = approvalDecisionId;
+    const approvalId = asString(approvalRecord.approval_id);
+    if (!approvalId) {
+        return null;
+    }
     return {
+        approvalId,
         runId,
+        decisionId,
         approved: asBoolean(approvalRecord.approved),
         approver: asString(approvalRecord.approver),
         approvedAt: asString(approvalRecord.approved_at),
-        checks: Object.fromEntries(Object.entries(checksObject).map(([key, value]) => [key, asBoolean(value)]))
+        checks: Object.fromEntries(REQUIRED_APPROVAL_CHECK_KEYS.map((key) => [
+            key,
+            asBoolean((asObject(approvalRecord.checks) ?? {})[key])
+        ]))
     };
 };
 const extractGateAuditRecordInput = (source) => {
@@ -107,6 +138,17 @@ const extractGateAuditRecordInput = (source) => {
     const gateDecision = asString(auditRecord.gate_decision) ??
         asString(consumerGateResult?.gate_decision) ??
         asString(asObject(source.gate_outcome)?.gate_decision);
+    const decisionId = asString(auditRecord.decision_id) ??
+        asString(asObject(source.gate_outcome)?.decision_id) ??
+        asString((asObject(source.approval_record) ?? {}).decision_id) ??
+        (runId ? `gate_decision_${runId}` : null);
+    const sourceApprovalRecord = asObject(source.approval_record);
+    const hasRealApprovalEvidence = hasRealApprovalRecord(sourceApprovalRecord);
+    const approvalId = hasRealApprovalEvidence
+        ? (asString(auditRecord.approval_id) ??
+            asString(sourceApprovalRecord?.approval_id) ??
+            null)
+        : null;
     const recordedAt = asString(auditRecord.recorded_at);
     const gateReasons = Array.isArray(auditRecord.gate_reasons)
         ? auditRecord.gate_reasons.filter((item) => typeof item === "string" && item.trim().length > 0)
@@ -114,6 +156,7 @@ const extractGateAuditRecordInput = (source) => {
             ? consumerGateResult.gate_reasons.filter((item) => typeof item === "string" && item.trim().length > 0)
             : [];
     if (!runId ||
+        !decisionId ||
         !sessionId ||
         !profile ||
         !issueScope ||
@@ -133,6 +176,8 @@ const extractGateAuditRecordInput = (source) => {
     }
     return {
         eventId,
+        decisionId,
+        approvalId,
         runId,
         sessionId,
         profile,
@@ -172,12 +217,29 @@ export class RuntimeStoreRecorder {
         return startedAt;
     }
     async #recordGateArtifacts(source) {
+        let persistedApprovalId = null;
+        let persistedDecisionId = null;
         const approvalInput = extractGateApprovalInput(source);
         if (approvalInput && this.#store.upsertGateApproval) {
-            await this.#store.upsertGateApproval(approvalInput);
+            const persistedApproval = asObject(await this.#store.upsertGateApproval(approvalInput));
+            persistedApprovalId = asString(persistedApproval?.approval_id);
+            persistedDecisionId = asString(persistedApproval?.decision_id);
         }
         const auditInput = extractGateAuditRecordInput(source);
         if (auditInput && this.#store.appendGateAuditRecord) {
+            const approvalRequired = requiresApprovalIdForAudit(auditInput);
+            if (approvalRequired && !approvalInput) {
+                throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "approval_record is required for allowed live audit records");
+            }
+            if (persistedApprovalId) {
+                auditInput.approvalId = persistedApprovalId;
+            }
+            if (persistedDecisionId) {
+                auditInput.decisionId = persistedDecisionId;
+            }
+            if (approvalRequired && !persistedApprovalId) {
+                throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "persisted approval_id is required for allowed live audit records");
+            }
             await this.#store.appendGateAuditRecord(auditInput);
         }
     }

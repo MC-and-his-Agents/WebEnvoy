@@ -84,8 +84,11 @@ export const assertGateApprovalInput = (
   input: UpsertGateApprovalInput,
   helpers: RuntimeStoreValidationContext
 ): void => {
-  if (!hasTrimmedText(input.runId)) {
-    helpers.invalidInput("run_id is required");
+  if (input.approvalId !== undefined && input.approvalId !== null && !hasTrimmedText(input.approvalId)) {
+    helpers.invalidInput("invalid approval_id");
+  }
+  if (!hasTrimmedText(input.runId) || !hasTrimmedText(input.decisionId)) {
+    helpers.invalidInput("run_id and decision_id are required");
   }
   if (!input.checks || typeof input.checks !== "object") {
     helpers.invalidInput("checks is required");
@@ -112,6 +115,7 @@ export const assertGateAuditRecordInput = (
 ): void => {
   if (
     !hasTrimmedText(input.eventId) ||
+    !hasTrimmedText(input.decisionId) ||
     !hasTrimmedText(input.runId) ||
     !hasTrimmedText(input.sessionId) ||
     !hasTrimmedText(input.profile) ||
@@ -126,6 +130,9 @@ export const assertGateAuditRecordInput = (
     !hasTrimmedText(input.gateDecision)
   ) {
     helpers.invalidInput("missing required gate audit fields");
+  }
+  if (input.approvalId !== null && !hasTrimmedText(input.approvalId)) {
+    helpers.invalidInput("invalid approval_id");
   }
   if (!Number.isInteger(input.targetTabId) || input.targetTabId <= 0) {
     helpers.invalidInput("invalid target_tab_id");
@@ -147,6 +154,14 @@ export const assertGateAuditRecordInput = (
   }
   if (!GATE_EXECUTION_MODES.has(input.effectiveExecutionMode)) {
     helpers.invalidInput("invalid effective_execution_mode");
+  }
+  const allowedLiveExecution =
+    input.gateDecision === "allowed" &&
+    (input.effectiveExecutionMode === "live_read_limited" ||
+      input.effectiveExecutionMode === "live_read_high_risk" ||
+      input.effectiveExecutionMode === "live_write");
+  if (allowedLiveExecution && input.approvalId === null) {
+    helpers.invalidInput("approval_id is required for allowed live audit records");
   }
   if (!GATE_DECISIONS.has(input.gateDecision)) {
     helpers.invalidInput("invalid gate_decision");

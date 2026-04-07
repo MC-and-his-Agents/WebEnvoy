@@ -3,7 +3,7 @@ import { BackgroundRelay as ExtractedBackgroundRelay } from "./background-relay.
 import { BackgroundRuntimeTrustState } from "./background-runtime-trust-state.js";
 import { NativeBridgePendingForwardState } from "./native-bridge-pending-forward-state.js";
 import { NativeBridgeRecoveryState } from "./native-bridge-recovery-state.js";
-import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
+import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, isApprovalRecordComplete, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, collectXhsCommandGateReasons, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 const defaultForwardTimeoutMs = 3_000;
@@ -403,6 +403,16 @@ const buildGateOnlyObservability = (gatePayload) => {
             : null
     };
 };
+const resolveGatePayloadApprovalId = (input) => {
+    if (!input.approvalActive || !isApprovalRecordComplete(input.approvalRecord)) {
+        return null;
+    }
+    const approvalDecisionId = asNonEmptyString(input.approvalRecord.decision_id);
+    if (approvalDecisionId && approvalDecisionId !== input.decisionId) {
+        return `gate_appr_${input.decisionId}`;
+    }
+    return asNonEmptyString(input.approvalRecord.approval_id) ?? `gate_appr_${input.decisionId}`;
+};
 const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
     const commandParams = asRecord(request.params.command_params) ?? {};
     const ability = asRecord(commandParams.ability) ?? {};
@@ -433,6 +443,21 @@ const createRelayXhsGatePayload = (input) => {
     const runId = String(input.request.params.run_id ?? input.request.id);
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
+    const decisionId = `gate_decision_${runId}_${input.request.id}`;
+    const approvalActive = input.gateDecision === "allowed" &&
+        (input.effectiveExecutionMode === "live_read_limited" ||
+            input.effectiveExecutionMode === "live_read_high_risk" ||
+            input.effectiveExecutionMode === "live_write");
+    const approvalId = resolveGatePayloadApprovalId({
+        approvalActive,
+        approvalRecord: input.approvalRecord,
+        decisionId
+    });
+    const approvalRecord = {
+        ...input.approvalRecord,
+        approval_id: approvalId,
+        decision_id: decisionId
+    };
     return {
         plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
         scope_context: XHS_SCOPE_CONTEXT,
@@ -451,6 +476,7 @@ const createRelayXhsGatePayload = (input) => {
             fingerprint_gate_decision: "allowed"
         },
         gate_outcome: {
+            decision_id: decisionId,
             effective_execution_mode: input.effectiveExecutionMode,
             gate_decision: input.gateDecision,
             gate_reasons: input.gateReasons,
@@ -458,7 +484,7 @@ const createRelayXhsGatePayload = (input) => {
             fingerprint_gate_decision: "allowed"
         },
         consumer_gate_result: input.consumerGateResult,
-        approval_record: input.approvalRecord,
+        approval_record: approvalRecord,
         issue_action_matrix: input.issueScope !== null
             ? resolveIssueActionMatrixEntry(input.issueScope, input.riskState)
             : null,
@@ -480,6 +506,8 @@ const createRelayXhsGatePayload = (input) => {
         }),
         audit_record: {
             event_id: `relay_gate_${input.request.id}`,
+            decision_id: decisionId,
+            approval_id: approvalId,
             run_id: runId,
             session_id: sessionId,
             profile,
@@ -493,8 +521,8 @@ const createRelayXhsGatePayload = (input) => {
             effective_execution_mode: input.effectiveExecutionMode,
             gate_decision: input.gateDecision,
             gate_reasons: input.gateReasons,
-            approver: input.approvalRecord.approver,
-            approved_at: input.approvalRecord.approved_at,
+            approver: approvalRecord.approver,
+            approved_at: approvalRecord.approved_at,
             recorded_at: recordedAt,
             risk_signal: input.riskState !== "allowed",
             recovery_signal: false,
@@ -509,8 +537,25 @@ const createBackgroundXhsGatePayload = (input) => {
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
     const recordedAt = new Date().toISOString();
+    const decisionId = `gate_decision_${runId}_${input.request.id}`;
+    const approvalActive = input.gateDecision === "allowed" &&
+        (input.effectiveExecutionMode === "live_read_limited" ||
+            input.effectiveExecutionMode === "live_read_high_risk" ||
+            input.effectiveExecutionMode === "live_write");
+    const approvalId = resolveGatePayloadApprovalId({
+        approvalActive,
+        approvalRecord: input.approvalRecord,
+        decisionId
+    });
+    const approvalRecord = {
+        ...input.approvalRecord,
+        approval_id: approvalId,
+        decision_id: decisionId
+    };
     const auditRecord = {
         event_id: `bg_gate_${input.request.id}`,
+        decision_id: decisionId,
+        approval_id: approvalId,
         run_id: runId,
         session_id: sessionId,
         profile,
@@ -524,8 +569,8 @@ const createBackgroundXhsGatePayload = (input) => {
         effective_execution_mode: input.effectiveExecutionMode,
         gate_decision: input.gateDecision,
         gate_reasons: input.gateReasons,
-        approver: input.approvalRecord.approver,
-        approved_at: input.approvalRecord.approved_at,
+        approver: approvalRecord.approver,
+        approved_at: approvalRecord.approved_at,
         write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null,
         write_matrix_decision: input.writeMatrixDecision?.decision ?? null,
         recorded_at: recordedAt,
@@ -550,6 +595,7 @@ const createBackgroundXhsGatePayload = (input) => {
             fingerprint_gate_decision: input.fingerprintGateDecision
         },
         gate_outcome: {
+            decision_id: decisionId,
             effective_execution_mode: input.effectiveExecutionMode,
             gate_decision: input.gateDecision,
             gate_reasons: input.gateReasons,
@@ -558,7 +604,7 @@ const createBackgroundXhsGatePayload = (input) => {
         },
         fingerprint_execution: input.fingerprintExecution ? { ...input.fingerprintExecution } : null,
         consumer_gate_result: input.consumerGateResult,
-        approval_record: input.approvalRecord,
+        approval_record: approvalRecord,
         issue_action_matrix: input.issueScope !== null
             ? resolveIssueActionMatrixEntry(input.issueScope, input.resolvedRiskState)
             : null,
@@ -2515,6 +2561,7 @@ class ChromeBackgroundBridge {
         const gateReasons = [];
         let writeGateOnlyApprovalDecision = null;
         let writeGateOnlyEligible = false;
+        const requestRunId = String(request.params.run_id ?? request.id);
         const pushReason = (reason) => {
             if (!gateReasons.includes(reason)) {
                 gateReasons.push(reason);
@@ -2550,6 +2597,7 @@ class ChromeBackgroundBridge {
         const matrixResolution = collectXhsMatrixGateReasons({
             gateReasons,
             state: gateState,
+            decisionId: `gate_decision_${requestRunId}_${request.id}`,
             approvalRecord,
             issue208EditorInputValidation
         });
@@ -2659,7 +2707,7 @@ class ChromeBackgroundBridge {
             fingerprint_reason_codes: resolvedFingerprintReasonCodes,
             write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
         };
-        const runId = String(request.params.run_id ?? request.id);
+        const runId = requestRunId;
         const sessionId = String(request.params.session_id ?? this.#sessionId);
         const profile = typeof request.profile === "string" ? request.profile : null;
         const recordedAt = new Date().toISOString();

@@ -1,4 +1,10 @@
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 10;
+const hasColumn = (db, tableName, columnName) => {
+    const rows = db
+        .prepare(`PRAGMA table_info(${tableName})`)
+        .all();
+    return rows.some((row) => row.name === columnName);
+};
 const backfillIssueScope = (db) => {
     db.exec(`
     UPDATE runtime_gate_audit_records
@@ -63,7 +69,7 @@ const migrateV1ToV2 = (db) => {
     CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
       ON runtime_gate_audit_records(profile, recorded_at DESC);
   `);
-    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("2");
 };
 const migrateV2ToV3 = (db) => {
     db.exec(`
@@ -138,6 +144,219 @@ const migrateV5ToV6 = (db) => {
       ON runtime_gate_audit_records(profile, recorded_at DESC);
     PRAGMA foreign_keys = ON;
   `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("6");
+};
+const migrateV6ToV7 = (db) => {
+    if (!hasColumn(db, "runtime_gate_approvals", "decision_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_approvals
+      ADD COLUMN decision_id TEXT;
+    `);
+    }
+    if (!hasColumn(db, "runtime_gate_audit_records", "decision_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN decision_id TEXT;
+    `);
+    }
+    if (!hasColumn(db, "runtime_gate_audit_records", "approval_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN approval_id TEXT;
+    `);
+    }
+    db.exec(`
+    UPDATE runtime_gate_approvals
+    SET decision_id = 'gate_decision_' || run_id
+    WHERE decision_id IS NULL OR decision_id = '';
+
+    UPDATE runtime_gate_audit_records
+    SET approval_id = COALESCE(
+      (
+        SELECT runtime_gate_approvals.approval_id
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
+      ),
+      CASE
+        WHEN (approver IS NOT NULL AND approver != '')
+          OR (approved_at IS NOT NULL AND approved_at != '')
+        THEN 'gate_appr_' || run_id
+        ELSE NULL
+      END
+    )
+    WHERE approval_id IS NULL OR approval_id = '';
+
+    UPDATE runtime_gate_audit_records
+    SET decision_id = COALESCE(
+      (
+        SELECT runtime_gate_approvals.decision_id
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
+      ),
+      'gate_decision_' || run_id
+    )
+    WHERE decision_id IS NULL OR decision_id = '';
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("7");
+};
+const migrateV7ToV8 = (db) => {
+    db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE runtime_gate_approvals_v8 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      approval_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    INSERT INTO runtime_gate_approvals_v8(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    FROM runtime_gate_approvals;
+    INSERT INTO runtime_gate_approvals_v8(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      synthesized_approvals.approval_id,
+      synthesized_approvals.run_id,
+      synthesized_approvals.decision_id,
+      1,
+      synthesized_approvals.approver,
+      synthesized_approvals.approved_at,
+      '{}',
+      synthesized_approvals.recorded_at,
+      synthesized_approvals.recorded_at
+    FROM (
+      SELECT *
+      FROM (
+        SELECT
+          runtime_gate_audit_records.approval_id,
+          runtime_gate_audit_records.run_id,
+          runtime_gate_audit_records.decision_id,
+          runtime_gate_audit_records.approver,
+          runtime_gate_audit_records.approved_at,
+          runtime_gate_audit_records.recorded_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY runtime_gate_audit_records.decision_id
+            ORDER BY runtime_gate_audit_records.recorded_at DESC, runtime_gate_audit_records.event_id DESC
+          ) AS row_num
+        FROM runtime_gate_audit_records
+        WHERE runtime_gate_audit_records.approval_id IS NOT NULL
+          AND runtime_gate_audit_records.approval_id != ''
+          AND runtime_gate_audit_records.decision_id IS NOT NULL
+          AND runtime_gate_audit_records.decision_id != ''
+          AND runtime_gate_audit_records.gate_decision = 'allowed'
+          AND runtime_gate_audit_records.effective_execution_mode IN (
+            'live_read_limited',
+            'live_read_high_risk',
+            'live_write'
+          )
+          AND runtime_gate_audit_records.approver IS NOT NULL
+          AND runtime_gate_audit_records.approver != ''
+          AND runtime_gate_audit_records.approved_at IS NOT NULL
+          AND runtime_gate_audit_records.approved_at != ''
+      )
+      WHERE row_num = 1
+    ) AS synthesized_approvals
+    WHERE synthesized_approvals.decision_id IS NOT NULL
+      AND synthesized_approvals.decision_id != ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM runtime_gate_approvals_v8
+        WHERE runtime_gate_approvals_v8.decision_id = synthesized_approvals.decision_id
+      );
+    DROP TABLE runtime_gate_approvals;
+    ALTER TABLE runtime_gate_approvals_v8 RENAME TO runtime_gate_approvals;
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
+    PRAGMA foreign_keys = ON;
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("8");
+};
+const migrateV8ToV9 = (db) => {
+    db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE runtime_gate_approvals_v9 (
+      approval_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    INSERT INTO runtime_gate_approvals_v9(
+      approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+    )
+    SELECT
+      CASE
+        WHEN approval_id IS NULL OR approval_id = '' OR approval_id = 'gate_appr_' || run_id
+          THEN 'gate_appr_' || decision_id
+        ELSE approval_id
+      END,
+      run_id,
+      decision_id,
+      approved,
+      approver,
+      approved_at,
+      checks_json,
+      created_at,
+      updated_at
+    FROM runtime_gate_approvals;
+    DROP TABLE runtime_gate_approvals;
+    ALTER TABLE runtime_gate_approvals_v9 RENAME TO runtime_gate_approvals;
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
+    PRAGMA foreign_keys = ON;
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("9");
+};
+const migrateV9ToV10 = (db) => {
+    db.exec(`
+    UPDATE runtime_gate_audit_records
+    SET approval_id = (
+      SELECT runtime_gate_approvals.approval_id
+      FROM runtime_gate_approvals
+      WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+    )
+    WHERE decision_id IS NOT NULL
+      AND decision_id != ''
+      AND gate_decision = 'allowed'
+      AND effective_execution_mode IN (
+        'live_read_limited',
+        'live_read_high_risk',
+        'live_write'
+      )
+      AND approver IS NOT NULL
+      AND approver != ''
+      AND approved_at IS NOT NULL
+      AND approved_at != ''
+      AND EXISTS (
+        SELECT 1
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+      )
+      AND (
+        approval_id IS NULL
+        OR approval_id = ''
+        OR approval_id != (
+          SELECT runtime_gate_approvals.approval_id
+          FROM runtime_gate_approvals
+          WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+        )
+      );
+  `);
     db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
 };
 export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
@@ -176,7 +395,8 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
       ON runtime_events(run_id, event_time ASC);
     CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
       approval_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL UNIQUE,
+      run_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL UNIQUE,
       approved INTEGER NOT NULL,
       approver TEXT,
       approved_at TEXT,
@@ -185,8 +405,12 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
     );
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_approvals_run_updated
+      ON runtime_gate_approvals(run_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
       event_id TEXT PRIMARY KEY,
+      decision_id TEXT,
+      approval_id TEXT,
       run_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       profile TEXT NOT NULL,
@@ -247,6 +471,26 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
         if (currentVersion === 5) {
             migrateV5ToV6(db);
             currentVersion = 6;
+            continue;
+        }
+        if (currentVersion === 6) {
+            migrateV6ToV7(db);
+            currentVersion = 7;
+            continue;
+        }
+        if (currentVersion === 7) {
+            migrateV7ToV8(db);
+            currentVersion = 8;
+            continue;
+        }
+        if (currentVersion === 8) {
+            migrateV8ToV9(db);
+            currentVersion = 9;
+            continue;
+        }
+        if (currentVersion === 9) {
+            migrateV9ToV10(db);
+            currentVersion = 10;
             continue;
         }
         break;

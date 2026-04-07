@@ -32,16 +32,17 @@ describe("extension shared module contract", () => {
 
   it("exports xhs gate helpers from the extension root", () => {
     expect(XHS_ALLOWED_DOMAINS.has("www.xiaohongshu.com")).toBe(true);
-    expect(
-      evaluateXhsGate({
-        issueScope: "issue_209",
-        riskState: "allowed",
-        targetDomain: "www.xiaohongshu.com",
-        targetTabId: 8,
-        targetPage: "search_result_tab",
-        actionType: "read",
-        requestedExecutionMode: "dry_run"
-      }).consumer_gate_result.gate_decision
-    ).toBe("allowed");
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 8,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "dry_run"
+    });
+
+    expect(gate.consumer_gate_result.gate_decision).toBe("allowed");
+    expect(gate.approval_record.approval_id).toBeNull();
   });
 });
