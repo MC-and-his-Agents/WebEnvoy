@@ -22,6 +22,7 @@
 4. 建立人工确认与审计记录最小闭环，支持事后追溯与回滚。
 5. 将 `#208` 与 `#209` 统一纳入同一门禁模型。
 6. 冻结统一门禁输出对象，确保 `#208/#209` 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+7. 收口 `#254` sidecar 契约分歧，明确 `consumer_gate_result.risk_state` 不属于 FR-0010 稳定字段。
 
 ## 非目标
 
@@ -96,12 +97,35 @@
   - `effective_execution_mode`
   - `gate_decision`
   - `gate_reasons`
+- `consumer_gate_result` 不冻结 `risk_state`。
+- 风险状态的正式归属固定如下：
+  - 请求输入真相源：`gate_input.risk_state`
+  - 审计真相源：`audit_record.risk_state`
+  - 状态机 / 恢复输出真相源：`risk_state_output`
+- service-worker / relay 的阻断与放行路径不得把 `consumer_gate_result.risk_state` 当作稳定对外承诺；如历史实现曾临时透传该字段，也只视为遗留调试信息，不得被 contract test 或下游消费者当作正式契约依赖。
 - `#208` 与 `#209` 不得定义私有门禁字段绕过上述对象。
 
 ### 7. #223 统一状态机与阻断策略归属锚点（规约层）
 
 - `#223` 的 Sprint 2 统一风险状态机与阻断策略，归属在 FR-0010 套件内扩展，不再新增并行门禁契约。
 - `#223` 仅允许在 FR-0010 的 `risk_state`、`gate_decision` 与 `gate_reasons` 语义上做规约层收口；本 FR 不扩展到代码实现承诺。
+- `#254` 的 formal 结论受本 FR 约束：统一状态机输入继续落在 `gate_input.risk_state`，而不是回灌进 `consumer_gate_result`。
+
+### 8. 已冻结的 Sprint 2 review 边界（承载 #363）
+
+- `#218` 的 formal 边界已冻结为：
+  - 读域 / 写域分离
+  - `target_domain + target_tab_id + target_page` 显式确认
+  - 禁止单域成功推导另一域放行
+- `#219` 的 formal 边界已冻结为：
+  - `requested_execution_mode` 与 `effective_execution_mode` 双字段分工
+  - 默认 `dry_run/recon`
+  - 未满足前置时所有 `live_*` 请求默认阻断
+- `#221` 的 formal 边界已冻结为：
+  - `approval_record` / `audit_record` 最小闭环
+  - `decision_id`、`approval_id`、`event_id` 的唯一回链关系
+  - live 放行必须可追溯到同一门禁结论与审批记录
+- 上述边界在本 FR 内收口后，`#208/#209` 只允许消费 FR-0010 冻结对象，不得回退到 issue 私有字段解释。
 
 ## GWT 验收场景
 
@@ -160,6 +184,8 @@ And 不存在某一事项绕过门禁的路径
 7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义；`live_read_limited` 在本 FR 中仅作 Sprint 3 兼容占位，不单独冻结其公开模式语义。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
+10. `consumer_gate_result.risk_state` 已被明确排除在稳定契约之外；风险状态统一由 `gate_input` / `audit_record` / `risk_state_output` 承载。
+11. service-worker / relay 阻断路径的正式承诺已与 shared contract 对齐，不再要求在 `consumer_gate_result` 内稳定透传 `risk_state`。
 
 ## 与 FR-0009 的替代与兼容关系
 

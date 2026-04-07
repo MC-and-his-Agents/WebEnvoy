@@ -36,6 +36,7 @@
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前只能得到 `blocked` 结果，不得被视为 Sprint 2 已拥有的公开 live 模式。
+5. `risk_state` 作为统一风险状态机的正式输入字段，只在 `GateInput`、`AuditRecord` 与 `risk_state_output` 语义中承载；不进入 `consumer_gate_result` 冻结字段集合。
 
 ## 实体 3：GateDecision
 
@@ -116,12 +117,14 @@
 3. 计算门禁后生成 `GateDecision`。
 4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
 5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
+6. 若需要对外返回统一风险状态机结果，使用 `risk_state_output`；不得把状态输入或下一状态镜像回 `consumer_gate_result` 作为稳定契约。
 
 ## 与现有 FR 对齐
 
 - 与 `FR-0009`：FR-0009 保留治理基线；FR-0010 作为 Sprint 2 实现与测试的唯一消费契约。
 - 与 `FR-0004`：复用运行标识与最小可观测信息，不重建外层错误壳。
 - 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+- 与 `#254`：`consumer_gate_result.risk_state` 不进入正式字段集合；统一风险状态机相关字段继续由 `GateInput.risk_state`、`AuditRecord.risk_state` 与 `risk_state_output` 承担。
 
 ## FR-0009 -> FR-0010 字段迁移映射（规约层）
 
