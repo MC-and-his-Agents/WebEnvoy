@@ -14,6 +14,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const normalizeManifestPath = (value) => (isAbsolute(value) ? value : resolve(value));
 export const isPersistentExtensionId = (value) => PERSISTENT_EXTENSION_ID_PATTERN.test(value);
 export const isPersistentExtensionBrowserChannel = (value) => PERSISTENT_EXTENSION_BROWSER_CHANNELS.includes(value);
 const invalidIdentityBindingInput = (reason, message) => new CliError("ERR_PROFILE_INVALID", message, {
@@ -67,9 +68,7 @@ export const parsePersistentExtensionBindingFromParams = (params) => {
         browserChannel: browserChannelRaw,
         manifestPath: manifestPathRaw === null
             ? null
-            : isAbsolute(manifestPathRaw)
-                ? manifestPathRaw
-                : resolve(manifestPathRaw)
+            : normalizeManifestPath(manifestPathRaw)
     };
 };
 export const readPersistentExtensionBindingFromMetaValue = (value) => {
@@ -95,7 +94,7 @@ export const readPersistentExtensionBindingFromMetaValue = (value) => {
         extensionId,
         nativeHostName,
         browserChannel,
-        manifestPath: manifestPath ?? null
+        manifestPath: manifestPath === null ? null : normalizeManifestPath(manifestPath)
     };
 };
 export const inferPersistentExtensionBrowserChannel = (input) => {
