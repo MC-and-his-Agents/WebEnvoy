@@ -550,7 +550,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
             reason?: string;
           };
           consumer_gate_result?: {
-            risk_state?: string;
             issue_scope?: string;
             target_domain?: string | null;
             target_tab_id?: number | null;
@@ -588,7 +587,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
         },
         consumer_gate_result: {
           issue_scope: "issue_209",
-          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",
@@ -2967,7 +2965,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
               action: "read"
             },
             consumer_gate_result: {
-              risk_state: "limited",
               target_domain: "www.xiaohongshu.com",
               target_tab_id: 32,
               target_page: "search_result_tab",
@@ -3001,7 +2998,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
             action: "read"
           },
           consumer_gate_result: {
-            risk_state: "limited",
             requested_execution_mode: "live_read_limited",
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
@@ -3080,7 +3076,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
               action: "read"
             },
             consumer_gate_result: {
-              risk_state: "allowed",
               target_domain: "www.xiaohongshu.com",
               target_tab_id: 32,
               target_page: "search_result_tab",
@@ -3114,7 +3109,6 @@ describe("extension service worker recovery contract / xhs gate and live forward
             action: "read"
           },
           consumer_gate_result: {
-            risk_state: "allowed",
             requested_execution_mode: "live_read_high_risk",
             effective_execution_mode: "live_read_high_risk",
             gate_decision: "allowed",

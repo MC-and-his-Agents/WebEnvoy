@@ -647,7 +647,6 @@ describe("extension service worker / gate and approval", () => {
             reason?: string;
           };
           consumer_gate_result?: {
-            risk_state?: string;
             issue_scope?: string;
             target_domain?: string | null;
             target_tab_id?: number | null;
@@ -685,7 +684,6 @@ describe("extension service worker / gate and approval", () => {
         },
         consumer_gate_result: {
           issue_scope: "issue_209",
-          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",

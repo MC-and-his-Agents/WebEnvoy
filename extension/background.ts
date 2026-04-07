@@ -254,7 +254,6 @@ interface XhsTargetGateResult {
   errorMessage: string;
   gateOnly: boolean;
   consumerGateResult: {
-    risk_state: XhsRiskState;
     issue_scope: XhsIssueScope;
     target_domain: string | null;
     target_tab_id: number | null;
