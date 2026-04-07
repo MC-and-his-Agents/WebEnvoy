@@ -11,7 +11,7 @@
 - 产出：
   - 门禁输出对象与字段语义（见 `contracts/risk-gate-execution.md`）
   - 关键执行接入点清单（读路径、写路径候选、模式切换）
-  - `risk_state` 的正式归属收口：`gate_input` / `audit_record`，不落入 `consumer_gate_result`
+  - `risk_state` 的正式归属收口：`gate_input` / `audit_record`
 - 依赖：`FR-0009` 已合并。
 - issue 对齐：冻结 `#218/#219/#221` 共用的门禁字段与对象边界。
 

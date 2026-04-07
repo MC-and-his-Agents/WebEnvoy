@@ -174,7 +174,7 @@
 7. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 8. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
-10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值；后续消费者不得要求从 `consumer_gate_result` 回读同名字段。
+10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值。
 
 ## consumer_gate_result
 
