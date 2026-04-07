@@ -25,8 +25,8 @@
 - [x] `FR-0011` formal 收口前，`live_read_limited` 对读动作同样默认阻断，且 staged rollout 条件载体 `limited_read_rollout_ready_true` 已回写到实现/测试准入口径。
 - [x] 门禁默认模式（`dry_run/recon`）与 live 升级审批流程已在 formal 套件内达成统一评审口径。
 - [x] 统一消费对象字段已在 formal 套件内冻结：`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
-- [ ] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与状态字段真相源”。
-- [ ] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展只能消费统一门禁对象，`consumer_gate_result.risk_state` 不属于稳定契约”。
+- [x] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与状态字段真相源”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/208#issuecomment-4198847806`
+- [x] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展只能消费统一门禁对象，`consumer_gate_result.risk_state` 不属于稳定契约”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/209#issuecomment-4198850182`
 
 ## 实施清单（spec 通过后）
 
