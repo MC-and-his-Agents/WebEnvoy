@@ -10,6 +10,11 @@ source "${SCRIPT_DIR}/pr-guardian.merge-guard.hydrate.sh"
 source "${SCRIPT_DIR}/pr-guardian.merge-guard.merge-gate.sh"
 
 main() {
+  load_guardian_without_main
+  assert_pass run_all_checks_pass_with_payload '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
+  assert_pass run_all_checks_pass_without_required_checks_reported
+  assert_fail run_all_checks_pass_when_required_checks_pass_but_all_checks_fail
+  assert_fail run_all_checks_pass_when_all_checks_list_is_empty
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_slim_pr_body_preserves_medium_item_design_note_sections
