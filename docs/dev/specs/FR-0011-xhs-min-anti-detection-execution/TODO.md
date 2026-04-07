@@ -8,7 +8,9 @@
 - [x] FR-0011 已冻结 Sprint 3 的核心边界：插件层门禁主落点、读路径执行模式收敛、写路径交互分级、最小 session 节律/冷却/恢复、以及 `paused/limited/allowed` 风险状态机。
 - [x] FR-0011 已冻结 `#208/#209` 共享的状态机、审批/审计边界、`live_read_limited` 正式公开模式语义、`limited_read_rollout_ready_true` 条件载体，以及 `gate_decision=blocked` 时 `effective_execution_mode` 的正式解释。
 - [x] FR-0011 已冻结 `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 语义，以及 `editor_input` 作为唯一正式验证对象时的验证范围、成功/失败信号、最小 replay 与关闭语义。
-- [x] `#365` 在仓库内的职责是回写上述 formal review 结论和解释边界，不替代 `#231` 作为 open FR 锚点的职责，也不把本文件改造成 GitHub 状态快照。
+- [x] `#231` 是 FR-0011 当前唯一 active issue anchor；`#217` 仅保留历史起草语义，`#365` 只承接本轮 closeout backlog，不替代 open FR 锚点。
+- [x] `PR #414` 是本轮 closeout writeback 的可审计 review artifact；`#365` 只负责驱动这次 truth sync，不单独承担 formal review 记录职责。
+- [x] 本文件只回写 formal review 结论和解释边界，不把本地 `TODO.md` 扩张成 GitHub issue、Project、里程碑或关闭状态的真相源。
 
 ## 时间边界澄清
 
@@ -21,7 +23,7 @@
 
 - [x] 后续任何 `#209` 范围的 live 扩展或 follow-up 修复，仍应继续引用 FR-0011 已冻结的 Sprint 3 前置。
 - [x] 后续任何 `#208` 邻近事项若再次引用 `editor_input`，都必须沿用 FR-0011 已冻结的唯一正式验证边界，而不能回退到 2026-03-30 的阶段性未完成表述。
-- [x] `#231` 继续承接 FR-0011 的 open FR 锚点职责；`#217` 仅保留历史起草语义，不再承担 open anchor 语义。
+- [x] 后续任何 formal 文档回写若需要引用 FR-0011 的 active issue anchor，都应继续使用 `#231`；`#217` 与 `#365` 都不得重新写成当前 open anchor。
 
 ## 后续实现入口
 
