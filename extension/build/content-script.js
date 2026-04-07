@@ -1899,18 +1899,184 @@ const performEditorInputValidation = async (input) => {
 };
 return { performEditorInputValidation };
 })();
-const __webenvoy_module_content_script_handler = (() => {
-const { executeXhsSearch } = __webenvoy_module_xhs_search;
-const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;
+const __webenvoy_module_content_script_main_world = (() => {
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+let mainWorldEventChannel = null;
+let mainWorldResultListener = null;
+let mainWorldResultListenerEventName = null;
+const pendingMainWorldRequests = new Map();
+const encodeUtf8Base64 = (value) => {
+    if (typeof btoa === "function") {
+        return btoa(unescape(encodeURIComponent(value)));
+    }
+    const bufferCtor = globalThis.Buffer;
+    if (bufferCtor) {
+        return bufferCtor.from(value, "utf8").toString("base64");
+    }
+    throw new Error("base64 encoder is unavailable");
+};
+const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const createMainWorldBootstrapDetail = (secret) => {
+    const names = resolveMainWorldEventNamesForSecret(secret);
+    return {
+        request_event: names.requestEvent,
+        result_event: names.resultEvent
+    };
+};
+const resolveMainWorldEventNamesForSecret = (secret) => {
+    const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+    return {
+        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+    };
+};
+const createWindowEvent = (type, detail) => {
+    const CustomEventCtor = globalThis.CustomEvent;
+    if (typeof CustomEventCtor === "function") {
+        return new CustomEventCtor(type, { detail });
+    }
+    return { type, detail };
+};
+const onMainWorldResultEvent = (event) => {
+    const detail = (event.detail ?? null);
+    if (!detail || typeof detail.id !== "string") {
+        return;
+    }
+    const pending = pendingMainWorldRequests.get(detail.id);
+    if (!pending) {
+        return;
+    }
+    clearTimeout(pending.timeout);
+    pendingMainWorldRequests.delete(detail.id);
+    if (detail.ok === true) {
+        pending.resolve(detail.result);
+        return;
+    }
+    const message = typeof detail.message === "string" ? detail.message : "main world call failed";
+    pending.reject(new Error(message));
+};
+const detachMainWorldResultListener = () => {
+    if (!mainWorldResultListener || !mainWorldResultListenerEventName) {
+        return;
+    }
+    try {
+        window.removeEventListener(mainWorldResultListenerEventName, mainWorldResultListener);
+    }
+    catch {
+        // noop in contract environments
+    }
+    mainWorldResultListener = null;
+    mainWorldResultListenerEventName = null;
+};
+const installMainWorldEventChannelSecret = (secret) => {
+    const normalizedSecret = normalizeMainWorldSecret(secret);
+    if (typeof window === "undefined" ||
+        typeof window.addEventListener !== "function" ||
+        typeof window.dispatchEvent !== "function") {
+        detachMainWorldResultListener();
+        mainWorldEventChannel = null;
+        return false;
+    }
+    if (!normalizedSecret) {
+        detachMainWorldResultListener();
+        mainWorldEventChannel = null;
+        return false;
+    }
+    const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    if (mainWorldEventChannel?.secret === normalizedSecret &&
+        mainWorldResultListenerEventName === names.resultEvent) {
+        return true;
+    }
+    detachMainWorldResultListener();
+    window.addEventListener(names.resultEvent, onMainWorldResultEvent);
+    mainWorldEventChannel = {
+        secret: normalizedSecret,
+        requestEvent: names.requestEvent,
+        resultEvent: names.resultEvent
+    };
+    mainWorldResultListener = onMainWorldResultEvent;
+    mainWorldResultListenerEventName = names.resultEvent;
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret)));
+    return true;
+};
+const resetMainWorldEventChannelForContract = () => {
+    for (const pending of pendingMainWorldRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("main world request reset"));
+    }
+    pendingMainWorldRequests.clear();
+    detachMainWorldResultListener();
+    mainWorldEventChannel = null;
+};
+const mainWorldCall = async (request) => {
+    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `mw-${Date.now()}`;
+    return await new Promise((resolve, reject) => {
+        if (!mainWorldEventChannel ||
+            typeof window === "undefined" ||
+            typeof window.dispatchEvent !== "function") {
+            reject(new Error("main world event channel unavailable"));
+            return;
+        }
+        const timeout = setTimeout(() => {
+            pendingMainWorldRequests.delete(requestId);
+            reject(new Error("main world event channel response timeout"));
+        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        pendingMainWorldRequests.set(requestId, {
+            resolve: (value) => resolve(value),
+            reject,
+            timeout
+        });
+        const requestDetail = {
+            id: requestId,
+            ...request
+        };
+        try {
+            window.dispatchEvent(createWindowEvent(mainWorldEventChannel.requestEvent, requestDetail));
+        }
+        catch (error) {
+            clearTimeout(timeout);
+            pendingMainWorldRequests.delete(requestId);
+            reject(error);
+        }
+    });
+};
+const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => await mainWorldCall({
+    type: "fingerprint-install",
+    payload: {
+        fingerprint_runtime: fingerprintRuntime
+    }
+});
+const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldCall({
+    type: "fingerprint-verify",
+    payload: {}
+});
+return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+})();
+const __webenvoy_module_content_script_fingerprint = (() => {
+const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
 const {
-  DEFAULT_MIME_TYPE_DESCRIPTORS,
-  DEFAULT_PLUGIN_DESCRIPTORS,
-  ensureFingerprintRuntimeContext
-} = __webenvoy_module_fingerprint_profile;
+  installFingerprintRuntimeViaMainWorld,
+  verifyFingerprintRuntimeViaMainWorld
+} = __webenvoy_module_content_script_main_world;
+const AUDIO_PATCH_EPSILON = 1e-12;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const cloneFingerprintRuntimeContextWithInjection = (runtime, injection) => injection
@@ -1919,14 +2085,6 @@ const cloneFingerprintRuntimeContextWithInjection = (runtime, injection) => inje
         injection: JSON.parse(JSON.stringify(injection))
     }
     : { ...runtime };
-const resolveRequestedExecutionMode = (message) => {
-    const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
-    if (topLevelMode) {
-        return topLevelMode;
-    }
-    const options = asRecord(message.commandParams.options);
-    return asString(options?.requested_execution_mode);
-};
 const resolveAttestedFingerprintRuntimeContext = (value) => {
     const record = asRecord(value);
     if (!record) {
@@ -1951,6 +2109,7 @@ const resolveFingerprintContextFromMessage = (message) => {
     const fallback = resolveAttestedFingerprintRuntimeContext(resolveFingerprintContextFromCommandParams(message.commandParams));
     return fallback ?? null;
 };
+const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
 const buildFailedFingerprintInjectionContext = (fingerprintRuntime, errorMessage) => {
     const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
     return {
@@ -2010,247 +2169,9 @@ const summarizeFingerprintRuntimeContext = (fingerprintRuntime) => {
     };
 };
 const resolveFingerprintContextForContract = (message) => resolveFingerprintContextFromMessage({
-    kind: "forward",
-    id: "contract",
-    runId: "contract",
-    tabId: null,
-    profile: null,
-    cwd: "",
-    timeoutMs: 1_000,
-    command: "runtime.ping",
-    params: {},
     commandParams: message.commandParams,
     fingerprintContext: message.fingerprintContext
 });
-const extractFetchBody = async (response) => {
-    const text = await response.text();
-    if (text.length === 0) {
-        return null;
-    }
-    try {
-        return JSON.parse(text);
-    }
-    catch {
-        return {
-            message: text
-        };
-    }
-};
-const encodeUtf8Base64 = (value) => {
-    if (typeof btoa === "function") {
-        return btoa(unescape(encodeURIComponent(value)));
-    }
-    const bufferCtor = globalThis.Buffer;
-    if (bufferCtor) {
-        return bufferCtor.from(value, "utf8").toString("base64");
-    }
-    throw new Error("base64 encoder is unavailable");
-};
-const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
-const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
-const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
-const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
-const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
-const AUDIO_PATCH_EPSILON = 1e-12;
-let mainWorldEventChannel = null;
-let mainWorldResultListener = null;
-let mainWorldResultListenerEventName = null;
-const pendingMainWorldRequests = new Map();
-const hashMainWorldEventChannel = (value) => {
-    let hash = 0x811c9dc5;
-    for (let index = 0; index < value.length; index += 1) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(36);
-};
-const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-const createMainWorldBootstrapDetail = (channel) => ({
-    request_event: channel.requestEvent,
-    result_event: channel.resultEvent
-});
-const resolveMainWorldEventNamesForSecret = (secret) => {
-    const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
-    return {
-        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
-        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
-    };
-};
-const createWindowEvent = (type, detail) => {
-    if (typeof CustomEvent === "function") {
-        return new CustomEvent(type, { detail });
-    }
-    return {
-        type,
-        detail
-    };
-};
-const onMainWorldResultEvent = (event) => {
-    const detail = asRecord(event.detail);
-    if (!detail || typeof detail.id !== "string") {
-        return;
-    }
-    const pending = pendingMainWorldRequests.get(detail.id);
-    if (!pending) {
-        return;
-    }
-    pendingMainWorldRequests.delete(detail.id);
-    clearTimeout(pending.timeout);
-    if (detail.ok === true) {
-        pending.resolve(detail.result);
-        return;
-    }
-    pending.reject(new Error(typeof detail.message === "string" ? detail.message : "main world call failed"));
-};
-const detachMainWorldResultListener = () => {
-    if (!mainWorldResultListener ||
-        !mainWorldResultListenerEventName ||
-        typeof window === "undefined" ||
-        typeof window.removeEventListener !== "function") {
-        mainWorldResultListener = null;
-        mainWorldResultListenerEventName = null;
-        return;
-    }
-    window.removeEventListener(mainWorldResultListenerEventName, mainWorldResultListener);
-    mainWorldResultListener = null;
-    mainWorldResultListenerEventName = null;
-};
-const installMainWorldEventChannelSecret = (secret) => {
-    const normalizedSecret = normalizeMainWorldSecret(secret);
-    if (typeof window === "undefined" ||
-        typeof window.addEventListener !== "function" ||
-        typeof window.dispatchEvent !== "function") {
-        mainWorldEventChannel = null;
-        detachMainWorldResultListener();
-        return false;
-    }
-    if (!normalizedSecret) {
-        mainWorldEventChannel = null;
-        detachMainWorldResultListener();
-        return false;
-    }
-    const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
-    if (mainWorldEventChannel &&
-        mainWorldEventChannel.secret === normalizedSecret &&
-        mainWorldResultListenerEventName === names.resultEvent) {
-        return true;
-    }
-    detachMainWorldResultListener();
-    window.addEventListener(names.resultEvent, onMainWorldResultEvent);
-    mainWorldResultListener = onMainWorldResultEvent;
-    mainWorldResultListenerEventName = names.resultEvent;
-    mainWorldEventChannel = {
-        secret: normalizedSecret,
-        requestEvent: names.requestEvent,
-        resultEvent: names.resultEvent
-    };
-    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(mainWorldEventChannel)));
-    return true;
-};
-const resetMainWorldEventChannelForContract = () => {
-    for (const pending of pendingMainWorldRequests.values()) {
-        clearTimeout(pending.timeout);
-        pending.reject(new Error("main world event channel reset"));
-    }
-    pendingMainWorldRequests.clear();
-    mainWorldEventChannel = null;
-    detachMainWorldResultListener();
-};
-const mainWorldCall = async (request) => {
-    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `mw-${Date.now()}`;
-    return await new Promise((resolve, reject) => {
-        if (!mainWorldEventChannel ||
-            typeof window === "undefined" ||
-            typeof window.dispatchEvent !== "function") {
-            reject(new Error("main world event channel unavailable"));
-            return;
-        }
-        const timeout = setTimeout(() => {
-            pendingMainWorldRequests.delete(requestId);
-            reject(new Error("main world event channel response timeout"));
-        }, MAIN_WORLD_CALL_TIMEOUT_MS);
-        pendingMainWorldRequests.set(requestId, {
-            resolve: (value) => resolve(value),
-            reject,
-            timeout
-        });
-        const requestDetail = {
-            id: requestId,
-            ...request
-        };
-        try {
-            window.dispatchEvent(createWindowEvent(mainWorldEventChannel.requestEvent, requestDetail));
-        }
-        catch (error) {
-            clearTimeout(timeout);
-            pendingMainWorldRequests.delete(requestId);
-            reject(error);
-        }
-    });
-};
-const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => await mainWorldCall({
-    type: "fingerprint-install",
-    payload: {
-        fingerprint_runtime: fingerprintRuntime
-    }
-});
-const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldCall({
-    type: "fingerprint-verify",
-    payload: {}
-});
-const requestXhsSignatureViaExtension = async (uri, body) => {
-    const runtime = globalThis.chrome?.runtime;
-    const sendMessage = runtime?.sendMessage;
-    if (!sendMessage) {
-        throw new Error("extension runtime.sendMessage is unavailable");
-    }
-    const request = {
-        kind: "xhs-sign-request",
-        uri,
-        body
-    };
-    const response = await new Promise((resolve, reject) => {
-        try {
-            const maybePromise = sendMessage(request, (message) => {
-                resolve(message ?? { ok: false, error: { message: "xhs-sign response missing" } });
-            });
-            if (maybePromise && typeof maybePromise.then === "function") {
-                void maybePromise
-                    .then((message) => {
-                    if (message) {
-                        resolve(message);
-                    }
-                })
-                    .catch((error) => {
-                    reject(error);
-                });
-            }
-        }
-        catch (error) {
-            reject(error);
-        }
-    });
-    if (!response.ok || !response.result) {
-        throw new Error(typeof response.error?.message === "string" ? response.error.message : "xhs-sign failed");
-    }
-    return response.result;
-};
-const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
-const installFingerprintRuntimeWithVerification = async (fingerprintRuntime) => {
-    const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
-    const preInstallAudioSample = requiredPatches.includes("audio_context")
-        ? await probeAudioFirstSample()
-        : null;
-    const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
-    return await verifyFingerprintInstallResult({
-        fingerprintRuntime,
-        installResult: asRecord(installResult),
-        preInstallAudioSample
-    });
-};
 const probeAudioFirstSample = async () => {
     const offlineAudioCtor = typeof window.OfflineAudioContext === "function"
         ? window.OfflineAudioContext
@@ -2279,18 +2200,6 @@ const probeAudioFirstSample = async () => {
         return null;
     }
 };
-const buildRuntimeBootstrapAckPayload = (input) => ({
-    method: "runtime.bootstrap.ack",
-    result: {
-        version: input.version,
-        run_id: input.runId,
-        runtime_context_id: input.runtimeContextId,
-        profile: input.profile,
-        status: input.attested ? "ready" : "pending"
-    },
-    runtime_bootstrap_attested: input.attested,
-    ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
-});
 const probeBatteryApi = async () => {
     const getBattery = window.navigator
         .getBattery;
@@ -2400,6 +2309,118 @@ const verifyFingerprintInstallResult = async (input) => {
         }
     };
 };
+const installFingerprintRuntimeWithVerification = async (fingerprintRuntime) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+    const preInstallAudioSample = requiredPatches.includes("audio_context")
+        ? await probeAudioFirstSample()
+        : null;
+    const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
+    return await verifyFingerprintInstallResult({
+        fingerprintRuntime,
+        installResult: asRecord(installResult),
+        preInstallAudioSample
+    });
+};
+return { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext };
+})();
+const __webenvoy_module_content_script_handler = (() => {
+const { executeXhsSearch } = __webenvoy_module_xhs_search;
+const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;
+const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
+const {
+  buildFailedFingerprintInjectionContext,
+  hasInstalledFingerprintInjection,
+  installFingerprintRuntimeWithVerification,
+  resolveFingerprintContextForContract,
+  resolveFingerprintContextFromMessage,
+  resolveMissingRequiredFingerprintPatches,
+  summarizeFingerprintRuntimeContext
+} = __webenvoy_module_content_script_fingerprint;
+const {
+  encodeMainWorldPayload,
+  installFingerprintRuntimeViaMainWorld,
+  installMainWorldEventChannelSecret,
+  MAIN_WORLD_EVENT_BOOTSTRAP,
+  resetMainWorldEventChannelForContract,
+  resolveMainWorldEventNamesForSecret
+} = __webenvoy_module_content_script_main_world;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const resolveRequestedExecutionMode = (message) => {
+    const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
+    if (topLevelMode) {
+        return topLevelMode;
+    }
+    const options = asRecord(message.commandParams.options);
+    return asString(options?.requested_execution_mode);
+};
+const extractFetchBody = async (response) => {
+    const text = await response.text();
+    if (text.length === 0) {
+        return null;
+    }
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return {
+            message: text
+        };
+    }
+};
+const requestXhsSignatureViaExtension = async (uri, body) => {
+    const runtime = globalThis.chrome?.runtime;
+    const sendMessage = runtime?.sendMessage;
+    if (!sendMessage) {
+        throw new Error("extension runtime.sendMessage is unavailable");
+    }
+    const request = {
+        kind: "xhs-sign-request",
+        uri,
+        body
+    };
+    const response = await new Promise((resolve, reject) => {
+        try {
+            const maybePromise = sendMessage(request, (message) => {
+                resolve(message ?? { ok: false, error: { message: "xhs-sign response missing" } });
+            });
+            if (maybePromise && typeof maybePromise.then === "function") {
+                void maybePromise
+                    .then((message) => {
+                    if (message) {
+                        resolve(message);
+                    }
+                })
+                    .catch((error) => {
+                    reject(error);
+                });
+            }
+        }
+        catch (error) {
+            reject(error);
+        }
+    });
+    if (!response.ok || !response.result) {
+        throw new Error(typeof response.error?.message === "string" ? response.error.message : "xhs-sign failed");
+    }
+    return response.result;
+};
+const buildRuntimeBootstrapAckPayload = (input) => ({
+    method: "runtime.bootstrap.ack",
+    result: {
+        version: input.version,
+        run_id: input.runId,
+        runtime_context_id: input.runtimeContextId,
+        profile: input.profile,
+        status: input.attested ? "ready" : "pending"
+    },
+    runtime_bootstrap_attested: input.attested,
+    ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
+});
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
