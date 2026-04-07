@@ -11,7 +11,7 @@
 - [x] `#218/#219/#221` 的职责映射已在 FR-0010 套件内显式冻结。
 - [x] `consumer_gate_result` 的稳定字段集合已在 formal 套件内固定为 `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
 - [x] `#254` 对应的 sidecar 契约分歧已在规约层明确结论：`consumer_gate_result.risk_state` 不是 FR-0010 稳定字段。
-- [x] `risk_state` 的正式归属已在 formal 套件内固定到 `gate_input.risk_state`、`audit_record.risk_state` 与 `risk_state_output`。
+- [x] `risk_state` 的正式归属已在 formal 套件内固定到 `gate_input.risk_state` 与 `audit_record.risk_state`；Sprint 3 状态输出对象继续由 `FR-0011` 承接。
 - [x] service-worker / relay 阻断路径的正式承诺已收口为“不要求在 `consumer_gate_result` 内稳定透传 `risk_state`”。
 
 ## 当前 review 待完成项

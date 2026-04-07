@@ -11,7 +11,7 @@
 - 产出：
   - 门禁输出对象与字段语义（见 `contracts/risk-gate-execution.md`）
   - 关键执行接入点清单（读路径、写路径候选、模式切换）
-  - `risk_state` 的正式归属收口：`gate_input` / `audit_record` / `risk_state_output`，不落入 `consumer_gate_result`
+  - `risk_state` 的正式归属收口：`gate_input` / `audit_record`，不落入 `consumer_gate_result`
 - 依赖：`FR-0009` 已合并。
 - issue 对齐：冻结 `#218/#219/#221` 共用的门禁字段与对象边界。
 
@@ -55,7 +55,7 @@
 
 - 合约层验证：
   - 门禁对象字段完整性、枚举值合法性、回退语义稳定。
-  - `consumer_gate_result` 不把 `risk_state` 作为稳定字段；相关断言必须回到 `gate_input` / `audit_record` / `risk_state_output`。
+  - `consumer_gate_result` 不把 `risk_state` 作为稳定字段；相关断言必须回到 `gate_input` / `audit_record`，Sprint 3 状态输出对象继续由 `FR-0011` 承接。
   - `live_read_limited` 仅允许绑定 `action_type=read`，不得扩展为写路径共享模式。
   - `gate_decision=blocked` 时 `effective_execution_mode` 只能回落到真实未继续 live 的模式。
 - 行为层验证：
@@ -106,4 +106,4 @@
    - `effective_execution_mode`
    - `gate_decision`
    - `gate_reasons`
-8. `#254` 对应的 sidecar 契约分歧已在 FR-0010 formal 套件内收口：`consumer_gate_result.risk_state` 被明确排除出稳定字段集合，service-worker / relay 的统一消费口径已同步。
+8. `#254` 对应的 sidecar 契约分歧已在 FR-0010 formal 套件内收口：`consumer_gate_result.risk_state` 被明确排除出稳定字段集合，service-worker / relay 的统一消费口径已同步，Sprint 3 状态输出契约所有权保持在 `FR-0011`。

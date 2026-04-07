@@ -177,66 +177,6 @@
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
 10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值；后续消费者不得要求从 `consumer_gate_result` 回读同名字段。
 
-## risk_state_output
-
-当门禁实现需要对外发布统一风险状态机结果时，必须通过独立对象 `risk_state_output` 输出，而不是回灌到 `consumer_gate_result`：
-
-```json
-{
-  "risk_state_output": {
-    "current_state": "paused",
-    "session_rhythm_policy": {
-      "min_action_interval_ms": 3000,
-      "min_experiment_interval_ms": 30000,
-      "cooldown_strategy": "exponential_backoff",
-      "cooldown_base_minutes": 30,
-      "cooldown_cap_minutes": 720,
-      "resume_probe_mode": "recon_only"
-    },
-    "session_rhythm": {
-      "state": "paused",
-      "triggered_by": "GATE_BLOCKED",
-      "cooldown_until": null,
-      "recovery_started_at": null,
-      "last_event_at": "2026-03-23T10:00:00.000Z",
-      "source_event_id": "gate_evt_001"
-    },
-    "risk_state_machine": {
-      "states": ["paused", "limited", "allowed"],
-      "transitions": [],
-      "hard_block_when_paused": ["live_read_high_risk", "live_write"]
-    },
-    "issue_action_matrix": [
-      {
-        "issue_scope": "issue_208",
-        "risk_state": "paused",
-        "allowed_actions": ["dry_run"],
-        "conditional_actions": [],
-        "blocked_actions": ["live_write"]
-      },
-      {
-        "issue_scope": "issue_209",
-        "risk_state": "paused",
-        "allowed_actions": ["dry_run", "recon"],
-        "conditional_actions": [],
-        "blocked_actions": ["live_read_high_risk", "live_read_limited"]
-      }
-    ],
-    "recovery_requirements": ["audit_record_present"]
-  }
-}
-```
-
-约束：
-
-1. `risk_state_output` 只承载统一状态机输出，不替代 `gate_input`、`gate_outcome`、`approval_record`、`audit_record` 或 `consumer_gate_result`。
-2. `current_state` 枚举固定为 `paused | limited | allowed`，表示当前统一状态机对外公开的状态。
-3. `session_rhythm_policy`、`session_rhythm`、`risk_state_machine`、`issue_action_matrix` 与 `recovery_requirements` 一旦对外发布，都视为稳定输出字段，不得在 formal review 之外改写语义。
-4. `session_rhythm.source_event_id` 必须能够回链到当前状态输出所依据的审计事件；FR-0010 不要求在 `risk_state_output` 内内联完整 `audit_record`。
-5. `issue_action_matrix` 在 FR-0010 基线下必须按 `issue_208`、`issue_209` 两个 issue scope 输出统一状态机下的动作矩阵，不得额外增加并行门禁对象。
-6. 如运行时未对外发布统一状态机结果，可整体省略 `risk_state_output`；一旦发布，则上述字段都视为稳定输出字段。
-7. service-worker / relay 若对外暴露状态机结果，也必须复用本对象，而不是新增并行状态输出字段。
-
 ## consumer_gate_result
 
 `#208` 与 `#209` 必须消费同一个标准化对象，不允许定义私有判定字段绕过门禁：
@@ -267,8 +207,8 @@
 5. 风险状态的正式真相源固定为：
    - `gate_input.risk_state`
    - `audit_record.risk_state`
-   - `risk_state_output`
-6. 若历史实现仍暂时透传 `consumer_gate_result.risk_state`，该字段只可视为 legacy debug signal，不得进入 contract tests、formal consumers 或后续 FR 的必填字段白名单。
+6. Sprint 3 如需对外发布统一状态机 / 恢复输出，继续由 `FR-0011` 冻结 `risk_state_output` 契约；FR-0010 不在本对象组中重定义其机器 shape。
+7. 若历史实现仍暂时透传 `consumer_gate_result.risk_state`，该字段只可视为 legacy debug signal，不得进入 contract tests、formal consumers 或后续 FR 的必填字段白名单。
 
 ## #223 统一状态机锚点（规约层）
 
@@ -277,7 +217,6 @@
 1. `gate_input.risk_state`：统一状态机的输入状态集合（当前 `paused|limited|allowed`）。
 2. `gate_outcome.gate_decision` + `gate_outcome.gate_reasons`：统一阻断策略的可审计输出边界。
 3. `audit_record`：统一状态机与阻断策略的追溯记录载体。
-4. `risk_state_output`：统一状态机的恢复/下一状态输出边界，不由 `consumer_gate_result` 代持。
 
 ## 兼容性
 
