@@ -19,7 +19,8 @@ describe("observability", () => {
       page_kind: "feed",
       url: "https://example.com/feed",
       title: "Example Feed",
-      ready_state: "complete"
+      ready_state: "complete",
+      observation_status: "complete"
     });
   });
 
@@ -122,6 +123,7 @@ describe("observability", () => {
     expect(payload.page_state).not.toBeNull();
     expect(payload.page_state?.title).toHaveLength(32);
     expect(payload.page_state?.title_truncated).toBe(true);
+    expect(payload.page_state?.observation_status).toBe("complete");
     expect(payload.page_state?.url).toBe("https://example.com/post/1");
     expect(payload.key_requests).toHaveLength(1);
     expect(payload.key_requests[0].url).toBe("https://example.com/api/feed");
@@ -233,6 +235,7 @@ describe("observability", () => {
 
     expect(payload.coverage).toBe("partial");
     expect(payload.page_state?.partial_observable).toBe(true);
+    expect(payload.page_state?.observation_status).toBe("partial");
     expect(payload.request_evidence).toBe("none");
   });
 
