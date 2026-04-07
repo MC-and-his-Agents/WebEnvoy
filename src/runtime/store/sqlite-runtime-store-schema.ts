@@ -358,6 +358,16 @@ const migrateV9ToV10 = (db: DatabaseSync): void => {
     )
     WHERE decision_id IS NOT NULL
       AND decision_id != ''
+      AND gate_decision = 'allowed'
+      AND effective_execution_mode IN (
+        'live_read_limited',
+        'live_read_high_risk',
+        'live_write'
+      )
+      AND approver IS NOT NULL
+      AND approver != ''
+      AND approved_at IS NOT NULL
+      AND approved_at != ''
       AND EXISTS (
         SELECT 1
         FROM runtime_gate_approvals

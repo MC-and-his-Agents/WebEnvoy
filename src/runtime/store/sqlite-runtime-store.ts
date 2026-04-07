@@ -138,6 +138,16 @@ export interface ListAuditRecordsInput {
   limit?: number;
 }
 
+const LIVE_APPROVAL_EXECUTION_MODES = new Set([
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
+
+const isAllowedLiveAuditRecord = (record: GateAuditRecord): boolean =>
+  record.gate_decision === "allowed" &&
+  LIVE_APPROVAL_EXECUTION_MODES.has(record.effective_execution_mode);
+
 export interface ListGateAuditRecordsInput {
   runId?: string;
   sessionId?: string;
@@ -609,6 +619,9 @@ export class SQLiteRuntimeStore {
     const latestApprovedRecord =
       auditRecords
         .map((record) => {
+          if (!isAllowedLiveAuditRecord(record)) {
+            return null;
+          }
           if (
             typeof record.decision_id !== "string" ||
             record.decision_id.length === 0 ||

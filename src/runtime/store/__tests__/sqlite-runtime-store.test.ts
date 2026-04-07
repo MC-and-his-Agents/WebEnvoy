@@ -758,6 +758,107 @@ describeWithSqlite("sqlite-runtime-store", () => {
     ]);
   });
 
+  it("ignores blocked audit rows even when they match a persisted approval trail", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+
+    await store.upsertRun({
+      runId: "run-gate-approval-blocked-match-001",
+      sessionId: "session-gate-approval-blocked-match-001",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:30.000Z",
+      errorCode: null
+    });
+    await store.upsertApprovalRecord({
+      approvalId: "gate_appr_run-gate-approval-blocked-match-001_req-1",
+      runId: "run-gate-approval-blocked-match-001",
+      decisionId: "gate_decision_run-gate-approval-blocked-match-001_req-1",
+      approved: true,
+      approver: "qa-reviewer-a",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-approval-blocked-match-001_req-1",
+      decisionId: "gate_decision_run-gate-approval-blocked-match-001_req-1",
+      approvalId: "gate_appr_run-gate-approval-blocked-match-001_req-1",
+      runId: "run-gate-approval-blocked-match-001",
+      sessionId: "session-gate-approval-blocked-match-001",
+      profile: "profile-a",
+      issueScope: "issue_209",
+      riskState: "allowed",
+      nextState: "allowed",
+      transitionTrigger: "manual_approval",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 42,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      effectiveExecutionMode: "live_read_high_risk",
+      gateDecision: "allowed",
+      gateReasons: ["LIVE_MODE_APPROVED"],
+      approver: "qa-reviewer-a",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      recordedAt: "2026-03-23T10:00:11.000Z"
+    });
+    await store.upsertApprovalRecord({
+      approvalId: "gate_appr_run-gate-approval-blocked-match-001_req-2",
+      runId: "run-gate-approval-blocked-match-001",
+      decisionId: "gate_decision_run-gate-approval-blocked-match-001_req-2",
+      approved: true,
+      approver: "qa-reviewer-b",
+      approvedAt: "2026-03-23T10:00:20.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-approval-blocked-match-001_req-2",
+      decisionId: "gate_decision_run-gate-approval-blocked-match-001_req-2",
+      approvalId: "gate_appr_run-gate-approval-blocked-match-001_req-2",
+      runId: "run-gate-approval-blocked-match-001",
+      sessionId: "session-gate-approval-blocked-match-001",
+      profile: "profile-a",
+      issueScope: "issue_209",
+      riskState: "allowed",
+      nextState: "limited",
+      transitionTrigger: "risk_signal_detected",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 42,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      effectiveExecutionMode: "dry_run",
+      gateDecision: "blocked",
+      gateReasons: ["MANUAL_CONFIRMATION_MISSING"],
+      approver: "qa-reviewer-b",
+      approvedAt: "2026-03-23T10:00:20.000Z",
+      recordedAt: "2026-03-23T10:00:21.000Z"
+    });
+
+    const trail = await store.getAuditTrailByRunId("run-gate-approval-blocked-match-001");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_run-gate-approval-blocked-match-001_req-1",
+      decision_id: "gate_decision_run-gate-approval-blocked-match-001_req-1",
+      approver: "qa-reviewer-a"
+    });
+  });
+
   it("backfills v6 gate linkage fields during v7 migration", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
@@ -2046,6 +2147,185 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(trail.audit_records[0]).toMatchObject({
       approval_id: "gate_appr_gate_decision_run-v9-buggy-approved",
       decision_id: "gate_decision_run-v9-buggy-approved"
+    });
+  });
+
+  it("does not backfill blocked v9 audit rows when repairing approval linkage drift", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '9');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        decision_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        decision_id TEXT,
+        approval_id TEXT,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-v9-buggy-mixed",
+      "session-v9-buggy-mixed",
+      "profile-a",
+      "xhs.search",
+      "succeeded",
+      "2026-03-23T13:00:00.000Z",
+      "2026-03-23T13:00:01.000Z",
+      null,
+      "2026-03-23T13:00:00.000Z",
+      "2026-03-23T13:00:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_approvals(
+        approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "gate_appr_gate_decision_run-v9-buggy-mixed",
+      "run-v9-buggy-mixed",
+      "gate_decision_run-v9-buggy-mixed",
+      1,
+      "qa-reviewer",
+      "2026-03-23T13:00:10.000Z",
+      JSON.stringify({
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }),
+      "2026-03-23T13:00:10.000Z",
+      "2026-03-23T13:00:10.000Z"
+    );
+    const insertAudit = db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, decision_id, approval_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+        action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertAudit.run(
+      "evt-v9-buggy-mixed-allowed",
+      "gate_decision_run-v9-buggy-mixed",
+      "gate_appr_run-v9-buggy-mixed",
+      "run-v9-buggy-mixed",
+      "session-v9-buggy-mixed",
+      "profile-a",
+      "issue_209",
+      "allowed",
+      "allowed",
+      "manual_approval",
+      "www.xiaohongshu.com",
+      18,
+      "search_result_tab",
+      "read",
+      "live_read_high_risk",
+      "live_read_high_risk",
+      "allowed",
+      JSON.stringify(["LIVE_MODE_APPROVED"]),
+      "qa-reviewer",
+      "2026-03-23T13:00:10.000Z",
+      "2026-03-23T13:00:11.000Z",
+      "2026-03-23T13:00:11.000Z"
+    );
+    insertAudit.run(
+      "evt-v9-buggy-mixed-blocked",
+      "gate_decision_run-v9-buggy-mixed",
+      "gate_appr_run-v9-buggy-mixed",
+      "run-v9-buggy-mixed",
+      "session-v9-buggy-mixed",
+      "profile-a",
+      "issue_209",
+      "allowed",
+      "limited",
+      "risk_signal_detected",
+      "www.xiaohongshu.com",
+      18,
+      "search_result_tab",
+      "read",
+      "live_read_high_risk",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["MANUAL_CONFIRMATION_MISSING"]),
+      "qa-reviewer",
+      "2026-03-23T13:00:10.000Z",
+      "2026-03-23T13:00:12.000Z",
+      "2026-03-23T13:00:12.000Z"
+    );
+    db.close();
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    const trail = await store.getAuditTrailByRunId("run-v9-buggy-mixed");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_gate_decision_run-v9-buggy-mixed",
+      decision_id: "gate_decision_run-v9-buggy-mixed"
+    });
+    expect(trail.audit_records[0]).toMatchObject({
+      event_id: "evt-v9-buggy-mixed-blocked",
+      approval_id: "gate_appr_run-v9-buggy-mixed",
+      effective_execution_mode: "dry_run",
+      gate_decision: "blocked"
+    });
+    expect(trail.audit_records[1]).toMatchObject({
+      event_id: "evt-v9-buggy-mixed-allowed",
+      approval_id: "gate_appr_gate_decision_run-v9-buggy-mixed",
+      effective_execution_mode: "live_read_high_risk",
+      gate_decision: "allowed"
     });
   });
 

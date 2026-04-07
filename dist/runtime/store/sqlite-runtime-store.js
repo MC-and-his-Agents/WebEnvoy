@@ -4,6 +4,13 @@ import path from "node:path";
 import { initializeRuntimeStoreSchema } from "./sqlite-runtime-store-schema.js";
 import { mapGateApprovalRecordRow, mapGateAuditRecordRow } from "./sqlite-runtime-store-helpers.js";
 import { assertAppendRunEventInput, assertGateApprovalInput, assertGateAuditRecordInput, assertListGateAuditInput, assertUpsertRunInput } from "./sqlite-runtime-store-validation.js";
+const LIVE_APPROVAL_EXECUTION_MODES = new Set([
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
+const isAllowedLiveAuditRecord = (record) => record.gate_decision === "allowed" &&
+    LIVE_APPROVAL_EXECUTION_MODES.has(record.effective_execution_mode);
 export class RuntimeStoreError extends Error {
     code;
     constructor(code, message, options) {
@@ -316,6 +323,9 @@ export class SQLiteRuntimeStore {
         const auditRecords = this.#listGateAuditRecords({ runId });
         const latestApprovedRecord = auditRecords
             .map((record) => {
+            if (!isAllowedLiveAuditRecord(record)) {
+                return null;
+            }
             if (typeof record.decision_id !== "string" ||
                 record.decision_id.length === 0 ||
                 typeof record.approval_id !== "string" ||
