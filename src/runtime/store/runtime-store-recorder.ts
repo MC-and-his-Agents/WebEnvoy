@@ -62,6 +62,13 @@ const hasRealApprovalRecord = (approvalRecord: JsonObject | null): boolean => {
   return checkValues.length > 0 && checkValues.every((value) => value === true);
 };
 
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+
+const requiresApprovalIdForAudit = (input: AppendGateAuditRecordInput): boolean =>
+  input.gateDecision === "allowed" &&
+  (LIVE_EXECUTION_MODES.has(input.requestedExecutionMode) ||
+    LIVE_EXECUTION_MODES.has(input.effectiveExecutionMode));
+
 const buildEvent = (
   context: RuntimeContext,
   input: Omit<AppendRunEventInput, "runId" | "eventTime">
@@ -292,13 +299,29 @@ export class RuntimeStoreRecorder {
   }
 
   async #recordGateArtifacts(source: JsonObject): Promise<void> {
+    let persistedApprovalId: string | null = null;
+    let persistedDecisionId: string | null = null;
     const approvalInput = extractGateApprovalInput(source);
     if (approvalInput && this.#store.upsertGateApproval) {
-      await this.#store.upsertGateApproval(approvalInput);
+      const persistedApproval = asObject(await this.#store.upsertGateApproval(approvalInput));
+      persistedApprovalId = asString(persistedApproval?.approval_id);
+      persistedDecisionId = asString(persistedApproval?.decision_id);
     }
 
     const auditInput = extractGateAuditRecordInput(source);
     if (auditInput && this.#store.appendGateAuditRecord) {
+      if (persistedApprovalId) {
+        auditInput.approvalId = persistedApprovalId;
+      }
+      if (persistedDecisionId) {
+        auditInput.decisionId = persistedDecisionId;
+      }
+      if (requiresApprovalIdForAudit(auditInput) && !auditInput.approvalId) {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_INVALID_INPUT",
+          "approval_id is required for allowed live audit records"
+        );
+      }
       await this.#store.appendGateAuditRecord(auditInput);
     }
   }

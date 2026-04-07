@@ -418,6 +418,50 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(approval.decision_id).toBe("gate_decision_run-gate-conflict-approval-001_req-2");
   });
 
+  it("rejects allowed live audit records that omit approval_id", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-live-audit-missing-approval-001",
+      sessionId: "session-gate-live-audit-missing-approval-1",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:01.000Z",
+      errorCode: null
+    });
+
+    await expect(
+      store.appendAuditRecord({
+        eventId: "gate_evt_run-gate-live-audit-missing-approval-001",
+        decisionId: "gate_decision_run-gate-live-audit-missing-approval-001_req-1",
+        approvalId: null,
+        runId: "run-gate-live-audit-missing-approval-001",
+        sessionId: "session-gate-live-audit-missing-approval-1",
+        profile: "profile-a",
+        issueScope: "issue_209",
+        riskState: "allowed",
+        nextState: "allowed",
+        transitionTrigger: "manual_approval",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 12,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: "qa-reviewer",
+        approvedAt: "2026-03-23T10:00:10.000Z",
+        recordedAt: "2026-03-23T10:00:11.000Z"
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
   it("keeps separate approval records for multiple decisions in the same run", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));

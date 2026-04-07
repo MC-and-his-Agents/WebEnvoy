@@ -119,6 +119,13 @@ export const assertGateAuditRecordInput = (input, helpers) => {
     if (!GATE_EXECUTION_MODES.has(input.effectiveExecutionMode)) {
         helpers.invalidInput("invalid effective_execution_mode");
     }
+    const allowedLiveExecution = input.gateDecision === "allowed" &&
+        (input.effectiveExecutionMode === "live_read_limited" ||
+            input.effectiveExecutionMode === "live_read_high_risk" ||
+            input.effectiveExecutionMode === "live_write");
+    if (allowedLiveExecution && input.approvalId === null) {
+        helpers.invalidInput("approval_id is required for allowed live audit records");
+    }
     if (!GATE_DECISIONS.has(input.gateDecision)) {
         helpers.invalidInput("invalid gate_decision");
     }
