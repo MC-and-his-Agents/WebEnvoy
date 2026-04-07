@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -130,9 +130,30 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
 
 let cliContractRuntimeBuilt = false;
 const runtimeBuildRepoKey = createHash("sha1").update(repoRoot).digest("hex").slice(0, 12);
+const resolveRuntimeBuildFingerprint = (): string => {
+  const hash = createHash("sha1");
+  const visit = (targetPath: string): void => {
+    const stats = statSync(targetPath);
+    if (stats.isDirectory()) {
+      for (const entry of readdirSync(targetPath).sort()) {
+        visit(path.join(targetPath, entry));
+      }
+      return;
+    }
+    hash.update(targetPath.replace(repoRoot, ""));
+    hash.update(String(stats.mtimeMs));
+    hash.update(String(stats.size));
+  };
+
+  visit(path.join(repoRoot, "src"));
+  visit(path.join(repoRoot, "bin", "webenvoy"));
+  visit(path.join(repoRoot, "tsconfig.json"));
+  visit(path.join(repoRoot, "package.json"));
+  return hash.digest("hex").slice(0, 12);
+};
 const runtimeBuildSession =
   process.env.WEBENVOY_CLI_CONTRACT_BUILD_SESSION ??
-  `ppid-${String(process.ppid)}`;
+  `src-${resolveRuntimeBuildFingerprint()}`;
 const runtimeBuildLockRoot = path.join(
   tmpdir(),
   "webenvoy-cli-contract-runtime-build",
