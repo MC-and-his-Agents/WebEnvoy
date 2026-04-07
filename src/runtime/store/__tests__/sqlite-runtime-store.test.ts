@@ -1296,6 +1296,292 @@ describeWithSqlite("sqlite-runtime-store", () => {
     });
   });
 
+  it("normalizes legacy run-scoped approval_id in both approval and audit records during migration", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '6');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-v6-legacy-approved",
+      "session-v6-legacy-approved",
+      "profile-a",
+      "xhs.search",
+      "succeeded",
+      "2026-03-23T12:00:00.000Z",
+      "2026-03-23T12:00:01.000Z",
+      null,
+      "2026-03-23T12:00:00.000Z",
+      "2026-03-23T12:00:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_approvals(
+        approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "gate_appr_run-v6-legacy-approved",
+      "run-v6-legacy-approved",
+      1,
+      "qa-reviewer",
+      "2026-03-23T12:00:10.000Z",
+      JSON.stringify({
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }),
+      "2026-03-23T12:00:10.000Z",
+      "2026-03-23T12:00:10.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+        action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-v6-legacy-approved",
+      "run-v6-legacy-approved",
+      "session-v6-legacy-approved",
+      "profile-a",
+      "issue_208",
+      "allowed",
+      "allowed",
+      "manual_approval",
+      "creator.xiaohongshu.com",
+      18,
+      "creator_publish_tab",
+      "write",
+      "live_write",
+      "live_write",
+      "allowed",
+      JSON.stringify(["LIVE_MODE_APPROVED"]),
+      "qa-reviewer",
+      "2026-03-23T12:00:10.000Z",
+      "2026-03-23T12:00:11.000Z",
+      "2026-03-23T12:00:11.000Z"
+    );
+    db.close();
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    const trail = await store.getAuditTrailByRunId("run-v6-legacy-approved");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_gate_decision_run-v6-legacy-approved",
+      decision_id: "gate_decision_run-v6-legacy-approved"
+    });
+    expect(trail.audit_records[0]).toMatchObject({
+      approval_id: "gate_appr_gate_decision_run-v6-legacy-approved",
+      decision_id: "gate_decision_run-v6-legacy-approved"
+    });
+  });
+
+  it("repairs buggy v9 audit linkage drift on reopen", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '9');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        decision_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        decision_id TEXT,
+        approval_id TEXT,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-v9-buggy-approved",
+      "session-v9-buggy-approved",
+      "profile-a",
+      "xhs.search",
+      "succeeded",
+      "2026-03-23T13:00:00.000Z",
+      "2026-03-23T13:00:01.000Z",
+      null,
+      "2026-03-23T13:00:00.000Z",
+      "2026-03-23T13:00:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_approvals(
+        approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "gate_appr_gate_decision_run-v9-buggy-approved",
+      "run-v9-buggy-approved",
+      "gate_decision_run-v9-buggy-approved",
+      1,
+      "qa-reviewer",
+      "2026-03-23T13:00:10.000Z",
+      JSON.stringify({
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }),
+      "2026-03-23T13:00:10.000Z",
+      "2026-03-23T13:00:10.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, decision_id, approval_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+        action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-v9-buggy-approved",
+      "gate_decision_run-v9-buggy-approved",
+      "gate_appr_run-v9-buggy-approved",
+      "run-v9-buggy-approved",
+      "session-v9-buggy-approved",
+      "profile-a",
+      "issue_208",
+      "allowed",
+      "allowed",
+      "manual_approval",
+      "creator.xiaohongshu.com",
+      18,
+      "creator_publish_tab",
+      "write",
+      "live_write",
+      "live_write",
+      "allowed",
+      JSON.stringify(["LIVE_MODE_APPROVED"]),
+      "qa-reviewer",
+      "2026-03-23T13:00:10.000Z",
+      "2026-03-23T13:00:11.000Z",
+      "2026-03-23T13:00:11.000Z"
+    );
+    db.close();
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    const trail = await store.getAuditTrailByRunId("run-v9-buggy-approved");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_gate_decision_run-v9-buggy-approved",
+      decision_id: "gate_decision_run-v9-buggy-approved"
+    });
+    expect(trail.audit_records[0]).toMatchObject({
+      approval_id: "gate_appr_gate_decision_run-v9-buggy-approved",
+      decision_id: "gate_decision_run-v9-buggy-approved"
+    });
+  });
+
   it("backfills issue_scope conservatively when migrating v4 gate audit records", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);

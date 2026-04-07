@@ -3,7 +3,7 @@ import { BackgroundRelay as ExtractedBackgroundRelay } from "./background-relay.
 import { BackgroundRuntimeTrustState } from "./background-runtime-trust-state.js";
 import { NativeBridgePendingForwardState } from "./native-bridge-pending-forward-state.js";
 import { NativeBridgeRecoveryState } from "./native-bridge-recovery-state.js";
-import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
+import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, isApprovalRecordComplete, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, collectXhsCommandGateReasons, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 const defaultForwardTimeoutMs = 3_000;
@@ -433,8 +433,9 @@ const createRelayXhsGatePayload = (input) => {
     const runId = String(input.request.params.run_id ?? input.request.id);
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
-    const decisionId = `gate_decision_${runId}_${input.request.id}`;
-    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
+    const decisionId = input.approvalRecord.decision_id ?? `gate_decision_${runId}_${input.request.id}`;
+    const approvalId = input.approvalRecord.approval_id ??
+        (isApprovalRecordComplete(input.approvalRecord) ? `gate_appr_${decisionId}` : null);
     const approvalRecord = {
         ...input.approvalRecord,
         approval_id: approvalId,
@@ -519,8 +520,9 @@ const createBackgroundXhsGatePayload = (input) => {
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
     const recordedAt = new Date().toISOString();
-    const decisionId = `gate_decision_${runId}_${input.request.id}`;
-    const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
+    const decisionId = input.approvalRecord.decision_id ?? `gate_decision_${runId}_${input.request.id}`;
+    const approvalId = input.approvalRecord.approval_id ??
+        (isApprovalRecordComplete(input.approvalRecord) ? `gate_appr_${decisionId}` : null);
     const approvalRecord = {
         ...input.approvalRecord,
         approval_id: approvalId,

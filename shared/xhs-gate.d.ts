@@ -10,7 +10,7 @@ import type {
 } from "./risk-state.js";
 
 export interface XhsApprovalRecord {
-  approval_id: string;
+  approval_id: string | null;
   decision_id: string;
   approved: boolean;
   approver: string | null;

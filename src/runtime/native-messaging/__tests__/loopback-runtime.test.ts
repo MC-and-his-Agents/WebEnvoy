@@ -117,4 +117,66 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
   });
+
+  it("keeps approval_id null in blocked loopback gate bundles without approval", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-loopback-no-approval-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 33,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "paused"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toMatchObject({
+      approval_record: {
+        approval_id: null
+      },
+      audit_record: {
+        approval_id: null
+      }
+    });
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
+          )
+        }),
+        approval_record: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
+          )
+        }),
+        audit_record: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
+          )
+        })
+      })
+    );
+  });
 });

@@ -15,6 +15,7 @@ import {
   buildRiskTransitionAudit,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
+  isApprovalRecordComplete,
   getWriteActionMatrixDecisions,
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState,
@@ -807,8 +808,10 @@ const createRelayXhsGatePayload = (input: {
   const runId = String(input.request.params.run_id ?? input.request.id);
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
-  const decisionId = `gate_decision_${runId}_${input.request.id}`;
-  const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
+  const decisionId = input.approvalRecord.decision_id ?? `gate_decision_${runId}_${input.request.id}`;
+  const approvalId =
+    input.approvalRecord.approval_id ??
+    (isApprovalRecordComplete(input.approvalRecord) ? `gate_appr_${decisionId}` : null);
   const approvalRecord = {
     ...input.approvalRecord,
     approval_id: approvalId,
@@ -918,8 +921,10 @@ const createBackgroundXhsGatePayload = (input: {
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
   const recordedAt = new Date().toISOString();
-  const decisionId = `gate_decision_${runId}_${input.request.id}`;
-  const approvalId = input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`;
+  const decisionId = input.approvalRecord.decision_id ?? `gate_decision_${runId}_${input.request.id}`;
+  const approvalId =
+    input.approvalRecord.approval_id ??
+    (isApprovalRecordComplete(input.approvalRecord) ? `gate_appr_${decisionId}` : null);
   const approvalRecord = {
     ...input.approvalRecord,
     approval_id: approvalId,

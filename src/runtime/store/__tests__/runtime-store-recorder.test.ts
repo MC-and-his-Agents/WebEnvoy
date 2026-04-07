@@ -132,4 +132,73 @@ describe("runtime-store-recorder", () => {
       })
     );
   });
+
+  it("does not persist synthetic approval rows for gate results without real approval", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const upsertGateApproval = vi.fn().mockResolvedValue(undefined);
+    const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
+      upsertRun,
+      appendRunEvent,
+      upsertGateApproval,
+      appendGateAuditRecord,
+      close
+    });
+
+    await recorder.recordFailure(
+      { ...baseContext, command: "xhs.search" },
+      new CliError("ERR_EXECUTION_FAILED", "blocked", {
+        details: {
+          run_id: "run-recorder-002",
+          gate_outcome: {
+            decision_id: "gate_decision_run-recorder-002_req-1"
+          },
+          approval_record: {
+            approval_id: null,
+            decision_id: "gate_decision_run-recorder-002_req-1",
+            approved: false,
+            approver: null,
+            approved_at: null,
+            checks: {
+              target_domain_confirmed: false
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_gate_decision_run-recorder-002_req-1",
+            decision_id: "gate_decision_run-recorder-002_req-1",
+            approval_id: null,
+            run_id: "run-recorder-002",
+            session_id: "session-recorder-002",
+            profile: "default",
+            issue_scope: "issue_209",
+            risk_state: "paused",
+            next_state: "paused",
+            transition_trigger: "gate_evaluation",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 9,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "dry_run",
+            gate_decision: "blocked",
+            gate_reasons: ["LIVE_READ_HIGH_RISK_BLOCKED"],
+            approver: null,
+            approved_at: null,
+            recorded_at: "2026-03-23T10:00:11.000Z"
+          }
+        }
+      })
+    );
+
+    expect(upsertGateApproval).not.toHaveBeenCalled();
+    expect(appendGateAuditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "gate_evt_gate_decision_run-recorder-002_req-1",
+        approvalId: null,
+        decisionId: "gate_decision_run-recorder-002_req-1"
+      })
+    );
+  });
 });

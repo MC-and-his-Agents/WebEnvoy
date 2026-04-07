@@ -143,7 +143,7 @@ export interface XhsSearchGate {
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
   approval_record: {
-    approval_id: string;
+    approval_id: string | null;
     decision_id: string;
     approved: boolean;
     approver: string | null;

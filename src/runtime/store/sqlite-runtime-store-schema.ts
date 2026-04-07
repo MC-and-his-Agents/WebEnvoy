@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 interface InitializeRuntimeStoreSchemaInput {
   db: DatabaseSync;
@@ -320,6 +320,36 @@ const migrateV8ToV9 = (db: DatabaseSync): void => {
     PRAGMA foreign_keys = ON;
   `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
+    "9"
+  );
+};
+
+const migrateV9ToV10 = (db: DatabaseSync): void => {
+  db.exec(`
+    UPDATE runtime_gate_audit_records
+    SET approval_id = (
+      SELECT runtime_gate_approvals.approval_id
+      FROM runtime_gate_approvals
+      WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+    )
+    WHERE decision_id IS NOT NULL
+      AND decision_id != ''
+      AND EXISTS (
+        SELECT 1
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+      )
+      AND (
+        approval_id IS NULL
+        OR approval_id = ''
+        OR approval_id != (
+          SELECT runtime_gate_approvals.approval_id
+          FROM runtime_gate_approvals
+          WHERE runtime_gate_approvals.decision_id = runtime_gate_audit_records.decision_id
+        )
+      );
+  `);
+  db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
     String(SCHEMA_VERSION)
   );
 };
@@ -459,6 +489,11 @@ export const initializeRuntimeStoreSchema = ({
     if (currentVersion === 8) {
       migrateV8ToV9(db);
       currentVersion = 9;
+      continue;
+    }
+    if (currentVersion === 9) {
+      migrateV9ToV10(db);
+      currentVersion = 10;
       continue;
     }
     break;

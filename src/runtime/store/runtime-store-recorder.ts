@@ -48,6 +48,20 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const hasRealApprovalRecord = (approvalRecord: JsonObject | null): boolean => {
+  if (!approvalRecord || !asBoolean(approvalRecord.approved)) {
+    return false;
+  }
+
+  if (!asString(approvalRecord.approver) || !asString(approvalRecord.approved_at)) {
+    return false;
+  }
+
+  const checksObject = asObject(approvalRecord.checks) ?? {};
+  const checkValues = Object.values(checksObject);
+  return checkValues.length > 0 && checkValues.every((value) => value === true);
+};
+
 const buildEvent = (
   context: RuntimeContext,
   input: Omit<AppendRunEventInput, "runId" | "eventTime">
@@ -69,7 +83,7 @@ const extractGateApprovalInput = (
   source: JsonObject
 ): UpsertGateApprovalInput | null => {
   const approvalRecord = asObject(source.approval_record);
-  if (!approvalRecord) {
+  if (!approvalRecord || !hasRealApprovalRecord(approvalRecord)) {
     return null;
   }
 
@@ -85,17 +99,20 @@ const extractGateApprovalInput = (
     asString(approvalRecord.decision_id) ??
     asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
     `gate_decision_${runId}`;
+  const approvalId = asString(approvalRecord.approval_id);
+  if (!approvalId) {
+    return null;
+  }
 
-  const checksObject = asObject(approvalRecord.checks) ?? {};
   return {
-    approvalId: asString(approvalRecord.approval_id) ?? `gate_appr_${decisionId}`,
+    approvalId,
     runId,
     decisionId,
     approved: asBoolean(approvalRecord.approved),
     approver: asString(approvalRecord.approver),
     approvedAt: asString(approvalRecord.approved_at),
     checks: Object.fromEntries(
-      Object.entries(checksObject).map(([key, value]) => [key, asBoolean(value)])
+      Object.entries(asObject(approvalRecord.checks) ?? {}).map(([key, value]) => [key, asBoolean(value)])
     )
   };
 };
@@ -185,10 +202,7 @@ const extractGateAuditRecordInput = (
   const approvalId =
     asString(auditRecord.approval_id) ??
     asString((asObject(source.approval_record) ?? {}).approval_id) ??
-    (decisionId &&
-    (asObject(source.approval_record) || asString(auditRecord.approver) || asString(auditRecord.approved_at))
-      ? `gate_appr_${decisionId}`
-      : null);
+    null;
   const recordedAt = asString(auditRecord.recorded_at);
   const gateReasons = Array.isArray(auditRecord.gate_reasons)
     ? auditRecord.gate_reasons.filter(

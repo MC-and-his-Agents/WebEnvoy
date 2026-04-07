@@ -82,7 +82,14 @@ const deriveApprovalId = (input, decisionId) => {
     return recordApprovalId;
   }
 
-  return `gate_appr_${decisionId}`;
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const hasRealApproval =
+    approvalRecord.approved &&
+    approvalRecord.approver &&
+    approvalRecord.approved_at &&
+    XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
+
+  return hasRealApproval ? `gate_appr_${decisionId}` : null;
 };
 
 const pushReason = (target, reason) => {

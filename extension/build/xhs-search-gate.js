@@ -16,7 +16,6 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const buildGateDecisionId = (context) => context.requestId
     ? `gate_decision_${context.runId}_${context.requestId}`
     : `gate_decision_${context.runId}`;
-const buildGateApprovalId = (decisionId) => `gate_appr_${decisionId}`;
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
@@ -41,7 +40,10 @@ export const resolveActualTargetGateReasons = (options) => {
     return gateReasons;
 };
 export const resolveGate = (options, context) => {
-    const decisionId = buildGateDecisionId(context);
+    const providedApprovalRecord = (options.approval_record ?? options.approval);
+    const approvalRecord = asRecord(providedApprovalRecord);
+    const decisionId = asNonEmptyString(approvalRecord?.decision_id) ?? buildGateDecisionId(context);
+    const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
     return evaluateXhsGate({
         issueScope: options.issue_scope,
         riskState: options.risk_state,
@@ -55,9 +57,9 @@ export const resolveGate = (options, context) => {
         actionType: options.action_type,
         abilityAction: options.ability_action,
         requestedExecutionMode: options.requested_execution_mode,
-        approvalRecord: options.approval_record ?? options.approval,
+        approvalRecord: providedApprovalRecord,
         decisionId,
-        approvalId: buildGateApprovalId(decisionId),
+        approvalId,
         issue208EditorInputValidation: isIssue208EditorInputValidation(options),
         treatMissingEditorValidationAsUnsupported: true
     });

@@ -110,7 +110,7 @@ export class InMemoryBackgroundRelay {
         const gate = buildLoopbackGate(options, asString(ability.action), {
           runId,
           decisionId,
-          approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${decisionId}`
+          approvalId: asString(approvalRecord?.approval_id) ?? undefined
         });
         const auditRecord = buildLoopbackAuditRecord({
           runId,
