@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,7 +26,7 @@ const repoOwnedNativeHostEntryPath = path.join(
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
-type DatabaseSyncCtor = new (filePath: string) => {
+export type DatabaseSyncCtor = new (filePath: string) => {
   prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
   close: () => void;
 };
@@ -126,11 +128,141 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   )
 });
 
+let cliContractRuntimeBuilt = false;
+const runtimeBuildRepoKey = createHash("sha1").update(repoRoot).digest("hex").slice(0, 12);
+const resolveRuntimeBuildFingerprint = (): string => {
+  const hash = createHash("sha1");
+  const visit = (targetPath: string): void => {
+    const stats = statSync(targetPath);
+    if (stats.isDirectory()) {
+      for (const entry of readdirSync(targetPath).sort()) {
+        visit(path.join(targetPath, entry));
+      }
+      return;
+    }
+    hash.update(targetPath.replace(repoRoot, ""));
+    hash.update(String(stats.mtimeMs));
+    hash.update(String(stats.size));
+  };
+
+  visit(path.join(repoRoot, "src"));
+  visit(path.join(repoRoot, "bin", "webenvoy"));
+  visit(path.join(repoRoot, "tsconfig.json"));
+  visit(path.join(repoRoot, "package.json"));
+  return hash.digest("hex").slice(0, 12);
+};
+const runtimeBuildSession =
+  process.env.WEBENVOY_CLI_CONTRACT_BUILD_SESSION ??
+  `src-${resolveRuntimeBuildFingerprint()}`;
+const runtimeBuildLockRoot = path.join(
+  tmpdir(),
+  "webenvoy-cli-contract-runtime-build",
+  runtimeBuildRepoKey,
+  runtimeBuildSession
+);
+const runtimeBuildLockDir = path.join(runtimeBuildLockRoot, "lock");
+const runtimeBuildSuccessMarker = path.join(runtimeBuildLockRoot, "success");
+const runtimeBuildFailureMarker = path.join(runtimeBuildLockRoot, "failure");
+
+const sleep = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+const waitForRuntimeBuildRelease = (): void => {
+  const deadline = Date.now() + 60_000;
+  while (existsSync(runtimeBuildLockDir)) {
+    if (Date.now() >= deadline) {
+      throw new Error("timed out waiting for CLI runtime build lock");
+    }
+    sleep(100);
+  }
+
+  if (existsSync(runtimeBuildSuccessMarker)) {
+    cliContractRuntimeBuilt = true;
+    return;
+  }
+
+  if (existsSync(runtimeBuildFailureMarker)) {
+    const failureMessage = readFileSync(runtimeBuildFailureMarker, "utf8").trim();
+    throw new Error(failureMessage || "CLI runtime build failed in another suite worker");
+  }
+
+  throw new Error("CLI runtime build lock released without success marker");
+};
+
+const ensureFreshCliContractRuntimeBuild = (): void => {
+  if (process.env.WEBENVOY_CLI_CONTRACT_RUNTIME_PREBUILT === "1") {
+    cliContractRuntimeBuilt = true;
+  }
+
+  if (cliContractRuntimeBuilt) {
+    return;
+  }
+
+  mkdirSync(runtimeBuildLockRoot, { recursive: true });
+
+  try {
+    mkdirSync(runtimeBuildLockDir);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "EEXIST"
+    ) {
+      waitForRuntimeBuildRelease();
+      return;
+    }
+    throw error;
+  }
+
+  try {
+    if (!existsSync(runtimeBuildSuccessMarker)) {
+      const buildResult = spawnSync("npm", ["run", "build:runtime"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env
+        }
+      });
+
+      if (buildResult.status !== 0) {
+        writeFileSync(
+          runtimeBuildFailureMarker,
+          [
+            "failed to rebuild CLI runtime before contract suite",
+            `status=${String(buildResult.status)}`,
+            `error=${buildResult.error instanceof Error ? buildResult.error.message : ""}`,
+            `stdout=${buildResult.stdout ?? ""}`,
+            `stderr=${buildResult.stderr ?? ""}`
+          ].join(": "),
+          "utf8"
+        );
+        throw new Error(
+          [
+            "failed to rebuild CLI runtime before contract suite",
+            `status=${String(buildResult.status)}`,
+            `error=${buildResult.error instanceof Error ? buildResult.error.message : ""}`,
+            `stdout=${buildResult.stdout ?? ""}`,
+            `stderr=${buildResult.stderr ?? ""}`
+          ].join(": ")
+        );
+      }
+
+      writeFileSync(runtimeBuildSuccessMarker, `${Date.now()}\n`, "utf8");
+    }
+
+    cliContractRuntimeBuilt = true;
+  } finally {
+    rmSync(runtimeBuildLockDir, { recursive: true, force: true });
+  }
+}
+
 const runCli = (
   args: string[],
   cwdOrEnv: string | Record<string, string> = repoRoot,
   env?: Record<string, string>
 ) => {
+  ensureFreshCliContractRuntimeBuild();
   const cwd = typeof cwdOrEnv === "string" ? cwdOrEnv : repoRoot;
   const mergedEnv =
     typeof cwdOrEnv === "string"
@@ -297,6 +429,7 @@ const runCliAsync = (
   env?: Record<string, string>
 ): Promise<{ status: number | null; stdout: string; stderr: string }> =>
   new Promise((resolve, reject) => {
+    ensureFreshCliContractRuntimeBuild();
     const child = spawn(process.execPath, [binPath, ...args], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -563,5 +696,71 @@ Object.assign(globalThis as Record<string, unknown>, {
     scopedReadGateOptions
   }
 });
+
+export {
+  spawn,
+  spawnSync,
+  createServer,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  createRequire,
+  tmpdir,
+  path,
+  afterEach,
+  describe,
+  expect,
+  it,
+  buildRuntimeBootstrapContextId,
+  resolveRuntimeStorePath,
+  repoRoot,
+  binPath,
+  mockBrowserPath,
+  nativeHostMockPath,
+  repoOwnedNativeHostEntryPath,
+  browserStateFilename,
+  tempDirs,
+  DatabaseSync,
+  itWithSqlite,
+  resolveDatabaseSync,
+  createRuntimeCwd,
+  createNativeHostManifest,
+  seedInstalledPersistentExtension,
+  defaultRuntimeEnv,
+  runCli,
+  expectBundledNativeHostStarts,
+  createNativeHostCommand,
+  createShellWrappedNativeHostCommand,
+  PROFILE_MODE_ROOT_PREFERRED,
+  quoteLauncherExportValue,
+  resolveCanonicalExpectedProfileDir,
+  expectProfileRootOnlyLauncherContract,
+  expectDualEnvRootPreferredLauncherContract,
+  runGit,
+  createGitWorktreePair,
+  runCliAsync,
+  parseSingleJsonLine,
+  encodeNativeBridgeEnvelope,
+  readSingleNativeBridgeEnvelope,
+  asRecord,
+  resolveCliGateEnvelope,
+  resolveWriteInteractionTier,
+  scopedXhsGateOptions,
+  assertLockMissing,
+  detectSystemChromePath,
+  wait,
+  runHeadlessDomProbe,
+  realBrowserContractsEnabled,
+  BROWSER_STATE_FILENAME,
+  BROWSER_CONTROL_FILENAME,
+  isPidAlive,
+  scopedReadGateOptions
+};
 
 export {};
