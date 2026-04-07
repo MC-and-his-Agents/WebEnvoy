@@ -100,7 +100,7 @@
 - 风险状态的正式归属固定如下：
   - 请求输入真相源：`gate_input.risk_state`
   - 审计真相源：`audit_record.risk_state`
-- `#208` 与 `#209` 必须以 `gate_input`、`gate_outcome`、`approval_record`、`audit_record`、`consumer_gate_result` 作为共同门禁基线；如需扩展，只能通过后续正式 FR / contract 增补，不得为同语义字段回退到 issue 私有解释。
+- `#208` 与 `#209` 在直接消费门禁结论时，必须以 `consumer_gate_result` 的冻结字段作为共同消费者边界；如需引用 `gate_input`、`approval_record`、`audit_record` 中的正式真相源，只能按对应对象的正式归属读取，不得把这些对象改写成并行的共同消费基线，也不得回退到 issue 私有解释。
 
 ### 7. #223 统一状态机与阻断策略归属锚点（规约层）
 
