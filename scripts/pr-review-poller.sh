@@ -257,7 +257,7 @@ main() {
       continue
     fi
 
-    if [[ "${post_review}" != "1" ]] && state_has_matching_head_sha "${state_file}" "${pr_number}" "${head_sha}"; then
+    if [[ "${post_review}" != "1" ]] && [[ "${review_status_reason}" == "review_status_failed" ]] && state_has_matching_head_sha "${state_file}" "${pr_number}" "${head_sha}"; then
       echo "跳过已在本地 --no-post-review 模式审查过同一 HEAD 的 PR #${pr_number}: ${pr_title} (reason=local_state_same_head)"
       if [[ "${dry_run}" != "1" ]]; then
         update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"

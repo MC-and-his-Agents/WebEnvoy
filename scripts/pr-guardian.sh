@@ -3237,11 +3237,14 @@ main() {
 
   if [[ "${should_check_reusable_review}" == "1" ]]; then
     current_user="$(gh api user --jq '.login')"
-    write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
-    if jq -e '.reusable == true' "${review_status_file}" >/dev/null 2>&1; then
-      hydrate_reused_review_result "${review_status_file}"
-      reused_existing_review=1
-      echo "已复用当前 HEAD 的 guardian review。"
+    if write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"; then
+      if jq -e '.reusable == true' "${review_status_file}" >/dev/null 2>&1; then
+        hydrate_reused_review_result "${review_status_file}"
+        reused_existing_review=1
+        echo "已复用当前 HEAD 的 guardian review。"
+      fi
+    else
+      echo "警告: guardian 复用检查失败，已回退到 fresh review。" >&2
     fi
   fi
 

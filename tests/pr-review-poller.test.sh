@@ -74,6 +74,7 @@ setup_case_dir() {
   : > "${MOCK_GH_CALLS_LOG}"
   : > "${MOCK_GUARDIAN_LOG}"
   printf '{\n  "prs": {}\n}\n' > "${STATE_FILE}"
+  unset MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR
   export MOCK_GH_CALLS_LOG MOCK_GUARDIAN_LOG MOCK_GH_OPEN_PRS_JSON MOCK_GUARDIAN_STATUS_DIR STATE_FILE
 
   cat > "${mock_bin}/gh" <<'EOF'
@@ -180,8 +181,8 @@ test_poller_reviews_pr_when_metadata_is_stale() {
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 276"
 }
 
-test_poller_no_post_review_uses_state_as_same_head_throttle() {
-  setup_case_dir "no-post-review-same-head-throttle"
+test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status() {
+  setup_case_dir "no-post-review-remote-stale-wins"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
   export GUARDIAN_SCRIPT
 
@@ -191,8 +192,24 @@ test_poller_no_post_review_uses_state_as_same_head_throttle() {
 
   assert_pass main --state-file "${STATE_FILE}" --no-post-review
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 277"
-  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 277"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 277"
   assert_equal "$(jq -r '.prs["277"].head_sha' "${STATE_FILE}")" "head-sha-277"
+}
+
+test_poller_no_post_review_uses_state_as_same_head_throttle_when_status_query_fails() {
+  setup_case_dir "no-post-review-same-head-throttle-on-status-failure"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+  MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR="285"
+  export MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR
+
+  printf '%s\n' '[{"number":285,"title":"Status failure with local throttle","headRefOid":"head-sha-285","headRefName":"feat/no-post-status-fail","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/285","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"prs":{"285":{"head_sha":"head-sha-285","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+
+  assert_pass main --state-file "${STATE_FILE}" --no-post-review
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 285"
+  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 285"
+  assert_equal "$(jq -r '.prs["285"].head_sha' "${STATE_FILE}")" "head-sha-285"
 }
 
 test_poller_post_review_mode_does_not_use_state_as_truth() {
@@ -260,7 +277,8 @@ main() {
   test_poller_skips_pr_with_fresh_guardian_review
   test_poller_reviews_pr_when_metadata_is_missing
   test_poller_reviews_pr_when_metadata_is_stale
-  test_poller_no_post_review_uses_state_as_same_head_throttle
+  test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
+  test_poller_no_post_review_uses_state_as_same_head_throttle_when_status_query_fails
   test_poller_post_review_mode_does_not_use_state_as_truth
   test_poller_continues_when_review_status_query_fails
   test_poller_preserves_draft_base_branch_and_milestone_filters

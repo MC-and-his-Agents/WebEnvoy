@@ -1376,6 +1376,86 @@ EOF
   assert_file_not_contains "${call_log}" "post_review:274"
 }
 
+test_main_review_with_post_review_falls_back_to_fresh_review_when_status_query_fails() {
+  setup_case_dir "main-review-fallback-after-status-query-failure"
+
+  local call_log="${TMP_DIR}/main.calls.log"
+  export call_log
+
+  (
+    require_cmd() { :; }
+    gh() {
+      if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
+        printf '%s\n' "review-bot"
+        return 0
+      fi
+      echo "unexpected gh call: $*" >&2
+      return 1
+    }
+    check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
+    prepare_pr_workspace() { printf '%s\n' "prepare_pr_workspace:$1" >> "${call_log}"; }
+    assert_required_review_context_available() { printf '%s\n' "assert_required_review_context_available" >> "${call_log}"; }
+    ensure_review_prompt_prepared() { printf '%s\n' "ensure_review_prompt_prepared:$1" >> "${call_log}"; }
+    write_review_status_json() {
+      printf '%s\n' "write_review_status_json:$1:$2" >> "${call_log}"
+      return 42
+    }
+    hydrate_reused_review_result() { printf '%s\n' "hydrate_reused_review_result" >> "${call_log}"; }
+    run_codex_review() { printf '%s\n' "run_codex_review:$1" >> "${call_log}"; }
+    print_summary() { printf '%s\n' "print_summary" >> "${call_log}"; }
+    post_review() { printf '%s\n' "post_review:$1" >> "${call_log}"; }
+    merge_if_safe() { printf '%s\n' "merge_if_safe:$1:$2" >> "${call_log}"; }
+    cleanup() { :; }
+
+    assert_pass main review 274 --post-review
+  )
+
+  assert_file_contains "${call_log}" "write_review_status_json:274:review-bot"
+  assert_file_contains "${call_log}" "run_codex_review:274"
+  assert_file_contains "${call_log}" "post_review:274"
+  assert_file_not_contains "${call_log}" "hydrate_reused_review_result"
+}
+
+test_main_merge_if_safe_falls_back_to_fresh_review_when_status_query_fails() {
+  setup_case_dir "main-merge-if-safe-fallback-after-status-query-failure"
+
+  local call_log="${TMP_DIR}/main.calls.log"
+  export call_log
+
+  (
+    require_cmd() { :; }
+    gh() {
+      if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
+        printf '%s\n' "review-bot"
+        return 0
+      fi
+      echo "unexpected gh call: $*" >&2
+      return 1
+    }
+    check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
+    prepare_pr_workspace() { printf '%s\n' "prepare_pr_workspace:$1" >> "${call_log}"; }
+    assert_required_review_context_available() { printf '%s\n' "assert_required_review_context_available" >> "${call_log}"; }
+    ensure_review_prompt_prepared() { printf '%s\n' "ensure_review_prompt_prepared:$1" >> "${call_log}"; }
+    write_review_status_json() {
+      printf '%s\n' "write_review_status_json:$1:$2" >> "${call_log}"
+      return 42
+    }
+    hydrate_reused_review_result() { printf '%s\n' "hydrate_reused_review_result:$1" >> "${call_log}"; }
+    run_codex_review() { printf '%s\n' "run_codex_review:$1" >> "${call_log}"; }
+    print_summary() { printf '%s\n' "print_summary" >> "${call_log}"; }
+    post_review() { printf '%s\n' "post_review:$1" >> "${call_log}"; }
+    merge_if_safe() { printf '%s\n' "merge_if_safe:$1:$2" >> "${call_log}"; }
+    cleanup() { :; }
+
+    assert_pass main merge-if-safe 274
+  )
+
+  assert_file_contains "${call_log}" "write_review_status_json:274:review-bot"
+  assert_file_contains "${call_log}" "run_codex_review:274"
+  assert_file_contains "${call_log}" "merge_if_safe:274:0"
+  assert_file_not_contains "${call_log}" "hydrate_reused_review_result"
+}
+
 test_fetch_issue_summary_fails_closed_when_issue_lookup_fails() {
   setup_case_dir "run-review-without-issue-summary"
 
