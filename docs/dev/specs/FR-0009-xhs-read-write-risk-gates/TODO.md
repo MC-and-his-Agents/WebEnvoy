@@ -1,6 +1,6 @@
 # FR-0009 TODO（读写路径风险审查与保护门禁）
 
-> 本文件记录 FR-0009 在 `#362` 语境下的 formal closeout 状态；canonical formal-review PR 与 final writeback 会分别记录。当前 PR 只负责收敛正式套件与 review 输入，不提前伪造 `APPROVE`、`formal_closeout = complete` 或 closed issue sync 已完成的事实。
+> 本文件记录 FR-0009 在 `#362` 语境下的 formal closeout 实际状态。`PR #388` 已作为 canonical formal-review PR 合入主干；本次 final writeback 只回写已发生事实，不再改动正式契约语义。
 
 ## Formal Review Repair Snapshot
 
@@ -18,19 +18,19 @@
 
 ## 当前 review 状态
 
-- [ ] `#362` 的 canonical formal-review PR 已在 guardian `APPROVE` 后受控合入主干。
-- [ ] FR-0009 已记录为 `APPROVE`。
-- [ ] FR-0009 已记录为 `formal_closeout = complete`。
+- [x] `#362` 的 canonical formal-review PR（`#388`）已在 guardian `APPROVE` 后受控合入主干，merge commit=`d728024f0f3df7060f70ff83dd68101c4991f9c6`。
+- [x] FR-0009 已记录为 `APPROVE`。
+- [x] FR-0009 已记录为 `formal_closeout = complete`。
 
-## 进入实现前必须完成
+## 已完成的实现前收口项
 
-- [ ] 完成 FR-0009 spec review 并清零阻断意见。
-- [ ] 在 `#208` 的 issue 线程中写入“FR-0009 已冻结其后续 live / replay / 恢复讨论需要引用的条件与禁止动作边界”的 sync comment。
-- [ ] 在 `#209` 的历史 issue 中写入“后续高风险 live 扩展需引用 FR-0009 治理基线”的 sync comment。
-- [ ] 在 `#201` 的历史 issue 中补充“风险门禁前置已冻结，可作为历史 exit review 的补充输入”的 sync comment。
-- [ ] 明确人工确认流程中的责任人、审批记录载体与审计留痕方式。
-- [ ] 明确 dry-run/侦察模式的默认启用策略和切换条件。
-- [ ] 将 FR-0009 gap 清单同步给 `#201/#208/#209` 作为统一治理口径输入。
+- [x] 完成 FR-0009 spec review 并清零阻断意见。
+- [x] 在 `#208` 的 issue 线程中写入“FR-0009 已冻结其后续 live / replay / 恢复讨论需要引用的条件与禁止动作边界”的 sync comment。
+- [x] 在 `#209` 的历史 issue 中写入“后续高风险 live 扩展需引用 FR-0009 治理基线”的 sync comment。
+- [x] 在 `#201` 的历史 issue 中补充“风险门禁前置已冻结，可作为历史 exit review 的补充输入”的 sync comment。
+- [x] 明确人工确认流程中的责任人、审批记录载体与审计留痕方式。
+- [x] 明确 dry-run/侦察模式的默认启用策略和切换条件。
+- [x] 将 FR-0009 gap 清单同步给 `#201/#208/#209` 作为统一治理口径输入。
 
 ## Formal Review 现状依据
 
@@ -38,7 +38,7 @@
 - `#213` 仍保留为当前 formal 套件与下游 Sprint 2/3 套件继续引用的 upstream issue；若后续要统一迁移到 `#215`，需在 dedicated follow-up 中先同步下游套件再切换 canonical anchor。
 - `#201` 在本轮作为历史消费者引用；`#208/#209` 在本轮作为 issue 线程与后续 formal 套件的治理基线引用方；sync comment 只补统一口径，不借此改写其他 FR 已冻结的关闭语义。
 - `FR-0009` 本轮只收 formal spec，不进入实现代码，也不以 live evidence 作为关闭依据。
-- final writeback 必须在 canonical formal-review PR 合入后，依据 latest guardian `APPROVE`、GitHub checks 全绿与受控 merge 结果回写。
+- final writeback 已在 `PR #388` 合入、latest guardian `APPROVE`、GitHub checks 全绿、以及 `#201/#208/#209/#215` sync comment 落地后完成回写。
 
 ## Spec 通过后的实施清单（后续事项）
 
