@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -128,9 +128,11 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
 });
 
 let cliContractRuntimeBuilt = false;
-const runtimeBuildLockRoot = path.join(repoRoot, ".tmp", "cli-contract-runtime-build");
+const runtimeBuildSession = process.env.WEBENVOY_CLI_CONTRACT_BUILD_SESSION ?? "manual";
+const runtimeBuildLockRoot = path.join(repoRoot, ".tmp", "cli-contract-runtime-build", runtimeBuildSession);
 const runtimeBuildLockDir = path.join(runtimeBuildLockRoot, "lock");
-const runtimeBuildDoneMarker = path.join(runtimeBuildLockRoot, "done");
+const runtimeBuildSuccessMarker = path.join(runtimeBuildLockRoot, "success");
+const runtimeBuildFailureMarker = path.join(runtimeBuildLockRoot, "failure");
 
 const sleep = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -139,15 +141,23 @@ const sleep = (ms: number): void => {
 const waitForRuntimeBuildRelease = (): void => {
   const deadline = Date.now() + 60_000;
   while (existsSync(runtimeBuildLockDir)) {
-    if (!existsSync(runtimeBuildLockDir) && existsSync(runtimeBuildDoneMarker)) {
-      cliContractRuntimeBuilt = true;
-      return;
-    }
     if (Date.now() >= deadline) {
       throw new Error("timed out waiting for CLI runtime build lock");
     }
     sleep(100);
   }
+
+  if (existsSync(runtimeBuildSuccessMarker)) {
+    cliContractRuntimeBuilt = true;
+    return;
+  }
+
+  if (existsSync(runtimeBuildFailureMarker)) {
+    const failureMessage = readFileSync(runtimeBuildFailureMarker, "utf8").trim();
+    throw new Error(failureMessage || "CLI runtime build failed in another suite worker");
+  }
+
+  throw new Error("CLI runtime build lock released without success marker");
 };
 
 const ensureFreshCliContractRuntimeBuild = (): void => {
@@ -176,7 +186,7 @@ const ensureFreshCliContractRuntimeBuild = (): void => {
   }
 
   try {
-    if (!existsSync(runtimeBuildDoneMarker)) {
+    if (!existsSync(runtimeBuildSuccessMarker)) {
       const buildResult = spawnSync("npm", ["run", "build:runtime"], {
         cwd: repoRoot,
         encoding: "utf8",
@@ -186,6 +196,17 @@ const ensureFreshCliContractRuntimeBuild = (): void => {
       });
 
       if (buildResult.status !== 0) {
+        writeFileSync(
+          runtimeBuildFailureMarker,
+          [
+            "failed to rebuild CLI runtime before contract suite",
+            `status=${String(buildResult.status)}`,
+            `error=${buildResult.error instanceof Error ? buildResult.error.message : ""}`,
+            `stdout=${buildResult.stdout ?? ""}`,
+            `stderr=${buildResult.stderr ?? ""}`
+          ].join(": "),
+          "utf8"
+        );
         throw new Error(
           [
             "failed to rebuild CLI runtime before contract suite",
@@ -197,7 +218,7 @@ const ensureFreshCliContractRuntimeBuild = (): void => {
         );
       }
 
-      writeFileSync(runtimeBuildDoneMarker, `${Date.now()}\n`, "utf8");
+      writeFileSync(runtimeBuildSuccessMarker, `${Date.now()}\n`, "utf8");
     }
 
     cliContractRuntimeBuilt = true;
