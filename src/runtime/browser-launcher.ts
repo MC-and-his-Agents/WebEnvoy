@@ -8,6 +8,7 @@ import type { JsonObject } from "../core/types.js";
 import {
   BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
+  resolveBrowserExecutablePath,
   resolveBrowserVersionOutputForFingerprint,
   resolveBrowserVersionTruthSource,
   resolvePreferredBrowserVersionTruthSource
@@ -15,6 +16,7 @@ import {
 export {
   BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
+  resolveBrowserExecutablePath,
   resolveBrowserVersionOutputForFingerprint,
   resolveBrowserVersionTruthSource,
   resolvePreferredBrowserCandidates,
@@ -1016,7 +1018,7 @@ const waitForBrowserInstanceState = async (input: {
 
 export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserLaunchResult> => {
   const launchMode = input.launchMode ?? "load_extension";
-  const { executablePath } = await resolveBrowserVersionTruthSource(input.params, {
+  const executablePath = await resolveBrowserExecutablePath(input.params, {
     allowUnsupportedExtensionBrowser: launchMode === "official_chrome_persistent_extension"
   });
   const supervisorScriptPath = await resolveSupervisorScriptPath();
