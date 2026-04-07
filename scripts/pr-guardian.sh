@@ -3151,8 +3151,15 @@ main() {
   local current_user=""
   local review_status_file="${TMP_DIR}/review-status.json"
   local reused_existing_review=0
+  local should_check_reusable_review=0
 
   if [[ "${mode}" == "merge-if-safe" ]]; then
+    should_check_reusable_review=1
+  elif [[ "${mode}" == "review" && "${post_review_flag}" == "1" ]]; then
+    should_check_reusable_review=1
+  fi
+
+  if [[ "${should_check_reusable_review}" == "1" ]]; then
     current_user="$(gh api user --jq '.login')"
     write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
     if jq -e '.reusable == true' "${review_status_file}" >/dev/null 2>&1; then
@@ -3168,12 +3175,10 @@ main() {
 
   print_summary
 
-  if [[ "${mode:-}" == "merge-if-safe" ]]; then
-    if [[ "${reused_existing_review}" == "1" ]]; then
-      should_post_review=0
-    else
-      should_post_review=1
-    fi
+  if [[ "${reused_existing_review}" == "1" ]]; then
+    should_post_review=0
+  elif [[ "${mode:-}" == "merge-if-safe" ]]; then
+    should_post_review=1
   else
     should_post_review="${post_review_flag}"
   fi
