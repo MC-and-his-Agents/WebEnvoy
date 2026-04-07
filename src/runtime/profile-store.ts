@@ -7,7 +7,7 @@ import {
   markFingerprintProfileBundleAsLegacyBackfilled,
   type FingerprintProfileBundle
 } from "../../shared/fingerprint-profile.js";
-import { isValidNativeHostName } from "../install/native-host.js";
+import { isValidNativeHostName } from "../install/native-host-platform.js";
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 import type { ProfileState } from "./profile-state.js";
