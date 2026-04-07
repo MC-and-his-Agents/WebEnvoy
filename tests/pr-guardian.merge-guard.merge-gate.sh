@@ -1,3 +1,157 @@
+setup_review_status_fixture() {
+  local case_name="$1"
+  local pr_author="$2"
+  local reviewer="$3"
+  local review_state="$4"
+  local verdict="$5"
+  local safe_to_merge="$6"
+  local include_metadata="${7:-1}"
+  local metadata_mode="${8:-valid}"
+
+  setup_case_dir "${case_name}"
+
+  HEAD_SHA="head-sha-123"
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha-123"
+  REVIEW_PROFILE="high_risk_impl_profile"
+  PROMPT_DIGEST="prompt-digest-123"
+  PR_AUTHOR="${pr_author}"
+  export HEAD_SHA BASE_REF MERGE_BASE_SHA REVIEW_PROFILE PROMPT_DIGEST PR_AUTHOR
+
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  printf '{"verdict":"%s","safe_to_merge":%s,"summary":"summary","findings":[],"required_actions":[]}\n' "${verdict}" "${safe_to_merge}" > "${RESULT_FILE}"
+  printf '%s\n' "## PR Review 结论" > "${REVIEW_MD_FILE}"
+  printf '%s\n' "" >> "${REVIEW_MD_FILE}"
+  printf '%s\n' "body for ${case_name}" >> "${REVIEW_MD_FILE}"
+
+  if [[ "${include_metadata}" == "1" ]]; then
+    case "${metadata_mode}" in
+      valid)
+        append_guardian_metadata_comment "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+        ;;
+      invalid)
+        printf '\n<!-- webenvoy-guardian-meta:v1 bm90LWpzb24= -->\n' >> "${REVIEW_MD_FILE}"
+        ;;
+      *)
+        echo "unknown metadata mode: ${metadata_mode}" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  local review_body_json
+  review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+
+  MOCK_GH_USER_LOGIN="${reviewer}"
+  export MOCK_GH_USER_LOGIN
+
+  MOCK_GH_PR_VIEW_JSON="${TEST_TMP_DIR}/${case_name}/mock/pr-view.json"
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+  export MOCK_GH_PR_VIEW_JSON
+
+  MOCK_GH_CHECKS_JSON="${TEST_TMP_DIR}/${case_name}/mock/checks.json"
+  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_CHECKS_JSON}"
+  export MOCK_GH_CHECKS_JSON
+
+  MOCK_GH_REVIEWS_JSON="${TEST_TMP_DIR}/${case_name}/mock/reviews.json"
+  printf '[[{"id":41,"user":{"login":"%s"},"commit_id":"%s","state":"%s","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${reviewer}" "${HEAD_SHA}" "${review_state}" "${review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+  export MOCK_GH_REVIEWS_JSON
+}
+
+test_review_status_reports_reusable_review_for_matching_metadata() {
+  setup_review_status_fixture \
+    "review-status-reusable" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.verdict' "${status_file}")" "APPROVE"
+  assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "true"
+}
+
+test_review_status_rejects_prompt_digest_mismatch() {
+  setup_review_status_fixture \
+    "review-status-prompt-digest-mismatch" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  PROMPT_DIGEST="prompt-digest-new"
+  export PROMPT_DIGEST
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "prompt_digest_mismatch"
+}
+
+test_review_status_rejects_missing_metadata() {
+  setup_review_status_fixture \
+    "review-status-missing-metadata" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "0"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_metadata"
+}
+
+test_review_status_rejects_invalid_metadata() {
+  setup_review_status_fixture \
+    "review-status-invalid-metadata" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "invalid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
+}
+
+test_reused_request_changes_does_not_become_mergeable() {
+  setup_review_status_fixture \
+    "review-status-request-changes" \
+    "pr-author" \
+    "review-bot" \
+    "CHANGES_REQUESTED" \
+    "REQUEST_CHANGES" \
+    "false" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local err_file="${TMP_DIR}/merge.err"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_pass hydrate_reused_review_result "${status_file}"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "Codex 审查未批准，拒绝合并。"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 test_merge_if_safe_without_post_review_respects_comment_contract() {
   setup_merge_if_safe_fixture \
     "merge-without-post-review-comment-contract" \

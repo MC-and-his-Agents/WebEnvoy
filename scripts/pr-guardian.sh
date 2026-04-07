@@ -15,10 +15,12 @@ usage() {
   cat <<'EOF'
 用法:
   scripts/pr-guardian.sh review <pr-number> [--post-review]
+  scripts/pr-guardian.sh review-status <pr-number>
   scripts/pr-guardian.sh merge-if-safe <pr-number> [--post-review] [--delete-branch]
 
 说明:
   review         本机执行 Codex 审查并打印结论
+  review-status  输出当前 HEAD 是否存在可复用 guardian review 的机器可读状态
   merge-if-safe  自动回写 review（可兼容传 --post-review）；审查通过且必需检查通过时，执行 squash merge
 EOF
 }
@@ -249,6 +251,59 @@ cleanup() {
   fi
 }
 
+hash_file_sha256() {
+  local file="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${file}" | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "${file}" | awk '{print $NF}'
+    return 0
+  fi
+
+  die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
+}
+
+guardian_metadata_json() {
+  local result_file="$1"
+
+  jq -cn \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    --argjson result "$(jq -c '.' "${result_file}")" \
+    '
+      {
+        head_sha: $head_sha,
+        base_ref: $base_ref,
+        merge_base_sha: $merge_base_sha,
+        review_profile: $review_profile,
+        prompt_digest: $prompt_digest,
+        verdict: $result.verdict,
+        safe_to_merge: $result.safe_to_merge
+      }
+    '
+}
+
+append_guardian_metadata_comment() {
+  local result_file="$1"
+  local review_file="$2"
+  local metadata_b64=""
+
+  metadata_b64="$(guardian_metadata_json "${result_file}" | base64 | tr -d '\n')"
+  printf '\n<!-- webenvoy-guardian-meta:v1 %s -->\n' "${metadata_b64}" >> "${review_file}"
+}
+
 build_markdown_review() {
   local result_file="$1"
   local review_file="$2"
@@ -292,6 +347,8 @@ build_markdown_review() {
     "### 需要关注的问题\n\n" + findings + "\n\n" +
     "### 合并前动作\n\n" + actions + "\n"
   ' "${result_file}" > "${review_file}"
+
+  append_guardian_metadata_comment "${result_file}" "${review_file}"
 }
 
 prepare_pr_workspace() {
@@ -1393,6 +1450,8 @@ build_review_prompt() {
 
   {
     printf 'profile=%s\n' "${REVIEW_PROFILE}"
+    PROMPT_DIGEST="$(hash_file_sha256 "${PROMPT_RUN_FILE}")"
+    printf 'prompt_digest=%s\n' "${PROMPT_DIGEST}"
     printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
     printf 'context_docs=%s\n' "${context_count}"
   } > "${REVIEW_STATS_FILE}"
@@ -1413,6 +1472,14 @@ prepare_review_worktree_context() {
   local pr_number="$1"
 
   build_review_prompt "${pr_number}"
+}
+
+ensure_review_prompt_prepared() {
+  local pr_number="$1"
+
+  if [[ -z "${PROMPT_DIGEST:-}" || ! -f "${PROMPT_RUN_FILE:-}" ]]; then
+    prepare_review_worktree_context "${pr_number}"
+  fi
 }
 
 extract_first_review_json_candidate() {
@@ -2411,7 +2478,8 @@ run_codex_review() {
   local formatted_result_file=""
   local normalization_source_file=""
 
-  prepare_review_worktree_context "${pr_number}"
+  require_cmd codex
+  ensure_review_prompt_prepared "${pr_number}"
   native_error_file="${TMP_DIR}/codex-native-review.err"
 
   if codex exec \
@@ -2473,6 +2541,13 @@ submit_review_event() {
   fi
 }
 
+load_pull_reviews() {
+  local pr_number="$1"
+  local reviews_file="$2"
+
+  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+}
+
 head_has_expected_review_state() {
   local pr_number="$1"
   local head_sha="$2"
@@ -2480,7 +2555,7 @@ head_has_expected_review_state() {
   local expected_state="$4"
   local reviews_file="${TMP_DIR}/reviews.json"
 
-  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+  load_pull_reviews "${pr_number}" "${reviews_file}"
 
   jq -e \
     --arg reviewer "${reviewer}" \
@@ -2504,6 +2579,165 @@ head_has_expected_review_state() {
           ) == $expected_state
         end
     ' "${reviews_file}" >/dev/null 2>&1
+}
+
+write_review_status_json() {
+  local pr_number="$1"
+  local reviewer="$2"
+  local output_file="$3"
+  local reviews_file="${TMP_DIR}/reviews-status.json"
+
+  load_pull_reviews "${pr_number}" "${reviews_file}"
+
+  jq -c \
+    --arg reviewer "${reviewer}" \
+    --arg pr_author "${PR_AUTHOR:-}" \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    '
+      def completed_state:
+        . == "APPROVED" or . == "CHANGES_REQUESTED" or . == "COMMENTED" or . == "DISMISSED";
+      def expected_state($verdict):
+        if ($pr_author | length) > 0 and $pr_author == $reviewer then
+          "COMMENTED"
+        elif $verdict == "APPROVE" then
+          "APPROVED"
+        else
+          "CHANGES_REQUESTED"
+        end;
+      def latest_review($entries):
+        (
+          $entries
+          | to_entries
+          | sort_by([(.value.submitted_at // ""), (.value.id // 0), .key])
+          | last
+          | .value
+        );
+      def body_without_meta($body):
+        ($body // "") | gsub("\\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+/=]+ -->\\n?"; "\n");
+      [
+        .[][]
+        | select((.user.login // "") == $reviewer)
+        | select((.commit_id // "") == $head_sha)
+        | select((.state // "") | completed_state)
+      ] as $matching_reviews
+      | if ($matching_reviews | length) == 0 then
+          {
+            reusable: false,
+            reason: "missing_review",
+            head_sha: $head_sha,
+            review_profile: $review_profile,
+            prompt_digest: $prompt_digest,
+            verdict: null,
+            safe_to_merge: null
+          }
+        else
+          (latest_review($matching_reviews)) as $latest
+          | ($latest.body // "") as $body
+          | (([$body | match("<!-- webenvoy-guardian-meta:v1 (?<meta>[A-Za-z0-9+/=]+) -->"; "g")?] | last | .captures[0].string?) // "") as $meta_b64
+          | if ($meta_b64 | length) == 0 then
+              {
+                reusable: false,
+                reason: "missing_metadata",
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                prompt_digest: $prompt_digest,
+                verdict: null,
+                safe_to_merge: null
+              }
+            else
+              ((try ($meta_b64 | @base64d | fromjson) catch null)) as $meta
+              | if $meta == null then
+                  {
+                    reusable: false,
+                    reason: "invalid_metadata",
+                    head_sha: $head_sha,
+                    review_profile: $review_profile,
+                    prompt_digest: $prompt_digest,
+                    verdict: null,
+                    safe_to_merge: null
+                  }
+                elif (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not) or (($meta.safe_to_merge | type) != "boolean") then
+                  {
+                    reusable: false,
+                    reason: "invalid_metadata",
+                    head_sha: $head_sha,
+                    review_profile: $review_profile,
+                    prompt_digest: $prompt_digest,
+                    verdict: ($meta.verdict // null),
+                    safe_to_merge: ($meta.safe_to_merge // null)
+                  }
+                else
+                  {
+                    reusable: (
+                      ($meta.head_sha // "") == $head_sha
+                      and ($meta.base_ref // "") == $base_ref
+                      and ($meta.merge_base_sha // "") == $merge_base_sha
+                      and ($meta.review_profile // "") == $review_profile
+                      and ($meta.prompt_digest // "") == $prompt_digest
+                      and ($latest.state // "") == expected_state($meta.verdict)
+                    ),
+                    reason: (
+                      if ($meta.head_sha // "") != $head_sha then
+                        "head_sha_mismatch"
+                      elif ($meta.base_ref // "") != $base_ref then
+                        "base_ref_mismatch"
+                      elif ($meta.merge_base_sha // "") != $merge_base_sha then
+                        "merge_base_sha_mismatch"
+                      elif ($meta.review_profile // "") != $review_profile then
+                        "review_profile_mismatch"
+                      elif ($meta.prompt_digest // "") != $prompt_digest then
+                        "prompt_digest_mismatch"
+                      elif ($latest.state // "") != expected_state($meta.verdict) then
+                        "review_state_mismatch"
+                      else
+                        "matching_metadata"
+                      end
+                    ),
+                    head_sha: $head_sha,
+                    review_profile: $review_profile,
+                    prompt_digest: $prompt_digest,
+                    verdict: $meta.verdict,
+                    safe_to_merge: $meta.safe_to_merge,
+                    base_ref: ($meta.base_ref // ""),
+                    merge_base_sha: ($meta.merge_base_sha // ""),
+                    review_state: ($latest.state // ""),
+                    review_id: ($latest.id // null),
+                    review_body: body_without_meta($body)
+                  }
+                end
+            end
+        end
+    ' "${reviews_file}" > "${output_file}"
+}
+
+hydrate_reused_review_result() {
+  local review_status_file="$1"
+
+  jq -c '
+    {
+      verdict: .verdict,
+      safe_to_merge: .safe_to_merge,
+      summary: (
+        if .safe_to_merge then
+          "已复用当前 HEAD 的 guardian review 结论。"
+        else
+          "已复用当前 HEAD 的 guardian 阻断结论。"
+        end
+      ),
+      findings: [],
+      required_actions: []
+    }
+  ' "${review_status_file}" > "${RESULT_FILE}"
+
+  if [[ "$(jq -r '.review_body // ""' "${review_status_file}")" != "" ]]; then
+    jq -r '.review_body' "${review_status_file}" > "${REVIEW_MD_FILE}"
+  else
+    build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  fi
 }
 
 wait_for_expected_review_state() {
@@ -2809,7 +3043,6 @@ main() {
   require_cmd gh
   require_cmd jq
   require_cmd perl
-  require_cmd codex
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
 
   local mode="${1:-}"
@@ -2842,7 +3075,7 @@ main() {
   done
 
   case "${mode}" in
-    review|merge-if-safe)
+    review|review-status|merge-if-safe)
       ;;
     *)
       usage
@@ -2853,11 +3086,44 @@ main() {
   check_gh_auth
   prepare_pr_workspace "${pr_number}"
   assert_required_review_context_available
-  run_codex_review "${pr_number}"
+  ensure_review_prompt_prepared "${pr_number}"
+
+  if [[ "${mode}" == "review-status" ]]; then
+    local current_user
+    local review_status_file="${TMP_DIR}/review-status.json"
+
+    current_user="$(gh api user --jq '.login')"
+    write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
+    cat "${review_status_file}"
+    exit 0
+  fi
+
+  local current_user=""
+  local review_status_file="${TMP_DIR}/review-status.json"
+  local reused_existing_review=0
+
+  if [[ "${mode}" == "merge-if-safe" ]]; then
+    current_user="$(gh api user --jq '.login')"
+    write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
+    if jq -e '.reusable == true' "${review_status_file}" >/dev/null 2>&1; then
+      hydrate_reused_review_result "${review_status_file}"
+      reused_existing_review=1
+      echo "已复用当前 HEAD 的 guardian review。"
+    fi
+  fi
+
+  if [[ "${reused_existing_review}" != "1" ]]; then
+    run_codex_review "${pr_number}"
+  fi
+
   print_summary
 
   if [[ "${mode:-}" == "merge-if-safe" ]]; then
-    should_post_review=1
+    if [[ "${reused_existing_review}" == "1" ]]; then
+      should_post_review=0
+    else
+      should_post_review=1
+    fi
   else
     should_post_review="${post_review_flag}"
   fi

@@ -65,6 +65,8 @@ jobs:
               case "$file" in
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
+                "scripts/pr-review-poller.sh"|\
+                "tests/pr-review-poller.test.sh"|\
                 "tests/pr-guardian.merge-guard.test.sh")
                   merge_guard_validation_required="yes"
                   governance_docs_only="no"
@@ -78,6 +80,8 @@ jobs:
                 ".github/workflows/"*|\
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
+                "scripts/pr-review-poller.sh"|\
+                "tests/pr-review-poller.test.sh"|\
                 tests/pr-guardian*.test.sh)
                   guardrail_changed="yes"
                   ;;
@@ -169,8 +173,9 @@ jobs:
           set -euo pipefail
           echo "Guardrail-related change detected, running merge-guard checks."
           bash tests/pr-guardian.merge-guard.test.sh
+          bash tests/pr-review-poller.test.sh
 
-          for script in scripts/pr-guardian.sh scripts/merge-pr.sh; do
+          for script in scripts/pr-guardian.sh scripts/pr-review-poller.sh scripts/merge-pr.sh; do
             if [ -f "$script" ]; then
               echo "Syntax check: $script"
               bash -n "$script"
