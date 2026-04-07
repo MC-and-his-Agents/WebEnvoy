@@ -5,7 +5,9 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
-import { buildLoopbackXhsSearchGateBundle } from "./loopback-gate.js";
+import { buildLoopbackGate } from "./loopback-gate.js";
+import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
+import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 
 type HostMessage =
   | { kind: "request"; envelope: BridgeRequestEnvelope }
@@ -35,6 +37,35 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const buildLoopbackXhsSearchGateBundle = (input: {
+  options: Record<string, unknown>;
+  abilityAction: string | null;
+  runId: string;
+  sessionId: string;
+  profile: string;
+}): {
+  consumerGateResult: Record<string, unknown>;
+  payload: Record<string, unknown>;
+} => {
+  const gate = buildLoopbackGate(input.options, input.abilityAction);
+  const auditRecord = buildLoopbackAuditRecord({
+    runId: input.runId,
+    sessionId: input.sessionId,
+    profile: input.profile,
+    gate
+  });
+  return {
+    consumerGateResult: gate.consumerGateResult,
+    payload: buildLoopbackGatePayload({
+      runId: input.runId,
+      sessionId: input.sessionId,
+      profile: input.profile,
+      gate,
+      auditRecord
+    })
+  };
+};
 
 class InMemoryPort<TMessage> {
   #listeners = new Set<(message: TMessage) => void>();
