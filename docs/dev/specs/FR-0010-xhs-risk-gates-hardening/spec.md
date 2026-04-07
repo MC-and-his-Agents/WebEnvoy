@@ -102,7 +102,6 @@
 - 风险状态的正式归属固定如下：
   - 请求输入真相源：`gate_input.risk_state`
   - 审计真相源：`audit_record.risk_state`
-- Sprint 3 如需对外发布统一状态机 / 恢复输出，继续由 `FR-0011` 负责冻结 `risk_state_output` 契约；FR-0010 不重复定义该对象。
 - service-worker / relay 的阻断与放行路径不得把 `consumer_gate_result.risk_state` 当作稳定对外承诺；如历史实现曾临时透传该字段，也只视为遗留调试信息，不得被 contract test 或下游消费者当作正式契约依赖。
 - `#208` 与 `#209` 不得定义私有门禁字段绕过上述对象。
 
@@ -185,7 +184,7 @@ And 不存在某一事项绕过门禁的路径
 7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义；`live_read_limited` 在本 FR 中仅作 Sprint 3 兼容占位，不单独冻结其公开模式语义。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
-10. `consumer_gate_result.risk_state` 已被明确排除在稳定契约之外；FR-0010 范围内风险状态统一由 `gate_input` / `audit_record` 承载，Sprint 3 的状态输出对象继续由 `FR-0011` 冻结。
+10. `consumer_gate_result.risk_state` 已被明确排除在稳定契约之外；FR-0010 范围内风险状态统一由 `gate_input` / `audit_record` 承载。
 11. service-worker / relay 阻断路径的正式承诺已与 shared contract 对齐，不再要求在 `consumer_gate_result` 内稳定透传 `risk_state`。
 
 ## 与 FR-0009 的替代与兼容关系

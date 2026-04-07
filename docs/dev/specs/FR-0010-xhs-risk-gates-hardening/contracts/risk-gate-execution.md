@@ -207,8 +207,7 @@
 5. 风险状态的正式真相源固定为：
    - `gate_input.risk_state`
    - `audit_record.risk_state`
-6. Sprint 3 如需对外发布统一状态机 / 恢复输出，继续由 `FR-0011` 冻结 `risk_state_output` 契约；FR-0010 不在本对象组中重定义其机器 shape。
-7. 若历史实现仍暂时透传 `consumer_gate_result.risk_state`，该字段只可视为 legacy debug signal，不得进入 contract tests、formal consumers 或后续 FR 的必填字段白名单。
+6. 若历史实现仍暂时透传 `consumer_gate_result.risk_state`，该字段只可视为 legacy debug signal，不得进入 contract tests、formal consumers 或后续 FR 的必填字段白名单。
 
 ## #223 统一状态机锚点（规约层）
 

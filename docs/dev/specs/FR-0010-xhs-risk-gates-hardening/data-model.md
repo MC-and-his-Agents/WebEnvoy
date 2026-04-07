@@ -119,14 +119,14 @@
 3. 计算门禁后生成 `GateDecision`。
 4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
 5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
-6. Sprint 3 如需对外返回统一风险状态机结果，由 `FR-0011` 负责定义输出对象；FR-0010 只要求相关输出不得通过 `consumer_gate_result` 镜像 `risk_state`。
+6. FR-0010 只要求风险状态不得通过 `consumer_gate_result` 镜像承载；后续状态输出对象如需正式冻结，应在对应后续 FR 中单独定义。
 
 ## 与现有 FR 对齐
 
 - 与 `FR-0009`：FR-0009 保留治理基线；FR-0010 作为 Sprint 2 实现与测试的唯一消费契约。
 - 与 `FR-0004`：复用运行标识与最小可观测信息，不重建外层错误壳。
 - 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
-- 与 `#254`：`consumer_gate_result.risk_state` 不进入正式字段集合；FR-0010 范围内统一风险状态机相关字段由 `GateInput.risk_state` 与 `AuditRecord.risk_state` 承担，`risk_state_output` 的正式机器契约归属 `FR-0011`。
+- 与 `#254`：`consumer_gate_result.risk_state` 不进入正式字段集合；FR-0010 范围内统一风险状态机相关字段由 `GateInput.risk_state` 与 `AuditRecord.risk_state` 承担。
 
 ## FR-0009 -> FR-0010 字段迁移映射（规约层）
 
