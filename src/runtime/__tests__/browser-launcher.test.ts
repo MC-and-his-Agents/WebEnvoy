@@ -137,6 +137,44 @@ while true; do sleep 1; done
   return dir;
 };
 
+const createVersionCountedBrowserExecutable = async (): Promise<{
+  scriptPath: string;
+  logPath: string;
+}> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-version-count-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "counted-browser.mjs");
+  const logPath = join(dir, "version-count.log");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+const logPath = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+if (process.argv.includes("--version")) {
+  appendFileSync(logPath, "version\\n");
+  console.log("Chromium 146.0.0.0");
+  process.exit(0);
+}
+let profileDir = "";
+for (const arg of process.argv.slice(2)) {
+  if (arg.startsWith("--user-data-dir=")) {
+    profileDir = arg.slice("--user-data-dir=".length);
+  }
+}
+if (profileDir) {
+  mkdirSync(profileDir + "/Default", { recursive: true });
+  writeFileSync(profileDir + "/Local State", "{}");
+  writeFileSync(profileDir + "/Default/Preferences", "{}");
+}
+appendFileSync(logPath, "launch\\n");
+setInterval(() => {}, 1000);
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return { scriptPath, logPath };
+};
+
 const waitForLaunchLog = async (logPath: string): Promise<string> => {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -337,6 +375,36 @@ describe("browser-launcher", () => {
       stat(join(profileDir, EXTENSION_STAGING_DIRNAME))
     ).rejects.toMatchObject({
       code: "ENOENT"
+    });
+  });
+
+  it("does not require a second version probe on the launch path", async () => {
+    const { scriptPath, logPath } = await createVersionCountedBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-single-probe-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-single-probe-001",
+      params: {}
+    });
+
+    const probeLog = await readFile(logPath, "utf8");
+    const lines = probeLog
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    expect(lines.filter((line) => line === "version")).toHaveLength(1);
+    expect(lines.filter((line) => line === "launch")).toHaveLength(1);
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-single-probe-001"
     });
   });
 
