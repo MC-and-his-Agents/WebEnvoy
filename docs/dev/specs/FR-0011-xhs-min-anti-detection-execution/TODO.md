@@ -8,6 +8,7 @@
 - [x] FR-0011 已冻结 Sprint 3 的核心边界：插件层门禁主落点、读路径执行模式收敛、写路径交互分级、最小 session 节律/冷却/恢复、以及 `paused/limited/allowed` 风险状态机。
 - [x] FR-0011 已冻结 `#208/#209` 共享的状态机、审批/审计边界、`live_read_limited` 正式公开模式语义、`limited_read_rollout_ready_true` 条件载体，以及 `gate_decision=blocked` 时 `effective_execution_mode` 的正式解释。
 - [x] FR-0011 已冻结 `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 语义，以及 `editor_input` 作为唯一正式验证对象时的验证范围、成功/失败信号、最小 replay 与关闭语义。
+- [x] FR-0011 的后续 follow-up / review traffic 继续回到 issue `#231` 这一 FR 入口；`#217` 只保留历史起草线索，`#365` 只承接本轮 closeout truth sync。
 - [x] 本文件只回写 formal review 结论和解释边界，不把本地 `TODO.md` 扩张成 GitHub issue、Project、里程碑或关闭状态的真相源。
 
 ## 时间边界澄清
