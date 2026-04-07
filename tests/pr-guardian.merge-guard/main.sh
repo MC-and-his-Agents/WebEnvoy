@@ -83,6 +83,7 @@ main() {
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json
   test_normalize_native_review_result_accepts_relaxed_native_schema_correctness_phrase
+  test_normalize_native_review_result_accepts_request_changes_verdict_when_summary_is_safe
   test_normalize_native_review_result_accepts_request_changes_verdict_when_summary_uses_merge_blocking_regression_free_phrase
   test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat
   test_normalize_native_review_result_accepts_brace_bearing_preamble_json
@@ -170,4 +171,3 @@ main() {
 
   echo "pr-guardian merge-guard semantics test passed."
 }
-
