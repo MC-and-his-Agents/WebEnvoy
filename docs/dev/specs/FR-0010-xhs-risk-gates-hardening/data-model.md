@@ -49,10 +49,11 @@
 
 约束：
 
-1. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
-2. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
-3. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
-4. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
+1. `decision_id` 必须稳定、唯一，并作为正式公开的 `gate_outcome.decision_id` 供审批记录与审计记录回链。
+2. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
+3. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
+4. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
+5. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
 
 ## 实体 4：ApprovalRecord
 
@@ -138,5 +139,5 @@
 
 1. FR-0010 不与 FR-0009 并存双套可执行机器字段；Sprint 2 实现按 FR-0010 单口径消费。
 2. `live_read_limited` 的 Sprint 3 readiness 字段与放行条件不在本 FR 冻结；在 `FR-0011` formal 收口前，本 FR 只承接其默认阻断语义。
-3. `FR-0009.resume_requirements.spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension` 与 `explicit_scope_for_208` 继续保留为治理前置，但其正式机器承载不在本 FR 冻结。
+3. `FR-0009.resume_requirements.spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension` 与 `explicit_scope_for_208` 继续保留为治理前置，但其正式机器承载不在本 FR 冻结；其中 `limited_read_rollout_ready` 仅允许在 `FR-0011.issue_action_matrix.conditional_actions.requires` 中以 `limited_read_rollout_ready_true` 作为正式条件名被消费。
 4. 旧字段兼容若有需要，应在实现 PR 做显式映射层，不回灌到 FR-0010 正式字段命名。

@@ -121,7 +121,7 @@
    - approval record：至少包含 `approver`、`approved_at`、`checks`、`approval_record_ref`
    - audit trail：至少包含与同一次恢复判断对应的执行模式、门禁决策、`recorded_at`、`audit_record_ref`
 9. `approval_record_ref` 与 `audit_record_ref` 必须是稳定、可复核、不可歧义的 live-approval 记录引用；formal closeout 阶段的 PR review artifact / sync comment permalink 只用于 review evidence，不得单独满足 `approver_recorded=true`。
-10. `limited_read_rollout_ready=true` 只表示治理前置已齐备；在 `FR-0010` 与 `FR-0011` 都完成各自 formal 收口前，不得据此单独恢复 `live_read_limited`。
+10. `limited_read_rollout_ready=true` 只表示治理前置已齐备；其正式条件载体由 `FR-0011` 以 `limited_read_rollout_ready_true` 冻结。在 `FR-0010` 与 `FR-0011` 都完成各自 formal 收口前，不得据此单独恢复 `live_read_limited`。
 
 ## 兼容性约束
 

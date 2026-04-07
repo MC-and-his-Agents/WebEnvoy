@@ -60,6 +60,7 @@
   - 未满足前置时默认 `dry_run/recon`；
   - 高风险 live 被阻断；
   - `live_read_limited` 在 `FR-0011` formal 收口前对读动作同样必须阻断；
+  - `FR-0011` 必须以 `limited_read_rollout_ready_true` 冻结其 staged rollout 条件载体，Sprint 2 在此之前不得假定该前置已有正式机器承载；
   - `live_read_limited` 在非读动作下必须阻断；
   - 目标页未确认时阻断；
   - 审批记录缺失时阻断。
@@ -93,7 +94,7 @@
 3. 已明确 `#208` 与 `#209` 的门禁消费关系。
 4. 已定义“默认非 live”与“live 恢复”判定条件。
 5. 已确认回滚策略：任一关键前置失效时立即回退到 `dry_run/recon`。
-6. 已明确 `FR-0011` formal 收口前，`live_read_limited` 对读动作同样保持默认阻断，且该 blocker 已进入实现与测试策略。
+6. 已明确 `FR-0011` formal 收口前，`live_read_limited` 对读动作同样保持默认阻断，且该 blocker 已进入实现与测试策略；其 staged rollout 条件载体由 `FR-0011` 以 `limited_read_rollout_ready_true` 冻结后方可进入后续实现评审。
 7. `#218/#219/#221` 共用字段完成冻结并通过评审：
    - `target_domain`
    - `target_tab_id`

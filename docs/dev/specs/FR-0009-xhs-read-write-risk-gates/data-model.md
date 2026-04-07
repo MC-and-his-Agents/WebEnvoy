@@ -51,7 +51,7 @@
   - `audit_record_ref`
 - 生命周期：全部满足前，live 不得放行。
 - 说明：
-  - `limited_read_rollout_ready` 约束 `live_read_limited` 的 staged rollout readiness；未满足时不得放行受控读侧 live。
+  - `limited_read_rollout_ready` 约束 `live_read_limited` 的 staged rollout readiness；未满足时不得放行受控读侧 live。其正式条件载体由 `FR-0011` 以 `limited_read_rollout_ready_true` 冻结。
   - `approval_record_ref` 与 `audit_record_ref` 是 live approval 记录的稳定引用；二者缺失时，`approver_recorded` 不成立。
   - `explicit_scope_for_209_extension` 约束读侧 live 扩展；未满足时不得放行 `live_read_limited`。
   - `explicit_scope_for_208` 只约束写侧真实交互与 `live_write`；未满足时不得放行 `#208` 真实验证，但不单独阻断受控读侧 `limited` live。
