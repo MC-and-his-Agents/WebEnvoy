@@ -126,11 +126,42 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   )
 });
 
+let cliContractRuntimeBuilt = false;
+
+const ensureFreshCliContractRuntimeBuild = (): void => {
+  if (cliContractRuntimeBuilt) {
+    return;
+  }
+
+  const buildResult = spawnSync("npm", ["run", "build:runtime"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env
+    }
+  });
+
+  if (buildResult.status !== 0) {
+    throw new Error(
+      [
+        "failed to rebuild CLI runtime before contract suite",
+        `status=${String(buildResult.status)}`,
+        `error=${buildResult.error instanceof Error ? buildResult.error.message : ""}`,
+        `stdout=${buildResult.stdout ?? ""}`,
+        `stderr=${buildResult.stderr ?? ""}`
+      ].join(": ")
+    );
+  }
+
+  cliContractRuntimeBuilt = true;
+}
+
 const runCli = (
   args: string[],
   cwdOrEnv: string | Record<string, string> = repoRoot,
   env?: Record<string, string>
 ) => {
+  ensureFreshCliContractRuntimeBuild();
   const cwd = typeof cwdOrEnv === "string" ? cwdOrEnv : repoRoot;
   const mergedEnv =
     typeof cwdOrEnv === "string"
@@ -297,6 +328,7 @@ const runCliAsync = (
   env?: Record<string, string>
 ): Promise<{ status: number | null; stdout: string; stderr: string }> =>
   new Promise((resolve, reject) => {
+    ensureFreshCliContractRuntimeBuild();
     const child = spawn(process.execPath, [binPath, ...args], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
