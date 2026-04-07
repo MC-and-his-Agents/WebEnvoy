@@ -1890,6 +1890,70 @@ test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_
   restore_test_repo_root
 }
 
+test_build_review_prompt_uses_stable_digest_across_temp_paths() {
+  setup_case_dir "stable-prompt-digest"
+  setup_fake_repo_root
+
+  local fake_worktree_dir_one="${TMP_DIR}/run-one/worktree"
+  local baseline_snapshot_root_one="${TMP_DIR}/run-one/baseline-snapshot"
+  local fake_worktree_dir_two="${TMP_DIR}/run-two/worktree"
+  local baseline_snapshot_root_two="${TMP_DIR}/run-two/baseline-snapshot"
+  local prompt_one="${TMP_DIR}/run-one/prompt.md"
+  local prompt_two="${TMP_DIR}/run-two/prompt.md"
+  local stats_one="${TMP_DIR}/run-one/review-stats.txt"
+  local stats_two="${TMP_DIR}/run-two/review-stats.txt"
+  local digest_one
+  local digest_two
+
+  mkdir -p "${fake_worktree_dir_one}/docs/dev/review" "${baseline_snapshot_root_one}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir_two}/docs/dev/review" "${baseline_snapshot_root_two}/docs/dev/review"
+
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md"
+
+  REVIEW_PROFILE="high_risk_impl_profile"
+  PR_TITLE="stable digest"
+  PR_URL="https://example.test/pr/415"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE
+
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  WORKTREE_DIR="${fake_worktree_dir_one}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root_one}"
+  PROMPT_RUN_FILE="${prompt_one}"
+  REVIEW_STATS_FILE="${stats_one}"
+  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT PROMPT_RUN_FILE REVIEW_STATS_FILE
+  printf '%s\n' "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md" > "${CONTEXT_DOCS_FILE}"
+  build_review_prompt 415
+
+  WORKTREE_DIR="${fake_worktree_dir_two}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root_two}"
+  PROMPT_RUN_FILE="${prompt_two}"
+  REVIEW_STATS_FILE="${stats_two}"
+  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT PROMPT_RUN_FILE REVIEW_STATS_FILE
+  printf '%s\n' "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md" > "${CONTEXT_DOCS_FILE}"
+  build_review_prompt 415
+
+  digest_one="$(awk -F= '/^prompt_digest=/{print $2}' "${stats_one}")"
+  digest_two="$(awk -F= '/^prompt_digest=/{print $2}' "${stats_two}")"
+
+  assert_file_contains "${prompt_one}" "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md"
+  assert_file_contains "${prompt_two}" "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md"
+  assert_equal "${digest_one}" "${digest_two}"
+
+  restore_test_repo_root
+}
+
 test_assert_required_review_context_available_accepts_base_snapshot_review_summaries() {
   setup_case_dir "base-snapshot-review-summaries"
   setup_fake_repo_root

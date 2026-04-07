@@ -176,6 +176,35 @@ test_poller_reviews_pr_when_metadata_is_stale() {
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 276"
 }
 
+test_poller_no_post_review_uses_state_as_same_head_throttle() {
+  setup_case_dir "no-post-review-same-head-throttle"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+
+  printf '%s\n' '[{"number":277,"title":"No post review","headRefOid":"head-sha-277","headRefName":"feat/no-post","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/277","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-277","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/277.json"
+  printf '%s\n' '{"prs":{"277":{"head_sha":"head-sha-277","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+
+  assert_pass main --state-file "${STATE_FILE}" --no-post-review
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 277"
+  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 277"
+  assert_equal "$(jq -r '.prs["277"].head_sha' "${STATE_FILE}")" "head-sha-277"
+}
+
+test_poller_post_review_mode_does_not_use_state_as_truth() {
+  setup_case_dir "post-review-ignores-local-state"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+
+  printf '%s\n' '[{"number":278,"title":"Post review still runs","headRefOid":"head-sha-278","headRefName":"feat/post-review","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/278","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-278","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/278.json"
+  printf '%s\n' '{"prs":{"278":{"head_sha":"head-sha-278","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+
+  assert_pass main --state-file "${STATE_FILE}"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 278"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 278"
+}
+
 test_poller_preserves_draft_base_branch_and_milestone_filters() {
   setup_case_dir "preserve-poller-filters"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
@@ -203,6 +232,8 @@ main() {
   test_poller_skips_pr_with_fresh_guardian_review
   test_poller_reviews_pr_when_metadata_is_missing
   test_poller_reviews_pr_when_metadata_is_stale
+  test_poller_no_post_review_uses_state_as_same_head_throttle
+  test_poller_post_review_mode_does_not_use_state_as_truth
   test_poller_preserves_draft_base_branch_and_milestone_filters
   echo "pr-review-poller test passed."
 }

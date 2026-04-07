@@ -87,6 +87,18 @@ update_state() {
   mv "${tmp_file}" "${state_file}"
 }
 
+state_has_matching_head_sha() {
+  local state_file="$1"
+  local pr_number="$2"
+  local head_sha="$3"
+
+  jq -e \
+    --arg pr "${pr_number}" \
+    --arg sha "${head_sha}" \
+    '(.prs[$pr].head_sha // "") == $sha' \
+    "${state_file}" >/dev/null 2>&1
+}
+
 review_pr() {
   local pr_number="$1"
   local post_review="$2"
@@ -232,6 +244,16 @@ main() {
 
     if [[ "${reusable_review}" == "true" ]]; then
       echo "跳过已存在 fresh guardian review 的 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
+      if [[ "${dry_run}" != "1" ]]; then
+        update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
+      fi
+      rm -f "${review_status_file}"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+
+    if [[ "${post_review}" != "1" ]] && state_has_matching_head_sha "${state_file}" "${pr_number}" "${head_sha}"; then
+      echo "跳过已在本地 --no-post-review 模式审查过同一 HEAD 的 PR #${pr_number}: ${pr_title} (reason=local_state_same_head)"
       if [[ "${dry_run}" != "1" ]]; then
         update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
       fi

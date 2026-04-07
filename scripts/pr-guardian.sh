@@ -272,6 +272,56 @@ hash_file_sha256() {
   die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
 }
 
+hash_string_sha256() {
+  local value="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "${value}" | sha256sum | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "${value}" | shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    printf '%s' "${value}" | openssl dgst -sha256 | awk '{print $NF}'
+    return 0
+  fi
+
+  die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
+}
+
+stable_prompt_digest() {
+  local prompt_file="$1"
+  local normalized_prompt
+
+  normalized_prompt="$(
+    REPO_ROOT="${REPO_ROOT:-}" \
+    TMP_DIR="${TMP_DIR:-}" \
+    WORKTREE_DIR="${WORKTREE_DIR:-}" \
+    BASELINE_SNAPSHOT_ROOT="${BASELINE_SNAPSHOT_ROOT:-}" \
+    perl -0pe '
+      my @pairs = (
+        [$ENV{WORKTREE_DIR}, "__WEBENVOY_WORKTREE__"],
+        [$ENV{BASELINE_SNAPSHOT_ROOT}, "__WEBENVOY_BASELINE_SNAPSHOT__"],
+        [$ENV{REPO_ROOT}, "__WEBENVOY_REPO_ROOT__"],
+        [$ENV{TMP_DIR}, "__WEBENVOY_TMP__"],
+      );
+
+      for my $pair (@pairs) {
+        my ($needle, $replacement) = @$pair;
+        next unless defined $needle && length $needle;
+        my $quoted = quotemeta($needle);
+        s/$quoted/$replacement/g;
+      }
+    ' "${prompt_file}"
+  )"
+
+  hash_string_sha256 "${normalized_prompt}"
+}
+
 guardian_metadata_json() {
   local result_file="$1"
 
@@ -1450,7 +1500,7 @@ build_review_prompt() {
 
   {
     printf 'profile=%s\n' "${REVIEW_PROFILE}"
-    PROMPT_DIGEST="$(hash_file_sha256 "${PROMPT_RUN_FILE}")"
+    PROMPT_DIGEST="$(stable_prompt_digest "${PROMPT_RUN_FILE}")"
     printf 'prompt_digest=%s\n' "${PROMPT_DIGEST}"
     printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
     printf 'context_docs=%s\n' "${context_count}"
