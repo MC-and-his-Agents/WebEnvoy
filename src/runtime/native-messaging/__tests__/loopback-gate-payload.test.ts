@@ -41,6 +41,17 @@ describe("native messaging loopback gate payload", () => {
       }
     });
 
+    const payloadGateReasons = payload.consumer_gate_result as
+      | { gate_reasons?: string[] }
+      | null
+      | undefined;
+    payloadGateReasons?.gate_reasons?.push("MUTATED");
+    const payloadAuditDecisions = payload.audit_record as
+      | { write_action_matrix_decisions?: { decisions?: string[] } | null }
+      | null
+      | undefined;
+    payloadAuditDecisions?.write_action_matrix_decisions?.decisions?.push("MUTATED");
+
     expect(payload).toMatchObject({
       plugin_gate_ownership: {
         background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
@@ -58,6 +69,9 @@ describe("native messaging loopback gate payload", () => {
         gate_decision: "blocked"
       },
       observability: {
+        page_state: {
+          observation_status: "complete"
+        },
         failure_site: {
           component: "gate"
         }
@@ -71,5 +85,8 @@ describe("native messaging loopback gate payload", () => {
         session_id: "session-001"
       }
     });
+    expect(gate.consumerGateResult.gate_reasons).toEqual(["TARGET_DOMAIN_OUT_OF_SCOPE"]);
+    expect(gate.writeActionMatrixDecisions?.decisions).toEqual([]);
+    expect(gate.readExecutionPolicy.blocked_actions).toEqual(["expand_new_live_surface_without_gate"]);
   });
 });

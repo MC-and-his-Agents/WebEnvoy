@@ -34,7 +34,8 @@ describe("native messaging loopback gate observability", () => {
         page_kind: "compose",
         url: "https://creator.xiaohongshu.com/publish/publish",
         title: "Creator Publish",
-        ready_state: "complete"
+        ready_state: "complete",
+        observation_status: "complete"
       },
       key_requests: [],
       failure_site: {

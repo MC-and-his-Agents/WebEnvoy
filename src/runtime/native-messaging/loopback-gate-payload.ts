@@ -34,6 +34,7 @@ export const buildLoopbackGatePayload = (input: {
   gate: LoopbackGate;
   auditRecord: Record<string, unknown>;
 }): Record<string, unknown> => {
+  const clone = <T>(value: T): T => structuredClone(value);
   const riskTransitionAudit = buildRiskTransitionAudit({
     runId: input.runId,
     sessionId: input.sessionId,
@@ -55,33 +56,36 @@ export const buildLoopbackGatePayload = (input: {
     resolvedRiskState
   );
   const persistedAuditRecord: Record<string, unknown> = {
-    ...input.auditRecord,
+    ...clone(input.auditRecord),
     next_state: riskTransitionAudit.next_state,
     transition_trigger: riskTransitionAudit.trigger
+  };
+  const gateInput = {
+    run_id: input.runId,
+    session_id: input.sessionId,
+    profile: input.profile,
+    ...input.gate.gateInput
   };
 
   return {
     plugin_gate_ownership: LOOPBACK_PLUGIN_GATE_OWNERSHIP,
-    scope_context: input.gate.scopeContext,
-    gate_input: {
-      run_id: input.runId,
-      session_id: input.sessionId,
-      profile: input.profile,
-      ...input.gate.gateInput
-    },
-    gate_outcome: input.gate.gateOutcome,
-    consumer_gate_result: input.gate.consumerGateResult,
-    approval_record: input.gate.approvalRecord,
-    issue_action_matrix: resolvedIssueActionMatrix,
-    write_interaction_tier: input.gate.writeInteractionTier,
-    write_action_matrix_decisions: input.gate.writeActionMatrixDecisions,
+    scope_context: clone(input.gate.scopeContext),
+    gate_input: clone(gateInput),
+    gate_outcome: clone(input.gate.gateOutcome),
+    consumer_gate_result: clone(input.gate.consumerGateResult),
+    approval_record: clone(input.gate.approvalRecord),
+    issue_action_matrix: clone(resolvedIssueActionMatrix),
+    write_interaction_tier: clone(input.gate.writeInteractionTier),
+    write_action_matrix_decisions: input.gate.writeActionMatrixDecisions
+      ? clone(input.gate.writeActionMatrixDecisions)
+      : null,
     observability: buildLoopbackGateObservability(input.gate),
-    read_execution_policy: input.gate.readExecutionPolicy,
+    read_execution_policy: clone(input.gate.readExecutionPolicy),
     risk_state_output: buildUnifiedRiskStateOutput(resolvedRiskState, {
-      auditRecords: [persistedAuditRecord],
+      auditRecords: [clone(persistedAuditRecord)],
       now: String(persistedAuditRecord.recorded_at ?? "")
     }),
-    audit_record: persistedAuditRecord,
-    risk_transition_audit: riskTransitionAudit
+    audit_record: clone(persistedAuditRecord),
+    risk_transition_audit: clone(riskTransitionAudit)
   };
 };

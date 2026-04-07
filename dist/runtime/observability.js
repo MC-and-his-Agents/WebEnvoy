@@ -81,13 +81,14 @@ export const normalizePageState = (input, options) => {
     const readyStateRaw = typeof input.ready_state === "string" ? input.ready_state.trim() : "";
     const titleNormalized = nonEmpty(titleRaw, "unknown");
     const title = truncate(titleNormalized, maxTitleLength);
+    const partialObservable = pageKindRaw.length === 0 || urlRaw.length === 0 || titleRaw.length === 0 || readyStateRaw.length === 0;
     const pageState = {
         page_kind: pageKindRaw.length > 0 ? pageKindRaw : "unknown",
         url: urlRaw.length > 0 ? urlRaw : "about:blank",
         title: title.value,
-        ready_state: readyStateRaw.length > 0 ? readyStateRaw : "unknown"
+        ready_state: readyStateRaw.length > 0 ? readyStateRaw : "unknown",
+        observation_status: partialObservable ? "partial" : "complete"
     };
-    const partialObservable = pageKindRaw.length === 0 || urlRaw.length === 0 || titleRaw.length === 0 || readyStateRaw.length === 0;
     if (partialObservable) {
         pageState.partial_observable = true;
     }

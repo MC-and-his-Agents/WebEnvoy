@@ -5,12 +5,20 @@ import { createLoopbackGateFixture } from "./loopback-gate-test-fixtures.js";
 
 describe("native messaging loopback gate audit", () => {
   it("records the gate outcome into the audit envelope", () => {
+    const gate = createLoopbackGateFixture();
     const audit = buildLoopbackAuditRecord({
       runId: "run-001",
       sessionId: "session-001",
       profile: "profile-a",
-      gate: createLoopbackGateFixture()
+      gate
     });
+
+    (audit.gate_reasons as string[]).push("MUTATED");
+    const decisions = audit.write_action_matrix_decisions as
+      | { decisions?: string[] }
+      | null
+      | undefined;
+    decisions?.decisions?.push("MUTATED");
 
     expect(audit).toMatchObject({
       event_id: "gate_evt_run-001",
@@ -30,5 +38,7 @@ describe("native messaging loopback gate audit", () => {
       write_interaction_tier: "observe_only",
       recorded_at: "2026-03-23T10:00:00.000Z"
     });
+    expect(gate.consumerGateResult.gate_reasons).toEqual([]);
+    expect(gate.writeActionMatrixDecisions?.decisions).toEqual([]);
   });
 });

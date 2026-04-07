@@ -16,10 +16,11 @@ export const buildLoopbackGateObservability = (gate: LoopbackGate): Record<strin
               targetPage === "creator_publish_tab"
                 ? `https://${targetDomain}/publish/publish`
                 : targetPage === "search_result_tab"
-                  ? `https://${targetDomain}/search_result`
-                  : `https://${targetDomain}/`,
+                ? `https://${targetDomain}/search_result`
+                : `https://${targetDomain}/`,
             title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
-            ready_state: "complete"
+            ready_state: "complete",
+            observation_status: "complete"
           }
         : null,
     key_requests: [],
