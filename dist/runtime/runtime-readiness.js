@@ -122,3 +122,71 @@ export const mapBootstrapCliErrorToReadiness = (error, identityBindingState = "b
             };
     }
 };
+export const buildNonPersistentRuntimeReadiness = (input) => {
+    const transportState = input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
+    const bootstrapState = input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
+    return {
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState,
+        runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
+    };
+};
+export const buildUnlockedPersistentRuntimeReadiness = (input) => {
+    const transportState = input.profileState === "disconnected" ? "disconnected" : "not_connected";
+    const bootstrapState = input.identityBindingState === "bound" && transportState === "disconnected"
+        ? "pending"
+        : "not_started";
+    return {
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState,
+        runtimeReadiness: buildRuntimeReadiness({
+            lockHeld: false,
+            identityBindingState: input.identityBindingState,
+            transportState,
+            bootstrapState
+        })
+    };
+};
+export const buildBoundlessRuntimeReadiness = (input) => {
+    const transportState = "not_connected";
+    const bootstrapState = "not_started";
+    return {
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState,
+        runtimeReadiness: buildRuntimeReadiness({
+            lockHeld: input.lockHeld,
+            identityBindingState: input.identityBindingState,
+            transportState,
+            bootstrapState
+        })
+    };
+};
+export const mapRuntimeReadinessPayload = (input) => {
+    const transportState = input.payload?.transport_state === "disconnected"
+        ? "disconnected"
+        : input.payload?.transport_state === "ready"
+            ? "ready"
+            : "not_connected";
+    const bootstrapState = input.payload?.bootstrap_state === "not_started" ||
+        input.payload?.bootstrap_state === "pending" ||
+        input.payload?.bootstrap_state === "ready" ||
+        input.payload?.bootstrap_state === "stale" ||
+        input.payload?.bootstrap_state === "failed"
+        ? input.payload.bootstrap_state
+        : "not_started";
+    return {
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState,
+        runtimeReadiness: buildRuntimeReadiness({
+            lockHeld: input.lockHeld,
+            identityBindingState: input.identityBindingState,
+            transportState,
+            bootstrapState
+        }),
+        details: input.payload ? input.payload : undefined
+    };
+};

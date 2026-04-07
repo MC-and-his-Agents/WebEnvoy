@@ -1,5 +1,6 @@
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
+
 import type { IdentityPreflightResult } from "./persistent-extension-identity.js";
 import type { ProfileState } from "./profile-state.js";
 import { NativeMessagingTransportError } from "./native-messaging/bridge.js";
@@ -55,9 +56,7 @@ export const buildRuntimeReadiness = (input: {
   transportState: TransportState;
   bootstrapState: BootstrapState;
 }): RuntimeReadiness => {
-  if (
-    input.identityBindingState === "mismatch" || input.identityBindingState === "missing"
-  ) {
+  if (input.identityBindingState === "mismatch" || input.identityBindingState === "missing") {
     return "blocked";
   }
   if (!input.lockHeld) {
@@ -170,4 +169,96 @@ export const mapBootstrapCliErrorToReadiness = (
         details
       };
   }
+};
+
+export const buildNonPersistentRuntimeReadiness = (input: {
+  identityBindingState: IdentityPreflightResult["identityBindingState"];
+  lockHeld: boolean;
+  profileState: ProfileState;
+}): RuntimeReadinessSnapshot => {
+  const transportState: TransportState =
+    input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
+  const bootstrapState: BootstrapState =
+    input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
+  return {
+    identityBindingState: input.identityBindingState,
+    transportState,
+    bootstrapState,
+    runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
+  };
+};
+
+export const buildUnlockedPersistentRuntimeReadiness = (input: {
+  identityBindingState: IdentityPreflightResult["identityBindingState"];
+  profileState: ProfileState;
+}): RuntimeReadinessSnapshot => {
+  const transportState: TransportState =
+    input.profileState === "disconnected" ? "disconnected" : "not_connected";
+  const bootstrapState: BootstrapState =
+    input.identityBindingState === "bound" && transportState === "disconnected"
+      ? "pending"
+      : "not_started";
+  return {
+    identityBindingState: input.identityBindingState,
+    transportState,
+    bootstrapState,
+    runtimeReadiness: buildRuntimeReadiness({
+      lockHeld: false,
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState
+    })
+  };
+};
+
+export const buildBoundlessRuntimeReadiness = (input: {
+  identityBindingState: IdentityPreflightResult["identityBindingState"];
+  lockHeld: boolean;
+}): RuntimeReadinessSnapshot => {
+  const transportState: TransportState = "not_connected";
+  const bootstrapState: BootstrapState = "not_started";
+  return {
+    identityBindingState: input.identityBindingState,
+    transportState,
+    bootstrapState,
+    runtimeReadiness: buildRuntimeReadiness({
+      lockHeld: input.lockHeld,
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState
+    })
+  };
+};
+
+export const mapRuntimeReadinessPayload = (input: {
+  payload: Record<string, unknown> | null;
+  identityBindingState: IdentityPreflightResult["identityBindingState"];
+  lockHeld: boolean;
+}): RuntimeReadinessSnapshot => {
+  const transportState =
+    input.payload?.transport_state === "disconnected"
+      ? "disconnected"
+      : input.payload?.transport_state === "ready"
+        ? "ready"
+        : "not_connected";
+  const bootstrapState =
+    input.payload?.bootstrap_state === "not_started" ||
+    input.payload?.bootstrap_state === "pending" ||
+    input.payload?.bootstrap_state === "ready" ||
+    input.payload?.bootstrap_state === "stale" ||
+    input.payload?.bootstrap_state === "failed"
+      ? (input.payload.bootstrap_state as BootstrapState)
+      : "not_started";
+  return {
+    identityBindingState: input.identityBindingState,
+    transportState,
+    bootstrapState,
+    runtimeReadiness: buildRuntimeReadiness({
+      lockHeld: input.lockHeld,
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState
+    }),
+    details: input.payload ? (input.payload as JsonObject) : undefined
+  };
 };

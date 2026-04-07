@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
+import { BrowserLaunchError } from "./browser-launcher-shared.js";
+export { BrowserLaunchError };
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -35,12 +37,15 @@ const KNOWN_BROWSER_CANDIDATES = {
     cygwin: []
 };
 const hasPathSegment = (value) => /[\\/]/.test(value);
-const readTrimmedEnvString = (value) => {
-    if (typeof value !== "string") {
-        return null;
+export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
+const pathExists = async (path) => {
+    try {
+        await access(path, fsConstants.F_OK);
+        return true;
     }
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : null;
+    catch {
+        return false;
+    }
 };
 const parseOptionalString = (value) => {
     if (value === undefined || value === null) {
@@ -55,24 +60,13 @@ const parseOptionalString = (value) => {
     }
     return normalized;
 };
-const pathExists = async (path) => {
-    try {
-        await access(path, fsConstants.F_OK);
-        return true;
+const readTrimmedEnvString = (value) => {
+    if (typeof value !== "string") {
+        return null;
     }
-    catch {
-        return false;
-    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
 };
-export class BrowserLaunchError extends Error {
-    code;
-    constructor(code, message, options) {
-        super(message, options);
-        this.name = "BrowserLaunchError";
-        this.code = code;
-    }
-}
-export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
 const resolveCommandFromPath = async (command) => {
     const pathEnv = process.env.PATH ?? "";
     if (pathEnv.trim().length === 0) {
@@ -164,7 +158,7 @@ export const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
     const major = Number.parseInt(match[1], 10);
     return Number.isInteger(major) && major >= 137;
 };
-export const resolveBrowserExecutablePath = async (params, options) => {
+export const resolveExecutablePath = async (params, options) => {
     const explicitFromParams = parseOptionalString(params.browserPath);
     if (explicitFromParams !== null) {
         throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
@@ -195,18 +189,7 @@ export const resolveBrowserExecutablePath = async (params, options) => {
     }
     throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
 };
-export const resolveBrowserVersionOutputForFingerprint = async (executablePath) => {
-    if (executablePath) {
-        return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
-    }
-    try {
-        const truthSource = await resolveBrowserVersionTruthSource();
-        return truthSource.browserVersion;
-    }
-    catch {
-        return null;
-    }
-};
+export const resolveBrowserExecutablePath = resolveExecutablePath;
 const resolveExecutableCandidate = async (candidate) => {
     const executablePath = await resolveBrowserExecutableCandidatePath(candidate);
     if (executablePath === null) {
@@ -254,4 +237,16 @@ export const resolvePreferredBrowserVersionTruthSource = async (params = {}) => 
         return fallbackCandidate;
     }
     return resolveBrowserVersionTruthSource(params);
+};
+export const resolveBrowserVersionOutputForFingerprint = async (executablePath) => {
+    if (executablePath) {
+        return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
+    }
+    try {
+        const truthSource = await resolveBrowserVersionTruthSource();
+        return truthSource.browserVersion;
+    }
+    catch {
+        return null;
+    }
 };
