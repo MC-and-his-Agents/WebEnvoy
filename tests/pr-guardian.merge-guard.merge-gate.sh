@@ -96,6 +96,27 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
   assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller-bot"
 }
 
+test_review_status_rejects_dismissed_latest_review() {
+  setup_review_status_fixture \
+    "review-status-dismissed-latest-review" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local review_body_json
+  review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+  printf '[[{"id":41,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"DISMISSED","submitted_at":"2026-04-07T10:05:00Z","body":%s}]]\n' "${review_body_json}" "${review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "review_state_mismatch"
+}
+
 test_review_status_rejects_prompt_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-prompt-digest-mismatch" \

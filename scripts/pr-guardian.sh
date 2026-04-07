@@ -2700,7 +2700,13 @@ write_review_status_json() {
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
         | normalize_review
-      ] as $matching_reviews
+      ] as $raw_matching_reviews
+      | [
+          $raw_matching_reviews
+          | sort_by(.user.login // "")
+          | group_by(.user.login // "")[]
+          | latest_review(.)
+        ] as $matching_reviews
       | [
           $matching_reviews[]
           | select((.meta_status // "") == "ok")
