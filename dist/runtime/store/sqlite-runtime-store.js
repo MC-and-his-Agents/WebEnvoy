@@ -205,13 +205,16 @@ export class SQLiteRuntimeStore {
                 throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
             }
             const nowIso = new Date().toISOString();
-            const approvalId = `gate_appr_${input.runId}`;
+            const approvalId = typeof input.approvalId === "string" && input.approvalId.trim().length > 0
+                ? input.approvalId.trim()
+                : `gate_appr_${input.runId}`;
             this.#db
                 .prepare(`
           INSERT INTO runtime_gate_approvals(
             approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(run_id) DO UPDATE SET
+            approval_id = excluded.approval_id,
             decision_id = excluded.decision_id,
             approved = excluded.approved,
             approver = excluded.approver,

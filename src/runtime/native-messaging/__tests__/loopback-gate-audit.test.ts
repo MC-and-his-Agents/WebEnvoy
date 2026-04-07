@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLoopbackAuditRecord } from "../loopback-gate-audit.js";
+import { type LoopbackAuditSource, buildLoopbackAuditRecord } from "../loopback-gate-audit.js";
 import { createLoopbackAuditFixture } from "./loopback-gate-test-fixtures.js";
 
 describe("native messaging loopback gate audit", () => {
@@ -21,7 +21,7 @@ describe("native messaging loopback gate audit", () => {
     decisions?.decisions?.push("MUTATED");
 
     expect(audit).toMatchObject({
-      event_id: "gate_evt_run-001",
+      event_id: "gate_evt_gate_decision_run-001",
       decision_id: "gate_decision_run-001",
       approval_id: "gate_appr_run-001",
       run_id: "run-001",
@@ -42,5 +42,42 @@ describe("native messaging loopback gate audit", () => {
     });
     expect(gate.consumerGateResult.gate_reasons).toEqual([]);
     expect(gate.writeActionMatrixDecisions?.decisions).toEqual([]);
+  });
+
+  it("derives unique event_id values from decision_id for repeated gate evaluations", () => {
+    const first = buildLoopbackAuditRecord({
+      runId: "run-001",
+      sessionId: "session-001",
+      profile: "profile-a",
+      gate: createLoopbackAuditFixture()
+    });
+    const second = buildLoopbackAuditRecord({
+      runId: "run-001",
+      sessionId: "session-001",
+      profile: "profile-a",
+      gate: createLoopbackAuditFixture({
+        gateOutcome: {
+          decision_id: "gate_decision_run-001_req-002",
+          gate_decision: "allowed"
+        } as unknown as LoopbackAuditSource["gateOutcome"],
+        approvalRecord: {
+          approval_id: "gate_appr_run-001",
+          decision_id: "gate_decision_run-001_req-002",
+          approved: true,
+          approver: "loopback-agent",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            approval_record_approved_true: true,
+            approval_record_approver_present: true,
+            approval_record_approved_at_present: true,
+            approval_record_checks_all_true: true
+          }
+        } as unknown as LoopbackAuditSource["approvalRecord"]
+      })
+    });
+
+    expect(first.event_id).toBe("gate_evt_gate_decision_run-001");
+    expect(second.event_id).toBe("gate_evt_gate_decision_run-001_req-002");
+    expect(second.event_id).not.toBe(first.event_id);
   });
 });

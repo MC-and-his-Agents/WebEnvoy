@@ -56,6 +56,7 @@ export interface AppendRunEventResult {
 }
 
 export interface UpsertGateApprovalInput {
+  approvalId?: string | null;
   runId: string;
   decisionId: string;
   approved: boolean;
@@ -444,7 +445,10 @@ export class SQLiteRuntimeStore {
       }
 
       const nowIso = new Date().toISOString();
-      const approvalId = `gate_appr_${input.runId}`;
+      const approvalId =
+        typeof input.approvalId === "string" && input.approvalId.trim().length > 0
+          ? input.approvalId.trim()
+          : `gate_appr_${input.runId}`;
       this.#db
         .prepare(
           `
@@ -452,6 +456,7 @@ export class SQLiteRuntimeStore {
             approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(run_id) DO UPDATE SET
+            approval_id = excluded.approval_id,
             decision_id = excluded.decision_id,
             approved = excluded.approved,
             approver = excluded.approver,

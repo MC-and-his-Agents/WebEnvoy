@@ -52,10 +52,14 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.validation_action === "editor_input";
 
 const buildGateDecisionId = (context: XhsExecutionContext): string =>
-  `gate_decision_${context.runId}`;
+  context.requestId
+    ? `gate_decision_${context.runId}_${context.requestId}`
+    : `gate_decision_${context.runId}`;
 
 const buildGateApprovalId = (context: XhsExecutionContext): string =>
   `gate_appr_${context.runId}`;
+
+const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
 
 export const resolveActualTargetGateReasons = (options: XhsSearchOptions): string[] => {
   const gateReasons: string[] = [];
@@ -124,7 +128,7 @@ export const createAuditRecord = (
     liveModeRequested;
 
   const auditRecord: XhsExecutionAuditRecord = {
-    event_id: `gate_evt_${context.runId}`,
+    event_id: buildGateEventId(gate.gate_outcome.decision_id),
     decision_id: gate.gate_outcome.decision_id,
     approval_id: gate.approval_record.approval_id,
     run_id: context.runId,

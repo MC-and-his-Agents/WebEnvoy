@@ -182,8 +182,7 @@ export class InMemoryContentScriptRuntime {
           : {};
       const gate = buildLoopbackGate(options, asString(ability.action), {
         runId: message.runId,
-        decisionId: `gate_decision_${message.runId}`,
-        approvalId: `gate_appr_${message.runId}`
+        decisionId: `gate_decision_${message.runId}_${message.id}`
       });
       const consumerGateResult = gate.consumerGateResult;
       const auditRecord = buildLoopbackAuditRecord({

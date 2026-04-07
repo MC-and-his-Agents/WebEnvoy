@@ -184,6 +184,30 @@ const migrateV6ToV7 = (db: DatabaseSync): void => {
       ADD COLUMN approval_id TEXT;
     `);
   }
+  db.exec(`
+    UPDATE runtime_gate_approvals
+    SET decision_id = 'gate_decision_' || run_id
+    WHERE decision_id IS NULL OR decision_id = '';
+
+    UPDATE runtime_gate_audit_records
+    SET decision_id = 'gate_decision_' || run_id
+    WHERE decision_id IS NULL OR decision_id = '';
+
+    UPDATE runtime_gate_audit_records
+    SET approval_id = (
+      SELECT runtime_gate_approvals.approval_id
+      FROM runtime_gate_approvals
+      WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
+    )
+    WHERE (approval_id IS NULL OR approval_id = '')
+      AND EXISTS (
+        SELECT 1
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
+          AND runtime_gate_approvals.approval_id IS NOT NULL
+          AND runtime_gate_approvals.approval_id != ''
+      );
+  `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
     String(SCHEMA_VERSION)
   );

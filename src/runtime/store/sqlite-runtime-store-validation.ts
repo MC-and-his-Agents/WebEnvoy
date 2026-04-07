@@ -84,6 +84,9 @@ export const assertGateApprovalInput = (
   input: UpsertGateApprovalInput,
   helpers: RuntimeStoreValidationContext
 ): void => {
+  if (input.approvalId !== undefined && input.approvalId !== null && !hasTrimmedText(input.approvalId)) {
+    helpers.invalidInput("invalid approval_id");
+  }
   if (!hasTrimmedText(input.runId) || !hasTrimmedText(input.decisionId)) {
     helpers.invalidInput("run_id and decision_id are required");
   }

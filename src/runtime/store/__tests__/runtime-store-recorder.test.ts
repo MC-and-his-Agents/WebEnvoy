@@ -55,4 +55,81 @@ describe("runtime-store-recorder", () => {
 
     await expect(recorder.recordSuccess(baseContext, {})).rejects.toBe(writeError);
   });
+
+  it("preserves approval_id when recording gate artifacts", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const upsertGateApproval = vi.fn().mockResolvedValue(undefined);
+    const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
+      upsertRun,
+      appendRunEvent,
+      upsertGateApproval,
+      appendGateAuditRecord,
+      close
+    });
+
+    await recorder.recordSuccess(
+      { ...baseContext, command: "xhs.search" },
+      {
+        run_id: "run-recorder-001",
+        gate_outcome: {
+          decision_id: "gate_decision_run-recorder-001_req-1"
+        },
+        approval_record: {
+          approval_id: "gate_appr_custom_run-recorder-001",
+          decision_id: "gate_decision_run-recorder-001_req-1",
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:10.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        },
+        audit_record: {
+          event_id: "gate_evt_gate_decision_run-recorder-001_req-1",
+          decision_id: "gate_decision_run-recorder-001_req-1",
+          approval_id: "gate_appr_custom_run-recorder-001",
+          run_id: "run-recorder-001",
+          session_id: "session-recorder-001",
+          profile: "default",
+          issue_scope: "issue_209",
+          risk_state: "allowed",
+          next_state: "allowed",
+          transition_trigger: "manual_approval",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 9,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"],
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:10.000Z",
+          recorded_at: "2026-03-23T10:00:11.000Z"
+        }
+      }
+    );
+
+    expect(upsertGateApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalId: "gate_appr_custom_run-recorder-001",
+        decisionId: "gate_decision_run-recorder-001_req-1",
+        runId: "run-recorder-001"
+      })
+    );
+    expect(appendGateAuditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "gate_evt_gate_decision_run-recorder-001_req-1",
+        approvalId: "gate_appr_custom_run-recorder-001",
+        decisionId: "gate_decision_run-recorder-001_req-1"
+      })
+    );
+  });
 });

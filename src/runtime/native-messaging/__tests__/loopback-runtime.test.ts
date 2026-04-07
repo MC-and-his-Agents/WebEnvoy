@@ -56,4 +56,59 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
   });
+
+  it("preserves a caller-provided approval_id across the loopback gate bundle", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-loopback-custom-approval-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused",
+          approval_record: {
+            approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      }
+    });
+
+    expect(result.payload).toMatchObject({
+      approval_record: {
+        approval_id: "gate_appr_custom_run-loopback-custom-approval-001"
+      },
+      audit_record: {
+        approval_id: "gate_appr_custom_run-loopback-custom-approval-001"
+      }
+    });
+  });
 });

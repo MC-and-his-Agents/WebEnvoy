@@ -13,8 +13,11 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => `gate_decision_${context.runId}`;
+const buildGateDecisionId = (context) => context.requestId
+    ? `gate_decision_${context.runId}_${context.requestId}`
+    : `gate_decision_${context.runId}`;
 const buildGateApprovalId = (context) => `gate_appr_${context.runId}`;
+const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
     const targetDomain = asNonEmptyString(options.target_domain);
@@ -67,7 +70,7 @@ export const createAuditRecord = (context, gate, env) => {
         gate.gate_input.risk_state === "limited" &&
         liveModeRequested;
     const auditRecord = {
-        event_id: `gate_evt_${context.runId}`,
+        event_id: buildGateEventId(gate.gate_outcome.decision_id),
         decision_id: gate.gate_outcome.decision_id,
         approval_id: gate.approval_record.approval_id,
         run_id: context.runId,

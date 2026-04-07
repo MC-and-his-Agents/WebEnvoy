@@ -5,6 +5,10 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveApprovalId = (options) => {
+    const approvalRecord = asRecord(options.approval_record) ?? asRecord(options.approval);
+    return asString(approvalRecord?.approval_id);
+};
 export class InMemoryContentScriptRuntime {
     port;
     static BOOTSTRAP_ATTEST_DELAY_MS = 10;
@@ -148,8 +152,8 @@ export class InMemoryContentScriptRuntime {
                 : {};
             const gate = buildLoopbackGate(options, asString(ability.action), {
                 runId: message.runId,
-                decisionId: `gate_decision_${message.runId}`,
-                approvalId: `gate_appr_${message.runId}`
+                decisionId: `gate_decision_${message.runId}_${message.id}`,
+                approvalId: resolveApprovalId(options) ?? `gate_appr_${message.runId}`
             });
             const consumerGateResult = gate.consumerGateResult;
             const auditRecord = buildLoopbackAuditRecord({

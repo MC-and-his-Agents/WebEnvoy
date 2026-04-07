@@ -88,6 +88,7 @@ const extractGateApprovalInput = (
 
   const checksObject = asObject(approvalRecord.checks) ?? {};
   return {
+    approvalId: asString(approvalRecord.approval_id) ?? `gate_appr_${runId}`,
     runId,
     decisionId,
     approved: asBoolean(approvalRecord.approved),

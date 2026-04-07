@@ -187,6 +187,7 @@ export interface XhsExecutionContext {
   runId: string;
   sessionId: string;
   profile: string;
+  requestId?: string;
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";

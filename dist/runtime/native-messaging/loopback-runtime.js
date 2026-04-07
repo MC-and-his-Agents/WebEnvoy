@@ -9,7 +9,7 @@ const asString = (value) => typeof value === "string" && value.trim().length > 0
 const buildLoopbackXhsSearchGateBundle = (input) => {
     const gate = buildLoopbackGate(input.options, input.abilityAction, {
         runId: input.runId,
-        decisionId: `gate_decision_${input.runId}`,
+        decisionId: `gate_decision_${input.runId}_${input.requestId}`,
         approvalId: `gate_appr_${input.runId}`
     });
     const auditRecord = buildLoopbackAuditRecord({
@@ -215,6 +215,7 @@ class InMemoryContentScriptRuntime {
             options,
             abilityAction: asString(ability.action),
             runId: message.runId,
+            requestId: message.id,
             sessionId: message.sessionId,
             profile: "loopback_profile"
         });
@@ -545,6 +546,7 @@ class InMemoryBackgroundRelay {
                     options,
                     abilityAction: asString(ability.action),
                     runId,
+                    requestId: request.id,
                     sessionId,
                     profile: "loopback_profile"
                 });
