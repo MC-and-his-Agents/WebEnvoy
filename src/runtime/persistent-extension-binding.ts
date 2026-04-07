@@ -32,6 +32,8 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asNonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const normalizeManifestPath = (value: string): string => (isAbsolute(value) ? value : resolve(value));
+
 export const isPersistentExtensionId = (value: string): boolean =>
   PERSISTENT_EXTENSION_ID_PATTERN.test(value);
 
@@ -123,9 +125,7 @@ export const parsePersistentExtensionBindingFromParams = (
     manifestPath:
       manifestPathRaw === null
         ? null
-        : isAbsolute(manifestPathRaw)
-          ? manifestPathRaw
-          : resolve(manifestPathRaw)
+        : normalizeManifestPath(manifestPathRaw)
   };
 };
 
@@ -156,7 +156,7 @@ export const readPersistentExtensionBindingFromMetaValue = (
     extensionId,
     nativeHostName,
     browserChannel,
-    manifestPath: manifestPath ?? null
+    manifestPath: manifestPath === null ? null : normalizeManifestPath(manifestPath)
   };
 };
 
