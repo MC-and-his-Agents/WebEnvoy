@@ -36,6 +36,7 @@
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前只能得到 `blocked` 结果，不得被视为 Sprint 2 已拥有的公开 live 模式。
+5. `risk_state` 作为统一风险状态机的正式输入字段，由 `GateInput` 提供并参与后续门禁判定。
 
 ## 实体 3：GateDecision
 
@@ -86,6 +87,7 @@
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
+- `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
 - `target_domain` string NOT NULL
 - `target_tab_id` integer NOT NULL
 - `target_page` string NOT NULL
@@ -108,6 +110,7 @@
 6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 7. `decision_id` 必须指向同一次 `GateDecision`，保证审计记录能回链到唯一门禁结论。
 8. `approval_id` 在 live 放行时必填，且必须引用对应 `ApprovalRecord.approval_id`，确保 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
+9. `risk_state` 是统一风险状态机在审计记录侧的正式真相源，记录本次门禁判定实际使用的状态输入值。
 
 ## 生命周期
 
@@ -116,6 +119,7 @@
 3. 计算门禁后生成 `GateDecision`。
 4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
 5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
+6. 后续状态输出对象如需正式冻结，应在对应后续 FR 中单独定义。
 
 ## 与现有 FR 对齐
 

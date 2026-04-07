@@ -72,6 +72,7 @@
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前必须返回阻断结果，不得被解释为 Sprint 2 已放行的正式 live 模式。
+5. `gate_input.risk_state` 是统一风险状态机在请求入口侧的正式输入字段。
 
 ## gate_outcome
 
@@ -143,6 +144,7 @@
     "run_id": "run_001",
     "session_id": "nm-session-001",
     "profile": "xhs_account_001",
+    "risk_state": "paused",
     "target_domain": "www.xiaohongshu.com",
     "target_tab_id": 924,
     "target_page": "search_result_tab",
@@ -172,6 +174,7 @@
 7. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 8. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
+10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值。
 
 ## consumer_gate_result
 
@@ -199,7 +202,6 @@
 1. `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons` 为冻结字段。
 2. `#208` 与 `#209` 只允许追加附加字段，不允许重定义冻结字段语义。
 3. `requested_execution_mode` 与 `effective_execution_mode` 中保留 `live_read_limited` 仅用于与 `FR-0011` 的兼容承接；其正式公开模式语义不得在本 FR 中重定义。
-
 ## #223 统一状态机锚点（规约层）
 
 `#223` 在 Sprint 2 仅允许扩展本契约，不允许新建并行门禁契约。可引用锚点如下：
