@@ -293,6 +293,28 @@ hash_string_sha256() {
   die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
 }
 
+trusted_guardian_reviewers_json() {
+  local requesting_user="$1"
+  local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
+
+  jq -nc \
+    --arg requesting_user "${requesting_user}" \
+    --arg extra_reviewers "${extra_reviewers}" \
+    '
+      [
+        $requesting_user,
+        (
+          $extra_reviewers
+          | split(",")
+          | map(gsub("^\\s+|\\s+$"; ""))
+          | .[]
+        )
+      ]
+      | map(select(length > 0))
+      | unique
+    '
+}
+
 stable_prompt_digest() {
   local prompt_file="$1"
   local normalized_prompt
@@ -2636,11 +2658,14 @@ write_review_status_json() {
   local requesting_user="$2"
   local output_file="$3"
   local reviews_file="${TMP_DIR}/reviews-status.json"
+  local trusted_reviewers_json
 
   load_pull_reviews "${pr_number}" "${reviews_file}"
+  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}")"
 
   jq -c \
     --arg requesting_user "${requesting_user}" \
+    --argjson trusted_reviewers "${trusted_reviewers_json}" \
     --arg pr_author "${PR_AUTHOR:-}" \
     --arg head_sha "${HEAD_SHA:-}" \
     --arg base_ref "${BASE_REF:-}" \
@@ -2699,6 +2724,7 @@ write_review_status_json() {
         .[][]
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
+        | select((.user.login // "") as $login | ($trusted_reviewers | index($login)) != null)
         | normalize_review
       ] as $raw_matching_reviews
       | [
