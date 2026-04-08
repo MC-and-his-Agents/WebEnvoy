@@ -55,11 +55,12 @@
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
 - `validated_execution_layer` 必须记录该条 latest 实际跑通的执行层；它来自 invocation layer，而不是 descriptor 的支持层集合。
 - `validated_execution_layer` 必须直接等于所在 `ability_validation_record.execution_layer`；它只承担证据含义，不再承担作用域键以外的额外语义。
-- `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`。
+- `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`；其中 `execution_layer_support` 在 layer-scoped 视图里仍作为证据快照保留，但不再要求与当前 support set 完整相等才算 current。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置。
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
-- `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线与 `baseline_descriptor` 任一字段不一致，或当前 `execution_layer_support` 已不再覆盖 `validated_execution_layer`。
-- `execution_layer_support` 的 stale/current 比较必须按归一化集合语义完成，而不是按数组顺序比较。
+- `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线中的 `entrypoint` / contract refs / `profile_ref` 与 `baseline_descriptor` 不一致，或当前 `execution_layer_support` 已不再覆盖 `validated_execution_layer`。
+- 当需要判断当前 `execution_layer_support` 是否仍覆盖 `validated_execution_layer` 时，比较必须按归一化集合语义完成，而不是按数组顺序比较。
+- 若当前 `execution_layer_support` 只是新增或删除了与该视图 `execution_layer` 无关的其他支持层，而 `validated_execution_layer` 仍被覆盖，则该条 latest 不得仅因 support set 变化而失效为 `stale`。
 - 每条 latest 只证明自己的 `validated_execution_layer` 曾被验证；不得把同一条 latest 自动外推为 descriptor 其他支持层也已被验证。
 
 ## 2. `ability_replay_request_projection`
