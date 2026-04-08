@@ -21,7 +21,7 @@ interface L2FirstUsableRequest {
   interaction_safety_class: "pure_read"
   goal_hint?: string
   risk_gate_context: L2RiskGateContext
-  allowed_actions: Array<"navigate" | "locate" | "click" | "extract" | "wait_settled">
+  allowed_actions: Array<"navigate" | "locate" | "reveal_only_click" | "extract" | "wait_settled">
 }
 ```
 
@@ -33,7 +33,7 @@ interface L2FirstUsableRequest {
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；`target_url` 的域名必须能回链到 `risk_gate_context.target_domain`。
 - 当前 FR 保持 read-first；未知站点通用 `write` lane 不在本次 formal baseline 内冻结，如需进入正式请求面，必须在未来独立 FR 中同时补齐验证与治理路径。
 - `goal_kind` 在当前 FR 中固定为 `read`；`interaction_safety_class` 在当前 FR 中固定为 `pure_read`。
-- `allowed_actions` 只允许 `navigate`、`locate`、`click`、`extract`、`wait_settled`；其中 `click` 的正式语义必须固定为 `reveal_only_click`，只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
+- `allowed_actions` 只允许 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`，以便在执行前就把揭示型点击和状态改变点击区分开。`reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
 - `interaction_safety_class=pure_read` 时，不得放行 `type`、submit、confirm、publish、purchase、dispatch、bind，或任何会持久改变账号、内容或表单状态的点击。
 - 若上游门禁请求仍携带平台专用 write lane、`irreversible_write` 或其他站点专用 gate 语义，必须在进入 `L2FirstUsableRequest` 前直接被阻断；FR-0019 当前不消费这类输入。
 
@@ -126,6 +126,7 @@ type L2FirstUsableResult =
 - `interaction_safety_class` 只描述本次首次可用路径的动作纯度，不改变 `candidate_shell_seed.ability_kind`；当前 formal baseline 下，`pure_read` 必须自然映射回 `read`。
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`；`entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的正式 contract ref。
+- `success=true` 还要求 `candidate_shell_seed.contract_registry_seed` 先满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：同一 `contract_ref` 不得出现多条冲突 entry，`entries[*].contract_kind` 必须与 ref kind 一致，且下游对 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 的 lookup 都必须能得到唯一有效结果。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
 - `failure_class=requires_l1_fallback` 时，`l1_fallback_payload` 必须存在，并至少冻结 `fallback_goal`、`fallback_reason`、`recommended_strategy`；不得只返回自由文本建议。

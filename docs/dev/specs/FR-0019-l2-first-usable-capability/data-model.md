@@ -83,6 +83,7 @@
 - `candidate_shell_seed` 不仅要提供 descriptor 字段，还必须同时提供 `contract_registry_seed`，以便下游按 `FR-0017.candidate_ability_contract_registry` 的 resolver 正式解引用 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`。
 - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`。
 - `candidate_shell_seed.contract_registry_seed.entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的 ref；若任一 ref 缺少对应 entry，该 handoff 不得视为完成。
+- `success=true` 还要求 `candidate_shell_seed.contract_registry_seed` 已满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：同一 `contract_ref` 不得出现多条冲突 entry，`contract_kind` 必须与 ref kind 一致，且对三类被引用 ref 的 lookup 必须都能得到唯一有效结果。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
 ## 4. `interaction_safety_class`
@@ -94,6 +95,7 @@
 最小字段：
 
 - `interaction_safety_class`
+- `allowed_actions`
 
 允许值：
 
@@ -102,7 +104,7 @@
 补充约束：
 
 - `goal_kind=read` 时必须固定映射到 `interaction_safety_class=pure_read`。
-- `interaction_safety_class=pure_read` 的允许动作集合只允许 `navigate`、`locate`、`click`、`extract`、`wait_settled`；其中 `click` 的正式语义必须收敛为 `reveal_only_click`。
+- `interaction_safety_class=pure_read` 的允许动作集合只允许 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`，以便在执行前就把揭示型点击与状态改变点击区分开。
 - `reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类揭示型点击。
 - `interaction_safety_class=pure_read` 明确禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击。
 - 当前 formal baseline 下，未知站点通用 `write` lane 不在本 FR 的正式数据模型内；如需纳入，必须在未来独立 FR 中补齐其 execution、validation 与治理边界。

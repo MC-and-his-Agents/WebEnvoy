@@ -67,7 +67,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `target_url` 的域名必须能回链到 `risk_gate_context.target_domain`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
   - 若上游门禁请求仍携带平台专用 write lane、`irreversible_write` 或其他站点专用 gate 语义，必须在进入本 FR 前直接被阻断；FR-0019 当前不消费这类输入
   - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
-  - `goal_kind=read` 时允许放行 `navigate`、`locate`、`click`、`extract`、`wait_settled`，但其中 `click` 的正式语义必须收敛为 `reveal_only_click`
+  - `goal_kind=read` 时允许放行 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`
   - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
   - `interaction_safety_class=pure_read` 时，必须显式禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击
   - 未知站点通用 `write` lane 当前不在本 FR 范围内；如需纳入正式请求面，必须在独立 FR 中同时冻结其 execution、validation、audit 与 health-state 边界
@@ -89,6 +89,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind`；当前 formal baseline 下只允许落成 `read`
   - `interaction_safety_class` 只描述本次首次可用路径允许的动作纯度，不改变 `candidate_shell_seed.ability_kind`；当前 formal baseline 下，`pure_read` 必须自然回落到 `FR-0017.ability_kind=read`
   - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`，且 `entries[*].contract_ref` 至少覆盖该次 handoff 引用到的 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
+  - `success=true` 还要求 `candidate_shell_seed.contract_registry_seed` 已满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则；若存在重复 ref、kind 不匹配或无法唯一解引用的 entry，不得上报成功 handoff
   - L2 首次可用成功的上报不依赖 replay artifact；首次 replay snapshot 的生成与持久化由后续 `FR-0018` 验证链路承接
 
 ### 4. 成功判定与失败分类
@@ -202,9 +203,10 @@ And 不会把它直接描述成正式可复用能力
 9. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
 10. 把 `FR-0010.gate_input`、其平台专用 write lane / execution-mode 集合，或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入，而不先收敛到当前 read-first 边界：视为共享请求边界漂移。
 11. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
-12. `goal_kind=read` 中允许的 `click` 没有被正式收敛为 `reveal_only_click`，或放行了会持久改变账号、内容或表单状态的点击：视为读取边界未冻结。
+12. request-side 仍允许裸 `click`，没有在执行前把可放行的点击显式收敛为 `reveal_only_click`：视为读取边界未冻结。
 13. 在当前 FR 中引入未知站点通用 `write` 请求、write candidate 或 live-write 门禁对象：视为超出已批准的 Phase 2 read-first 基线。
 14. `interaction_trace` 没有把揭示型点击编码为 `interaction_semantics=reveal_only_click + click_kind`：视为读写边界仍停留在文字约束，未冻结成机器字段。
+15. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被当作成功 handoff：视为下游 contract resolver 边界未冻结。
 
 ## 验收标准
 
