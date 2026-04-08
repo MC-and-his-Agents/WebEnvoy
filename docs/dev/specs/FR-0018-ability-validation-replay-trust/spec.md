@@ -312,7 +312,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
 3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
-4. 首个 replay 输入快照必须由可选上游 `seed_replay_input_ref` 或首次成功验证/重放输入建立，并初始化到对应 `last_success_input_ref` 的规则已冻结。
+4. 首个 replay 输入快照必须由可选上游 `seed_replay_input_ref` 或首次成功验证/重放输入建立；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许初始化到对应 `last_success_input_ref`，`write` 只允许作为 capture evidence 保留。
 5. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
 6. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
 7. 本 PR 只冻结规约，不混入实现代码。
