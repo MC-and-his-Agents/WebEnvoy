@@ -69,7 +69,7 @@ interface AbilityHealthView {
   health_state: "unknown" | "verified" | "degraded" | "broken" | "stale"
   latest_validations: LatestValidationByMode[]
   last_success_input_ref?: string
-  divergence_reason?: "smoke_replay_mismatch" | "missing_mode_evidence"
+  divergence_reason?: "smoke_replay_mismatch"
 }
 ```
 
@@ -81,8 +81,8 @@ interface AbilityHealthView {
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不再引入独立的 ability 引用命名空间或二次映射对象。
 - `replay_input_ref` 只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；该对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
-- 对新进入 `FR-0018` 的能力，首个 `ReplayInputSnapshotRef` 必须直接由 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 指向；该初始 seed 只允许落在 `capture_profile` 对应的健康视图内。
-- `candidate_ability_descriptor.seed_replay_input_ref` 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；生成后的 `snapshot_ref` 必须回写为同一 `ability_ref + profile_ref` 视图的初始 `ability_health_view.last_success_input_ref`。
+- 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个 `ReplayInputSnapshotRef` 的正式上游 seed，且只允许落在 `capture_profile` 对应的健康视图内。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 或 `replay_validation` 必须把本次成功输入物化为首个 `ReplayInputSnapshotRef`，并回写为 `ability_health_view.last_success_input_ref`。
 - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
@@ -96,8 +96,8 @@ interface AbilityHealthView {
 - `result_state=verified`：该 mode 最近一次验证成功，且 `failure_class` 必须为空。
 - `result_state=broken`：该 mode 最近一次验证失败，且必须给出 `failure_class`。
 - `result_state=stale`：该 mode 存在历史验证结果，但因 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与 `baseline_descriptor` 不一致，当前不能继续宣称可信；该记录仍必须保留最近一次已完成验证的证据字段。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=verified`：`smoke_validation` 与 `replay_validation` 的 latest 记录都已存在且均为 `verified`，并且不存在分叉。
+- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=verified`：至少存在一条 mode latest 记录，且现有 latest 记录全部为 `verified`，并且不存在分叉。
 - 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=broken`：已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=degraded`：至少存在一个 mode latest 记录，但 smoke / replay 结果分叉、成功/失败并存，或仅有单侧 smoke/replay 结果而另一侧尚未完成，`divergence_reason` 必须填写；单侧证据缺口时必须写为 `missing_mode_evidence`。
+- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=degraded`：至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，`divergence_reason` 必须填写。
 - 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=unknown`：尚不存在任何完成态 latest 记录。
 - 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=stale`：已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果。

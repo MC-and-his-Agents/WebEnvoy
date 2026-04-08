@@ -76,7 +76,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `candidate_shell_seed` 是面向 `FR-0017` 的 handoff 输入
   - 它不等于候选能力描述本身
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
-  - `candidate_shell_seed.seed_replay_input_ref` 必须稳定指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；producer 必须先把本次成功运行的 concrete input 持久化为初始 replay snapshot，再把该引用交给 `FR-0017`
+  - L2 首次可用成功的上报不依赖 replay artifact；首次 replay snapshot 的生成与持久化由后续 `FR-0018` 验证链路承接
 
 ### 4. 成功判定与失败分类
 
