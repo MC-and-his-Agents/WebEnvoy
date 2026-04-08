@@ -3157,12 +3157,16 @@ write_review_status_json_common() {
   local raw_reviews_file="${TMP_DIR}/reviews-status.raw.json"
   local reviews_file="${TMP_DIR}/reviews-status.json"
   local proof_store_file="${TMP_DIR}/guardian-proofs.json"
+  local proof_store_available="1"
   local repo_slug
   local trusted_reviewers_json
 
   load_pull_reviews "${pr_number}" "${raw_reviews_file}" || return 1
   annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}" || return 1
-  load_guardian_proof_store_json "${proof_store_file}" || return 1
+  if ! load_guardian_proof_store_json "${proof_store_file}"; then
+    printf '{\n  "proofs": {}\n}\n' > "${proof_store_file}"
+    proof_store_available="0"
+  fi
   repo_slug="$(repository_slug)"
   trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${include_requesting_user}")"
 
@@ -3171,6 +3175,7 @@ write_review_status_json_common() {
     --arg repo_slug "${repo_slug}" \
     --arg pr_number "${pr_number}" \
     --arg requesting_user "${requesting_user}" \
+    --arg proof_store_available "${proof_store_available}" \
     --argjson trusted_reviewers "${trusted_reviewers_json}" \
     --arg strict_prompt_digest "${strict_prompt_digest}" \
     --arg pr_author "${PR_AUTHOR:-}" \
@@ -3256,7 +3261,10 @@ write_review_status_json_common() {
         (.user.login // "") as $login
         | if trusted_bot_reviewer($login) then
             true
-          elif ($requesting_user | length) > 0 and $login == $requesting_user and ($login | endswith("[bot]") | not) then
+          elif ($proof_store_available == "1")
+            and ($requesting_user | length) > 0
+            and $login == $requesting_user
+            and ($login | endswith("[bot]") | not) then
             proof_matches_remote_review
           else
             false

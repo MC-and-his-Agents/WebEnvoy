@@ -346,7 +346,27 @@ test_review_status_rejects_invoking_human_reviewer_when_proof_store_is_invalid()
 
   local status_file="${TMP_DIR}/review-status.json"
   printf '%s\n' '{invalid-json' > "$(guardian_proof_store_file)"
-  assert_fail write_review_status_json 274 human-reviewer "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_allows_trusted_bot_reuse_when_proof_store_is_invalid() {
+  setup_review_status_fixture \
+    "review-status-bot-proof-store-invalid" \
+    "pr-author" \
+    "github-actions[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  printf '%s\n' '{invalid-json' > "$(guardian_proof_store_file)"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
 }
 
 test_review_status_reuses_valid_review_when_newer_trusted_comment_lacks_metadata() {
