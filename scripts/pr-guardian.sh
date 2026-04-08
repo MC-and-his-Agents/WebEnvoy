@@ -354,7 +354,6 @@ hash_normalized_review_body_sha256() {
 trusted_guardian_reviewers_json() {
   local requesting_user="$1"
   local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
-  local repo_owner="${REPO_OWNER_LOGIN:-}"
   local reviewer=""
   local -a trusted_reviewers=()
   local -a default_bot_reviewers=(
@@ -362,21 +361,11 @@ trusted_guardian_reviewers_json() {
     "poller[bot]"
   )
 
-  if [[ -n "${requesting_user}" ]]; then
+  if [[ -n "${requesting_user}" && "${requesting_user}" == *"[bot]" ]]; then
     trusted_reviewers+=("${requesting_user}")
   fi
 
   trusted_reviewers+=("${default_bot_reviewers[@]}")
-
-  if [[ -z "${repo_owner}" ]]; then
-    repo_owner="$(gh repo view --json owner --jq '.owner.login // ""' 2>/dev/null || true)"
-    REPO_OWNER_LOGIN="${repo_owner}"
-    export REPO_OWNER_LOGIN
-  fi
-
-  if [[ -n "${repo_owner}" ]]; then
-    trusted_reviewers+=("${repo_owner}")
-  fi
 
   if [[ -n "${extra_reviewers}" ]]; then
     while IFS= read -r reviewer; do
@@ -453,26 +442,10 @@ hash_git_ref_file_sha256() {
 }
 
 build_lightweight_review_baseline() {
-  local git_ref="refs/remotes/origin/${BASE_REF}"
+  local git_ref="${MERGE_BASE_SHA}"
   local file_path=""
-  local basis_paths_file="${TMP_DIR}/review-basis-paths.txt"
-  local repo_path=""
 
   printf 'guardian_script_sha256=%s\n' "$(hash_normalized_file_sha256 "${SCRIPT_DIR}/pr-guardian.sh")"
-
-  : > "${basis_paths_file}"
-  while IFS= read -r file_path; do
-    [[ -n "${file_path}" ]] || continue
-    printf '%s\n' "${file_path}" >> "${basis_paths_file}"
-  done < <(lightweight_review_baseline_paths)
-
-  if [[ -n "${CONTEXT_DOCS_FILE:-}" && -f "${CONTEXT_DOCS_FILE}" ]]; then
-    while IFS= read -r repo_path; do
-      [[ -n "${repo_path}" ]] || continue
-      [[ "${repo_path}" == "${REPO_ROOT}/"* ]] || continue
-      printf '%s\n' "${repo_path#${REPO_ROOT}/}" >> "${basis_paths_file}"
-    done < "${CONTEXT_DOCS_FILE}"
-  fi
 
   while IFS= read -r file_path; do
     [[ -n "${file_path}" ]] || continue
@@ -480,7 +453,7 @@ build_lightweight_review_baseline() {
       "${git_ref}" \
       "${file_path}" \
       "$(hash_git_ref_file_sha256 "${git_ref}" "${file_path}")"
-  done < <(awk 'NF && !seen[$0]++ { print }' "${basis_paths_file}")
+  done < <(lightweight_review_baseline_paths)
 }
 
 build_lightweight_issue_basis() {
@@ -686,7 +659,6 @@ prepare_review_status_context() {
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
   META_FILE="${TMP_DIR}/pr.json"
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
-  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
   SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
   LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
 
@@ -712,7 +684,6 @@ prepare_review_status_context() {
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
   resolve_linked_issue_numbers > "${LINKED_ISSUES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
-  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
   compute_review_basis_digest
   PROMPT_DIGEST=""
 }

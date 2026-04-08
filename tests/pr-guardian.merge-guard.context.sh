@@ -1890,11 +1890,12 @@ test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_
   restore_test_repo_root
 }
 
-test_build_lightweight_review_baseline_uses_origin_base_ref_files() {
+test_build_lightweight_review_baseline_uses_merge_base_snapshot_files() {
   setup_case_dir "lightweight-review-baseline"
 
   BASE_REF="main"
-  export BASE_REF
+  MERGE_BASE_SHA="merge-base-sha-123"
+  export BASE_REF MERGE_BASE_SHA
 
   hash_git_ref_file_sha256() {
     printf 'hash:%s:%s\n' "$1" "$2"
@@ -1903,18 +1904,18 @@ test_build_lightweight_review_baseline_uses_origin_base_ref_files() {
   local baseline
   baseline="$(build_lightweight_review_baseline)"
 
-  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=code_review.md\tsha256=hash:refs/remotes/origin/main:code_review.md'* ]]; then
-    echo "expected lightweight review baseline to hash code_review.md from origin/main" >&2
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=code_review.md\tsha256=hash:merge-base-sha-123:code_review.md'* ]]; then
+    echo "expected lightweight review baseline to hash code_review.md from merge-base snapshot" >&2
     exit 1
   fi
 
-  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=AGENTS.md\tsha256=hash:refs/remotes/origin/main:AGENTS.md'* ]]; then
-    echo "expected lightweight review baseline to hash AGENTS.md from origin/main" >&2
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=AGENTS.md\tsha256=hash:merge-base-sha-123:AGENTS.md'* ]]; then
+    echo "expected lightweight review baseline to hash AGENTS.md from merge-base snapshot" >&2
     exit 1
   fi
 
-  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=docs/dev/architecture/anti-detection.md\tsha256=hash:refs/remotes/origin/main:docs/dev/architecture/anti-detection.md'* ]]; then
-    echo "expected lightweight review baseline to hash high-risk anti-detection baseline from origin/main" >&2
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=docs/dev/architecture/anti-detection.md\tsha256=hash:merge-base-sha-123:docs/dev/architecture/anti-detection.md'* ]]; then
+    echo "expected lightweight review baseline to hash high-risk anti-detection baseline from merge-base snapshot" >&2
     exit 1
   fi
 

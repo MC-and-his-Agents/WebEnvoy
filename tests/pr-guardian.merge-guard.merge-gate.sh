@@ -98,24 +98,6 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
   assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "collaborators/"
 }
 
-test_review_status_reports_reusable_review_from_repo_owner_for_poller() {
-  setup_review_status_fixture \
-    "review-status-reusable-repo-owner-reviewer" \
-    "pr-author" \
-    "mcontheway" \
-    "APPROVED" \
-    "APPROVE" \
-    "true" \
-    "1" \
-    "valid"
-
-  local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 github-actions[bot] "${status_file}"
-  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
-  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
-  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "mcontheway"
-}
-
 test_review_status_rejects_untrusted_bot_reviewer() {
   setup_review_status_fixture \
     "review-status-untrusted-bot-reviewer" \

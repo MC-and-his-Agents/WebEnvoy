@@ -96,29 +96,6 @@ update_state() {
   mv "${tmp_file}" "${state_file}"
 }
 
-state_has_matching_review_identity() {
-  local state_file="$1"
-  local pr_number="$2"
-  local head_sha="$3"
-  local review_basis_digest="${4:-}"
-
-  jq -e \
-    --arg pr "${pr_number}" \
-    --arg sha "${head_sha}" \
-    --arg review_basis_digest "${review_basis_digest}" \
-    '
-      (.prs[$pr].head_sha // "") == $sha
-      and (
-        if ($review_basis_digest | length) > 0 then
-          (.prs[$pr].review_basis_digest // "") == $review_basis_digest
-        else
-          true
-        end
-      )
-    ' \
-    "${state_file}" >/dev/null 2>&1
-}
-
 review_pr() {
   local pr_number="$1"
   local post_review="$2"
@@ -271,19 +248,6 @@ main() {
 
     if [[ "${reusable_review}" == "true" ]]; then
       echo "跳过已存在 fresh guardian review 的 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
-      if [[ "${dry_run}" != "1" ]]; then
-        update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
-      fi
-      rm -f "${review_status_file}"
-      skipped_count=$((skipped_count + 1))
-      continue
-    fi
-
-    if [[ "${post_review}" != "1" ]] \
-      && [[ "${reusable_review}" != "true" ]] \
-      && [[ "${review_status_reason}" != "review_status_failed" ]] \
-      && state_has_matching_review_identity "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}"; then
-      echo "跳过已在本地 --no-post-review 模式审查过同一审查基线的 PR #${pr_number}: ${pr_title} (reason=local_state_matching_basis)"
       if [[ "${dry_run}" != "1" ]]; then
         update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
       fi

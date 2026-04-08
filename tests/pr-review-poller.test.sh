@@ -215,7 +215,7 @@ test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
   assert_equal "$(jq -r '.prs["277"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-277-new"
 }
 
-test_poller_no_post_review_uses_state_as_same_basis_throttle_when_remote_review_is_stale() {
+test_poller_no_post_review_does_not_use_state_when_remote_review_is_stale() {
   setup_case_dir "no-post-review-same-basis-throttle-on-remote-stale"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
   export GUARDIAN_SCRIPT
@@ -226,7 +226,7 @@ test_poller_no_post_review_uses_state_as_same_basis_throttle_when_remote_review_
 
   assert_pass main --state-file "${STATE_FILE}" --no-post-review
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 287"
-  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 287"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 287"
   assert_equal "$(jq -r '.prs["287"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-287"
 }
 
@@ -316,7 +316,7 @@ main() {
   test_poller_reviews_pr_when_metadata_is_stale
   test_poller_reviews_pr_when_review_basis_digest_changes_on_same_head
   test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
-  test_poller_no_post_review_uses_state_as_same_basis_throttle_when_remote_review_is_stale
+  test_poller_no_post_review_does_not_use_state_when_remote_review_is_stale
   test_poller_no_post_review_fails_closed_when_status_query_fails
   test_poller_post_review_mode_does_not_use_state_as_truth
   test_poller_continues_when_review_status_query_fails
