@@ -115,6 +115,23 @@ test_review_status_rejects_untrusted_bot_reviewer() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
 }
 
+test_review_status_does_not_auto_trust_requesting_bot_reviewer() {
+  setup_review_status_fixture \
+    "review-status-requesting-bot-not-auto-trusted" \
+    "pr-author" \
+    "other-bot[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 "other-bot[bot]" "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
 test_review_status_rejects_untrusted_other_reviewer() {
   setup_review_status_fixture \
     "review-status-untrusted-other-reviewer" \
@@ -909,6 +926,40 @@ test_post_review_records_local_guardian_proof_for_human_reviewer() {
   assert_file_contains "$(guardian_proof_store_file)" '"1000"'
   assert_file_contains "$(guardian_proof_store_file)" '"reviewer_login": "human-reviewer"'
   assert_file_contains "$(guardian_proof_store_file)" '"head_sha": "head-sha-123"'
+}
+
+test_post_review_retries_until_human_proof_review_is_visible() {
+  setup_merge_if_safe_fixture \
+    "post-review-retries-human-proof-visibility" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true,"summary":"summary","findings":[],"required_actions":[]}' > "${RESULT_FILE}"
+  build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  export RESULT_FILE REVIEW_MD_FILE
+
+  local review_body_json
+  review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+  MOCK_GH_REVIEWS_SEQUENCE_FILE="${TEST_TMP_DIR}/post-review-retries-human-proof-visibility/mock/reviews-seq.jsonl"
+  {
+    printf '%s\n' '[[]]'
+    printf '[[{"id":1000,"user":{"login":"human-reviewer"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:10:00Z","body":%s}]]\n' "${review_body_json}"
+  } > "${MOCK_GH_REVIEWS_SEQUENCE_FILE}"
+  export MOCK_GH_REVIEWS_SEQUENCE_FILE
+
+  PR_GUARDIAN_PROOF_VISIBILITY_MAX_ATTEMPTS=2
+  PR_GUARDIAN_PROOF_VISIBILITY_RETRY_DELAY_SECONDS=0
+  export PR_GUARDIAN_PROOF_VISIBILITY_MAX_ATTEMPTS
+  export PR_GUARDIAN_PROOF_VISIBILITY_RETRY_DELAY_SECONDS
+
+  assert_pass post_review 274
+  assert_file_contains "$(guardian_proof_store_file)" '"1000"'
+  assert_equal "$(grep -c 'repos/:owner/:repo/pulls/274/reviews' "${MOCK_GH_CALLS_LOG}")" "2"
 }
 
 test_merge_if_safe_rejects_comment_marker_without_formal_review() {

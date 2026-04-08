@@ -171,6 +171,7 @@ main() {
   test_review_status_reports_reusable_review_for_matching_metadata
   test_review_status_reports_reusable_review_from_other_reviewer
   test_review_status_rejects_untrusted_bot_reviewer
+  test_review_status_does_not_auto_trust_requesting_bot_reviewer
   test_review_status_rejects_untrusted_other_reviewer
   test_review_status_allows_invoking_human_reviewer_in_strict_mode
   test_light_review_status_rejects_invoking_human_reviewer_without_proof
@@ -211,6 +212,7 @@ main() {
   test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head
   test_merge_if_safe_rejects_comment_marker_without_formal_review
   test_post_review_records_local_guardian_proof_for_human_reviewer
+  test_post_review_retries_until_human_proof_review_is_visible
   echo "pr-guardian merge-guard semantics test passed."
 }
 

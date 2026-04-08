@@ -421,7 +421,7 @@ trusted_guardian_reviewers_json() {
     "poller[bot]"
   )
 
-  if [[ "${include_requesting_user}" == "1" && -n "${requesting_user}" ]]; then
+  if [[ "${include_requesting_user}" == "1" && -n "${requesting_user}" && "${requesting_user}" != *"[bot]" ]]; then
     trusted_reviewers+=("${requesting_user}")
   fi
 
@@ -3072,14 +3072,26 @@ record_posted_guardian_review_proof() {
   local verdict="$3"
   local expected_review_state
   local review_file="${TMP_DIR}/posted-review.json"
+  local max_attempts="${PR_GUARDIAN_PROOF_VISIBILITY_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_PROOF_VISIBILITY_RETRY_DELAY_SECONDS:-1}"
+  local attempt=1
 
   expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${reviewer}")"
 
-  if ! find_latest_posted_guardian_review "${pr_number}" "${reviewer}" "${expected_review_state}" "${review_file}"; then
-    return 1
-  fi
+  while (( attempt <= max_attempts )); do
+    if find_latest_posted_guardian_review "${pr_number}" "${reviewer}" "${expected_review_state}" "${review_file}"; then
+      persist_guardian_review_proof "${pr_number}" "${reviewer}" "${review_file}"
+      return 0
+    fi
 
-  persist_guardian_review_proof "${pr_number}" "${reviewer}" "${review_file}"
+    if (( attempt < max_attempts )); then
+      sleep "${retry_delay_seconds}"
+    fi
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 head_has_expected_review_state() {
