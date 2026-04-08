@@ -1280,10 +1280,11 @@ test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
 test_main_review_status_uses_lightweight_context_only() {
   setup_case_dir "main-review-status-lightweight"
 
-  local call_log="${TMP_DIR}/main.calls.log"
+  local call_log="${TEST_TMP_DIR}/main-review-status-lightweight/main.calls.log"
   export call_log
 
   (
+    unset TMP_DIR || true
     require_cmd() { :; }
     gh() {
       if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
@@ -1294,7 +1295,12 @@ test_main_review_status_uses_lightweight_context_only() {
       return 1
     }
     check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
-    prepare_review_status_context() { printf '%s\n' "prepare_review_status_context:$1" >> "${call_log}"; }
+    prepare_review_status_context() {
+      TMP_DIR="${TEST_TMP_DIR}/main-review-status-lightweight/runtime-tmp"
+      mkdir -p "${TMP_DIR}"
+      export TMP_DIR
+      printf '%s\n' "prepare_review_status_context:$1" >> "${call_log}"
+    }
     write_light_review_status_json() {
       printf '%s\n' "write_light_review_status_json:$1:$2" >> "${call_log}"
       cat > "$3" <<'EOF'

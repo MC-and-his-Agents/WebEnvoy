@@ -1890,6 +1890,72 @@ test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_
   restore_test_repo_root
 }
 
+test_build_lightweight_review_baseline_uses_origin_base_ref_files() {
+  setup_case_dir "lightweight-review-baseline"
+
+  BASE_REF="main"
+  export BASE_REF
+
+  hash_git_ref_file_sha256() {
+    printf 'hash:%s:%s\n' "$1" "$2"
+  }
+
+  local baseline
+  baseline="$(build_lightweight_review_baseline)"
+
+  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=code_review.md\tsha256=hash:refs/remotes/origin/main:code_review.md'* ]]; then
+    echo "expected lightweight review baseline to hash code_review.md from origin/main" >&2
+    exit 1
+  fi
+
+  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=AGENTS.md\tsha256=hash:refs/remotes/origin/main:AGENTS.md'* ]]; then
+    echo "expected lightweight review baseline to hash AGENTS.md from origin/main" >&2
+    exit 1
+  fi
+
+  if [[ "${baseline}" != *"guardian_script_sha256="* ]]; then
+    echo "expected lightweight review baseline to include guardian script hash" >&2
+    exit 1
+  fi
+}
+
+test_compute_review_basis_digest_changes_when_lightweight_review_baseline_changes() {
+  setup_case_dir "review-basis-digest-baseline-change"
+
+  PR_TITLE="same head"
+  PR_BODY=""
+  BASE_REF="main"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
+  export PR_TITLE PR_BODY BASE_REF SLIM_PR_FILE LINKED_ISSUES_FILE
+
+  : > "${SLIM_PR_FILE}"
+  : > "${LINKED_ISSUES_FILE}"
+
+  build_lightweight_issue_basis() {
+    :
+  }
+
+  build_lightweight_review_baseline() {
+    printf '%s\n' "baseline=v1"
+  }
+
+  compute_review_basis_digest
+  local digest_one="${REVIEW_BASIS_DIGEST}"
+
+  build_lightweight_review_baseline() {
+    printf '%s\n' "baseline=v2"
+  }
+
+  compute_review_basis_digest
+  local digest_two="${REVIEW_BASIS_DIGEST}"
+
+  if [[ "${digest_one}" == "${digest_two}" ]]; then
+    echo "expected review basis digest to change when lightweight review baseline changes" >&2
+    exit 1
+  fi
+}
+
 test_build_review_prompt_uses_stable_digest_across_temp_paths() {
   setup_case_dir "stable-prompt-digest"
   setup_fake_repo_root

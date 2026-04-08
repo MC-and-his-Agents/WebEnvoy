@@ -337,6 +337,11 @@ hash_normalized_file_sha256() {
   local file="$1"
   local normalized_body
 
+  if [[ ! -f "${file}" ]]; then
+    hash_string_sha256 "__WEBENVOY_MISSING_FILE__:${file}"
+    return 0
+  fi
+
   normalized_body="$(perl -0pe 's/\s+\z//s' "${file}")"
   hash_string_sha256 "${normalized_body}"
 }
@@ -395,6 +400,64 @@ stable_prompt_digest() {
   hash_string_sha256 "${normalized_prompt}"
 }
 
+lightweight_review_baseline_paths() {
+  cat <<'EOF'
+vision.md
+AGENTS.md
+docs/dev/AGENTS.md
+docs/dev/roadmap.md
+docs/dev/architecture/system-design.md
+code_review.md
+spec_review.md
+docs/dev/review/guardian-review-addendum.md
+docs/dev/review/guardian-spec-review-summary.md
+EOF
+}
+
+hash_git_ref_file_sha256() {
+  local git_ref="$1"
+  local file_path="$2"
+  local file_content=""
+
+  if file_content="$(git -C "${REPO_ROOT}" show "${git_ref}:${file_path}" 2>/dev/null)"; then
+    hash_string_sha256 "${file_content}"
+    return 0
+  fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING__:${git_ref}:${file_path}"
+}
+
+build_lightweight_review_baseline() {
+  local git_ref="refs/remotes/origin/${BASE_REF}"
+  local file_path=""
+  local basis_paths_file="${TMP_DIR}/review-basis-paths.txt"
+  local repo_path=""
+
+  printf 'guardian_script_sha256=%s\n' "$(hash_normalized_file_sha256 "${SCRIPT_DIR}/pr-guardian.sh")"
+
+  : > "${basis_paths_file}"
+  while IFS= read -r file_path; do
+    [[ -n "${file_path}" ]] || continue
+    printf '%s\n' "${file_path}" >> "${basis_paths_file}"
+  done < <(lightweight_review_baseline_paths)
+
+  if [[ -n "${CONTEXT_DOCS_FILE:-}" && -f "${CONTEXT_DOCS_FILE}" ]]; then
+    while IFS= read -r repo_path; do
+      [[ -n "${repo_path}" ]] || continue
+      [[ "${repo_path}" == "${REPO_ROOT}/"* ]] || continue
+      printf '%s\n' "${repo_path#${REPO_ROOT}/}" >> "${basis_paths_file}"
+    done < "${CONTEXT_DOCS_FILE}"
+  fi
+
+  while IFS= read -r file_path; do
+    [[ -n "${file_path}" ]] || continue
+    printf 'baseline_ref=%s\tpath=%s\tsha256=%s\n' \
+      "${git_ref}" \
+      "${file_path}" \
+      "$(hash_git_ref_file_sha256 "${git_ref}" "${file_path}")"
+  done < <(awk 'NF && !seen[$0]++ { print }' "${basis_paths_file}")
+}
+
 build_lightweight_issue_basis() {
   local issue_number=""
   local issue_file=""
@@ -435,13 +498,21 @@ compute_review_basis_digest() {
   local pr_body_hash=""
   local issue_basis_file=""
   local issue_basis=""
+  local baseline_basis=""
 
   issue_basis_file="${TMP_DIR}/review-basis-issues.txt"
   pr_title_hash="$(hash_string_sha256 "$(sanitize_user_prompt_line "${PR_TITLE:-}")")"
   pr_body_hash="$(hash_normalized_file_sha256 "${SLIM_PR_FILE}")"
   build_lightweight_issue_basis > "${issue_basis_file}"
   issue_basis="$(cat "${issue_basis_file}")"
-  REVIEW_BASIS_DIGEST="$(hash_string_sha256 "$(printf 'pr_title_sha256=%s\npr_body_sha256=%s\n%s' "${pr_title_hash}" "${pr_body_hash}" "${issue_basis}")")"
+  baseline_basis="$(build_lightweight_review_baseline)"
+  REVIEW_BASIS_DIGEST="$(
+    hash_string_sha256 "$(
+      printf 'pr_title_sha256=%s\npr_body_sha256=%s\n' "${pr_title_hash}" "${pr_body_hash}"
+      printf '%s\n' "${baseline_basis}"
+      printf '%s' "${issue_basis}"
+    )"
+  )"
   export REVIEW_BASIS_DIGEST
 }
 
@@ -575,9 +646,9 @@ prepare_pr_workspace() {
     ISSUE_NUMBER=""
   fi
   slim_pr_body > "${SLIM_PR_FILE}"
-  compute_review_basis_digest
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+  compute_review_basis_digest
 }
 
 prepare_review_status_context() {
@@ -590,6 +661,7 @@ prepare_review_status_context() {
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
   META_FILE="${TMP_DIR}/pr.json"
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
   SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
   LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
 
@@ -615,6 +687,7 @@ prepare_review_status_context() {
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
   resolve_linked_issue_numbers > "${LINKED_ISSUES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
   compute_review_basis_digest
   PROMPT_DIGEST=""
 }
@@ -2903,7 +2976,7 @@ write_review_status_json_common() {
         .[][]
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
-        | select((.user.login // "") as $login | (($trusted_reviewers | index($login)) != null) or ($login | endswith("[bot]")))
+        | select((.user.login // "") as $login | (($trusted_reviewers | index($login)) != null))
         | normalize_review
       ] as $raw_matching_reviews
       | [
@@ -3412,9 +3485,10 @@ main() {
 
   if [[ "${mode}" == "review-status" ]]; then
     local current_user
-    local review_status_file="${TMP_DIR}/review-status.json"
+    local review_status_file=""
 
     prepare_review_status_context "${pr_number}"
+    review_status_file="${TMP_DIR:-/tmp}/review-status.json"
     current_user="$(gh api user --jq '.login')"
     write_light_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
     cat "${review_status_file}"
