@@ -98,6 +98,24 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
   assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "collaborators/"
 }
 
+test_review_status_reports_reusable_review_from_repo_owner_for_poller() {
+  setup_review_status_fixture \
+    "review-status-reusable-repo-owner-reviewer" \
+    "pr-author" \
+    "mcontheway" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 github-actions[bot] "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "mcontheway"
+}
+
 test_review_status_rejects_untrusted_bot_reviewer() {
   setup_review_status_fixture \
     "review-status-untrusted-bot-reviewer" \
@@ -132,6 +150,28 @@ test_review_status_rejects_untrusted_other_reviewer() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
 }
 
+test_review_status_reuses_valid_review_when_newer_trusted_comment_lacks_metadata() {
+  setup_review_status_fixture \
+    "review-status-reuse-older-valid-review" \
+    "pr-author" \
+    "poller[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local review_body_json
+  review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+  printf '[[{"id":41,"user":{"login":"poller[bot]"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"human-reviewer"},"commit_id":"head-sha-123","state":"COMMENTED","submitted_at":"2026-04-07T10:05:00Z","body":"plain follow-up comment"}]]\n' "${review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller[bot]"
+}
+
 test_review_status_rejects_dismissed_latest_review() {
   setup_review_status_fixture \
     "review-status-dismissed-latest-review" \
@@ -151,6 +191,39 @@ test_review_status_rejects_dismissed_latest_review() {
   assert_pass write_review_status_json 274 review-bot "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "review_state_mismatch"
+}
+
+test_review_status_prefers_latest_trusted_review_over_older_approval() {
+  setup_review_status_fixture \
+    "review-status-latest-trusted-review-wins" \
+    "pr-author" \
+    "mcontheway" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local latest_result_file="${TMP_DIR}/latest-review.json"
+  local latest_review_file="${TMP_DIR}/latest-review.md"
+  local older_review_body_json
+  local latest_review_body_json
+
+  printf '%s\n' '{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"blocked","findings":[],"required_actions":[]}' > "${latest_result_file}"
+  RESULT_FILE="${latest_result_file}"
+  REVIEW_MD_FILE="${latest_review_file}"
+  build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  latest_review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+
+  older_review_body_json="$(jq -Rs . < "${TMP_DIR}/review.md")"
+  printf '[[{"id":41,"user":{"login":"mcontheway"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"github-actions[bot]"},"commit_id":"head-sha-123","state":"CHANGES_REQUESTED","submitted_at":"2026-04-07T10:05:00Z","body":%s}]]\n' "${older_review_body_json}" "${latest_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 github-actions[bot] "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "github-actions[bot]"
+  assert_equal "$(jq -r '.verdict' "${status_file}")" "REQUEST_CHANGES"
+  assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "false"
 }
 
 test_review_status_rejects_prompt_digest_mismatch() {

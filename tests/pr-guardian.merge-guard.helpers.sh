@@ -106,6 +106,15 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  if [[ " $* " == *" --jq "* ]]; then
+    printf '%s\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
+  else
+    printf '{"owner":{"login":"%s"}}\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "api" ]]; then
   endpoint=""
   has_paginate=0
@@ -247,6 +256,7 @@ setup_case_dir() {
   unset MOCK_CODEX_FAIL_CALL || true
   unset REUSED_REVIEWER_LOGIN || true
   unset WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS || true
+  unset MOCK_GH_REPO_OWNER_LOGIN || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 

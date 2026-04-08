@@ -1913,6 +1913,11 @@ test_build_lightweight_review_baseline_uses_origin_base_ref_files() {
     exit 1
   fi
 
+  if [[ "${baseline}" != *$'baseline_ref=refs/remotes/origin/main\tpath=docs/dev/architecture/anti-detection.md\tsha256=hash:refs/remotes/origin/main:docs/dev/architecture/anti-detection.md'* ]]; then
+    echo "expected lightweight review baseline to hash high-risk anti-detection baseline from origin/main" >&2
+    exit 1
+  fi
+
   if [[ "${baseline}" != *"guardian_script_sha256="* ]]; then
     echo "expected lightweight review baseline to include guardian script hash" >&2
     exit 1

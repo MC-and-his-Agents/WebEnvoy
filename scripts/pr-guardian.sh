@@ -424,6 +424,14 @@ AGENTS.md
 docs/dev/AGENTS.md
 docs/dev/roadmap.md
 docs/dev/architecture/system-design.md
+docs/dev/architecture/anti-detection.md
+docs/dev/architecture/system_nfr.md
+docs/dev/architecture/system-design/communication.md
+docs/dev/architecture/system-design/read-write.md
+docs/dev/architecture/system-design/account.md
+docs/dev/architecture/system-design/adapter.md
+docs/dev/architecture/system-design/database.md
+docs/dev/architecture/system-design/execution.md
 code_review.md
 spec_review.md
 docs/dev/review/guardian-review-addendum.md
@@ -2956,6 +2964,39 @@ write_review_status_json_common() {
           | last
           | .value
         );
+      def meta_safe_to_merge($entry):
+        if (($entry.meta | type) == "object") and ($entry.meta | has("safe_to_merge")) then
+          $entry.meta.safe_to_merge
+        else
+          null
+        end;
+      def review_key:
+        [(.submitted_at // ""), (.id // 0)];
+      def review_matches_current_context:
+        (.meta_status // "") == "ok"
+        and (.meta.head_sha // "") == $head_sha
+        and (.meta.base_ref // "") == $base_ref
+        and (.meta.merge_base_sha // "") == $merge_base_sha
+        and (.meta.review_profile // "") == $review_profile
+        and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
+        and ((.state // "") == (.expected_state // ""));
+      def review_blocks_reuse:
+        if (.meta_status // "") == "missing_metadata" then
+          (.state // "") != "COMMENTED"
+        elif (.meta_status // "") == "invalid_metadata" then
+          true
+        else
+          (
+            (.meta.head_sha // "") != $head_sha
+            or (.meta.base_ref // "") != $base_ref
+            or (.meta.merge_base_sha // "") != $merge_base_sha
+            or (.meta.review_profile // "") != $review_profile
+            or (.meta.review_basis_digest // "") != $review_basis_digest
+            or ($strict_prompt_digest == "1" and (.meta.prompt_digest // "") != $prompt_digest)
+            or ((.state // "") != (.expected_state // ""))
+          )
+        end;
       def normalize_review:
         (.body // "") as $body
         | (.cleaned_body // "") as $cleaned_body
@@ -3011,14 +3052,7 @@ write_review_status_json_common() {
         ) as $latest_matching_review
       | [
           $matching_reviews[]
-          | select((.meta_status // "") == "ok")
-          | select((.meta.head_sha // "") == $head_sha)
-          | select((.meta.base_ref // "") == $base_ref)
-          | select((.meta.merge_base_sha // "") == $merge_base_sha)
-          | select((.meta.review_profile // "") == $review_profile)
-          | select((.meta.review_basis_digest // "") == $review_basis_digest)
-          | select(($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
-          | select((.state // "") == (.expected_state // ""))
+          | select(review_matches_current_context)
         ] as $reusable_reviews
       | if ($matching_reviews | length) == 0 then
           {
@@ -3032,17 +3066,27 @@ write_review_status_json_common() {
             safe_to_merge: null,
             reviewer_login: ($requesting_user // "")
           }
-        elif (
-          ($latest_matching_review.meta_status // "") == "ok"
-          and ($latest_matching_review.meta.head_sha // "") == $head_sha
-          and ($latest_matching_review.meta.base_ref // "") == $base_ref
-          and ($latest_matching_review.meta.merge_base_sha // "") == $merge_base_sha
-          and ($latest_matching_review.meta.review_profile // "") == $review_profile
-          and ($latest_matching_review.meta.review_basis_digest // "") == $review_basis_digest
-          and (($strict_prompt_digest != "1") or (($latest_matching_review.meta.prompt_digest // "") == $prompt_digest))
-          and (($latest_matching_review.state // "") == ($latest_matching_review.expected_state // ""))
-        ) then
-          $latest_matching_review as $reused
+        else
+          (
+            if ($reusable_reviews | length) == 0 then
+              null
+            else
+              latest_review($reusable_reviews)
+            end
+          ) as $latest_reusable_review
+          | (
+              if $latest_reusable_review == null then
+                []
+              else
+                [
+                  $matching_reviews[]
+                  | select(review_key > ($latest_reusable_review | review_key))
+                  | select(review_blocks_reuse)
+                ]
+              end
+            ) as $blocking_reviews
+          | if ($latest_reusable_review != null) and (($blocking_reviews | length) == 0) then
+          $latest_reusable_review as $reused
           | {
               reusable: true,
               reason: "matching_metadata",
@@ -3051,7 +3095,7 @@ write_review_status_json_common() {
               review_basis_digest: ($reused.meta.review_basis_digest // ""),
               prompt_digest: ($reused.meta.prompt_digest // ""),
               verdict: ($reused.meta.verdict // null),
-              safe_to_merge: ($reused.meta.safe_to_merge // null),
+              safe_to_merge: meta_safe_to_merge($reused),
               result: ($reused.meta.result // null),
               base_ref: ($reused.meta.base_ref // ""),
               merge_base_sha: ($reused.meta.merge_base_sha // ""),
@@ -3061,7 +3105,13 @@ write_review_status_json_common() {
               reviewer_login: ($reused.user.login // "")
             }
         else
-          $latest_matching_review as $latest
+          (
+            if ($blocking_reviews | length) > 0 then
+              latest_review($blocking_reviews)
+            else
+              $latest_matching_review
+            end
+          ) as $latest
           | if ($latest.meta_status // "") == "missing_metadata" then
               {
                 reusable: false,
@@ -3083,7 +3133,7 @@ write_review_status_json_common() {
                 review_basis_digest: $review_basis_digest,
                 prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
-                safe_to_merge: ($latest.meta.safe_to_merge // null),
+                safe_to_merge: meta_safe_to_merge($latest),
                 result: ($latest.meta.result // null),
                 reviewer_login: ($latest.user.login // "")
               }
@@ -3114,7 +3164,7 @@ write_review_status_json_common() {
                 review_basis_digest: $review_basis_digest,
                 prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
-                safe_to_merge: ($latest.meta.safe_to_merge // null),
+                safe_to_merge: meta_safe_to_merge($latest),
                 result: ($latest.meta.result // null),
                 base_ref: ($latest.meta.base_ref // ""),
                 merge_base_sha: ($latest.meta.merge_base_sha // ""),
@@ -3124,6 +3174,7 @@ write_review_status_json_common() {
                 reviewer_login: ($latest.user.login // "")
               }
             end
+        end
         end
     ' "${reviews_file}" > "${output_file}"
 }
