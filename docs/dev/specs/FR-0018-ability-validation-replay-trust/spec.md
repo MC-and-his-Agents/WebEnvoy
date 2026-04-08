@@ -86,6 +86,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - `replay_input_ref` 只能引用已存在的输入快照引用对象
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
+  - 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须从 `FR-0017.candidate_ability_descriptor.capture_run_id + capture_profile` 对应的成功捕获输入中规范化生成，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
+  - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
+  - 若 `capture_run_id` 对应的成功捕获输入无法物化为稳定输入快照，则该能力可以被保存，但不得宣称 replay-ready
 
 ### 4. 最小可信判断对象
 
@@ -141,6 +144,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
+  - 对新进入 `FR-0018` 的能力，初始 `last_success_input_ref` 只能由 `candidate_ability_descriptor.capture_run_id + capture_profile` 派生出的首个 `ReplayInputSnapshotRef` 建立；不得靠带外默认值、人工口头输入或跨 profile 复制补齐
   - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref` 下的输入快照引用对象；引用不存在、owner 不符或 profile 不符时，请求必须视为无效
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
@@ -212,20 +216,22 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
-5. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
-6. 失败大类被写成低层错误码镜像：视为边界漂移。
-7. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
-8. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-9. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+5. 新能力进入验证链路时，没有先从 `capture_run_id + capture_profile` 规范化出首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
+6. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
+7. 失败大类被写成低层错误码镜像：视为边界漂移。
+8. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
+9. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+10. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 
 ## 验收标准
 
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
 3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
-4. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
-5. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
-6. 本 PR 只冻结规约，不混入实现代码。
+4. 首个 replay 输入快照必须由 `capture_run_id + capture_profile` 派生并初始化到对应 `last_success_input_ref` 的规则已冻结。
+5. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
+6. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
+7. 本 PR 只冻结规约，不混入实现代码。
 
 ## 依赖与前置条件
 

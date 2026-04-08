@@ -74,6 +74,9 @@
 - `replay_input_ref` 与 `last_success_input_ref` 的正式 truth source 都是该输入快照引用对象。
 - 输入快照引用对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
+- 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须从 `FR-0017.candidate_ability_descriptor.capture_run_id + capture_profile` 对应的成功捕获输入中规范化生成；该 seed 的 `source_run_id` 必须等于 `capture_run_id`。
+- 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
+- 若实现层无法从 `capture_run_id` 物化出稳定输入快照，能力可以继续存在于 descriptor 层，但 replay 绑定不得被标记为 ready。
 
 ## 4. 与既有对象的关系
 

@@ -80,6 +80,9 @@ interface AbilityHealthView {
 - `validation_mode=replay_validation && input_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在；`input_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `replay_input_ref` 只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；该对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
+- 对新进入 `FR-0018` 的能力，首个 `ReplayInputSnapshotRef` 必须从 `FR-0017.candidate_ability_descriptor.capture_run_id + capture_profile` 对应的成功捕获输入中规范化生成；该初始 seed 只允许落在 `capture_profile` 对应的健康视图内。
+- 该初始 seed 的 `source_run_id` 必须等于 `candidate_ability_descriptor.capture_run_id`，生成后的 `snapshot_ref` 必须回写为同一 `ability_ref + profile_ref` 视图的初始 `ability_health_view.last_success_input_ref`。
+- 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
 - `last_success_input` 的正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `ability_health_view.last_success_input_ref`；该值为空时，请求不得被视为可执行 replay。

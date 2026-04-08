@@ -92,12 +92,16 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 必须明确：
   - `success=false` 的结果对象必须始终返回 `failure_class`
   - 失败分支可以省略成功态产物，但不能省略最小失败原因码
+  - 当 `failure_class=requires_l1_fallback` 时，结果对象必须同时返回结构化 `l1_fallback_payload`，至少包含 `fallback_goal`、`fallback_reason`、`recommended_strategy`
+  - `l1_fallback_payload.fallback_reason` 只允许表达触发 L2 停止并移交 L1 的最小原因：语义结构不足、目标连续无法定位、或状态始终无法收敛
+  - `l1_fallback_payload.recommended_strategy` 只描述 L1 下一步最小方向，不在本 FR 中扩张成完整 L1 工作流或自动切换
 
 ### 5. 与 L1 兜底和 L3 专用路径的边界
 
 - 本 FR 必须明确：
   - L2 只承接未知网站或暂无线下专用适配器的网站
   - 若页面缺少足够语义结构、连续三次无法定位目标、或交互链始终无法稳定收敛，应停止宣称 L2 首次可用成立，并给出 L1 fallback 建议
+  - 该建议必须以结构化 `l1_fallback_payload` 返回，而不是自由文本；`fallback_goal` 用于说明 L1 继续承接的是 `read` 还是 `write`，`recommended_strategy` 只冻结最小方向，如视觉重新获取目标、视觉确认页面状态、或视觉引导后继续物理交互
 - 本 FR 不承诺运行时自动切换 L2/L1/L3，只冻结成功判定与 handoff 边界。
 
 ### 6. 与候选能力与验证链路的衔接
@@ -129,8 +133,8 @@ Given 页面缺少足够语义结构或连续无法定位目标
 When L2 无法稳定完成首次成功路径
 Then 系统会返回明确失败大类
 And `success=false` 的结果对象中必须包含 `failure_class`
+And 当 `failure_class=requires_l1_fallback` 时必须同时包含结构化 `l1_fallback_payload`
 And 不会返回 `candidate_shell_seed` 冒充候选能力输入
-And 会给出需要 L1 fallback 的结构化方向
 
 ### 场景 4：L2 首次可用不等于正式复用
 
@@ -143,18 +147,20 @@ And 不会把它直接描述成正式可复用能力
 
 1. 只完成了一次临时读取，但未留下结构化输出或候选能力 handoff 输入：不得声称首次可用成立。
 2. `success=false` 却缺少 `failure_class`，或仍返回 `candidate_shell_seed`：视为失败回传边界未冻结。
-3. 风险门禁阻断时继续推进高风险交互：视为越界到 `FR-0010/0011` 之外。
-4. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
-5. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
-6. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
+3. `failure_class=requires_l1_fallback` 却缺少结构化 `l1_fallback_payload`，或只给出自由文本建议：视为 L1 交接边界未冻结。
+4. 风险门禁阻断时继续推进高风险交互：视为越界到 `FR-0010/0011` 之外。
+5. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
+6. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
+7. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
 
 ## 验收标准
 
 1. FR-0019 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. L2 首次可用的最小能力面、成功判定、失败分类与 handoff 输出已冻结。
-3. 本 FR 已明确继承 `FR-0017` 与既有运行/诊断/风控边界。
-4. 文档已明确区分“首次成功”“候选能力”“已验证能力”。
-5. 本 PR 只冻结规约，不混入实现代码。
+3. `failure_class=requires_l1_fallback` 时的结构化 `l1_fallback_payload` 已冻结，且不会与成功态 `candidate_shell_seed` 混用。
+4. 本 FR 已明确继承 `FR-0017` 与既有运行/诊断/风控边界。
+5. 文档已明确区分“首次成功”“候选能力”“已验证能力”。
+6. 本 PR 只冻结规约，不混入实现代码。
 
 ## 依赖与前置条件
 

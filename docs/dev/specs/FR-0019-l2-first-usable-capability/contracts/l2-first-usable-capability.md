@@ -32,6 +32,12 @@ interface InteractionTraceStep {
   settled: boolean
 }
 
+interface L1FallbackPayload {
+  fallback_goal: "read" | "write"
+  fallback_reason: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled"
+  recommended_strategy: "visual_reacquire" | "visual_state_check" | "visual_then_physical_act"
+}
+
 type L2FirstUsableResult =
   | {
       success: true
@@ -62,7 +68,16 @@ type L2FirstUsableResult =
     }
   | {
       success: false
-      failure_class: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked" | "requires_l1_fallback"
+      failure_class: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked"
+      result_summary?: Record<string, unknown>
+      first_usable_trace?: FirstUsableTraceStep[]
+      interaction_trace?: InteractionTraceStep[]
+      capture_hints?: Record<string, unknown>
+    }
+  | {
+      success: false
+      failure_class: "requires_l1_fallback"
+      l1_fallback_payload: L1FallbackPayload
       result_summary?: Record<string, unknown>
       first_usable_trace?: FirstUsableTraceStep[]
       interaction_trace?: InteractionTraceStep[]
@@ -77,6 +92,10 @@ type L2FirstUsableResult =
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
+- `failure_class=requires_l1_fallback` 时，`l1_fallback_payload` 必须存在，并至少冻结 `fallback_goal`、`fallback_reason`、`recommended_strategy`；不得只返回自由文本建议。
+- `l1_fallback_payload.fallback_reason` 只允许表达触发 L2 停止并移交 L1 的最小原因：语义结构不足、目标连续无法定位、或状态始终无法收敛。
+- `l1_fallback_payload.recommended_strategy` 只描述 L1 下一步最小方向，不在本 FR 中扩张成完整 L1 工作流或自动切换编排。
+- 非 `requires_l1_fallback` 的失败分支不得伪造 `l1_fallback_payload`。
 - 当前 FR 只允许把 `read` / `write` 首次成功路径交给 `FR-0017`；`download` 如需进入 L2 first-usable，必须在独立 FR 中先冻结其最小执行语义与结果形态。
 - `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

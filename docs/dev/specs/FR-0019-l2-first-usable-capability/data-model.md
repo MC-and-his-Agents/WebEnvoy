@@ -73,7 +73,26 @@
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
 - `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
 
-## 5. 与既有对象的关系
+## 5. `l1_fallback_payload`
+
+用途：
+
+- 在 `failure_class=requires_l1_fallback` 时，向 L1 明确交接“为什么停止 L2”以及“下一步最小应做什么”
+
+最小字段：
+
+- `fallback_goal`
+- `fallback_reason`
+- `recommended_strategy`
+
+补充约束：
+
+- `l1_fallback_payload` 只在 `failure_class=requires_l1_fallback` 时出现，其他失败分支不得伪造。
+- `fallback_goal` 只允许 `read` / `write`，用于说明 L1 继续承接的目标类型。
+- `fallback_reason` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`，用于说明触发 L2 停止的最小原因。
+- `recommended_strategy` 只允许 `visual_reacquire`、`visual_state_check`、`visual_then_physical_act`，用于冻结 L1 的最小方向，而不是完整 L1 工作流。
+
+## 6. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
