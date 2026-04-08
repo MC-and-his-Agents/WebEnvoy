@@ -87,10 +87,12 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref`
   - `profile_ref`
   - `source_run_id`
+  - `payload_locator`
   - `captured_at`
 - 必须明确：
   - `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用已存在的输入快照引用对象
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
+  - `payload_locator` 是 replay snapshot 的正式可解析 payload 边界；重放层必须通过它重新取回已保存输入，不得仅靠 `source_run_id`、artifact refs 或带外扫描临时反推
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
   - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_source=last_success_input` 冻结为可执行 replay 入口；状态变更能力如需 replay，必须在后续独立 FR 中补齐 gate 元数据或 dry-run 语义后再行收口
@@ -291,16 +293,17 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
-5. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
-6. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
-7. 失败大类被写成低层错误码镜像：视为边界漂移。
-8. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
-9. 只有 smoke current latest 成功、却仍把顶层 `health_state` 压成 `degraded`，或未把覆盖度标成 `smoke_only`：视为状态轴仍然混用。
-10. 把 `healthy` 误当成“可交付/可分享”，或把 `validation_coverage_state` 当成顶层可用性结论：视为越界到 Phase 3/5。
-11. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-12. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
-13. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref` 或 `last_success_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
-14. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun 或写出 `healthy`：视为状态变更验证门禁缺失。
+5. 输入快照引用对象缺少 `payload_locator`，或该 locator 无法解析到对应 payload：不得视为可执行 replay。
+6. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
+7. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
+8. 失败大类被写成低层错误码镜像：视为边界漂移。
+9. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
+10. 只有 smoke current latest 成功、却仍把顶层 `health_state` 压成 `degraded`，或未把覆盖度标成 `smoke_only`：视为状态轴仍然混用。
+11. 把 `healthy` 误当成“可交付/可分享”，或把 `validation_coverage_state` 当成顶层可用性结论：视为越界到 Phase 3/5。
+12. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+13. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref` 或 `last_success_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
+15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun 或写出 `healthy`：视为状态变更验证门禁缺失。
 
 ## 验收标准
 

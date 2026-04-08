@@ -80,6 +80,7 @@
 - `ability_ref`
 - `profile_ref`
 - `source_run_id`
+- `payload_locator`
 - `captured_at`
 
 说明：
@@ -87,6 +88,7 @@
 - `replay_input_ref` 与 `last_success_input_ref` 的正式 truth source 都是该输入快照引用对象。
 - 输入快照引用对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
+- `payload_locator` 是该输入快照引用对象的正式可解析 payload 边界；实现层必须通过它重新取回保存输入，不得仅靠 `source_run_id`、artifact refs 或其他带外扫描推导 payload。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。

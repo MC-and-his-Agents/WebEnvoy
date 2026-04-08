@@ -1,7 +1,5 @@
 # FR-0010 TODO
 
-> 本文件记录 FR-0010 在 `#363` closeout 后的 formal 状态与后续实现入口。GitHub issue / PR / Project 仍是排期与关闭状态真相源；当前 writeback 只回写已发生事实，不在本文件并行重定义 issue 状态。
-
 ## Formal Review Repair Snapshot（#363）
 
 - [x] `spec.md` 补齐目标、非目标、功能需求、GWT、异常场景、验收标准与依赖。
@@ -14,9 +12,9 @@
 - [x] `consumer_gate_result` 的稳定字段集合已在 formal 套件内固定为 `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
 - [x] `risk_state` 的正式归属已在 formal 套件内固定到 `gate_input.risk_state` 与 `audit_record.risk_state`。
 
-## 当前 review 状态
+## 当前 review 待完成项
 
-- [x] FR-0010 spec review 已通过；本轮 closeout 以 `#363` 的合入与对应 review 结论为准。
+- [ ] FR-0010 spec review 通过。
 - [x] `#218` 的门禁边界已在 FR-0010 套件内冻结：读写域分离 + 目标域/目标页显式确认。
 - [x] `#219` 的门禁边界已在 FR-0010 套件内冻结：默认 `dry_run/recon` + live 显式放行。
 - [x] `#221` 的门禁边界已在 FR-0010 套件内冻结：人工确认与审计记录最小闭环。
@@ -27,8 +25,6 @@
 - [x] 统一消费对象字段已在 formal 套件内冻结：`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
 - [x] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/208#issuecomment-4199076361`
 - [x] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展需要引用的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/209#issuecomment-4199076389`
-- [x] `#363` 已于 `2026-04-07T13:59:52Z` 关闭，当前 TODO 回写与 GitHub closeout 状态对齐。
-
 ## 实施清单（spec 通过后）
 
 - [ ] 实现读域/写域分离的执行前检查。
