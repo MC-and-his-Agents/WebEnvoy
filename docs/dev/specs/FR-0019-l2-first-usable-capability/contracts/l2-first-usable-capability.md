@@ -2,40 +2,22 @@
 
 ## 1. `l2_first_usable_request`
 
+说明：以下伪类型中的 `FR0010GateInput` 表示对 `FR-0010.gate_input` 的直接类型别名；本 FR 只引用，不本地重定义。
+
 ```ts
 type L2FirstUsableRequest =
   | {
       target_url: string
       goal_kind: "read"
       goal_hint?: string
-      gate_input: {
-        run_id: string
-        session_id: string
-        profile: string
-        target_domain: string
-        target_tab_id: number
-        target_page: string
-        action_type: "read" | "write"
-        requested_execution_mode: "dry_run" | "recon" | "live_read_limited" | "live_read_high_risk" | "live_write"
-        risk_state: "paused" | "limited" | "allowed"
-      }
+      gate_input: FR0010GateInput
       allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
     }
   | {
       target_url: string
       goal_kind: "write"
       goal_hint?: string
-      gate_input: {
-        run_id: string
-        session_id: string
-        profile: string
-        target_domain: string
-        target_tab_id: number
-        target_page: string
-        action_type: "read" | "write"
-        requested_execution_mode: "dry_run" | "recon" | "live_read_limited" | "live_read_high_risk" | "live_write"
-        risk_state: "paused" | "limited" | "allowed"
-      }
+      gate_input: FR0010GateInput
       allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
       write_safety_boundary: {
         irreversible_controls_blocked: true
@@ -48,8 +30,9 @@ type L2FirstUsableRequest =
 
 - 当前 FR 的请求面只冻结 `read` / `write`；`download` 仍保留在上游共享模型中，但不属于本 FR 的可请求能力。
 - 本 FR 中的最小基础交互统一归入 `write`，但不等于恢复高风险 live 写路径或账号敏感提交。
-- `gate_input` 必须直接复用 `FR-0010.gate_input` 的冻结字段形状；L2 first-usable 不得再为同一门禁输入发明第二套私有 request schema。
+- `gate_input` 表示对 `FR-0010.gate_input` 的直接别名引用；FR-0019 不得在本地重新枚举其子字段、模式分类或风险状态。
 - `gate_input.target_tab_id` 与 `gate_input.target_page` 必须共同存在；`goal_kind` 必须直接等于 `gate_input.action_type`，且 `target_url` 的域名必须能回链到 `gate_input.target_domain`。
+- 若 `gate_input.action_type=irreversible_write` 或 `gate_input.requested_execution_mode` 只在 XHS live lane 内成立，FR-0019 必须将其视为越界输入并阻断，而不是在通用 L2 请求面冻结一套分叉语义。
 - `goal_kind=write` 时，`write_safety_boundary` 必须存在，并且必须明确阻断不可逆控件；未知站点的 `write` 范围不允许覆盖 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类动作。
 
 ## 2. `l2_first_usable_result`

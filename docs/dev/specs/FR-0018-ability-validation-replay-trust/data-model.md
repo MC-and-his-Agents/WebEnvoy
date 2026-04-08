@@ -21,7 +21,7 @@
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
-- `divergence_reason` 至少支持 `smoke_replay_mismatch` 与 `missing_mode_evidence`；其中后者专用于“已有 smoke latest，但 replay latest 尚未建立”的状态。
+- `divergence_reason` 至少支持 `smoke_replay_mismatch` 与 `missing_mode_evidence`；其中后者专用于“smoke/replay 之一缺失”的状态。
 - 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> verified -> broken -> degraded`；一旦命中前序状态，后续状态不得再覆盖。
 - `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=verified` 只允许在 smoke/replay 两个 mode latest 都存在且都为 `verified` 时出现；`health_state=broken` 只允许在不存在任何 `verified` latest 且所有非 `stale` latest 都为 `broken` 时出现。
 - 其余存在 latest 的场景一律归入 `degraded`，包括 smoke-only verified、replay-only verified、success/failure 并存与 verified/stale 并存。

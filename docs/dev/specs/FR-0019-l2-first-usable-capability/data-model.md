@@ -79,7 +79,7 @@
 
 - 作为 `FR-0010.gate_input` 的直接复用输入，向 L2 first-usable 提供统一门禁上下文
 
-最小字段：
+继承字段：
 
 - `run_id`
 - `session_id`
@@ -94,8 +94,10 @@
 补充约束：
 
 - `gate_input` 必须与 `FR-0010.gate_input` 保持同字段形状与同语义，不得在 L2 first-usable request 中重新命名或拆分成私有别名。
+- `gate_input` 的子字段、执行模式与风险状态枚举以 `FR-0010.gate_input` 为唯一正式来源；FR-0019 不在本地重新冻结分叉版本。
 - `goal_kind` 必须直接等于 `gate_input.action_type`，`target_url` 必须能够回链到 `gate_input.target_domain`。
 - `gate_input.target_tab_id` 与 `gate_input.target_page` 必须共同存在；任一缺失都不得进入 `goal_kind=write` 的风险门禁消费路径。
+- 若 `gate_input.action_type=irreversible_write` 或命中只在 XHS live lane 内成立的执行模式，FR-0019 必须阻断该请求，不得把站点专用 gate 语义下沉为通用 L2 流程常量。
 
 ## 6. `failure_result`
 
