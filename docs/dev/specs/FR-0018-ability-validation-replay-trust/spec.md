@@ -62,6 +62,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 
 - 必须冻结 `ability_replay_request` 的最小边界，至少包含：
   - `ability_ref`
+  - `profile_ref`
   - `replay_source`
   - `replay_input_ref`
   - `replay_reason`
@@ -71,6 +72,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - 重放是“已保存能力的再运行入口”
   - 不等于重新训练、重新学习或自动修复
+  - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
 
 ### 4. 最小可信判断对象
 
@@ -85,11 +87,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 最近一次失败属于哪类大问题
   - 是否需要重新验证或人工修复
 - 最小判定标准：
-  - `unknown`：尚不存在任何完成态 latest 记录
-  - `verified`：已有 mode latest 记录全部为 `verified`，且不存在分叉
-  - `degraded`：至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，能力仍保留有限可用性
-  - `broken`：已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
-  - `stale`：已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果
+  - `unknown`：在给定 `ability_ref + profile_ref` 视图内，尚不存在任何完成态 latest 记录
+  - `verified`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `verified`，且不存在分叉
+  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，能力仍保留有限可用性
+  - `broken`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
+  - `stale`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果
 
 ### 5. 最小失败分类
 
@@ -105,14 +107,14 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 
 ### 6. 最近一次验证结果与证据引用
 
-- 每个能力必须能引用“按验证模式分开保存的最近一次验证结果”，每条 mode latest 至少包含：
+- 每个 `ability_ref + profile_ref` 组合必须能引用“按验证模式分开保存的最近一次验证结果”，每条 mode latest 至少包含：
   - `validation_mode`
   - `validated_at`
   - `result_state`
   - `failure_class`
   - `run_id`
   - `artifact_refs`
-- 每个能力还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
+- 每个 `ability_ref + profile_ref` 组合还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
   - `ability_ref`
   - `profile_ref`
   - `health_state`
@@ -125,7 +127,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 的正式 truth source 是 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 只保存引用，不另建 artifact 主数据
   - `ability_health_view` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state`
-  - `latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
+  - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
 ### 7. 与候选能力和 L2 首次可用的衔接
 
@@ -155,7 +157,7 @@ And 不需要直接阅读原始运行日志才能知道大概问题
 
 ### 场景 3：smoke 与 replay 分叉时不会被压扁成单一结果
 
-Given 同一个能力最近一次 `smoke_validation` 成功而 `replay_validation` 失败
+Given 同一个能力在同一个 `profile_ref` 下最近一次 `smoke_validation` 成功而 `replay_validation` 失败
 When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `degraded`
 And `latest_validations` 中必须同时保留 smoke 与 replay 各自的 latest 记录
@@ -171,7 +173,7 @@ And 不会在同一对象里暗含自动修复或重新学习
 
 Given 某次验证已经完成
 When reviewer 检查结果对象
-Then 能看到 `run_id` 与 `artifact_refs`
+Then 能看到 `validated_at`、`run_id` 与 `artifact_refs`
 And 不会创建第二套运行真相源
 
 ### 场景 6：L2 样本也能进入同一验证链路
@@ -193,8 +195,8 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 ## 验收标准
 
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
-2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结。
-3. 最近一次验证结果、失败大类与运行证据引用关系已冻结。
+2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
+3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id`、`artifact_refs` 为强制字段。
 4. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
 5. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
 6. 本 PR 只冻结规约，不混入实现代码。

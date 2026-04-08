@@ -54,20 +54,13 @@ interface CandidateAbilityInvocation {
 - `ability.id` 必须与 `descriptor_ref` 指向描述对象中的 `ability_id` 一致。
 - `descriptor_ref` 只负责把本次调用与候选能力描述绑定起来，不引入第二套调用壳。
 
-## 3. `candidate_ability_result_envelope`
-
-```ts
-interface CandidateAbilityResultEnvelope {
-  descriptor_ref: string
-  capability_result: Record<string, unknown>
-  diagnosis_ref?: string
-}
-```
+## 3. 结果挂载规则
 
 约束：
 
-- `capability_result` 继续落在 `FR-0007.summary.capability_result` 之下。
-- `diagnosis_ref` 只引用后续诊断/验证对象，不在本契约内展开。
+- 成功结果继续复用 `FR-0007` 的成功壳，并落在 `summary.capability_result` 之下。
+- `FR-0017` 不新增并行顶层结果壳；不得创造 `summary.capability_result` 之外的 `candidate_ability_result_envelope` 一类结构。
+- 结果与候选能力描述的绑定继续通过 `ability.id -> candidate_ability_descriptor.ability_id` 与调用时的 `descriptor_ref` 完成，不在成功结果里复制第二套结果壳。
 
 ## 4. 继承边界
 

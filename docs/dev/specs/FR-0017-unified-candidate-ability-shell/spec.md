@@ -76,6 +76,7 @@
   - `ability.layer` 表达本次执行所走的实际执行层，不能被 `execution_layer_support` 替代
   - `ability.action` 继续复用 `read` / `write` / `download`
 - 本 FR 必须明确：候选能力描述可以补充元数据，但不得重写 `FR-0007` 的最小输入/输出/错误结构。
+- 本 FR 不得新增并行顶层结果壳；成功结果仍只允许通过 `FR-0007.summary.capability_result` 暴露。
 
 ### 4. L3 / L2 统一承载边界
 
