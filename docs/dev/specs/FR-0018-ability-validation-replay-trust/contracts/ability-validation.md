@@ -7,7 +7,7 @@ interface AbilityValidationRequest {
   ability_ref: string
   validation_mode: "smoke_validation"
   profile_ref: string
-  expected_capability_kind: "read" | "write" | "download"
+  expected_capability_kind: "read" | "download"
   smoke_input: Record<string, unknown>
 }
 ```
@@ -78,7 +78,7 @@ interface AbilityHealthView {
 - `health_state` 只表达“现在是否可用”的最小可信判断，不表达是否可交付；`validation_coverage_state` 只表达验证覆盖度，不替代顶层可用性判断。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `validation_mode=smoke_validation` 时，`smoke_input` 必须存在，且必须满足 `FR-0017.candidate_ability_descriptor.input_contract_ref` 的最小输入边界。
-- `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；若目标 `candidate_ability_descriptor.ability_kind=write`，验证层必须在请求阶段拒绝该请求，不得写入 `latest_validations`，也不得据此推导 `health_state=healthy`。
+- `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；`write` 如需最小验证，必须在未来独立 FR 中冻结新的请求形态与 gate 元数据。
 - `expected_capability_kind` 如保留在请求面，必须直接等于 `FR-0017.candidate_ability_descriptor.ability_kind`；若不一致，验证层必须以结构化输入错误拒绝请求，不得自行容忍或改写。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不再引入独立的 ability 引用命名空间或二次映射对象。

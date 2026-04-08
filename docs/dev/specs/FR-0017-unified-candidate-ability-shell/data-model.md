@@ -39,8 +39,6 @@
 - `*_contract_ref` 的 canonical namespace 固定为 `cad::<ability_id>::<input|output|error>::v<major>`；其中 owner 必须是当前 `ability_id`，契约种类必须与 ref 中的 `<input|output|error>` 一致。
 - `candidate_ability_contract_registry` 是该 `ability_id` 下 `*_contract_ref` 的唯一正式解引用模型；它必须与 descriptor 同 owner 落库或原子发布。
 - `*_contract_ref` 的 authoritative resolver 是该 `ability_id` 对应的 descriptor-owned `candidate_ability_contract_registry`；实现层只能按完整 ref 精确 lookup `entries[*].contract_ref`，并校验 `contract_kind`，不得把 ref 退化为路径推断、runtime-store 主键或私有缓存键。
-- `candidate_ability_descriptor` 当前不落库 `write_execution_gate`、`write_gate_audit_refs` 或其他写入 lane 字段；对 `ability_kind=write`，这些门禁对象只允许停留在 `capture_run_id` 所关联的 run-scoped capture evidence 中。
-- 因此，descriptor 本身不能被视为可复用 write gate 或 write validation input 的真相源。
 - `seed_replay_input_ref` 如存在，是首个 replay 输入快照的正式引用字段；它必须稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`，但缺失时不得阻塞 `draft_candidate` 落库。
 - `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释为可执行 replay seed。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 descriptor 成立的强制前置。

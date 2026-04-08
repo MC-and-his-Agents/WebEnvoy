@@ -127,8 +127,6 @@
   - `capture_run_id`
   - `capture_profile`
 - `capture_profile` 必须是形成该候选能力时实际使用的 profile 引用，不允许缺失。
-- `candidate_ability_descriptor` 当前只承载共享能力壳与最小来源证据；对 `ability_kind=write`，capture 时使用过的 `write_execution_gate`、`write_gate_audit_refs` 等门禁字段仍属于 run-scoped capture evidence，不进入共享 descriptor。
-- 因此，`ability_kind=write` 的 descriptor 不能被下游解释为“已携带可复用 write gate”或“已具备可验证/可重放写入权限”；后续验证与 replay 仍必须等待独立 FR 冻结专门 gate 元数据。
 - `seed_replay_input_ref` 如存在，必须是首个 replay 输入快照的正式引用字段，稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；后续验证/重放不得再依赖从 `capture_run_id` 或 artifact 引用中临时反推初始输入。
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；但它不是 `draft_candidate` 的强制前置。
 - `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释成可执行 replay seed。
