@@ -18,8 +18,8 @@ usage() {
   检查当前仓库开放 PR 的最新 head SHA。
   默认只检查目标分支为 main 的 PR。
   可选按 head 分支前缀或 milestone 标题进一步过滤，只巡检当前 Sprint / FR 集合。
-  只有当某个 PR 自上次审查后出现新提交时，才触发一次 review。
-  如果没有开放 PR、目标分支不存在，或所有匹配 PR 都没有新提交，则直接结束。
+  对每个候选 PR，先查询当前 HEAD 是否已有 fresh guardian review。
+  如果没有开放 PR、目标分支不存在，或所有匹配 PR 都无需重新审查，则直接结束。
 EOF
 }
 
@@ -64,7 +64,8 @@ update_state() {
   local state_file="$1"
   local pr_number="$2"
   local head_sha="$3"
-  local repo_slug="$4"
+  local review_basis_digest="$4"
+  local repo_slug="$5"
   local reviewed_at
   local tmp_file
 
@@ -75,11 +76,19 @@ update_state() {
     --arg repo "${repo_slug}" \
     --arg pr "${pr_number}" \
     --arg sha "${head_sha}" \
+    --arg review_basis_digest "${review_basis_digest}" \
     --arg reviewed_at "${reviewed_at}" \
     '
       .repo = $repo
       | .prs[$pr] = {
           head_sha: $sha,
+          review_basis_digest: (
+            if ($review_basis_digest | length) > 0 then
+              $review_basis_digest
+            else
+              (.prs[$pr].review_basis_digest // "")
+            end
+          ),
           reviewed_at: $reviewed_at
         }
     ' "${state_file}" > "${tmp_file}"
@@ -96,6 +105,13 @@ review_pr() {
   else
     "${GUARDIAN_SCRIPT}" review "${pr_number}"
   fi
+}
+
+load_review_status() {
+  local pr_number="$1"
+  local output_file="$2"
+
+  "${GUARDIAN_SCRIPT}" review-status "${pr_number}" > "${output_file}"
 }
 
 main() {
@@ -182,7 +198,10 @@ main() {
     local is_draft
     local pr_base_ref
     local pr_milestone
-    local previous_sha
+    local review_status_file
+    local reusable_review
+    local review_status_reason
+    local review_basis_digest=""
 
     pr_number="$(jq -r '.number' <<< "${pr_row}")"
     pr_title="$(jq -r '.title' <<< "${pr_row}")"
@@ -191,7 +210,6 @@ main() {
     is_draft="$(jq -r '.isDraft' <<< "${pr_row}")"
     pr_base_ref="$(jq -r '.baseRefName' <<< "${pr_row}")"
     pr_milestone="$(jq -r '.milestone.title // ""' <<< "${pr_row}")"
-    previous_sha="$(jq -r --arg pr "${pr_number}" '.prs[$pr].head_sha // ""' "${state_file}")"
 
     if [[ "${pr_base_ref}" != "${base_branch}" ]]; then
       echo "跳过目标分支不是 ${base_branch} 的 PR #${pr_number}: ${pr_title} (base=${pr_base_ref})"
@@ -217,21 +235,38 @@ main() {
       continue
     fi
 
-    if [[ -n "${previous_sha}" && "${previous_sha}" == "${head_sha}" ]]; then
-      echo "跳过未更新 PR #${pr_number}: ${pr_title}"
+    review_status_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-review-status.XXXXXX")"
+    if ! load_review_status "${pr_number}" "${review_status_file}"; then
+      echo "review-status 查询失败，降级执行 guardian 审查 PR #${pr_number}: ${pr_title} (reason=review_status_failed)"
+      reusable_review="false"
+      review_status_reason="review_status_failed"
+    else
+      reusable_review="$(jq -r '.reusable' "${review_status_file}")"
+      review_status_reason="$(jq -r '.reason' "${review_status_file}")"
+      review_basis_digest="$(jq -r '.review_basis_digest // ""' "${review_status_file}")"
+    fi
+
+    if [[ "${reusable_review}" == "true" ]]; then
+      echo "跳过已存在 fresh guardian review 的 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
+      if [[ "${dry_run}" != "1" ]]; then
+        update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
+      fi
+      rm -f "${review_status_file}"
       skipped_count=$((skipped_count + 1))
       continue
     fi
 
     if [[ "${dry_run}" == "1" ]]; then
-      echo "Dry run: 将审查 PR #${pr_number}: ${pr_title}"
+      echo "Dry run: 将审查 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
+      rm -f "${review_status_file}"
       reviewed_count=$((reviewed_count + 1))
       continue
     fi
 
-    echo "开始审查 PR #${pr_number}: ${pr_title}"
+    echo "开始审查 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
     review_pr "${pr_number}" "${post_review}"
-    update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
+    update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
+    rm -f "${review_status_file}"
     reviewed_count=$((reviewed_count + 1))
   done < <(jq -c '.[]' <<< "${prs_json}")
 

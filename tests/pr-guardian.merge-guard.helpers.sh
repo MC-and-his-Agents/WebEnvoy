@@ -81,6 +81,65 @@ fi
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "review" ]]; then
   echo "$*" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
+  review_state="COMMENTED"
+  body_file=""
+  body=""
+  pr_number="${3:-}"
+  shift 3
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --approve)
+        review_state="APPROVED"
+        ;;
+      --request-changes)
+        review_state="CHANGES_REQUESTED"
+        ;;
+      --comment)
+        review_state="COMMENTED"
+        ;;
+      --body-file)
+        shift
+        body_file="${1:-}"
+        ;;
+      --body)
+        shift
+        body="${1:-}"
+        ;;
+    esac
+    shift || true
+  done
+
+  if [[ -n "${body_file}" ]]; then
+    body="$(cat "${body_file}")"
+  fi
+
+  if [[ -n "${MOCK_GH_POSTED_REVIEWS_JSON:-}" ]]; then
+    next_review_id="$(cat "${MOCK_GH_NEXT_REVIEW_ID_FILE:?missing MOCK_GH_NEXT_REVIEW_ID_FILE}")"
+    printf '%s\n' "$((next_review_id + 1))" > "${MOCK_GH_NEXT_REVIEW_ID_FILE}"
+
+    tmp_reviews_file="${MOCK_GH_POSTED_REVIEWS_JSON}.tmp"
+    jq \
+      --argjson review_id "${next_review_id}" \
+      --arg reviewer "${MOCK_GH_USER_LOGIN:?missing MOCK_GH_USER_LOGIN}" \
+      --arg commit_id "${HEAD_SHA:-}" \
+      --arg review_state "${review_state}" \
+      --arg submitted_at "${MOCK_GH_REVIEW_SUBMITTED_AT:-2026-04-07T10:10:00Z}" \
+      --arg body "${body}" \
+      '
+        .[0] += [
+          {
+            id: $review_id,
+            user: { login: $reviewer },
+            commit_id: $commit_id,
+            state: $review_state,
+            submitted_at: $submitted_at,
+            body: $body
+          }
+        ]
+      ' "${MOCK_GH_POSTED_REVIEWS_JSON}" > "${tmp_reviews_file}"
+    mv "${tmp_reviews_file}" "${MOCK_GH_POSTED_REVIEWS_JSON}"
+  fi
   exit 0
 fi
 
@@ -103,6 +162,21 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
     exit 0
   fi
   cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  if [[ " $* " == *" --json nameWithOwner "* ]]; then
+    if [[ " $* " == *" --jq "* ]]; then
+      printf '%s\n' "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
+    else
+      printf '{"nameWithOwner":"%s"}\n' "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
+    fi
+  elif [[ " $* " == *" --jq "* ]]; then
+    printf '%s\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
+  else
+    printf '{"owner":{"login":"%s"}}\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
+  fi
   exit 0
 fi
 
@@ -136,7 +210,20 @@ if [[ "${1:-}" == "api" ]]; then
     if [[ "${MOCK_GH_REVIEWS_REQUIRE_PAGINATE:-0}" == "1" && "${has_paginate}" != "1" ]]; then
       cat "${MOCK_GH_REVIEWS_FIRST_PAGE_JSON:?missing MOCK_GH_REVIEWS_FIRST_PAGE_JSON}"
     else
-      cat "${MOCK_GH_REVIEWS_JSON:?missing MOCK_GH_REVIEWS_JSON}"
+      jq -nc \
+        --slurpfile base "${MOCK_GH_REVIEWS_JSON:?missing MOCK_GH_REVIEWS_JSON}" \
+        --slurpfile posted "${MOCK_GH_POSTED_REVIEWS_JSON:?missing MOCK_GH_POSTED_REVIEWS_JSON}" \
+        '
+          ($base[0] // [[]]) as $base_pages
+          | ($posted[0][0] // []) as $posted_reviews
+          | if ($posted_reviews | length) == 0 then
+              $base_pages
+            elif ($base_pages | length) == 0 then
+              [$posted_reviews]
+            else
+              [($base_pages[0] + $posted_reviews)] + ($base_pages[1:] // [])
+            end
+        '
     fi
     exit 0
   fi
@@ -215,12 +302,18 @@ setup_case_dir() {
   MOCK_GH_CALLS_LOG="${case_dir}/gh.calls.log"
   MOCK_GH_MERGE_LOG="${case_dir}/gh.merge.log"
   MOCK_GH_REVIEW_LOG="${case_dir}/gh.review.log"
+  MOCK_GH_POSTED_REVIEWS_JSON="${case_dir}/mock/posted-reviews.json"
+  MOCK_GH_NEXT_REVIEW_ID_FILE="${case_dir}/mock/next-review-id.txt"
   : > "${MOCK_GH_CALLS_LOG}"
   : > "${MOCK_GH_MERGE_LOG}"
   : > "${MOCK_GH_REVIEW_LOG}"
+  printf '%s\n' '[[]]' > "${MOCK_GH_POSTED_REVIEWS_JSON}"
+  printf '%s\n' '1000' > "${MOCK_GH_NEXT_REVIEW_ID_FILE}"
   export MOCK_GH_CALLS_LOG
   export MOCK_GH_MERGE_LOG
   export MOCK_GH_REVIEW_LOG
+  export MOCK_GH_POSTED_REVIEWS_JSON
+  export MOCK_GH_NEXT_REVIEW_ID_FILE
 
   MOCK_CODEX_CALLS_LOG="${case_dir}/codex.calls.log"
   MOCK_CODEX_PROMPT_CAPTURE="${case_dir}/codex.prompt.log"
@@ -240,12 +333,97 @@ setup_case_dir() {
   unset MOCK_GH_REQUIRED_CHECKS_STDERR || true
   unset MOCK_GH_ISSUE_VIEW_EXIT_CODE || true
   unset MOCK_GH_ISSUE_VIEW_STDERR || true
+  unset PR_GUARDIAN_PROOF_VISIBILITY_MAX_ATTEMPTS || true
+  unset PR_GUARDIAN_PROOF_VISIBILITY_RETRY_DELAY_SECONDS || true
   unset MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED || true
   unset MOCK_CODEX_FORCE_FAIL || true
   unset MOCK_CODEX_OUTPUT_SEQUENCE_FILE || true
   unset MOCK_CODEX_PROMPT_CAPTURE_DIR || true
   unset MOCK_CODEX_FAIL_CALL || true
+  unset REUSED_REVIEWER_LOGIN || true
+  WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS="review-bot"
+  export WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS
+  unset MOCK_GH_REPO_OWNER_LOGIN || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
+  CODEX_HOME="${case_dir}/codex-home"
+  export CODEX_HOME
+  mkdir -p "${CODEX_HOME}/state"
+}
+
+seed_local_guardian_proof() {
+  local review_id="$1"
+  local reviewer="$2"
+  local review_state="$3"
+  local submitted_at="$4"
+  local proof_file
+  local tmp_file
+
+  proof_file="$(guardian_proof_store_file)"
+  ensure_guardian_proof_store_file
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/guardian-proof-test.XXXXXX")"
+
+  jq \
+    --arg review_id "${review_id}" \
+    --arg reviewer "${reviewer}" \
+    --arg review_state "${review_state}" \
+    --arg submitted_at "${submitted_at}" \
+    --arg repo_slug "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}" \
+    --arg pr_number "274" \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${REVIEW_MD_FILE}")" \
+    --arg verdict "$(jq -r '.verdict' "${RESULT_FILE}")" \
+    --argjson safe_to_merge "$(jq -r '.safe_to_merge' "${RESULT_FILE}")" \
+    '
+      .proofs //= {}
+      | .proofs[$review_id] = {
+          repo_slug: $repo_slug,
+          pr_number: $pr_number,
+          review_id: $review_id,
+          reviewer_login: $reviewer,
+          head_sha: $head_sha,
+          base_ref: $base_ref,
+          merge_base_sha: $merge_base_sha,
+          review_profile: $review_profile,
+          review_basis_digest: $review_basis_digest,
+          guardian_runtime_sha256: $guardian_runtime_sha256,
+          prompt_digest: $prompt_digest,
+          review_body_sha256: $review_body_sha256,
+          verdict: $verdict,
+          safe_to_merge: $safe_to_merge,
+          review_state: $review_state,
+          submitted_at: $submitted_at,
+          recorded_at: "2026-04-07T10:06:00Z"
+        }
+    ' "${proof_file}" > "${tmp_file}"
+
+  mv "${tmp_file}" "${proof_file}"
+}
+
+override_local_guardian_proof_field() {
+  local review_id="$1"
+  local field="$2"
+  local value="$3"
+  local proof_file
+  local tmp_file
+
+  proof_file="$(guardian_proof_store_file)"
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/guardian-proof-override.XXXXXX")"
+
+  jq \
+    --arg review_id "${review_id}" \
+    --arg field "${field}" \
+    --arg value "${value}" \
+    '
+      .proofs[$review_id][$field] = $value
+    ' "${proof_file}" > "${tmp_file}"
+
+  mv "${tmp_file}" "${proof_file}"
 }
 
 setup_fake_repo_root() {

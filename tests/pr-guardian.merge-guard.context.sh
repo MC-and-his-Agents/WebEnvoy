@@ -802,9 +802,9 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
   assert_file_contains "${git_calls_log}" "BatchMode=yes"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin +refs/heads/main:refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} remote get-url origin"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -857,7 +857,7 @@ test_fetch_origin_tracking_ref_passes_extra_fetch_args() {
   }
 
   assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main" "--deepen=200"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch --deepen=200 origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch --deepen=200 origin +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -895,7 +895,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback() {
       return 0
     fi
 
-    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"* ]]; then
+    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"* ]]; then
       return 0
     fi
 
@@ -907,7 +907,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback() {
   assert_file_contains "${git_calls_log}" "env GIT_ASKPASS="
   assert_file_contains "${git_calls_log}" "GIT_TERMINAL_PROMPT=0"
   assert_file_not_contains "${git_calls_log}" "env GIT_ASKPASS=${TMP_DIR}/git-askpass.sh"
-  assert_file_contains "${git_calls_log}" "fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"
   assert_file_not_contains "${git_calls_log}" "http.https://github.com/.extraheader="
 
   unset -f gh
@@ -947,7 +947,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https()
       return 0
     fi
 
-    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"* ]]; then
+    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"* ]]; then
       return 0
     fi
 
@@ -1029,7 +1029,7 @@ test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive
 
   assert_fail fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch origin +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
 }
@@ -1886,6 +1886,210 @@ test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_
   assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 首次引入该 guardian spec review 摘要，不存在 trusted baseline"
   assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 引入的 guardian spec review 摘要全文（当前无 trusted baseline）"
   assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+
+  restore_test_repo_root
+}
+
+test_build_lightweight_review_baseline_uses_merge_base_snapshot_files() {
+  setup_case_dir "lightweight-review-baseline"
+
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha-123"
+  export BASE_REF MERGE_BASE_SHA
+
+  hash_git_ref_file_sha256() {
+    printf 'hash:%s:%s\n' "$1" "$2"
+  }
+
+  local baseline
+  baseline="$(build_lightweight_review_baseline)"
+
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=code_review.md\tsha256=hash:merge-base-sha-123:code_review.md'* ]]; then
+    echo "expected lightweight review baseline to hash code_review.md from merge-base snapshot" >&2
+    exit 1
+  fi
+
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=AGENTS.md\tsha256=hash:merge-base-sha-123:AGENTS.md'* ]]; then
+    echo "expected lightweight review baseline to hash AGENTS.md from merge-base snapshot" >&2
+    exit 1
+  fi
+
+  if [[ "${baseline}" != *$'baseline_ref=merge-base-sha-123\tpath=docs/dev/architecture/anti-detection.md\tsha256=hash:merge-base-sha-123:docs/dev/architecture/anti-detection.md'* ]]; then
+    echo "expected lightweight review baseline to hash high-risk anti-detection baseline from merge-base snapshot" >&2
+    exit 1
+  fi
+
+  if [[ "${baseline}" != *"guardian_script_sha256="* ]]; then
+    echo "expected lightweight review baseline to include guardian script hash" >&2
+    exit 1
+  fi
+}
+
+test_build_lightweight_review_baseline_uses_pr_head_script_ref_when_available() {
+  setup_case_dir "lightweight-review-baseline-pr-head-script"
+
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha-123"
+  PR_HEAD_REF="refs/remotes/origin/pr/415"
+  export BASE_REF MERGE_BASE_SHA PR_HEAD_REF
+
+  local baseline
+  baseline="$(
+    hash_normalized_git_ref_file_sha256() {
+      printf 'normalized:%s:%s\n' "$1" "$2"
+    }
+
+    hash_normalized_file_sha256() {
+      printf 'local:%s\n' "$1"
+    }
+
+    build_lightweight_review_baseline
+  )"
+
+  if [[ "${baseline}" != *"guardian_script_sha256=normalized:refs/remotes/origin/pr/415:scripts/pr-guardian.sh"* ]]; then
+    echo "expected lightweight review baseline to hash guardian script from normalized PR head ref content when available" >&2
+    exit 1
+  fi
+}
+
+test_hash_guardian_script_review_basis_sha256_normalizes_pr_head_ref_content() {
+  setup_case_dir "guardian-script-hash-normalized-pr-head-ref"
+
+  PR_HEAD_REF="refs/remotes/origin/pr/415"
+  export PR_HEAD_REF
+  unset WORKTREE_DIR || true
+  unset HEAD_SHA || true
+
+  local actual
+  local expected
+  actual="$(
+    git() {
+      if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "refs/remotes/origin/pr/415:scripts/pr-guardian.sh" ]]; then
+        printf 'echo guardian\n\n'
+        return 0
+      fi
+      command git "$@"
+    }
+
+    hash_guardian_script_review_basis_sha256
+  )"
+  expected="$(hash_string_sha256 'echo guardian')"
+
+  assert_equal "${actual}" "${expected}"
+}
+
+test_hash_running_guardian_script_sha256_prefers_repo_checkout() {
+  setup_case_dir "guardian-runtime-hash-repo-checkout"
+
+  local actual
+  actual="$(
+    hash_normalized_file_sha256() {
+      printf 'local:%s\n' "$1"
+    }
+
+    hash_running_guardian_script_sha256
+  )"
+
+  assert_equal "${actual}" "local:${REPO_ROOT}/scripts/pr-guardian.sh"
+}
+
+test_compute_review_basis_digest_changes_when_lightweight_review_baseline_changes() {
+  setup_case_dir "review-basis-digest-baseline-change"
+
+  PR_TITLE="same head"
+  PR_BODY=""
+  BASE_REF="main"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
+  export PR_TITLE PR_BODY BASE_REF SLIM_PR_FILE LINKED_ISSUES_FILE
+
+  : > "${SLIM_PR_FILE}"
+  : > "${LINKED_ISSUES_FILE}"
+
+  build_lightweight_issue_basis() {
+    :
+  }
+
+  build_lightweight_review_baseline() {
+    printf '%s\n' "baseline=v1"
+  }
+
+  compute_review_basis_digest
+  local digest_one="${REVIEW_BASIS_DIGEST}"
+
+  build_lightweight_review_baseline() {
+    printf '%s\n' "baseline=v2"
+  }
+
+  compute_review_basis_digest
+  local digest_two="${REVIEW_BASIS_DIGEST}"
+
+  if [[ "${digest_one}" == "${digest_two}" ]]; then
+    echo "expected review basis digest to change when lightweight review baseline changes" >&2
+    exit 1
+  fi
+}
+
+test_build_review_prompt_uses_stable_digest_across_temp_paths() {
+  setup_case_dir "stable-prompt-digest"
+  setup_fake_repo_root
+
+  local fake_worktree_dir_one="${TMP_DIR}/run-one/worktree"
+  local baseline_snapshot_root_one="${TMP_DIR}/run-one/baseline-snapshot"
+  local fake_worktree_dir_two="${TMP_DIR}/run-two/worktree"
+  local baseline_snapshot_root_two="${TMP_DIR}/run-two/baseline-snapshot"
+  local prompt_one="${TMP_DIR}/run-one/prompt.md"
+  local prompt_two="${TMP_DIR}/run-two/prompt.md"
+  local stats_one="${TMP_DIR}/run-one/review-stats.txt"
+  local stats_two="${TMP_DIR}/run-two/review-stats.txt"
+  local digest_one
+  local digest_two
+
+  mkdir -p "${fake_worktree_dir_one}/docs/dev/review" "${baseline_snapshot_root_one}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir_two}/docs/dev/review" "${baseline_snapshot_root_two}/docs/dev/review"
+
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md"
+
+  REVIEW_PROFILE="high_risk_impl_profile"
+  PR_TITLE="stable digest"
+  PR_URL="https://example.test/pr/415"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE
+
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  WORKTREE_DIR="${fake_worktree_dir_one}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root_one}"
+  PROMPT_RUN_FILE="${prompt_one}"
+  REVIEW_STATS_FILE="${stats_one}"
+  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT PROMPT_RUN_FILE REVIEW_STATS_FILE
+  printf '%s\n' "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md" > "${CONTEXT_DOCS_FILE}"
+  build_review_prompt 415
+
+  WORKTREE_DIR="${fake_worktree_dir_two}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root_two}"
+  PROMPT_RUN_FILE="${prompt_two}"
+  REVIEW_STATS_FILE="${stats_two}"
+  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT PROMPT_RUN_FILE REVIEW_STATS_FILE
+  printf '%s\n' "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md" > "${CONTEXT_DOCS_FILE}"
+  build_review_prompt 415
+
+  digest_one="$(awk -F= '/^prompt_digest=/{print $2}' "${stats_one}")"
+  digest_two="$(awk -F= '/^prompt_digest=/{print $2}' "${stats_two}")"
+
+  assert_file_contains "${prompt_one}" "${baseline_snapshot_root_one}/docs/dev/review/guardian-review-addendum.md"
+  assert_file_contains "${prompt_two}" "${baseline_snapshot_root_two}/docs/dev/review/guardian-review-addendum.md"
+  assert_equal "${digest_one}" "${digest_two}"
 
   restore_test_repo_root
 }

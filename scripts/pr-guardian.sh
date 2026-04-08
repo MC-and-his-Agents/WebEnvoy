@@ -9,16 +9,19 @@ CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
 SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
 REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
 SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+CODEX_ROOT="${CODEX_HOME:-${HOME}/.codex}"
 declare -a REGISTERED_SECRET_TMP_DIRS=()
 
 usage() {
   cat <<'EOF'
 用法:
   scripts/pr-guardian.sh review <pr-number> [--post-review]
+  scripts/pr-guardian.sh review-status <pr-number>
   scripts/pr-guardian.sh merge-if-safe <pr-number> [--post-review] [--delete-branch]
 
 说明:
   review         本机执行 Codex 审查并打印结论
+  review-status  输出当前 HEAD 是否存在可复用 guardian review 的机器可读状态
   merge-if-safe  自动回写 review（可兼容传 --post-review）；审查通过且必需检查通过时，执行 squash merge
 EOF
 }
@@ -34,6 +37,55 @@ warn() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
+}
+
+guardian_proof_store_file() {
+  printf '%s/state/webenvoy-pr-guardian-proofs.json\n' "${CODEX_HOME:-${CODEX_ROOT}}"
+}
+
+ensure_guardian_proof_store_file() {
+  local proof_file
+  local proof_dir
+
+  proof_file="$(guardian_proof_store_file)"
+  proof_dir="$(dirname "${proof_file}")"
+  mkdir -p "${proof_dir}"
+
+  if [[ ! -f "${proof_file}" ]]; then
+    printf '{\n  "proofs": {}\n}\n' > "${proof_file}"
+  fi
+}
+
+load_guardian_proof_store_json() {
+  local output_file="$1"
+  local proof_file
+
+  proof_file="$(guardian_proof_store_file)"
+  ensure_guardian_proof_store_file
+  jq '.' "${proof_file}" > "${output_file}"
+}
+
+repository_slug() {
+  if [[ -n "${REPO_SLUG:-}" ]]; then
+    printf '%s\n' "${REPO_SLUG}"
+    return 0
+  fi
+
+  local origin_url=""
+  origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+
+  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]}"
+  elif [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/.]+?)(\.git)?$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]}"
+  elif [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]}"
+  else
+    REPO_SLUG="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+  fi
+
+  export REPO_SLUG
+  printf '%s\n' "${REPO_SLUG}"
 }
 
 origin_url_to_https() {
@@ -68,7 +120,7 @@ fetch_origin_tracking_ref() {
   local target_ref="$2"
   shift 2
   local fetch_args=("$@")
-  local refspec="${source_ref}:${target_ref}"
+  local refspec="+${source_ref}:${target_ref}"
   local origin_url=""
   local https_url=""
   local fetch_cmd=()
@@ -171,6 +223,13 @@ compute_merge_base_sha() {
   git -C "${WORKTREE_DIR}" merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true
 }
 
+compute_merge_base_sha_for_refs() {
+  local head_ref="$1"
+  local base_ref="$2"
+
+  git -C "${REPO_ROOT}" merge-base "${head_ref}" "${base_ref}" 2>/dev/null || true
+}
+
 ensure_merge_base_available() {
   local pr_number="$1"
   local fetch_arg=""
@@ -196,6 +255,39 @@ ensure_merge_base_available() {
     fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "--unshallow" || true
     fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "--unshallow" || true
     MERGE_BASE_SHA="$(compute_merge_base_sha)"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  fi
+
+  return 1
+}
+
+ensure_merge_base_available_for_refs() {
+  local pr_number="$1"
+  local head_ref="$2"
+  local base_ref="$3"
+  local fetch_arg=""
+  local is_shallow=""
+
+  MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
+  [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  [[ "${is_shallow}" == "true" ]] || return 1
+
+  for fetch_arg in "--deepen=200" "--deepen=1000"; do
+    warn "检测到浅历史且缺少 merge-base，正在尝试补齐提交历史: ${fetch_arg}"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "${fetch_arg}" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "${fetch_arg}" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  done
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  if [[ "${is_shallow}" == "true" ]]; then
+    warn "浅历史补齐后仍缺少 merge-base，正在尝试完整拉取历史。"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "--unshallow" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "--unshallow" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
     [[ -n "${MERGE_BASE_SHA}" ]] && return 0
   fi
 
@@ -249,6 +341,335 @@ cleanup() {
   fi
 }
 
+hash_file_sha256() {
+  local file="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${file}" | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "${file}" | awk '{print $NF}'
+    return 0
+  fi
+
+  die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
+}
+
+hash_string_sha256() {
+  local value="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "${value}" | sha256sum | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "${value}" | shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    printf '%s' "${value}" | openssl dgst -sha256 | awk '{print $NF}'
+    return 0
+  fi
+
+  die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
+}
+
+hash_normalized_file_sha256() {
+  local file="$1"
+  local normalized_body
+
+  if [[ ! -f "${file}" ]]; then
+    hash_string_sha256 "__WEBENVOY_MISSING_FILE__:${file}"
+    return 0
+  fi
+
+  normalized_body="$(perl -0pe 's/\s+\z//s' "${file}")"
+  hash_string_sha256 "${normalized_body}"
+}
+
+hash_normalized_review_body_sha256() {
+  local review_file="$1"
+  local normalized_body
+
+  normalized_body="$(
+    perl -0pe '
+      s/\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+\/=]+ -->\n?/\n/g;
+      s/\s+\z//s;
+    ' "${review_file}"
+  )"
+
+  hash_string_sha256 "${normalized_body}"
+}
+
+trusted_guardian_reviewers_json() {
+  local requesting_user="$1"
+  local include_requesting_user="${2:-0}"
+  local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
+  local reviewer=""
+  local -a trusted_reviewers=()
+  local -a default_bot_reviewers=(
+    "github-actions[bot]"
+    "poller[bot]"
+  )
+
+  if [[ "${include_requesting_user}" == "1" && -n "${requesting_user}" && "${requesting_user}" != *"[bot]" ]]; then
+    trusted_reviewers+=("${requesting_user}")
+  fi
+
+  trusted_reviewers+=("${default_bot_reviewers[@]}")
+
+  if [[ -n "${extra_reviewers}" ]]; then
+    while IFS= read -r reviewer; do
+      [[ -n "${reviewer}" ]] || continue
+      trusted_reviewers+=("${reviewer}")
+    done < <(printf '%s\n' "${extra_reviewers}" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  fi
+
+  jq -nc '$ARGS.positional | map(select(length > 0)) | unique' --args "${trusted_reviewers[@]}"
+}
+
+stable_prompt_digest() {
+  local prompt_file="$1"
+  local normalized_prompt
+
+  normalized_prompt="$(
+    REPO_ROOT="${REPO_ROOT:-}" \
+    TMP_DIR="${TMP_DIR:-}" \
+    WORKTREE_DIR="${WORKTREE_DIR:-}" \
+    BASELINE_SNAPSHOT_ROOT="${BASELINE_SNAPSHOT_ROOT:-}" \
+    perl -0pe '
+      my @pairs = (
+        [$ENV{WORKTREE_DIR}, "__WEBENVOY_WORKTREE__"],
+        [$ENV{BASELINE_SNAPSHOT_ROOT}, "__WEBENVOY_BASELINE_SNAPSHOT__"],
+        [$ENV{REPO_ROOT}, "__WEBENVOY_REPO_ROOT__"],
+        [$ENV{TMP_DIR}, "__WEBENVOY_TMP__"],
+      );
+
+      for my $pair (@pairs) {
+        my ($needle, $replacement) = @$pair;
+        next unless defined $needle && length $needle;
+        my $quoted = quotemeta($needle);
+        s/$quoted/$replacement/g;
+      }
+    ' "${prompt_file}"
+  )"
+
+  hash_string_sha256 "${normalized_prompt}"
+}
+
+lightweight_review_baseline_paths() {
+  cat <<'EOF'
+vision.md
+AGENTS.md
+docs/dev/AGENTS.md
+docs/dev/roadmap.md
+docs/dev/architecture/system-design.md
+docs/dev/architecture/anti-detection.md
+docs/dev/architecture/system_nfr.md
+docs/dev/architecture/system-design/communication.md
+docs/dev/architecture/system-design/read-write.md
+docs/dev/architecture/system-design/account.md
+docs/dev/architecture/system-design/adapter.md
+docs/dev/architecture/system-design/database.md
+docs/dev/architecture/system-design/execution.md
+code_review.md
+spec_review.md
+docs/dev/review/guardian-review-addendum.md
+docs/dev/review/guardian-spec-review-summary.md
+EOF
+}
+
+hash_git_ref_file_sha256() {
+  local git_ref="$1"
+  local file_path="$2"
+  local file_content=""
+
+  if file_content="$(git -C "${REPO_ROOT}" show "${git_ref}:${file_path}" 2>/dev/null)"; then
+    hash_string_sha256 "${file_content}"
+    return 0
+  fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING__:${git_ref}:${file_path}"
+}
+
+hash_normalized_git_ref_file_sha256() {
+  local git_ref="$1"
+  local file_path="$2"
+  local file_content=""
+
+  if file_content="$(git -C "${REPO_ROOT}" show "${git_ref}:${file_path}" 2>/dev/null)"; then
+    file_content="$(printf '%s' "${file_content}" | perl -0pe 's/\s+\z//s')"
+    hash_string_sha256 "${file_content}"
+    return 0
+  fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING__:${git_ref}:${file_path}"
+}
+
+build_lightweight_review_baseline() {
+  local git_ref="${MERGE_BASE_SHA}"
+  local file_path=""
+
+  printf 'guardian_script_sha256=%s\n' "$(hash_guardian_script_review_basis_sha256)"
+
+  while IFS= read -r file_path; do
+    [[ -n "${file_path}" ]] || continue
+    printf 'baseline_ref=%s\tpath=%s\tsha256=%s\n' \
+      "${git_ref}" \
+      "${file_path}" \
+      "$(hash_git_ref_file_sha256 "${git_ref}" "${file_path}")"
+  done < <(lightweight_review_baseline_paths)
+}
+
+hash_running_guardian_script_sha256() {
+  local repo_script_path="${REPO_ROOT:-}/scripts/pr-guardian.sh"
+  local running_script_path="${SCRIPT_DIR}/pr-guardian.sh"
+
+  if [[ -n "${REPO_ROOT:-}" && -f "${repo_script_path}" ]]; then
+    hash_normalized_file_sha256 "${repo_script_path}"
+    return 0
+  fi
+
+  if [[ -f "${running_script_path}" ]]; then
+    hash_normalized_file_sha256 "${running_script_path}"
+    return 0
+  fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING_RUNTIME_GUARDIAN__"
+}
+
+hash_guardian_script_review_basis_sha256() {
+  local relative_path="scripts/pr-guardian.sh"
+  local worktree_script_path=""
+
+  if [[ -n "${WORKTREE_DIR:-}" ]]; then
+    worktree_script_path="${WORKTREE_DIR}/${relative_path}"
+    if [[ -f "${worktree_script_path}" ]]; then
+      hash_normalized_file_sha256 "${worktree_script_path}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${PR_HEAD_REF:-}" ]]; then
+    hash_normalized_git_ref_file_sha256 "${PR_HEAD_REF}" "${relative_path}"
+    return 0
+  fi
+
+  if [[ -n "${HEAD_SHA:-}" ]]; then
+    hash_normalized_git_ref_file_sha256 "${HEAD_SHA}" "${relative_path}"
+    return 0
+  fi
+
+  hash_running_guardian_script_sha256
+}
+
+build_lightweight_issue_basis() {
+  local issue_number=""
+  local issue_file=""
+  local issue_title=""
+  local issue_body=""
+  local issue_body_file=""
+  local issue_title_hash=""
+  local issue_body_hash=""
+  local issue_updated_at=""
+
+  while IFS= read -r issue_number; do
+    [[ -n "${issue_number}" ]] || continue
+
+    issue_file="${TMP_DIR}/issue-${issue_number}-review-basis.json"
+    if ! gh issue view "${issue_number}" --json number,title,body,updatedAt > "${issue_file}" 2>/dev/null; then
+      printf 'issue=%s\tlookup=failed\n' "${issue_number}"
+      continue
+    fi
+
+    issue_title="$(jq -r '.title // ""' "${issue_file}")"
+    issue_body="$(jq -r '.body // ""' "${issue_file}")"
+    issue_updated_at="$(jq -r '.updatedAt // ""' "${issue_file}")"
+    issue_title_hash="$(hash_string_sha256 "$(sanitize_issue_prompt_line "${issue_title}")")"
+    issue_body_file="${TMP_DIR}/issue-${issue_number}-review-basis.md"
+    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
+    issue_body_hash="$(hash_normalized_file_sha256 "${issue_body_file}")"
+
+    printf 'issue=%s\tupdated_at=%s\ttitle_sha256=%s\tbody_sha256=%s\n' \
+      "${issue_number}" \
+      "${issue_updated_at}" \
+      "${issue_title_hash}" \
+      "${issue_body_hash}"
+  done < <(list_linked_issue_numbers)
+}
+
+compute_review_basis_digest() {
+  local pr_title_hash=""
+  local pr_body_hash=""
+  local issue_basis_file=""
+  local issue_basis=""
+  local baseline_basis=""
+
+  issue_basis_file="${TMP_DIR}/review-basis-issues.txt"
+  pr_title_hash="$(hash_string_sha256 "$(sanitize_user_prompt_line "${PR_TITLE:-}")")"
+  pr_body_hash="$(hash_normalized_file_sha256 "${SLIM_PR_FILE}")"
+  build_lightweight_issue_basis > "${issue_basis_file}"
+  issue_basis="$(cat "${issue_basis_file}")"
+  baseline_basis="$(build_lightweight_review_baseline)"
+  REVIEW_BASIS_DIGEST="$(
+    hash_string_sha256 "$(
+      printf 'pr_title_sha256=%s\npr_body_sha256=%s\n' "${pr_title_hash}" "${pr_body_hash}"
+      printf '%s\n' "${baseline_basis}"
+      printf '%s' "${issue_basis}"
+    )"
+  )"
+  export REVIEW_BASIS_DIGEST
+}
+
+guardian_metadata_json() {
+  local result_file="$1"
+  local review_file="$2"
+
+  jq -cn \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${review_file}")" \
+    --arg verdict "$(jq -r '.verdict' "${result_file}")" \
+    --argjson safe_to_merge "$(jq -r '.safe_to_merge' "${result_file}")" \
+    '
+      {
+        head_sha: $head_sha,
+        base_ref: $base_ref,
+        merge_base_sha: $merge_base_sha,
+        review_profile: $review_profile,
+        review_basis_digest: $review_basis_digest,
+        guardian_runtime_sha256: $guardian_runtime_sha256,
+        prompt_digest: $prompt_digest,
+        verdict: $verdict,
+        safe_to_merge: $safe_to_merge,
+        review_body_sha256: $review_body_sha256
+      }
+    '
+}
+
+append_guardian_metadata_comment() {
+  local result_file="$1"
+  local review_file="$2"
+  local metadata_b64=""
+
+  metadata_b64="$(guardian_metadata_json "${result_file}" "${review_file}" | base64 | tr -d '\n')"
+  printf '\n<!-- webenvoy-guardian-meta:v1 %s -->\n' "${metadata_b64}" >> "${review_file}"
+}
+
 build_markdown_review() {
   local result_file="$1"
   local review_file="$2"
@@ -292,6 +713,8 @@ build_markdown_review() {
     "### 需要关注的问题\n\n" + findings + "\n\n" +
     "### 合并前动作\n\n" + actions + "\n"
   ' "${result_file}" > "${review_file}"
+
+  append_guardian_metadata_comment "${result_file}" "${review_file}"
 }
 
 prepare_pr_workspace() {
@@ -324,6 +747,7 @@ prepare_pr_workspace() {
 
   fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}"
   fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
+  PR_HEAD_REF="refs/remotes/origin/pr/${pr_number}"
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
@@ -341,6 +765,47 @@ prepare_pr_workspace() {
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+  compute_review_basis_digest
+}
+
+prepare_review_status_context() {
+  local pr_number="$1"
+  local pr_head_ref=""
+  local base_branch_ref=""
+
+  unset WORKTREE_DIR || true
+  unset BASELINE_SNAPSHOT_ROOT || true
+  TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
+  META_FILE="${TMP_DIR}/pr.json"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
+
+  gh pr view "${pr_number}" --json \
+    title,body,baseRefName,headRefOid,author,closingIssuesReferences \
+    > "${META_FILE}"
+
+  PR_TITLE="$(jq -r '.title // ""' "${META_FILE}")"
+  PR_BODY="$(jq -r '.body // ""' "${META_FILE}")"
+  BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
+  HEAD_SHA="$(jq -r '.headRefOid' "${META_FILE}")"
+  PR_AUTHOR="$(jq -r '.author.login // ""' "${META_FILE}")"
+
+  fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}"
+  fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
+
+  pr_head_ref="refs/remotes/origin/pr/${pr_number}"
+  PR_HEAD_REF="${pr_head_ref}"
+  base_branch_ref="refs/remotes/origin/${BASE_REF}"
+  ensure_merge_base_available_for_refs "${pr_number}" "${pr_head_ref}" "${base_branch_ref}" \
+    || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法判断 review-status。"
+
+  git -C "${REPO_ROOT}" diff --name-only "${base_branch_ref}...${pr_head_ref}" > "${CHANGED_FILES_FILE}"
+  REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
+  resolve_linked_issue_numbers > "${LINKED_ISSUES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  compute_review_basis_digest
+  PROMPT_DIGEST=""
 }
 
 hydrate_worktree_dependencies() {
@@ -1393,6 +1858,9 @@ build_review_prompt() {
 
   {
     printf 'profile=%s\n' "${REVIEW_PROFILE}"
+    printf 'review_basis_digest=%s\n' "${REVIEW_BASIS_DIGEST:-}"
+    PROMPT_DIGEST="$(stable_prompt_digest "${PROMPT_RUN_FILE}")"
+    printf 'prompt_digest=%s\n' "${PROMPT_DIGEST}"
     printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
     printf 'context_docs=%s\n' "${context_count}"
   } > "${REVIEW_STATS_FILE}"
@@ -1413,6 +1881,14 @@ prepare_review_worktree_context() {
   local pr_number="$1"
 
   build_review_prompt "${pr_number}"
+}
+
+ensure_review_prompt_prepared() {
+  local pr_number="$1"
+
+  if [[ -z "${PROMPT_DIGEST:-}" || ! -f "${PROMPT_RUN_FILE:-}" ]]; then
+    prepare_review_worktree_context "${pr_number}"
+  fi
 }
 
 extract_first_review_json_candidate() {
@@ -2411,7 +2887,8 @@ run_codex_review() {
   local formatted_result_file=""
   local normalization_source_file=""
 
-  prepare_review_worktree_context "${pr_number}"
+  require_cmd codex
+  ensure_review_prompt_prepared "${pr_number}"
   native_error_file="${TMP_DIR}/codex-native-review.err"
 
   if codex exec \
@@ -2473,6 +2950,171 @@ submit_review_event() {
   fi
 }
 
+load_pull_reviews() {
+  local pr_number="$1"
+  local reviews_file="$2"
+
+  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+}
+
+annotate_pull_reviews_for_reuse() {
+  local input_file="$1"
+  local output_file="$2"
+
+  perl -MJSON::PP -MDigest::SHA=sha256_hex -MEncode=encode -0e '
+    my $json = JSON::PP->new->utf8->canonical;
+    my $data = $json->decode(do { local $/; <> });
+
+    for my $page (@{$data}) {
+      for my $review (@{$page}) {
+        my $body = $review->{body} // q{};
+        $body =~ s/\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+\/=]+ -->\n?/\n/g;
+        $body =~ s/\s+\z//s;
+        $review->{cleaned_body} = $body;
+        $review->{cleaned_body_sha256} = sha256_hex(encode("UTF-8", $body));
+      }
+    }
+
+    print $json->encode($data);
+  ' < "${input_file}" > "${output_file}"
+}
+
+find_latest_posted_guardian_review() {
+  local pr_number="$1"
+  local reviewer="$2"
+  local review_state="$3"
+  local output_file="$4"
+  local raw_reviews_file="${TMP_DIR}/reviews-proof.raw.json"
+  local reviews_file="${TMP_DIR}/reviews-proof.json"
+  local review_body_sha256
+
+  review_body_sha256="$(hash_normalized_review_body_sha256 "${REVIEW_MD_FILE}")"
+
+  load_pull_reviews "${pr_number}" "${raw_reviews_file}"
+  annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}"
+
+  jq -c \
+    --arg reviewer "${reviewer}" \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg review_state "${review_state}" \
+    --arg review_body_sha256 "${review_body_sha256}" \
+    '
+      [
+        .[][]
+        | select((.user.login // "") == $reviewer)
+        | select((.commit_id // "") == $head_sha)
+        | select((.state // "") == $review_state)
+        | select((.cleaned_body_sha256 // "") == $review_body_sha256)
+      ]
+      | if length == 0 then
+          empty
+        else
+          (
+            to_entries
+            | sort_by([(.value.submitted_at // ""), (.value.id // 0), .key])
+            | last
+            | .value
+          )
+        end
+    ' "${reviews_file}" > "${output_file}"
+
+  [[ -s "${output_file}" ]]
+}
+
+persist_guardian_review_proof() {
+  local pr_number="$1"
+  local reviewer="$2"
+  local review_file="$3"
+  local proof_file
+  local tmp_file
+  local repo_slug
+  local review_id
+  local safe_to_merge
+  local verdict
+  local recorded_at
+
+  proof_file="$(guardian_proof_store_file)"
+  ensure_guardian_proof_store_file
+  repo_slug="$(repository_slug)"
+  review_id="$(jq -r '(.id // "") | tostring' "${review_file}")"
+  [[ -n "${review_id}" ]] || return 1
+  safe_to_merge="$(jq -r '.safe_to_merge' "${RESULT_FILE}")"
+  verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
+  recorded_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-guardian-proof.XXXXXX")"
+
+  jq \
+    --arg review_id "${review_id}" \
+    --arg repo_slug "${repo_slug}" \
+    --arg pr_number "${pr_number}" \
+    --arg reviewer_login "${reviewer}" \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    --arg review_body_sha256 "$(jq -r '.cleaned_body_sha256 // ""' "${review_file}")" \
+    --arg verdict "${verdict}" \
+    --arg review_state "$(jq -r '.state // ""' "${review_file}")" \
+    --arg submitted_at "$(jq -r '.submitted_at // ""' "${review_file}")" \
+    --arg recorded_at "${recorded_at}" \
+    --argjson safe_to_merge "${safe_to_merge}" \
+    '
+      .proofs //= {}
+      | .proofs[$review_id] = {
+          repo_slug: $repo_slug,
+          pr_number: $pr_number,
+          review_id: $review_id,
+          reviewer_login: $reviewer_login,
+          head_sha: $head_sha,
+          base_ref: $base_ref,
+          merge_base_sha: $merge_base_sha,
+          review_profile: $review_profile,
+          review_basis_digest: $review_basis_digest,
+          guardian_runtime_sha256: $guardian_runtime_sha256,
+          prompt_digest: $prompt_digest,
+          review_body_sha256: $review_body_sha256,
+          verdict: $verdict,
+          safe_to_merge: $safe_to_merge,
+          review_state: $review_state,
+          submitted_at: $submitted_at,
+          recorded_at: $recorded_at
+        }
+    ' "${proof_file}" > "${tmp_file}"
+
+  mv "${tmp_file}" "${proof_file}"
+}
+
+record_posted_guardian_review_proof() {
+  local pr_number="$1"
+  local reviewer="$2"
+  local verdict="$3"
+  local expected_review_state
+  local review_file="${TMP_DIR}/posted-review.json"
+  local max_attempts="${PR_GUARDIAN_PROOF_VISIBILITY_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_PROOF_VISIBILITY_RETRY_DELAY_SECONDS:-1}"
+  local attempt=1
+
+  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${reviewer}")"
+
+  while (( attempt <= max_attempts )); do
+    if find_latest_posted_guardian_review "${pr_number}" "${reviewer}" "${expected_review_state}" "${review_file}"; then
+      persist_guardian_review_proof "${pr_number}" "${reviewer}" "${review_file}"
+      return 0
+    fi
+
+    if (( attempt < max_attempts )); then
+      sleep "${retry_delay_seconds}"
+    fi
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
 head_has_expected_review_state() {
   local pr_number="$1"
   local head_sha="$2"
@@ -2480,7 +3122,7 @@ head_has_expected_review_state() {
   local expected_state="$4"
   local reviews_file="${TMP_DIR}/reviews.json"
 
-  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+  load_pull_reviews "${pr_number}" "${reviews_file}"
 
   jq -e \
     --arg reviewer "${reviewer}" \
@@ -2504,6 +3146,395 @@ head_has_expected_review_state() {
           ) == $expected_state
         end
     ' "${reviews_file}" >/dev/null 2>&1
+}
+
+write_review_status_json_common() {
+  local pr_number="$1"
+  local requesting_user="$2"
+  local output_file="$3"
+  local strict_prompt_digest="${4:-1}"
+  local include_requesting_user="${5:-0}"
+  local raw_reviews_file="${TMP_DIR}/reviews-status.raw.json"
+  local reviews_file="${TMP_DIR}/reviews-status.json"
+  local proof_store_file="${TMP_DIR}/guardian-proofs.json"
+  local proof_store_available="1"
+  local repo_slug
+  local trusted_reviewers_json
+
+  load_pull_reviews "${pr_number}" "${raw_reviews_file}" || return 1
+  annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}" || return 1
+  if ! load_guardian_proof_store_json "${proof_store_file}"; then
+    printf '{\n  "proofs": {}\n}\n' > "${proof_store_file}"
+    proof_store_available="0"
+  fi
+  repo_slug="$(repository_slug)"
+  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${include_requesting_user}")"
+
+  jq -c \
+    --slurpfile proof_store "${proof_store_file}" \
+    --arg repo_slug "${repo_slug}" \
+    --arg pr_number "${pr_number}" \
+    --arg requesting_user "${requesting_user}" \
+    --arg proof_store_available "${proof_store_available}" \
+    --argjson trusted_reviewers "${trusted_reviewers_json}" \
+    --arg strict_prompt_digest "${strict_prompt_digest}" \
+    --arg pr_author "${PR_AUTHOR:-}" \
+    --arg head_sha "${HEAD_SHA:-}" \
+    --arg base_ref "${BASE_REF:-}" \
+    --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
+    --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
+    --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    '
+      ($proof_store[0].proofs // {}) as $proofs |
+      def completed_state:
+        . == "APPROVED" or . == "CHANGES_REQUESTED" or . == "COMMENTED" or . == "DISMISSED";
+      def trusted_bot_reviewer($login):
+        (($trusted_reviewers | index($login)) != null)
+        and ($login | endswith("[bot]"));
+      def expected_state($verdict; $reviewer):
+        if ($pr_author | length) > 0 and $pr_author == $reviewer then
+          "COMMENTED"
+        elif $verdict == "APPROVE" then
+          "APPROVED"
+        else
+          "CHANGES_REQUESTED"
+        end;
+      def latest_review($entries):
+        (
+          $entries
+          | to_entries
+          | sort_by([(.value.submitted_at // ""), (.value.id // 0), .key])
+          | last
+          | .value
+        );
+      def meta_safe_to_merge($entry):
+        if (($entry.meta | type) == "object") and ($entry.meta | has("safe_to_merge")) then
+          $entry.meta.safe_to_merge
+        else
+          null
+        end;
+      def review_key:
+        [(.submitted_at // ""), (.id // 0)];
+      def review_id_string:
+        ((.id // "") | tostring);
+      def review_matches_current_context:
+        (.meta_status // "") == "ok"
+        and (.meta.head_sha // "") == $head_sha
+        and (.meta.base_ref // "") == $base_ref
+        and (.meta.merge_base_sha // "") == $merge_base_sha
+        and (.meta.review_profile // "") == $review_profile
+        and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (.meta.guardian_runtime_sha256 // "") == $guardian_runtime_sha256
+        and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
+        and ((.state // "") == (.expected_state // ""));
+      def review_matches_reuse_basis:
+        (.meta_status // "") == "ok"
+        and (.meta.head_sha // "") == $head_sha
+        and (.meta.base_ref // "") == $base_ref
+        and (.meta.merge_base_sha // "") == $merge_base_sha
+        and (.meta.review_profile // "") == $review_profile
+        and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (.meta.guardian_runtime_sha256 // "") == $guardian_runtime_sha256
+        and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest));
+      def proof_matches_remote_review:
+        ($proofs[review_id_string] // null) as $proof
+        | $proof != null
+        and (($proof.repo_slug // "") == $repo_slug)
+        and ((($proof.pr_number // "") | tostring) == ($pr_number | tostring))
+        and ((($proof.review_id // "") | tostring) == review_id_string)
+        and (($proof.reviewer_login // "") == (.user.login // ""))
+        and (($proof.head_sha // "") == (.commit_id // ""))
+        and (($proof.base_ref // "") == (.meta.base_ref // ""))
+        and (($proof.merge_base_sha // "") == (.meta.merge_base_sha // ""))
+        and (($proof.review_profile // "") == (.meta.review_profile // ""))
+        and (($proof.review_basis_digest // "") == (.meta.review_basis_digest // ""))
+        and (($proof.guardian_runtime_sha256 // "") == (.meta.guardian_runtime_sha256 // ""))
+        and (($proof.prompt_digest // "") == (.meta.prompt_digest // ""))
+        and (($proof.review_body_sha256 // "") == (.cleaned_body_sha256 // ""))
+        and (($proof.verdict // "") == (.meta.verdict // ""))
+        and (($proof.safe_to_merge // null) == meta_safe_to_merge(.))
+        and (($proof.review_state // "") == (.state // ""))
+        and (($proof.submitted_at // "") == (.submitted_at // ""));
+      def reviewer_trusted_for_reuse:
+        (.user.login // "") as $login
+        | if trusted_bot_reviewer($login) then
+            true
+          elif ($proof_store_available == "1")
+            and ($requesting_user | length) > 0
+            and $login == $requesting_user
+            and ($login | endswith("[bot]") | not) then
+            proof_matches_remote_review
+          else
+            false
+          end;
+      def review_regresses_merge_safety($reused):
+        review_matches_reuse_basis
+        and (($reused.meta_status // "") == "ok")
+        and (meta_safe_to_merge($reused) == true)
+        and (meta_safe_to_merge(.) == false);
+      def review_blocks_reuse($reused):
+        if (.meta_status // "") == "missing_metadata" then
+          (.state // "") != "COMMENTED"
+        elif (.meta_status // "") == "invalid_metadata" then
+          true
+        else
+          (
+            (.meta.head_sha // "") != $head_sha
+            or (.meta.base_ref // "") != $base_ref
+            or (.meta.merge_base_sha // "") != $merge_base_sha
+            or (.meta.review_profile // "") != $review_profile
+            or (.meta.review_basis_digest // "") != $review_basis_digest
+            or (.meta.guardian_runtime_sha256 // "") != $guardian_runtime_sha256
+            or ($strict_prompt_digest == "1" and (.meta.prompt_digest // "") != $prompt_digest)
+            or ((.state // "") != (.expected_state // ""))
+            or review_regresses_merge_safety($reused)
+          )
+        end;
+      def normalize_review:
+        (.body // "") as $body
+        | (.cleaned_body // "") as $cleaned_body
+        | (([$body | match("<!-- webenvoy-guardian-meta:v1 (?<meta>[A-Za-z0-9+/=]+) -->"; "g")?] | last | .captures[0].string?) // "") as $meta_b64
+        | if ($meta_b64 | length) == 0 then
+            . + {
+              meta_status: "missing_metadata",
+              meta: null,
+              cleaned_body: $cleaned_body
+            }
+          else
+            ((try ($meta_b64 | @base64d | fromjson) catch null)) as $meta
+            | if $meta == null
+                or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not)
+                or (($meta.safe_to_merge | type) != "boolean")
+                or (($meta.guardian_runtime_sha256 // "") | length) == 0
+                or (
+                  ($meta | has("result"))
+                  and (
+                    (($meta.result | type) != "object")
+                    or (($meta.result.verdict // "") != ($meta.verdict // ""))
+                    or (($meta.result.safe_to_merge // null) != ($meta.safe_to_merge // null))
+                  )
+                )
+                or (($meta.review_body_sha256 // "") != (.cleaned_body_sha256 // "")) then
+                . + {
+                  meta_status: "invalid_metadata",
+                  meta: $meta,
+                  cleaned_body: $cleaned_body
+                }
+              else
+                . + {
+                  meta_status: "ok",
+                  meta: $meta,
+                  cleaned_body: $cleaned_body,
+                  expected_state: expected_state(($meta.verdict // ""); (.user.login // ""))
+                }
+              end
+          end;
+      [
+        .[][]
+        | select((.commit_id // "") == $head_sha)
+        | select((.state // "") | completed_state)
+        | normalize_review
+      ] as $normalized_head_reviews
+      | [
+          $normalized_head_reviews[]
+          | select(reviewer_trusted_for_reuse)
+      ] as $raw_matching_reviews
+      | (
+          $raw_matching_reviews
+          | sort_by(.user.login // "")
+          | group_by(.user.login // "")
+          | map(latest_review(.))
+        ) as $matching_reviews
+      | (
+          [
+            $normalized_head_reviews[]
+            | select(reviewer_trusted_for_reuse or (.meta_status // "") != "missing_metadata")
+          ]
+          | sort_by(.user.login // "")
+          | group_by(.user.login // "")
+          | map(latest_review(.))
+        ) as $blocking_candidate_reviews
+      | (
+          if ($matching_reviews | length) == 0 then
+            null
+          else
+            latest_review($matching_reviews)
+          end
+        ) as $latest_matching_review
+      | [
+          $matching_reviews[]
+          | select(review_matches_current_context)
+        ] as $reusable_reviews
+      | if ($matching_reviews | length) == 0 then
+          {
+            reusable: false,
+            reason: "missing_review",
+            head_sha: $head_sha,
+            review_profile: $review_profile,
+            review_basis_digest: $review_basis_digest,
+            prompt_digest: "",
+            verdict: null,
+            safe_to_merge: null,
+            reviewer_login: ($requesting_user // "")
+          }
+        else
+          (
+            if ($reusable_reviews | length) == 0 then
+              null
+            else
+              latest_review($reusable_reviews)
+            end
+          ) as $latest_reusable_review
+          | (
+              if $latest_reusable_review == null then
+                []
+              else
+                [
+                  $blocking_candidate_reviews[]
+                  | select(review_key > ($latest_reusable_review | review_key))
+                  | select(review_blocks_reuse($latest_reusable_review))
+                ]
+              end
+            ) as $blocking_reviews
+          | if ($latest_reusable_review != null) and (($blocking_reviews | length) == 0) then
+          $latest_reusable_review as $reused
+          | {
+              reusable: true,
+              reason: "matching_metadata",
+              head_sha: $head_sha,
+              review_profile: $review_profile,
+              review_basis_digest: ($reused.meta.review_basis_digest // ""),
+              prompt_digest: ($reused.meta.prompt_digest // ""),
+              verdict: ($reused.meta.verdict // null),
+              safe_to_merge: meta_safe_to_merge($reused),
+              result: ($reused.meta.result // null),
+              base_ref: ($reused.meta.base_ref // ""),
+              merge_base_sha: ($reused.meta.merge_base_sha // ""),
+              review_state: ($reused.state // ""),
+              review_id: ($reused.id // null),
+              review_body: ($reused.cleaned_body // ""),
+              reviewer_login: ($reused.user.login // "")
+            }
+        else
+          (
+            if ($blocking_reviews | length) > 0 then
+              latest_review($blocking_reviews)
+            else
+              $latest_matching_review
+            end
+          ) as $latest
+          | if ($latest.meta_status // "") == "missing_metadata" then
+              {
+                reusable: false,
+                reason: "missing_metadata",
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
+                verdict: null,
+                safe_to_merge: null,
+                reviewer_login: ($latest.user.login // "")
+              }
+            elif ($latest.meta_status // "") == "invalid_metadata" then
+              {
+                reusable: false,
+                reason: "invalid_metadata",
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
+                verdict: ($latest.meta.verdict // null),
+                safe_to_merge: meta_safe_to_merge($latest),
+                result: ($latest.meta.result // null),
+                reviewer_login: ($latest.user.login // "")
+              }
+            else
+              {
+                reusable: false,
+                reason: (
+                  if ($latest.meta.head_sha // "") != $head_sha then
+                    "head_sha_mismatch"
+                  elif ($latest.meta.base_ref // "") != $base_ref then
+                    "base_ref_mismatch"
+                  elif ($latest.meta.merge_base_sha // "") != $merge_base_sha then
+                    "merge_base_sha_mismatch"
+                  elif ($latest.meta.review_profile // "") != $review_profile then
+                    "review_profile_mismatch"
+                  elif ($latest.meta.review_basis_digest // "") != $review_basis_digest then
+                    "review_basis_digest_mismatch"
+                  elif ($latest.meta.guardian_runtime_sha256 // "") != $guardian_runtime_sha256 then
+                    "guardian_runtime_sha256_mismatch"
+                  elif ($strict_prompt_digest == "1" and ($latest.meta.prompt_digest // "") != $prompt_digest) then
+                    "prompt_digest_mismatch"
+                  elif ($latest_reusable_review != null) and ($latest | review_regresses_merge_safety($latest_reusable_review)) then
+                    "newer_blocking_review"
+                  elif ($latest.state // "") != ($latest.expected_state // "") then
+                    "review_state_mismatch"
+                  else
+                    "matching_metadata"
+                  end
+                ),
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
+                verdict: ($latest.meta.verdict // null),
+                safe_to_merge: meta_safe_to_merge($latest),
+                result: ($latest.meta.result // null),
+                base_ref: ($latest.meta.base_ref // ""),
+                merge_base_sha: ($latest.meta.merge_base_sha // ""),
+                review_state: ($latest.state // ""),
+                review_id: ($latest.id // null),
+                review_body: ($latest.cleaned_body // ""),
+                reviewer_login: ($latest.user.login // "")
+              }
+            end
+        end
+        end
+    ' "${reviews_file}" > "${output_file}"
+}
+
+write_review_status_json() {
+  write_review_status_json_common "$1" "$2" "$3" "1" "1"
+}
+
+write_light_review_status_json() {
+  write_review_status_json_common "$1" "$2" "$3" "0" "1"
+}
+
+hydrate_reused_review_result() {
+  local review_status_file="$1"
+
+  REUSED_REVIEWER_LOGIN="$(jq -r '.reviewer_login // ""' "${review_status_file}")"
+  export REUSED_REVIEWER_LOGIN
+
+  jq -c '
+    if (.result | type) == "object" then
+      .result
+    else
+      {
+        verdict: .verdict,
+        safe_to_merge: .safe_to_merge,
+        summary: (
+          if .safe_to_merge then
+            "已复用当前 HEAD 的 guardian review 结论。"
+          else
+            "已复用当前 HEAD 的 guardian 阻断结论。"
+          end
+        ),
+        findings: [],
+        required_actions: []
+      }
+    end
+  ' "${review_status_file}" > "${RESULT_FILE}"
+
+  if [[ "$(jq -r '.review_body // ""' "${review_status_file}")" != "" ]]; then
+    jq -r '.review_body' "${review_status_file}" > "${REVIEW_MD_FILE}"
+  else
+    build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  fi
 }
 
 wait_for_expected_review_state() {
@@ -2542,6 +3573,12 @@ post_review() {
 
   post_inline_comments "${pr_number}"
   submit_review_event "${pr_number}" "${verdict}" "${current_user}"
+
+  if [[ "${current_user}" != *"[bot]" ]]; then
+    if ! record_posted_guardian_review_proof "${pr_number}" "${current_user}" "${verdict}"; then
+      warn "本地 guardian proof 写入失败，后续 human same-head 复用将回退到 fresh review。"
+    fi
+  fi
 }
 
 assert_pr_head_matches_snapshot() {
@@ -2749,6 +3786,7 @@ merge_if_safe() {
   local merge_state_status
   local is_draft
   local current_user
+  local reviewer_for_gate
   local expected_review_state
   local current_head_sha
   local current_base_ref
@@ -2757,6 +3795,7 @@ merge_if_safe() {
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   safe_to_merge="$(jq -r '.safe_to_merge' "${RESULT_FILE}")"
   current_user="$(gh api user --jq '.login')"
+  reviewer_for_gate="${REUSED_REVIEWER_LOGIN:-${current_user}}"
   current_meta_file="${TMP_DIR}/merge-meta.json"
 
   wait_for_merge_gate_ready "${pr_number}" "${current_meta_file}" || true
@@ -2765,7 +3804,7 @@ merge_if_safe() {
   mergeable="$(jq -r '.mergeable' "${current_meta_file}")"
   merge_state_status="$(jq -r '.mergeStateStatus' "${current_meta_file}")"
   is_draft="$(jq -r '.isDraft' "${current_meta_file}")"
-  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${current_user}")"
+  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${reviewer_for_gate}")"
 
   if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
     die "合并前检测到 PR HEAD 已变化：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
@@ -2787,8 +3826,8 @@ merge_if_safe() {
       ;;
   esac
 
-  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
-    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
+  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${reviewer_for_gate}" "${expected_review_state}"; then
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${reviewer_for_gate} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then
@@ -2809,7 +3848,7 @@ main() {
   require_cmd gh
   require_cmd jq
   require_cmd perl
-  require_cmd codex
+  require_cmd date
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
 
   local mode="${1:-}"
@@ -2842,7 +3881,7 @@ main() {
   done
 
   case "${mode}" in
-    review|merge-if-safe)
+    review|review-status|merge-if-safe)
       ;;
     *)
       usage
@@ -2851,12 +3890,59 @@ main() {
   esac
 
   check_gh_auth
+
+  if [[ "${mode}" == "review-status" ]]; then
+    local current_user
+    local review_status_file=""
+
+    prepare_review_status_context "${pr_number}"
+    review_status_file="${TMP_DIR:-/tmp}/review-status.json"
+    current_user="$(gh api user --jq '.login')"
+    write_light_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
+    cat "${review_status_file}"
+    exit 0
+  fi
+
   prepare_pr_workspace "${pr_number}"
   assert_required_review_context_available
-  run_codex_review "${pr_number}"
+  ensure_review_prompt_prepared "${pr_number}"
+
+  local current_user=""
+  local review_status_file="${TMP_DIR}/review-status.json"
+  local reused_existing_review=0
+  local should_check_reusable_review=0
+
+  REUSED_REVIEWER_LOGIN=""
+  export REUSED_REVIEWER_LOGIN
+
+  if [[ "${mode}" == "merge-if-safe" ]]; then
+    should_check_reusable_review=1
+  elif [[ "${mode}" == "review" && "${post_review_flag}" == "1" ]]; then
+    should_check_reusable_review=1
+  fi
+
+  if [[ "${should_check_reusable_review}" == "1" ]]; then
+    current_user="$(gh api user --jq '.login')"
+    if write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"; then
+      if jq -e '.reusable == true' "${review_status_file}" >/dev/null 2>&1; then
+        hydrate_reused_review_result "${review_status_file}"
+        reused_existing_review=1
+        echo "已复用当前 HEAD 的 guardian review。"
+      fi
+    else
+      echo "警告: guardian 复用检查失败，已回退到 fresh review。" >&2
+    fi
+  fi
+
+  if [[ "${reused_existing_review}" != "1" ]]; then
+    run_codex_review "${pr_number}"
+  fi
+
   print_summary
 
-  if [[ "${mode:-}" == "merge-if-safe" ]]; then
+  if [[ "${reused_existing_review}" == "1" ]]; then
+    should_post_review=0
+  elif [[ "${mode:-}" == "merge-if-safe" ]]; then
     should_post_review=1
   else
     should_post_review="${post_review_flag}"
