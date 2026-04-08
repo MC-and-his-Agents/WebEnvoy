@@ -56,9 +56,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `validation_mode=smoke_validation` 时，请求必须显式给出满足 `input_contract_ref` 的 `smoke_input`
+  - `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；`ability_kind=write` 不得通过该请求面被 rerun、写入 latest 或标记为 `healthy`
   - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `expected_capability_kind` 如保留在请求面，必须直接等于该 descriptor 的 `ability_kind`；若不一致，验证层必须按结构化输入错误拒绝请求
   - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
+  - 若目标 `candidate_ability_descriptor.ability_kind=write`，验证层必须在请求阶段拒绝 `smoke_validation`；如未来要支持状态变更能力的最小验证，必须先在独立 FR 中冻结显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
   - `ability_validation_request` 是唯一的 smoke 请求契约；replay 不得复用或平行复制到该对象中
 
 ### 3. 最小重放对象
@@ -124,7 +126,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   3. `replay_only`：只有 `replay_validation` 的 current latest 为 `verified`
   4. `smoke_plus_replay`：`smoke_validation` 与 `replay_validation` 的 current latest 都存在，且都为 `verified`
   5. `divergent`：除以上情况外的其余所有 current latest 组合，包括任一 current latest 为 `broken`，或 smoke/replay current latest 结果不一致
-- `smoke_validation` 成功可以被下游消费为“当前仍可用”的最小信号；当只有 smoke current latest 为 `verified` 时，顶层必须呈现 `health_state=healthy`，同时把覆盖度落在 `validation_coverage_state=smoke_only`。
+- `smoke_validation` 成功可以被下游消费为“当前仍可用”的最小信号；当前 formal baseline 下，这一规则只适用于非状态变更能力。当只有 smoke current latest 为 `verified` 时，顶层必须呈现 `health_state=healthy`，同时把覆盖度落在 `validation_coverage_state=smoke_only`。
 - `divergence_reason` 不再承载“缺少模式证据”；它只允许表达真实冲突，当前枚举必须收敛为 `smoke_replay_mismatch`。
 
 ### 5. 最小失败分类
@@ -163,6 +165,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `ability_validation_request` 只负责 `smoke_validation`；任何 replay 入口都必须走 `ability_replay_request`，不得冻结第二套 replay 请求面
   - `expected_capability_kind` 只允许作为对 `candidate_ability_descriptor.ability_kind` 的显式断言；不一致时不得写入任何 latest 结果
+  - `candidate_ability_descriptor.ability_kind=write` 时，不得生成或消费无门禁 `smoke_validation` latest；当前 formal baseline 下，状态变更能力不得通过普通 smoke 路径被 rerun 或标记为 `healthy`
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
@@ -223,7 +226,16 @@ Then 顶层 `health_state` 必须是 `healthy`
 And `validation_coverage_state` 必须是 `smoke_only`
 And 该次 smoke 成功仍可作为最小可用证据并建立 `last_success_input_ref`
 
-### 场景 5：只有 replay 成功时也能呈现当前可用
+### 场景 5：状态变更能力不会通过无门禁 smoke_validation 呈现 healthy
+
+Given 某个候选能力的 `ability_kind=write`
+When 用户尝试发起一次 `smoke_validation`
+Then 验证层必须在请求阶段拒绝该组合
+And 不得写入 `smoke_validation` latest
+And 不得把该能力标记为 `healthy`
+And 若未来要支持状态变更能力的最小验证，必须先冻结显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
+
+### 场景 6：只有 replay 成功时也能呈现当前可用
 
 Given 同一个 `ability_kind=read|download` 的能力在同一个 `profile_ref` 下已经成功完成一次 `smoke_validation`
 And 当前 `smoke_validation` latest 不存在或已经 `stale`
@@ -232,7 +244,7 @@ When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `healthy`
 And `validation_coverage_state` 必须是 `replay_only`
 
-### 场景 6：最小重放不是自动修复
+### 场景 7：最小重放不是自动修复
 
 Given 某个能力需要再次运行
 When 用户提交一次 `ability_replay_request`
@@ -241,7 +253,7 @@ And 当输入来源是 `explicit_input_snapshot` 时会显式引用 `replay_inpu
 And 当输入来源是 `last_success_input` 时会读取当前 `last_success_input_ref`
 And 不会在同一对象里暗含自动修复或重新学习
 
-### 场景 7：状态变更能力不会通过无门禁 replay seed 被重放
+### 场景 8：状态变更能力不会通过无门禁 replay seed 被重放
 
 Given 某个候选能力的 `ability_kind=write`
 And 该能力保存了 `seed_replay_input_ref` 或其他输入快照引用
@@ -250,7 +262,7 @@ Then 当前 formal baseline 下不得把该请求视为可执行 replay
 And 这些输入快照最多只能作为 capture evidence 保留
 And 若未来要允许 write replay，必须先补齐专门 gate 元数据或 dry-run 语义
 
-### 场景 8：验证结果继续引用运行证据
+### 场景 9：验证结果继续引用运行证据
 
 Given 某次验证已经完成
 When reviewer 检查结果对象
@@ -258,7 +270,7 @@ Then 能看到 `validated_at` 与 `run_id`
 And 在存在 run-scoped evidence refs 时能看到 `artifact_refs`
 And 不会创建第二套运行真相源
 
-### 场景 9：只有 stale latest 时会退回 stale / none
+### 场景 10：只有 stale latest 时会退回 stale / none
 
 Given 同一个能力在同一个 `profile_ref` 下存在历史 latest
 And 这些 latest 全部因 freshness window 或 `baseline_descriptor` 漂移而失效为 `stale`
@@ -266,7 +278,7 @@ When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `stale`
 And `validation_coverage_state` 必须是 `none`
 
-### 场景 10：L2 样本也能进入同一验证链路
+### 场景 11：L2 样本也能进入同一验证链路
 
 Given 后续已有一个来自 L2 首次可用的候选能力
 When 该能力进入验证链路
@@ -288,6 +300,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 11. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
 12. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 13. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref` 或 `last_success_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
+14. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun 或写出 `healthy`：视为状态变更验证门禁缺失。
 
 ## 验收标准
 

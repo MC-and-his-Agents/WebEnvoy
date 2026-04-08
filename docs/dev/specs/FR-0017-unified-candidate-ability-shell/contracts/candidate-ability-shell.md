@@ -37,6 +37,8 @@ interface CandidateAbilityDescriptor {
 - `*_contract_ref` 的 authoritative resolver 只能是该 `ability_id` 对应的 descriptor-owned contract registry；lookup 必须按完整 ref 精确匹配，并校验 `ability_id` 与契约种类同时一致。下游实现不得把 ref 自行解释成 repo 路径、runtime-store 主键或私有别名。
 - 同一个 `*_contract_ref` 在所有实现中都必须代表同一份兼容契约边界；若输入、输出或错误语义发生不兼容变化，必须生成新的 ref，不得静默复用旧值。
 - `capture_run_id` 是候选能力来源证据的最小硬锚点。
+- `candidate_ability_descriptor` 当前不承载 `write_execution_gate`、`write_gate_audit_refs` 或其他写入门禁 lane 字段；对 `ability_kind=write`，这些字段只允许继续作为 `capture_run_id` 关联的 run-scoped capture evidence 存在。
+- 因此，`ability_kind=write` 的 descriptor 不得被下游解释为“已具备可复用 write gate”或“可直接进入验证 / replay 的写入权限”。
 - `seed_replay_input_ref` 如存在，必须指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；它是可选的上游 replay seed，而不是 `draft_candidate` 的强制前置。
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；`capture_artifact_refs` 不能充当该字段的替代值。
 - `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释成可执行 replay seed。

@@ -22,7 +22,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 不把 L2 首次可用等同于“未知网站能力已经正式可复用”。
 - 不实现最终导入/交付。
 - 不重定义现有 CLI 主链、运行记录或风控对象。
-- 不把高风险 live 写路径恢复混入本 FR。
+- 不把无门禁或平台专用的高风险 live 写路径恢复混入本 FR。
 - 不在本 FR 内混入实现代码。
 
 ## 功能需求
@@ -34,10 +34,10 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `FR-0017` 的候选能力描述输入
   - 现有 CLI / Extension / Native Messaging 主链
   - `FR-0004` 的最小诊断对象
-  - 与 `FR-0010/0011` 一致的站点无关最小风险门禁原则（如 `risk_gate_blocked`、人工确认、审计留痕）
+  - 与 `FR-0010/0011` 一致的站点无关最小风险门禁原则（如 `risk_gate_blocked`、人工确认、审计留痕、默认 `dry_run/recon` 与显式 live write 分离）
 - 本 FR 只承接“先做成一次”的最小能力，不承诺长期稳定性与正式复用。
 - 本 FR 不得把 XHS 专用 gate 条件、账号特有反风控假设或平台特有审批路径直接当成未知网站的实现前置。
-- 本 FR 的请求面只冻结站点无关的 `risk_gate_context`，不得把 `FR-0010.gate_input` 或其他平台专用 gate 请求对象整体别名为通用 L2 输入。
+- 本 FR 的请求面只冻结站点无关的 `risk_gate_context` 与 write-only 的 `write_execution_gate` 子集，不得把 `FR-0010.gate_input` 或其他平台专用 gate 请求对象整体别名为通用 L2 输入。
 - 在 Phase 2 Spike D/E 完成并把相关实现输入冻结前，本 FR 只能作为 formal spec baseline；不得被表述成已经具备 implementation-ready 状态。
 
 ### 2. L2 首次可用的最小能力面
@@ -65,17 +65,19 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 这些能力是为了达成首次成功路径
   - 不等于已经形成平台专用适配器或完整命令集
   - `L2FirstUsableRequest` 只允许携带站点无关的 `risk_gate_context`，至少包含 `run_id`、`profile`、`target_domain`、`target_tab_id`、`target_page`、`risk_state`；`session_id` 如 runtime 已提供则携带，否则不得因其缺失而判定请求无效
-  - `goal_kind` 是本 FR 唯一正式的能力目标类型；`interaction_safety_class` 是与之分离的正式动作纯度轴；FR-0019 不引入 `irreversible_write`、`requested_execution_mode` 或 XHS live lane 一类平台专用 gate 枚举
+  - `goal_kind` 是本 FR 唯一正式的能力目标类型；`interaction_safety_class` 是与之分离的正式动作纯度轴；FR-0019 不引入 `irreversible_write` 或 XHS 专用 live lane 枚举，但会在 `write_execution_gate` 中冻结站点无关的 `requested_execution_mode` / `effective_execution_mode` 子集
   - `target_url` 的域名必须能回链到 `risk_gate_context.target_domain`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
-  - 若上游门禁请求仍携带 `irreversible_write` 或平台专用 live lane 语义，必须在映射到 `risk_gate_context` 之前就被阻断或归一化；FR-0019 不消费这类平台专用输入
+  - 若上游门禁请求仍携带 `irreversible_write` 或平台专用 live lane 语义，必须在进入本 FR 前先映射为 `write_execution_gate` 的站点无关子集，或直接被阻断；FR-0019 不消费平台专用 mode 穿透
   - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
   - `goal_kind=write` 必须固定映射到 `interaction_safety_class=state_changing_write`
   - `goal_kind=read` 时允许放行 `navigate`、`locate`、`click`、`extract`、`wait_settled`，但其中 `click` 的正式语义必须收敛为 `reveal_only_click`
   - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
   - `interaction_safety_class=pure_read` 时，必须显式禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击
-  - 当 `goal_kind=write` 时，必须同时带有机器可读的 `write_gate_audit_refs` 与 `write_safety_boundary`
-  - `write_gate_audit_refs` 必须保留对同一次放行门禁结论的 `decision_id`、`approval_record_ref`、`audit_record_ref` 三条回链，正式语义分别对齐 `FR-0010.gate_outcome.decision_id`、`FR-0010.approval_record.approval_id`、`FR-0010.audit_record.event_id`
-  - `goal_kind=write` 的成功路径不得绕开审批与审计链路；缺少上述回链，或三者不能回到同一次 `gate_decision=allowed` 时，不得宣称首次可用成立
+  - 当 `goal_kind=write` 时，必须同时带有机器可读的 `write_execution_gate`、`write_gate_audit_refs` 与 `write_safety_boundary`
+  - `write_execution_gate` 必须显式冻结 `requested_execution_mode`、`effective_execution_mode`、`gate_decision`，并且把默认 `dry_run/recon` 与显式获批 `live_write` 分开
+  - `goal_kind=write` 的成功路径只允许出现在 `requested_execution_mode=live_write`、`effective_execution_mode=live_write`、`gate_decision=allowed` 的组合上；其余 `dry_run/recon` 组合只允许表达 gate-only / recon，不得宣称首次可用成立
+  - `write_gate_audit_refs` 必须保留对同一次写入门禁结论的 `decision_id`、`audit_record_ref`，并在 `live_write` 放行路径上补齐 `approval_record_ref`；正式语义分别对齐 `FR-0010.gate_outcome.decision_id`、`FR-0010.audit_record.event_id`、`FR-0010.approval_record.approval_id`
+  - `goal_kind=write` 的成功路径不得绕开 execution-mode gating、审批与审计链路；缺少 live-write 所需回链，或这些回链不能回到同一次 `gate_decision=allowed` 时，不得宣称首次可用成立
   - `write_safety_boundary` 必须明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出
@@ -94,6 +96,8 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
   - `candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind`；若目标类型与 handoff seed 不一致，不得把该结果视为首次成功成立
   - `interaction_safety_class` 只描述本次首次可用路径允许的动作纯度，不改变 `candidate_shell_seed.ability_kind`；`pure_read` / `state_changing_write` 必须自然回落到 `FR-0017.ability_kind=read|write`
+  - `write_execution_gate`、`write_gate_audit_refs`、`write_safety_boundary` 仍属于本次运行的 gate evidence，不进入 `candidate_shell_seed`；下游不得把 handoff seed 误解为已经携带可复用 write gate
+  - 因为 `FR-0017` 的 shared descriptor 当前不承载上述 write gate 字段，`ability_kind=write` 的后续验证 / replay 仍必须等待独立 FR 冻结专门 gate 元数据
   - L2 首次可用成功的上报不依赖 replay artifact；首次 replay snapshot 的生成与持久化由后续 `FR-0018` 验证链路承接
 
 ### 4. 成功判定与失败分类
@@ -161,10 +165,21 @@ When 请求进入 L2 首次可用
 Then 正式动作纯度必须是 `interaction_safety_class=state_changing_write`
 And `click` 与 `type` 可以被纳入成功路径
 And `risk_gate_context.risk_state` 必须是 `allowed`
-And `write_gate_audit_refs` 必须能回链到同一次 `gate_decision=allowed` 的审批与审计记录
+And `write_execution_gate` 必须显式给出 `requested_execution_mode`、`effective_execution_mode`、`gate_decision`
+And 只有 `requested_execution_mode=live_write`、`effective_execution_mode=live_write`、`gate_decision=allowed` 时才允许进入成功路径
+And `write_gate_audit_refs` 必须能回链到同一次 `gate_decision=allowed` 的审计记录，并在 live-write 放行路径上回链到审批记录
 And `write_safety_boundary` 必须继续约束不可逆控件
 
-### 场景 5：read 中的揭示型点击必须能被机器识别
+### 场景 5：未获批的写入请求必须停留在 dry_run / recon
+
+Given 某个未知网站的目标属于 `write`
+And 当前还没有显式 live-write 放行
+When 请求进入 L2 首次可用
+Then `write_execution_gate.requested_execution_mode` 与 `effective_execution_mode` 只允许是 `dry_run` 或 `recon`
+And 该请求不得被视为首次可用成功
+And 如调用方仍请求 `live_write`，系统必须把 `effective_execution_mode` 降级为 `dry_run` 或 `recon`，或直接返回 `risk_gate_blocked`
+
+### 场景 6：read 中的揭示型点击必须能被机器识别
 
 Given 某个读取路径使用了 `open_detail_view` 或 `load_more_or_paginate`
 When 系统输出 `interaction_trace`
@@ -172,14 +187,14 @@ Then 相应交互必须显式标记 `interaction_semantics=reveal_only_click`
 And 必须显式给出对应的 `click_kind`
 And 不得把这类点击退回为无法区分语义的泛化 `click`
 
-### 场景 6：首次成功路径可以进入候选能力链路
+### 场景 7：首次成功路径可以进入候选能力链路
 
 Given 某次 L2 首次可用执行成功
 When reviewer 检查本 FR 的输出对象
 Then 能看到 `candidate_shell_seed`
 And 该输出能作为 `FR-0017` 的 handoff 输入
 
-### 场景 7：L2 失败时不会伪装为成功
+### 场景 8：L2 失败时不会伪装为成功
 
 Given 页面缺少足够语义结构或连续无法定位目标
 When L2 无法稳定完成首次成功路径
@@ -188,7 +203,7 @@ And `success=false` 的结果对象中必须包含 `failure_class`
 And 当 `failure_class=requires_l1_fallback` 时必须同时包含结构化 `l1_fallback_payload`
 And 不会返回 `candidate_shell_seed` 冒充候选能力输入
 
-### 场景 8：L2 首次可用不等于正式复用
+### 场景 9：L2 首次可用不等于正式复用
 
 Given 某次 L2 路径已经成功一次
 When reviewer 检查本 FR 的边界
@@ -205,21 +220,24 @@ And 不会把它直接描述成正式可复用能力
 6. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
 7. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
 8. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
-9. 把 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入：视为共享请求边界漂移。
+9. 把 `FR-0010.gate_input`、其平台专用 execution-mode 全量集合，或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入，而不先映射到 `risk_gate_context + write_execution_gate`：视为共享请求边界漂移。
 10. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
 11. `goal_kind=read` 中允许的 `click` 没有被正式收敛为 `reveal_only_click`，或放行了会持久改变账号、内容或表单状态的点击：视为读取边界未冻结。
-12. `goal_kind=write` 缺少 `write_gate_audit_refs`，或这些引用不能回链到同一次 `gate_decision=allowed` 的审批/审计记录：视为通用 L2 写入门禁脱离正式审计链路。
-13. `interaction_trace` 没有把揭示型点击编码为 `interaction_semantics=reveal_only_click + click_kind`：视为读写边界仍停留在文字约束，未冻结成机器字段。
+12. `goal_kind=write` 缺少 `write_execution_gate`，或没有把 `dry_run/recon` 默认与显式 `live_write` 放行分开：视为 execution-mode gating 未冻结。
+13. `goal_kind=write` 缺少 `write_gate_audit_refs`，或这些引用不能回链到同一次 `gate_decision=allowed` 的审计 / 审批记录：视为通用 L2 写入门禁脱离正式审计链路。
+14. `requested_execution_mode=live_write` 却仍允许 `effective_execution_mode` 缺省、继续为 `dry_run/recon`、或在无 live 放行时进入成功路径：视为未知站点写入门禁回退。
+15. `interaction_trace` 没有把揭示型点击编码为 `interaction_semantics=reveal_only_click + click_kind`：视为读写边界仍停留在文字约束，未冻结成机器字段。
 
 ## 验收标准
 
 1. FR-0019 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. L2 首次可用的最小能力面、成功判定、失败分类与 handoff 输出已冻结。
-3. `failure_class=requires_l1_fallback` 时的结构化 `l1_fallback_payload` 已冻结，且不会与成功态 `candidate_shell_seed` 混用。
-4. 本 FR 已明确继承 `FR-0017` 与既有运行/诊断/风控边界。
-5. 文档已明确区分“首次成功”“候选能力”“已验证能力”。
-6. 本 PR 只冻结规约，不混入实现代码。
-7. 文档已明确把 Spike D/E 保留为进入实现前冻结之前的前置，而不是已完成事实。
+3. 未知站点 `goal_kind=write` 的 `write_execution_gate`、`write_gate_audit_refs` 与 `write_safety_boundary` 已共同冻结，且默认 `dry_run/recon` 与显式 `live_write` 放行语义已分离。
+4. `failure_class=requires_l1_fallback` 时的结构化 `l1_fallback_payload` 已冻结，且不会与成功态 `candidate_shell_seed` 混用。
+5. 本 FR 已明确继承 `FR-0017` 与既有运行/诊断/风控边界。
+6. 文档已明确区分“首次成功”“候选能力”“已验证能力”。
+7. 本 PR 只冻结规约，不混入实现代码。
+8. 文档已明确把 Spike D/E 保留为进入实现前冻结之前的前置，而不是已完成事实。
 
 ## 依赖与前置条件
 

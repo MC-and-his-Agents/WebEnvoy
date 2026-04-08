@@ -78,6 +78,7 @@ interface AbilityHealthView {
 - `health_state` 只表达“现在是否可用”的最小可信判断，不表达是否可交付；`validation_coverage_state` 只表达验证覆盖度，不替代顶层可用性判断。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `validation_mode=smoke_validation` 时，`smoke_input` 必须存在，且必须满足 `FR-0017.candidate_ability_descriptor.input_contract_ref` 的最小输入边界。
+- `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；若目标 `candidate_ability_descriptor.ability_kind=write`，验证层必须在请求阶段拒绝该请求，不得写入 `latest_validations`，也不得据此推导 `health_state=healthy`。
 - `expected_capability_kind` 如保留在请求面，必须直接等于 `FR-0017.candidate_ability_descriptor.ability_kind`；若不一致，验证层必须以结构化输入错误拒绝请求，不得自行容忍或改写。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不再引入独立的 ability 引用命名空间或二次映射对象。
@@ -114,5 +115,6 @@ interface AbilityHealthView {
   3. `replay_only`：只有 `replay_validation` 的 current latest 为 `verified`
   4. `smoke_plus_replay`：`smoke_validation` 与 `replay_validation` 的 current latest 都存在，且都为 `verified`
   5. `divergent`：除以上情况外的其余所有 current latest 组合，包括任一 current latest 为 `broken`，或 smoke/replay current latest 结果不一致
-- `smoke_validation` 成功可以作为“能力仍可用”的最小证据；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许建立首个 `last_success_input_ref`。当只有 smoke current latest 为 `verified` 时，顶层必须呈现 `health_state=healthy`，同时把 `validation_coverage_state` 标为 `smoke_only`。
+- `smoke_validation` 成功可以作为“能力仍可用”的最小证据；但当前 formal baseline 下它只适用于非状态变更能力。仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许建立首个 `last_success_input_ref`，并在只有 smoke current latest 为 `verified` 时呈现 `health_state=healthy + validation_coverage_state=smoke_only`。
+- 如未来要支持 `ability_kind=write` 的最小验证，必须先在独立 FR 中冻结显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据；在此之前，任何 write smoke 结果都不得被消费为 current healthy evidence。
 - `divergence_reason` 只允许在 `validation_coverage_state=divergent` 的真实冲突场景出现；当前正式枚举只允许 `smoke_replay_mismatch`。

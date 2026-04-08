@@ -21,13 +21,14 @@
 - `ability_validation_record` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
+- 当前 formal baseline 下，`ability_kind=write` 不得通过普通 `smoke_validation` 进入该聚合视图的 current healthy 路径；状态变更能力如需最小验证，必须先引入显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
 - 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，`last_success_input_ref` 不得被冻结为可执行 replay truth source；写能力的输入快照只能作为 capture evidence 保留，不能自动升级为无门禁 replay 种子。
 - `divergence_reason` 只允许 `smoke_replay_mismatch`，且只能用于表达 smoke/replay current latest 的真实冲突。
 - 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> healthy -> degraded -> broken`；一旦命中前序状态，后续状态不得再覆盖。
 - `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=healthy` 只允许在至少存在一条 current `verified` latest 且不存在任何 current `broken` latest 时出现；`health_state=degraded` 只允许在 current `verified` 与 current `broken` latest 并存时出现；`health_state=broken` 只允许在不存在任何 current `verified` latest 且至少存在一条 current `broken` latest 时出现。
 - 顶层 `validation_coverage_state` 必须按固定顺序计算：`none -> smoke_only -> replay_only -> smoke_plus_replay -> divergent`；其中 `none` 只允许在不存在任何 current latest 时出现，`smoke_only`/`replay_only` 只允许在单一 mode current latest 为 `verified` 时出现，`smoke_plus_replay` 只允许在 smoke/replay current latest 都为 `verified` 时出现，其余存在 current latest 的组合一律归入 `divergent`。
-- 只有 smoke current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=smoke_only`；只有 replay current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=replay_only`；只有 stale latest 时必须生成 `health_state=stale + validation_coverage_state=none`。
+- 对非状态变更能力，只有 smoke current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=smoke_only`；只有 replay current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=replay_only`；只有 stale latest 时必须生成 `health_state=stale + validation_coverage_state=none`。
 
 ### `latest_validations[*]`
 
@@ -45,6 +46,7 @@
 
 - `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
 - `validation_mode=smoke_validation` 的 latest 只允许来自 `ability_validation_request`；`validation_mode=replay_validation` 的 latest 只允许来自 `ability_replay_request`。
+- `candidate_ability_descriptor.ability_kind=write` 时，`validation_mode=smoke_validation` 不得落成 current latest；实现层必须在请求阶段拒绝该组合，历史遗留的无门禁 write smoke 结果也不得再被消费为 `health_state=healthy` 的依据。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
 - `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`。
