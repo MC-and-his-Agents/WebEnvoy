@@ -60,12 +60,29 @@
 - `capture_profile`
 - `captured_at`
 - `candidate_status="draft_candidate"`
+- `contract_registry_seed`
+
+### `candidate_shell_seed.contract_registry_seed`
+
+最小字段：
+
+- `ability_id`
+- `entries`
+
+`entries[*]` 最小字段：
+
+- `contract_ref`
+- `contract_kind`
+- `contract_body`
 
 补充约束：
 
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
 - 当前 FR 产出的 `candidate_shell_seed.ability_kind` 只允许 `read`；`write` / `download` 仍保留给上游共享模型与后续独立 FR。
 - `candidate_shell_seed.ability_kind` 必须直接等于本次请求 `goal_kind=read`；若 handoff seed 与请求目标不一致，不得落成成功态结果。
+- `candidate_shell_seed` 不仅要提供 descriptor 字段，还必须同时提供 `contract_registry_seed`，以便下游按 `FR-0017.candidate_ability_contract_registry` 的 resolver 正式解引用 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`。
+- `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`。
+- `candidate_shell_seed.contract_registry_seed.entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的 ref；若任一 ref 缺少对应 entry，该 handoff 不得视为完成。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
 ## 4. `interaction_safety_class`
@@ -159,6 +176,7 @@
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
+  - `candidate_shell_seed.contract_registry_seed` 必须能直接物化同 owner 的 `candidate_ability_contract_registry`
   - `candidate_shell_seed.ability_kind` 必须继续直接等于本次请求 `goal_kind=read`；`interaction_safety_class` 不能引入新的共享能力类型
 - 与 `FR-0004`：
   - 失败大类可以引用最小诊断，但不扩展诊断 schema

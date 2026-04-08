@@ -60,6 +60,7 @@
 
 - `ability_ref`
 - `profile_ref`
+- `expected_capability_kind`
 - `replay_source`
 - `replay_reason`
 - `replay_input_ref`（仅在 `replay_source=explicit_input_snapshot` 时出现）
@@ -69,8 +70,10 @@
 - 本对象只是 `ability_replay_request` 的存储投影，不是第二套正式 replay 请求契约。
 - 投影对象只说明“这次重放从哪里来的输入”，不承担自动修复语义，也不得额外引入 `ready` 一类未在 `spec.md` / `contracts/` 冻结的独立状态。
 - `profile_ref` 是 replay 绑定的正式作用域；当 `replay_source=last_success_input` 时，必须只在同一 `ability_ref + profile_ref` 下解析最近成功输入。
+- `expected_capability_kind` 在当前 formal baseline 下只允许 `read|download`，并且必须直接等于目标 `candidate_ability_descriptor.ability_kind`；不一致时不得执行 replay，也不得写入 `replay_validation` latest。
 - 当 `replay_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在，且只能指向已保存的显式输入快照。
 - 当 `replay_source=last_success_input` 时，`replay_input_ref` 必须缺省，并改由同一视图内的 `last_success_input_ref` 解引用输入快照。
+- 当前 formal baseline 下，`candidate_ability_descriptor.ability_kind=write` 不得落成可执行 replay 请求投影；无论输入来自 `last_success_input` 还是 `explicit_input_snapshot`，写能力都必须在请求阶段被拒绝，直到后续独立 FR 补齐 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据。
 
 ## 3. `replay_input_snapshot_ref`
 
@@ -92,7 +95,7 @@
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
-- 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，上述输入快照引用对象只能作为 capture evidence 保留；当前 formal baseline 下不得把它解析为可执行 replay 输入来源，也不得自动回写 `last_success_input_ref`。
+- 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，上述输入快照引用对象只能作为 capture evidence 保留；当前 formal baseline 下不得把它解析为可执行 replay 输入来源，也不得自动回写 `last_success_input_ref`。这条禁止同时覆盖 `replay_source=last_success_input` 与 `replay_source=explicit_input_snapshot`。
 
 ## 4. 与既有对象的关系
 

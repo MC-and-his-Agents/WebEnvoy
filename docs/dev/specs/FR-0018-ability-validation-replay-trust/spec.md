@@ -68,6 +68,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须冻结 `ability_replay_request` 的最小边界，至少包含：
   - `ability_ref`
   - `profile_ref`
+  - `expected_capability_kind`
   - `replay_source`
   - `replay_reason`
   - `replay_input_ref`（仅在 `replay_source=explicit_input_snapshot` 时出现）
@@ -80,6 +81,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_replay_request` 是唯一的 replay 请求契约；`latest_validations.validation_mode=replay_validation` 只能由 replay 请求结果产出
   - 任何 replay 持久化 / 投影对象都只能作为 `ability_replay_request` 的存储投影，不得额外冻结第二套 replay 请求面或 `ready` 一类独立状态
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
+  - `expected_capability_kind` 在当前 formal baseline 下只允许 `read|download`，并且必须直接等于目标 `candidate_ability_descriptor.ability_kind`
   - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `last_success_input_ref`
 - 必须冻结 `replay_input_ref` 背后的最小输入快照引用对象，至少包含：
@@ -95,7 +97,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `payload_locator` 是 replay snapshot 的正式可解析 payload 边界；重放层必须通过它重新取回已保存输入，不得仅靠 `source_run_id`、artifact refs 或带外扫描临时反推
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
-  - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_source=last_success_input` 冻结为可执行 replay 入口；状态变更能力如需 replay，必须在后续独立 FR 中补齐 gate 元数据或 dry-run 语义后再行收口
+  - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref`、`replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 冻结为可执行 replay 入口；显式 snapshot 也只能作为 capture evidence 保留，不能绕过当前缺失的 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续建立 `last_success_input_ref`
 
 ### 4. 最小可信判断对象
@@ -259,7 +261,7 @@ And 不会在同一对象里暗含自动修复或重新学习
 
 Given 某个候选能力的 `ability_kind=write`
 And 该能力保存了 `seed_replay_input_ref` 或其他输入快照引用
-When 用户尝试通过 `replay_source=last_success_input` 重新执行该能力
+When 用户尝试通过 `replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 重新执行该能力
 Then 当前 formal baseline 下不得把该请求视为可执行 replay
 And 这些输入快照最多只能作为 capture evidence 保留
 And 若未来要允许 write replay，必须先补齐专门 gate 元数据或 dry-run 语义
@@ -302,7 +304,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 11. 把 `healthy` 误当成“可交付/可分享”，或把 `validation_coverage_state` 当成顶层可用性结论：视为越界到 Phase 3/5。
 12. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
 13. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
-14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref` 或 `last_success_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
+14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
 15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun 或写出 `healthy`：视为状态变更验证门禁缺失。
 
 ## 验收标准

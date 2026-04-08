@@ -61,6 +61,12 @@ interface L1FallbackPayload {
   recommended_strategy: "visual_reacquire" | "visual_state_check" | "visual_then_physical_act"
 }
 
+interface CandidateContractRegistrySeedEntry {
+  contract_ref: string
+  contract_kind: "input" | "output" | "error"
+  contract_body: Record<string, unknown>
+}
+
 type L2FirstUsableResult =
   | {
       success: true
@@ -87,6 +93,10 @@ type L2FirstUsableResult =
         capture_artifact_refs?: string[]
         captured_at: string
         candidate_status: "draft_candidate"
+        contract_registry_seed: {
+          ability_id: string
+          entries: CandidateContractRegistrySeedEntry[]
+        }
       }
     }
   | {
@@ -111,10 +121,11 @@ type L2FirstUsableResult =
 约束：
 
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
-- `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
+- `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时提供 descriptor-owned `candidate_ability_contract_registry` 的最小 seed，不允许只留下松散 hint 或无法解引用的 `*_contract_ref`。
 - `success=true` 时，`candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind=read`；若 handoff seed 与请求目标不一致，不得返回成功结果。
 - `interaction_safety_class` 只描述本次首次可用路径的动作纯度，不改变 `candidate_shell_seed.ability_kind`；当前 formal baseline 下，`pure_read` 必须自然映射回 `read`。
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
+- `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`；`entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的正式 contract ref。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
 - `failure_class=requires_l1_fallback` 时，`l1_fallback_payload` 必须存在，并至少冻结 `fallback_goal`、`fallback_reason`、`recommended_strategy`；不得只返回自由文本建议。
