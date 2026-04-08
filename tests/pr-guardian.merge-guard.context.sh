@@ -802,9 +802,9 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
   assert_file_contains "${git_calls_log}" "BatchMode=yes"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin +refs/heads/main:refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} remote get-url origin"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -857,7 +857,7 @@ test_fetch_origin_tracking_ref_passes_extra_fetch_args() {
   }
 
   assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main" "--deepen=200"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch --deepen=200 origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch --deepen=200 origin +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -895,7 +895,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback() {
       return 0
     fi
 
-    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"* ]]; then
+    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"* ]]; then
       return 0
     fi
 
@@ -907,7 +907,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback() {
   assert_file_contains "${git_calls_log}" "env GIT_ASKPASS="
   assert_file_contains "${git_calls_log}" "GIT_TERMINAL_PROMPT=0"
   assert_file_not_contains "${git_calls_log}" "env GIT_ASKPASS=${TMP_DIR}/git-askpass.sh"
-  assert_file_contains "${git_calls_log}" "fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"
   assert_file_not_contains "${git_calls_log}" "http.https://github.com/.extraheader="
 
   unset -f gh
@@ -947,7 +947,7 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https()
       return 0
     fi
 
-    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"* ]]; then
+    if [[ "${GIT_ASKPASS:-}" == *"/webenvoy-gh-auth."*"/git-askpass.sh" && "${GIT_TERMINAL_PROMPT:-}" == "0" && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git +refs/heads/main:refs/remotes/origin/main"* ]]; then
       return 0
     fi
 
@@ -1029,7 +1029,7 @@ test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive
 
   assert_fail fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
-  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch origin refs/heads/main:refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch origin +refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
 }

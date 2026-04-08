@@ -120,7 +120,7 @@ fetch_origin_tracking_ref() {
   local target_ref="$2"
   shift 2
   local fetch_args=("$@")
-  local refspec="${source_ref}:${target_ref}"
+  local refspec="+${source_ref}:${target_ref}"
   local origin_url=""
   local https_url=""
   local fetch_cmd=()
