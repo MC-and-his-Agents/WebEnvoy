@@ -408,6 +408,41 @@ test_review_status_prefers_latest_trusted_review_over_older_approval() {
   assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "false"
 }
 
+test_review_status_rejects_older_bot_approval_when_newer_other_human_blocks() {
+  setup_review_status_fixture \
+    "review-status-newer-other-human-blocks-older-bot" \
+    "pr-author" \
+    "github-actions[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local latest_result_file="${TMP_DIR}/other-human-review.json"
+  local latest_review_file="${TMP_DIR}/other-human-review.md"
+  local older_review_body_json
+  local latest_review_body_json
+
+  older_review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+
+  printf '%s\n' '{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"blocked","findings":[],"required_actions":[]}' > "${latest_result_file}"
+  RESULT_FILE="${latest_result_file}"
+  REVIEW_MD_FILE="${latest_review_file}"
+  build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  latest_review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
+
+  printf '[[{"id":41,"user":{"login":"github-actions[bot]"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"other-human"},"commit_id":"head-sha-123","state":"CHANGES_REQUESTED","submitted_at":"2026-04-07T10:05:00Z","body":%s}]]\n' "${older_review_body_json}" "${latest_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "newer_blocking_review"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "other-human"
+  assert_equal "$(jq -r '.verdict' "${status_file}")" "REQUEST_CHANGES"
+  assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "false"
+}
+
 test_review_status_rejects_prompt_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-prompt-digest-mismatch" \

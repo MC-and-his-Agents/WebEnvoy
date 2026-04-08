@@ -3189,6 +3189,14 @@ write_review_status_json_common() {
         and (.meta.review_basis_digest // "") == $review_basis_digest
         and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
         and ((.state // "") == (.expected_state // ""));
+      def review_matches_reuse_basis:
+        (.meta_status // "") == "ok"
+        and (.meta.head_sha // "") == $head_sha
+        and (.meta.base_ref // "") == $base_ref
+        and (.meta.merge_base_sha // "") == $merge_base_sha
+        and (.meta.review_profile // "") == $review_profile
+        and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest));
       def proof_matches_remote_review:
         ($proofs[review_id_string] // null) as $proof
         | $proof != null
@@ -3216,7 +3224,12 @@ write_review_status_json_common() {
           else
             false
           end;
-      def review_blocks_reuse:
+      def review_regresses_merge_safety($reused):
+        review_matches_reuse_basis
+        and (($reused.meta_status // "") == "ok")
+        and (meta_safe_to_merge($reused) == true)
+        and (meta_safe_to_merge(.) == false);
+      def review_blocks_reuse($reused):
         if (.meta_status // "") == "missing_metadata" then
           (.state // "") != "COMMENTED"
         elif (.meta_status // "") == "invalid_metadata" then
@@ -3230,6 +3243,7 @@ write_review_status_json_common() {
             or (.meta.review_basis_digest // "") != $review_basis_digest
             or ($strict_prompt_digest == "1" and (.meta.prompt_digest // "") != $prompt_digest)
             or ((.state // "") != (.expected_state // ""))
+            or review_regresses_merge_safety($reused)
           )
         end;
       def normalize_review:
@@ -3270,14 +3284,26 @@ write_review_status_json_common() {
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
         | normalize_review
-        | select(reviewer_trusted_for_reuse)
-      ] as $raw_matching_reviews
+      ] as $normalized_head_reviews
       | [
+          $normalized_head_reviews[]
+          | select(reviewer_trusted_for_reuse)
+      ] as $raw_matching_reviews
+      | (
           $raw_matching_reviews
           | sort_by(.user.login // "")
-          | group_by(.user.login // "")[]
-          | latest_review(.)
-        ] as $matching_reviews
+          | group_by(.user.login // "")
+          | map(latest_review(.))
+        ) as $matching_reviews
+      | (
+          [
+            $normalized_head_reviews[]
+            | select(reviewer_trusted_for_reuse or (.meta_status // "") != "missing_metadata")
+          ]
+          | sort_by(.user.login // "")
+          | group_by(.user.login // "")
+          | map(latest_review(.))
+        ) as $blocking_candidate_reviews
       | (
           if ($matching_reviews | length) == 0 then
             null
@@ -3314,9 +3340,9 @@ write_review_status_json_common() {
                 []
               else
                 [
-                  $matching_reviews[]
+                  $blocking_candidate_reviews[]
                   | select(review_key > ($latest_reusable_review | review_key))
-                  | select(review_blocks_reuse)
+                  | select(review_blocks_reuse($latest_reusable_review))
                 ]
               end
             ) as $blocking_reviews
@@ -3388,6 +3414,8 @@ write_review_status_json_common() {
                     "review_basis_digest_mismatch"
                   elif ($strict_prompt_digest == "1" and ($latest.meta.prompt_digest // "") != $prompt_digest) then
                     "prompt_digest_mismatch"
+                  elif ($latest_reusable_review != null) and ($latest | review_regresses_merge_safety($latest_reusable_review)) then
+                    "newer_blocking_review"
                   elif ($latest.state // "") != ($latest.expected_state // "") then
                     "review_state_mismatch"
                   else
