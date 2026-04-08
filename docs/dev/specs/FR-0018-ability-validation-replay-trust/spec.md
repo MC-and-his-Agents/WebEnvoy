@@ -67,8 +67,8 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref`
   - `profile_ref`
   - `replay_source`
-  - `replay_input_ref`
   - `replay_reason`
+  - `replay_input_ref`（仅在 `replay_source=explicit_input_snapshot` 时出现）
 - `replay_source` 至少支持：
   - `last_success_input`
   - `explicit_input_snapshot`
@@ -86,7 +86,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `source_run_id`
   - `captured_at`
 - 必须明确：
-  - `replay_input_ref` 只能引用已存在的输入快照引用对象
+  - `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用已存在的输入快照引用对象
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`

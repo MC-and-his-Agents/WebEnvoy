@@ -80,7 +80,7 @@ interface AbilityHealthView {
 - `expected_capability_kind` 如保留在请求面，必须直接等于 `FR-0017.candidate_ability_descriptor.ability_kind`；若不一致，验证层必须以结构化输入错误拒绝请求，不得自行容忍或改写。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不再引入独立的 ability 引用命名空间或二次映射对象。
-- `replay_input_ref` 只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；该对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
+- `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；`replay_source=last_success_input` 分支必须缺省该字段。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个 `ReplayInputSnapshotRef` 的正式上游 seed，且只允许落在 `capture_profile` 对应的健康视图内。
 - `ability_validation_request` 是唯一的 smoke 请求契约；所有 replay 执行必须只通过 `ability_replay_request` 发起，`latest_validations.validation_mode=replay_validation` 也只能由 replay 请求结果写入。
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并回写为 `ability_health_view.last_success_input_ref`。

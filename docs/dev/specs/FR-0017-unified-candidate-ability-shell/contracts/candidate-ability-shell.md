@@ -41,7 +41,32 @@ interface CandidateAbilityDescriptor {
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；`capture_artifact_refs` 不能充当该字段的替代值。
 - `capture_artifact_refs` 如存在，必须是与 `capture_run_id` 同属一次运行的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 candidate 成立的强制前置。
 
-## 2. `candidate_ability_invocation`
+## 2. `candidate_ability_contract_registry`
+
+```ts
+interface CandidateAbilityContractRegistryEntry {
+  contract_ref: string
+  contract_kind: "input" | "output" | "error"
+  contract_body: Record<string, unknown>
+}
+
+interface CandidateAbilityContractRegistry {
+  ability_id: string
+  entries: CandidateAbilityContractRegistryEntry[]
+}
+```
+
+约束：
+
+- `candidate_ability_contract_registry` 是 `*_contract_ref` 的唯一正式解引用入口；消费者必须先拿到同一 `ability_id` 的 descriptor，再读取该 descriptor-owned registry 做精确 lookup。
+- 解引用规则固定为：
+  - 以 `candidate_ability_descriptor.ability_id` 锁定唯一 registry owner
+  - 在 `entries[*].contract_ref` 中按完整 ref 精确匹配
+  - 匹配结果的 `contract_kind` 必须与 ref 中声明的 kind 一致
+- 若 registry 缺失、同 ref 匹配到多条 entry、或 entry 的 `contract_kind` 与 ref kind 不一致，descriptor 必须视为无效，不得继续被下游 FR 消费。
+- `contract_body` 是被 `*_contract_ref` 解引用后的正式契约边界；实现不得绕过 registry 直接猜 repo 路径、runtime-store 行键或其他私有定位规则。
+
+## 3. `candidate_ability_invocation`
 
 ```ts
 interface CandidateAbilityInvocation {
@@ -64,7 +89,7 @@ interface CandidateAbilityInvocation {
 - `ability.action` 必须直接等于 `candidate_ability_descriptor.ability_kind`；若调用方传入的 action 与 descriptor kind 不一致，runtime 必须以结构化输入错误拒绝该 invocation。
 - `candidate_ability_descriptor` 自身就是输入/输出/错误契约引用的正式真相源；调用对象不得再引入独立的 `descriptor_ref` 或其他平行绑定壳。
 
-## 3. 结果挂载规则
+## 4. 结果挂载规则
 
 约束：
 
@@ -72,7 +97,7 @@ interface CandidateAbilityInvocation {
 - `FR-0017` 不新增并行顶层结果壳；不得创造 `summary.capability_result` 之外的 `candidate_ability_result_envelope` 一类结构。
 - 结果与候选能力描述的绑定继续通过 `ability.id -> candidate_ability_descriptor.ability_id` 完成，不在调用对象或成功结果里复制第二套 descriptor 绑定壳。
 
-## 4. 继承边界
+## 5. 继承边界
 
 - `FR-0007` 仍是最小能力壳来源。
 - `FR-0017` 只冻结候选能力描述对象和与最小能力壳的映射。
