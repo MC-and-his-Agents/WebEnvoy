@@ -293,26 +293,67 @@ hash_string_sha256() {
   die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
 }
 
+reviewer_has_guardian_reuse_permission() {
+  local reviewer="$1"
+  local permission_json
+  local permission=""
+  local role_name=""
+
+  [[ -n "${reviewer}" ]] || return 1
+
+  if ! permission_json="$(gh api "repos/:owner/:repo/collaborators/${reviewer}/permission" 2>/dev/null)"; then
+    return 1
+  fi
+
+  permission="$(jq -r '.permission // ""' <<< "${permission_json}")"
+  role_name="$(jq -r '.role_name // ""' <<< "${permission_json}")"
+
+  case "${permission}" in
+    admin|write)
+      return 0
+      ;;
+  esac
+
+  case "${role_name}" in
+    admin|maintain|write)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 trusted_guardian_reviewers_json() {
   local requesting_user="$1"
+  local reviews_file="${2:-}"
   local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
+  local reviewer=""
+  local -a trusted_reviewers=()
 
-  jq -nc \
-    --arg requesting_user "${requesting_user}" \
-    --arg extra_reviewers "${extra_reviewers}" \
-    '
-      [
-        $requesting_user,
-        (
-          $extra_reviewers
-          | split(",")
-          | map(gsub("^\\s+|\\s+$"; ""))
-          | .[]
-        )
-      ]
-      | map(select(length > 0))
-      | unique
-    '
+  if [[ -n "${requesting_user}" ]]; then
+    trusted_reviewers+=("${requesting_user}")
+  fi
+
+  if [[ -n "${extra_reviewers}" ]]; then
+    while IFS= read -r reviewer; do
+      [[ -n "${reviewer}" ]] || continue
+      trusted_reviewers+=("${reviewer}")
+    done < <(printf '%s\n' "${extra_reviewers}" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  fi
+
+  if [[ -n "${reviews_file}" && -f "${reviews_file}" ]]; then
+    while IFS= read -r reviewer; do
+      [[ -n "${reviewer}" ]] || continue
+      [[ "${reviewer}" == "${requesting_user}" ]] && continue
+      [[ "${reviewer}" == *"[bot]" ]] && continue
+
+      if reviewer_has_guardian_reuse_permission "${reviewer}"; then
+        trusted_reviewers+=("${reviewer}")
+      fi
+    done < <(jq -r '.[][] | .user.login // empty' "${reviews_file}" | sort -u)
+  fi
+
+  jq -nc '$ARGS.positional | map(select(length > 0)) | unique' --args "${trusted_reviewers[@]}"
 }
 
 stable_prompt_digest() {
@@ -2661,7 +2702,7 @@ write_review_status_json() {
   local trusted_reviewers_json
 
   load_pull_reviews "${pr_number}" "${reviews_file}"
-  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}")"
+  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${reviews_file}")"
 
   jq -c \
     --arg requesting_user "${requesting_user}" \
