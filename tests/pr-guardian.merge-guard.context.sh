@@ -1935,8 +1935,8 @@ test_build_lightweight_review_baseline_uses_pr_head_script_ref_when_available() 
 
   local baseline
   baseline="$(
-    hash_git_ref_file_sha256() {
-      printf 'hash:%s:%s\n' "$1" "$2"
+    hash_normalized_git_ref_file_sha256() {
+      printf 'normalized:%s:%s\n' "$1" "$2"
     }
 
     hash_normalized_file_sha256() {
@@ -1946,10 +1946,37 @@ test_build_lightweight_review_baseline_uses_pr_head_script_ref_when_available() 
     build_lightweight_review_baseline
   )"
 
-  if [[ "${baseline}" != *"guardian_script_sha256=hash:refs/remotes/origin/pr/415:scripts/pr-guardian.sh"* ]]; then
-    echo "expected lightweight review baseline to hash guardian script from PR head ref when available" >&2
+  if [[ "${baseline}" != *"guardian_script_sha256=normalized:refs/remotes/origin/pr/415:scripts/pr-guardian.sh"* ]]; then
+    echo "expected lightweight review baseline to hash guardian script from normalized PR head ref content when available" >&2
     exit 1
   fi
+}
+
+test_hash_guardian_script_review_basis_sha256_normalizes_pr_head_ref_content() {
+  setup_case_dir "guardian-script-hash-normalized-pr-head-ref"
+
+  PR_HEAD_REF="refs/remotes/origin/pr/415"
+  export PR_HEAD_REF
+  unset WORKTREE_DIR || true
+  unset HEAD_SHA || true
+
+  local actual
+  local expected
+
+  actual="$(
+    git() {
+      if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "refs/remotes/origin/pr/415:scripts/pr-guardian.sh" ]]; then
+        printf 'echo guardian\n\n'
+        return 0
+      fi
+      command git "$@"
+    }
+
+    hash_guardian_script_review_basis_sha256
+  )"
+  expected="$(hash_string_sha256 'echo guardian')"
+
+  assert_equal "${actual}" "${expected}"
 }
 
 test_compute_review_basis_digest_changes_when_lightweight_review_baseline_changes() {

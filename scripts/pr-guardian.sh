@@ -501,6 +501,20 @@ hash_git_ref_file_sha256() {
   hash_string_sha256 "__WEBENVOY_MISSING__:${git_ref}:${file_path}"
 }
 
+hash_normalized_git_ref_file_sha256() {
+  local git_ref="$1"
+  local file_path="$2"
+  local file_content=""
+
+  if file_content="$(git -C "${REPO_ROOT}" show "${git_ref}:${file_path}" 2>/dev/null)"; then
+    file_content="$(printf '%s' "${file_content}" | perl -0pe 's/\s+\z//s')"
+    hash_string_sha256 "${file_content}"
+    return 0
+  fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING__:${git_ref}:${file_path}"
+}
+
 build_lightweight_review_baseline() {
   local git_ref="${MERGE_BASE_SHA}"
   local file_path=""
@@ -529,12 +543,12 @@ hash_guardian_script_review_basis_sha256() {
   fi
 
   if [[ -n "${PR_HEAD_REF:-}" ]]; then
-    hash_git_ref_file_sha256 "${PR_HEAD_REF}" "${relative_path}"
+    hash_normalized_git_ref_file_sha256 "${PR_HEAD_REF}" "${relative_path}"
     return 0
   fi
 
   if [[ -n "${HEAD_SHA:-}" ]]; then
-    hash_git_ref_file_sha256 "${HEAD_SHA}" "${relative_path}"
+    hash_normalized_git_ref_file_sha256 "${HEAD_SHA}" "${relative_path}"
     return 0
   fi
 
