@@ -34,8 +34,9 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `FR-0017` 的候选能力描述输入
   - 现有 CLI / Extension / Native Messaging 主链
   - `FR-0004` 的最小诊断对象
-  - `FR-0010/0011` 已冻结的门禁与风险边界
+  - 与 `FR-0010/0011` 一致的站点无关最小风险门禁原则（如 `risk_gate_blocked`、人工确认、审计留痕）
 - 本 FR 只承接“先做成一次”的最小能力，不承诺长期稳定性与正式复用。
+- 本 FR 不得把 XHS 专用 gate 条件、账号特有反风控假设或平台特有审批路径直接当成未知网站的实现前置。
 
 ### 2. L2 首次可用的最小能力面
 
@@ -69,6 +70,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 必须明确：
   - `candidate_shell_seed` 是面向 `FR-0017` 的 handoff 输入
   - 它不等于候选能力描述本身
+  - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
 
 ### 4. 成功判定与失败分类
 
@@ -150,9 +152,9 @@ And 不会把它直接描述成正式可复用能力
 - 上游 FR：
   - `FR-0017-unified-candidate-ability-shell`
   - `FR-0004-runtime-observability`
-  - `FR-0010-xhs-risk-gates-hardening`
-  - `FR-0011-xhs-min-anti-detection-execution`
 - 相关但不由本 FR 关闭的事项：
   - `#155`
   - `#153`
   - 后续 L1 兜底与交付类事项
+  - `FR-0010-xhs-risk-gates-hardening`
+  - `FR-0011-xhs-min-anti-detection-execution`

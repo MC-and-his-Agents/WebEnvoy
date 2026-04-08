@@ -33,16 +33,28 @@
 
 最小字段：
 
-- `entrypoint_hint`
-- `input_shape_hint`
-- `result_shape_hint`
+- `ability_id`
+- `display_name`
+- `ability_kind`
+- `entrypoint`
+- `platform_scope`
+- `execution_layer_support=["L2"]`
+- `input_contract_ref`
+- `output_contract_ref`
+- `error_contract_ref`
+- `default_input_ref`
 - `capture_origin="l2_first_usable_sample"`
+- `capture_run_id`
+- `capture_profile`
+- `capture_artifact_refs`
+- `captured_at`
+- `candidate_status="draft_candidate"`
 
 ## 4. 与既有对象的关系
 
 - 与 `FR-0017`：
-  - `candidate_shell_seed` 只作为 handoff 输入
+  - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
 - 与 `FR-0004`：
   - 失败大类可以引用最小诊断，但不扩展诊断 schema
 - 与 `FR-0010/0011`：
-  - 风险门禁与审批/审计对象继续沿用既有定义
+  - 只继承站点无关的风险门禁结果语义，不继承 XHS 专用 gate 条件

@@ -10,6 +10,7 @@
 - `entrypoint`
 - `platform_scope`
 - `execution_layer_support`
+- `default_input_ref`
 - `capture_origin`
 - `candidate_status`
 - `capture_run_id`
@@ -41,6 +42,8 @@
 - 与 `FR-0007`：
   - 继续复用最小能力壳
   - 调用入口中的 `ability` 仍为结构对象，至少包含 `id` / `layer` / `action`
+- 与 `FR-0018`：
+  - `default_input_ref` 是 `input_source=descriptor_default` 的唯一正式来源
 - 与 `FR-0004`：
   - 继续复用最小诊断引用
 - 与 `FR-0006`：

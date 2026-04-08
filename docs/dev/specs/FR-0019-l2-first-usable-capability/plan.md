@@ -71,6 +71,8 @@
 
 - `FR-0017` spec review 未通过前，不进入本 FR 的实现 PR。
 - 本 FR spec review 未通过前，不进入 L2 首次可用实现 PR。
+- Phase 2 Spike D 未完成前，不把 AX Tree 压缩、RefMap 与短引用链路写成 implementation-ready。
+- Phase 2 Spike E 未完成前，不把请求拦截加速策略写成 implementation-ready。
 
 ### 可并行
 
@@ -91,3 +93,11 @@
 5. 后续实现 issue / PR 已明确：
   - `#157` 作为主线 issue
   - `FR-0017` 作为上游候选能力描述前置
+6. Phase 2 Spike D 已完成并形成可复核输入：
+  - AX Tree 压缩算法实现细节
+  - RefMap 短引用数据结构与序列化格式
+  - 压缩后 Token 消耗对比测试
+7. Phase 2 Spike E 已完成并形成可复核输入：
+  - `declarativeNetRequest` 拦截规则可行性
+  - 误拦截页面功能的影响边界
+  - 拦截前后加载时间对比

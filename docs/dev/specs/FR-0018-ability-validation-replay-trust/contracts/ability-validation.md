@@ -38,6 +38,11 @@ interface AbilityHealthView {
 
 约束：
 
+- `input_source=descriptor_default` 时，`ability_ref` 指向的 `candidate_ability_descriptor` 必须提供 `default_input_ref`。
 - `health_state` 只表达最小可信判断，不表达是否可交付。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `run_id` / `artifact_refs` 必须引用既有运行证据，不建立第二套真相源。
+- `verified`：最近一次验证成功，且同时具备 `run_id` 与 `artifact_refs`。
+- `degraded`：最近一次验证完成但仅部分满足预期，或 smoke / replay 结果出现分叉，仍需人工关注。
+- `broken`：最近一次验证失败，且必须给出 `failure_class`。
+- `stale`：存在历史验证结果，但因 freshness 过期或 descriptor/runtime/profile 基线变化，当前不能继续宣称可信。

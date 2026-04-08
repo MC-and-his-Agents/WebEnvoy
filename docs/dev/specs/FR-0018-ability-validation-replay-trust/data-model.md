@@ -15,6 +15,7 @@
 说明：
 
 - 本模型只冻结“最近一次验证结果”的最小视图，不要求在本 FR 中定义完整历史版本表。
+- `health_state` 必须按 `unknown/verified/degraded/broken/stale` 的最小判定标准生成，不能由调用方自由解释。
 
 ## 2. `ability_replay_binding`
 
@@ -33,6 +34,7 @@
 
 - 与 `FR-0017`：
   - `ability_ref` 必须引用已存在的候选能力描述
+  - `descriptor_default` 只允许引用 `default_input_ref`
 - 与 `FR-0004`：
   - 最小失败大类可以继续引用最小诊断结果，但不在本 FR 中扩展诊断 schema
 - 与 `FR-0006`：
