@@ -132,6 +132,41 @@ test_review_status_rejects_untrusted_other_reviewer() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
 }
 
+test_review_status_allows_invoking_human_reviewer_in_strict_mode() {
+  setup_review_status_fixture \
+    "review-status-invoking-human-strict" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "human-reviewer"
+}
+
+test_light_review_status_rejects_invoking_human_reviewer_without_allowlist() {
+  setup_review_status_fixture \
+    "review-status-invoking-human-light" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
 test_review_status_reuses_valid_review_when_newer_trusted_comment_lacks_metadata() {
   setup_review_status_fixture \
     "review-status-reuse-older-valid-review" \

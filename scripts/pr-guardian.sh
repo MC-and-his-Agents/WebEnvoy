@@ -353,6 +353,7 @@ hash_normalized_review_body_sha256() {
 
 trusted_guardian_reviewers_json() {
   local requesting_user="$1"
+  local include_requesting_user="${2:-0}"
   local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
   local reviewer=""
   local -a trusted_reviewers=()
@@ -361,7 +362,7 @@ trusted_guardian_reviewers_json() {
     "poller[bot]"
   )
 
-  if [[ -n "${requesting_user}" && "${requesting_user}" == *"[bot]" ]]; then
+  if [[ "${include_requesting_user}" == "1" && -n "${requesting_user}" ]]; then
     trusted_reviewers+=("${requesting_user}")
   fi
 
@@ -2897,13 +2898,14 @@ write_review_status_json_common() {
   local requesting_user="$2"
   local output_file="$3"
   local strict_prompt_digest="${4:-1}"
+  local include_requesting_user="${5:-0}"
   local raw_reviews_file="${TMP_DIR}/reviews-status.raw.json"
   local reviews_file="${TMP_DIR}/reviews-status.json"
   local trusted_reviewers_json
 
   load_pull_reviews "${pr_number}" "${raw_reviews_file}"
   annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}"
-  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}")"
+  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${include_requesting_user}")"
 
   jq -c \
     --arg requesting_user "${requesting_user}" \
@@ -3151,11 +3153,11 @@ write_review_status_json_common() {
 }
 
 write_review_status_json() {
-  write_review_status_json_common "$1" "$2" "$3" "1"
+  write_review_status_json_common "$1" "$2" "$3" "1" "1"
 }
 
 write_light_review_status_json() {
-  write_review_status_json_common "$1" "$2" "$3" "0"
+  write_review_status_json_common "$1" "$2" "$3" "0" "0"
 }
 
 hydrate_reused_review_result() {
