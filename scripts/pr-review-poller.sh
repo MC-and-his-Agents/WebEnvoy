@@ -279,7 +279,10 @@ main() {
       continue
     fi
 
-    if [[ "${post_review}" != "1" ]] && [[ "${reusable_review}" != "true" ]] && state_has_matching_review_identity "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}"; then
+    if [[ "${post_review}" != "1" ]] \
+      && [[ "${reusable_review}" != "true" ]] \
+      && [[ "${review_status_reason}" != "review_status_failed" ]] \
+      && state_has_matching_review_identity "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}"; then
       echo "跳过已在本地 --no-post-review 模式审查过同一审查基线的 PR #${pr_number}: ${pr_title} (reason=local_state_matching_basis)"
       if [[ "${dry_run}" != "1" ]]; then
         update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"

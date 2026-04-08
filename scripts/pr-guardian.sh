@@ -354,11 +354,28 @@ hash_normalized_review_body_sha256() {
 trusted_guardian_reviewers_json() {
   local requesting_user="$1"
   local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
+  local repo_owner="${REPO_OWNER_LOGIN:-}"
   local reviewer=""
   local -a trusted_reviewers=()
+  local -a default_bot_reviewers=(
+    "github-actions[bot]"
+    "poller[bot]"
+  )
 
   if [[ -n "${requesting_user}" ]]; then
     trusted_reviewers+=("${requesting_user}")
+  fi
+
+  trusted_reviewers+=("${default_bot_reviewers[@]}")
+
+  if [[ -z "${repo_owner}" ]]; then
+    repo_owner="$(gh repo view --json owner --jq '.owner.login // ""' 2>/dev/null || true)"
+    REPO_OWNER_LOGIN="${repo_owner}"
+    export REPO_OWNER_LOGIN
+  fi
+
+  if [[ -n "${repo_owner}" ]]; then
+    trusted_reviewers+=("${repo_owner}")
   fi
 
   if [[ -n "${extra_reviewers}" ]]; then
@@ -2985,6 +3002,13 @@ write_review_status_json_common() {
           | group_by(.user.login // "")[]
           | latest_review(.)
         ] as $matching_reviews
+      | (
+          if ($matching_reviews | length) == 0 then
+            null
+          else
+            latest_review($matching_reviews)
+          end
+        ) as $latest_matching_review
       | [
           $matching_reviews[]
           | select((.meta_status // "") == "ok")
@@ -2996,8 +3020,29 @@ write_review_status_json_common() {
           | select(($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
           | select((.state // "") == (.expected_state // ""))
         ] as $reusable_reviews
-      | if ($reusable_reviews | length) > 0 then
-          (latest_review($reusable_reviews)) as $reused
+      | if ($matching_reviews | length) == 0 then
+          {
+            reusable: false,
+            reason: "missing_review",
+            head_sha: $head_sha,
+            review_profile: $review_profile,
+            review_basis_digest: $review_basis_digest,
+            prompt_digest: "",
+            verdict: null,
+            safe_to_merge: null,
+            reviewer_login: ($requesting_user // "")
+          }
+        elif (
+          ($latest_matching_review.meta_status // "") == "ok"
+          and ($latest_matching_review.meta.head_sha // "") == $head_sha
+          and ($latest_matching_review.meta.base_ref // "") == $base_ref
+          and ($latest_matching_review.meta.merge_base_sha // "") == $merge_base_sha
+          and ($latest_matching_review.meta.review_profile // "") == $review_profile
+          and ($latest_matching_review.meta.review_basis_digest // "") == $review_basis_digest
+          and (($strict_prompt_digest != "1") or (($latest_matching_review.meta.prompt_digest // "") == $prompt_digest))
+          and (($latest_matching_review.state // "") == ($latest_matching_review.expected_state // ""))
+        ) then
+          $latest_matching_review as $reused
           | {
               reusable: true,
               reason: "matching_metadata",
@@ -3015,20 +3060,8 @@ write_review_status_json_common() {
               review_body: ($reused.cleaned_body // ""),
               reviewer_login: ($reused.user.login // "")
             }
-        elif ($matching_reviews | length) == 0 then
-          {
-            reusable: false,
-            reason: "missing_review",
-            head_sha: $head_sha,
-            review_profile: $review_profile,
-            review_basis_digest: $review_basis_digest,
-            prompt_digest: "",
-            verdict: null,
-            safe_to_merge: null,
-            reviewer_login: ($requesting_user // "")
-          }
         else
-          (latest_review($matching_reviews)) as $latest
+          $latest_matching_review as $latest
           | if ($latest.meta_status // "") == "missing_metadata" then
               {
                 reusable: false,
