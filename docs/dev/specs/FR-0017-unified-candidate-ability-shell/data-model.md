@@ -10,6 +10,9 @@
 - `entrypoint`
 - `platform_scope`
 - `execution_layer_support`
+- `input_contract_ref`
+- `output_contract_ref`
+- `error_contract_ref`
 - `capture_origin`
 - `candidate_status`
 - `capture_run_id`
@@ -23,20 +26,12 @@
 2. 最小输入/输出/错误边界与来源证据补齐后，可提升为 `candidate_ready`
 3. 验证结果与可信状态不在本模型内部承载，由后续 FR 承接
 
-## 2. `ability_contract_binding`
+补充约束：
 
-用途：
+- `candidate_ability_descriptor` 必须自包含输入/输出/错误契约引用；不得再拆出独立 `ability_contract_binding` 或其他平行绑定对象。
+- `ability_id` 是候选能力描述与 `FR-0007` 最小能力壳之间的正式绑定键。
 
-- 把候选能力描述绑定到最小能力壳与后续验证入口
-
-最小字段：
-
-- `descriptor_ref`
-- `input_contract_ref`
-- `output_contract_ref`
-- `error_contract_ref`
-
-## 3. 与既有对象的关系
+## 2. 与既有对象的关系
 
 - 与 `FR-0007`：
   - 继续复用最小能力壳

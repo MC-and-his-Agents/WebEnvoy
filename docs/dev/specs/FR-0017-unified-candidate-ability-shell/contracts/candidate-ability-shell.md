@@ -43,7 +43,6 @@ interface CandidateAbilityInvocation {
   }
   input: Record<string, unknown>
   options?: Record<string, unknown>
-  descriptor_ref: string
 }
 ```
 
@@ -51,8 +50,8 @@ interface CandidateAbilityInvocation {
 
 - `ability`、`input`、`options` 的最小语义继续继承 `FR-0007`。
 - `ability` 必须继续保持 `FR-0007` 的结构对象，不得降格为字符串或其他别名。
-- `ability.id` 必须与 `descriptor_ref` 指向描述对象中的 `ability_id` 一致。
-- `descriptor_ref` 只负责把本次调用与候选能力描述绑定起来，不引入第二套调用壳。
+- `ability.id` 必须直接对应 `candidate_ability_descriptor.ability_id`。
+- `candidate_ability_descriptor` 自身就是输入/输出/错误契约引用的正式真相源；调用对象不得再引入独立的 `descriptor_ref` 或其他平行绑定壳。
 
 ## 3. 结果挂载规则
 
@@ -60,7 +59,7 @@ interface CandidateAbilityInvocation {
 
 - 成功结果继续复用 `FR-0007` 的成功壳，并落在 `summary.capability_result` 之下。
 - `FR-0017` 不新增并行顶层结果壳；不得创造 `summary.capability_result` 之外的 `candidate_ability_result_envelope` 一类结构。
-- 结果与候选能力描述的绑定继续通过 `ability.id -> candidate_ability_descriptor.ability_id` 与调用时的 `descriptor_ref` 完成，不在成功结果里复制第二套结果壳。
+- 结果与候选能力描述的绑定继续通过 `ability.id -> candidate_ability_descriptor.ability_id` 完成，不在调用对象或成功结果里复制第二套 descriptor 绑定壳。
 
 ## 4. 继承边界
 
