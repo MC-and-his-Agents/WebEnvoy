@@ -42,6 +42,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `FR-0004` 的最小诊断与结构化错误边界
   - `FR-0006` 的运行证据与最小持久化边界
 - 本 FR 只冻结最小验证与可信判断，不承担版本治理、导入/安装或自动修复。
+- 当前 formal trust domain 只覆盖 `candidate_ability_descriptor.ability_kind=read|download`；`write` descriptor 当前停留在 FR-0017 的 capture evidence 域，不在本 FR 的普通 health/trust 视图内。
 
 ### 2. 最小验证请求对象
 
@@ -119,7 +120,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `divergent`
 - “当前 latest” 继续沿用现有 stale 规则：只有同时满足 7 天 freshness window 且 `baseline_descriptor` 与当前 descriptor/view 基线一致的 mode latest，才可被视为 current latest；其余 latest 必须失效为 `stale`。
 - 顶层 `health_state` 必须按固定顺序判定，分支互斥且穷尽：
-  1. `unknown`：在给定 `ability_ref + profile_ref` 视图内，不存在任何 mode latest 记录
+  1. `unknown`：在给定 `ability_ref + profile_ref` 的受支持视图内，不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
   3. `healthy`：至少存在一条 current latest 为 `verified`，且不存在任何 current latest 为 `broken`
   4. `degraded`：同时存在 current `verified` latest 与 current `broken` latest
@@ -169,7 +170,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `ability_validation_request` 只负责 `smoke_validation`；任何 replay 入口都必须走 `ability_replay_request`，不得冻结第二套 replay 请求面
   - `expected_capability_kind` 只允许作为对 `candidate_ability_descriptor.ability_kind` 的显式断言；不一致时不得写入任何 latest 结果
-  - `candidate_ability_descriptor.ability_kind=write` 时，不得生成或消费无门禁 `smoke_validation` latest；当前 formal baseline 下，状态变更能力不得通过普通 smoke 路径被 rerun 或标记为 `healthy`
+  - `candidate_ability_descriptor.ability_kind=write` 时，不得生成或消费无门禁 `smoke_validation` latest；当前 formal baseline 下，状态变更能力不得通过普通 smoke 路径被 rerun、标记为 `healthy`，也不得物化普通 `ability_health_view`
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
@@ -237,6 +238,7 @@ When 用户尝试发起一次 `smoke_validation`
 Then 验证层必须在请求阶段拒绝该组合
 And 不得写入 `smoke_validation` latest
 And 不得把该能力标记为 `healthy`
+And 不得为该能力物化普通 `ability_health_view` 并压成 `health_state=unknown`
 And 若未来要支持状态变更能力的最小验证，必须先冻结显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
 
 ### 场景 6：只有 replay 成功时也能呈现当前可用
@@ -305,12 +307,12 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 12. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
 13. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
-15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun 或写出 `healthy`：视为状态变更验证门禁缺失。
+15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun、写出 `healthy`，或被压成普通 `health_state=unknown`：视为状态变更验证门禁缺失。
 
 ## 验收标准
 
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
-2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
+2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结；当前 health/trust 视图只覆盖 `read|download`，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
 3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
 4. 首个 replay 输入快照必须由可选上游 `seed_replay_input_ref` 或首次成功验证/重放输入建立；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许初始化到对应 `last_success_input_ref`，`write` 只允许作为 capture evidence 保留。
 5. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。

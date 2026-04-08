@@ -37,6 +37,7 @@
 - `interaction_semantics` 是正式机器字段，只允许 `neutral`、`reveal_only_click`。
 - `interaction_semantics=reveal_only_click` 只允许与 `action=click` 一起出现，且当前正式 `click_kind` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
 - `click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现；其他交互不得伪造该字段。
+- request-side `allowed_actions=reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；两侧不得把同一动作写成无法互相映射的平行词汇。
 
 ## 3. `candidate_shell_seed`
 

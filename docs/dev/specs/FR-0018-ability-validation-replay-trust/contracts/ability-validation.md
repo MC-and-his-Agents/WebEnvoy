@@ -80,6 +80,7 @@ interface AbilityHealthView {
 
 - `health_state` 只表达“现在是否可用”的最小可信判断，不表达是否可交付；`validation_coverage_state` 只表达验证覆盖度，不替代顶层可用性判断。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
+- `FR-0018` 当前 formal trust domain 只覆盖 `candidate_ability_descriptor.ability_kind=read|download`；`write` descriptor 必须停留在 FR-0017 的 capture evidence 域，当前不得物化普通 `ability_health_view`、`latest_validations` 或 `last_success_input_ref`。
 - `validation_mode=smoke_validation` 时，`smoke_input` 必须存在，且必须满足 `FR-0017.candidate_ability_descriptor.input_contract_ref` 的最小输入边界。
 - `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；`write` 如需最小验证，必须在未来独立 FR 中冻结新的请求形态与 gate 元数据。
 - `expected_capability_kind` 如保留在请求面，必须直接等于 `FR-0017.candidate_ability_descriptor.ability_kind`；若不一致，验证层必须以结构化输入错误拒绝请求，不得自行容忍或改写。
@@ -94,11 +95,11 @@ interface AbilityHealthView {
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续回写为 `ability_health_view.last_success_input_ref`。
 - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`。
 - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref`、`replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 解释为可执行 replay 入口；显式 snapshot 也只能作为 capture evidence 保留，不能绕过当前缺失的 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据。
-- `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
+- `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。该规则只适用于当前 FR-0018 支持域内的 `read|download` descriptor 视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
 - `last_success_input` 的正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `ability_health_view.last_success_input_ref`；该值为空时，请求不得被视为可执行 replay。
 - `ability_health_view.last_success_input_ref` 如存在，也必须指向同一 `ability_ref + profile_ref` 视图内的 `ReplayInputSnapshotRef.snapshot_ref`。
-- `candidate_ability_descriptor.ability_kind=write` 时，`ability_health_view.last_success_input_ref` 必须保持为空；写能力的输入快照可以作为 capture evidence 保存，但不得被冻结成无门禁 replay truth source。
+- `health_state=unknown` 只允许用于当前 FR-0018 支持域内、尚不存在任何 mode latest 的 `read|download` descriptor；`write` 不得被压扁成普通 `unknown`。
 - `run_id` 是最近一次验证成立的最小硬证据锚点，不建立第二套运行真相源。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它当作 latest 记录成立的前置条件。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能出现一条 latest 记录。

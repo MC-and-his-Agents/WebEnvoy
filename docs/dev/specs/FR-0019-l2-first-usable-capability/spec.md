@@ -69,6 +69,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
   - `goal_kind=read` 时允许放行 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`
   - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
+  - request-side `reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；bare `action=click` 且没有 `interaction_semantics=reveal_only_click` 不得被视为已授权的 pure-read 点击
   - `interaction_safety_class=pure_read` 时，必须显式禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击
   - 未知站点通用 `write` lane 当前不在本 FR 范围内；如需纳入正式请求面，必须在独立 FR 中同时冻结其 execution、validation、audit 与 health-state 边界
 
@@ -161,8 +162,9 @@ And 必须阻断、失败或进入 fallback，而不是把未知站点 write lan
 ### 场景 5：read 中的揭示型点击必须能被机器识别
 
 Given 某个读取路径使用了 `open_detail_view` 或 `load_more_or_paginate`
-When 系统输出 `interaction_trace`
-Then 相应交互必须显式标记 `interaction_semantics=reveal_only_click`
+When reviewer 同时检查请求对象与系统输出 `interaction_trace`
+Then request-side 只能通过 `allowed_actions=reveal_only_click` 预授权这类点击
+And 相应交互在 trace-side 必须显式标记 `action=click + interaction_semantics=reveal_only_click`
 And 必须显式给出对应的 `click_kind`
 And 不得把这类点击退回为无法区分语义的泛化 `click`
 
@@ -205,7 +207,7 @@ And 不会把它直接描述成正式可复用能力
 11. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
 12. request-side 仍允许裸 `click`，没有在执行前把可放行的点击显式收敛为 `reveal_only_click`：视为读取边界未冻结。
 13. 在当前 FR 中引入未知站点通用 `write` 请求、write candidate 或 live-write 门禁对象：视为超出已批准的 Phase 2 read-first 基线。
-14. `interaction_trace` 没有把揭示型点击编码为 `interaction_semantics=reveal_only_click + click_kind`：视为读写边界仍停留在文字约束，未冻结成机器字段。
+14. request-side `reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 没有形成稳定翻译关系：视为请求边界与执行回传边界仍然脱节。
 15. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被当作成功 handoff：视为下游 contract resolver 边界未冻结。
 
 ## 验收标准

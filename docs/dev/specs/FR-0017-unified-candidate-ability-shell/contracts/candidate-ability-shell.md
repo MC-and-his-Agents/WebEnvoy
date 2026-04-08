@@ -16,7 +16,7 @@ interface CandidateAbilityDescriptor {
   input_contract_ref: string
   output_contract_ref: string
   error_contract_ref: string
-  capture_origin: "l3_adapter_sample" | "l2_first_usable_sample"
+  capture_origin: "l3_adapter_sample" | "l2_first_usable_sample" | "l1_fallback_sample"
   candidate_status: "draft_candidate" | "candidate_ready"
   capture_run_id: string
   capture_profile: string

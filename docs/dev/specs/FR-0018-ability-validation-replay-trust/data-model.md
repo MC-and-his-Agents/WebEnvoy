@@ -15,17 +15,18 @@
 说明：
 
 - 本模型冻结“每个 `ability_ref + profile_ref` 的聚合健康视图 + 按 mode 的 latest 结果子视图”，不要求在本 FR 中定义完整历史版本表。
-- 聚合健康视图必须按 `ability_ref + profile_ref` 唯一隔离；不同 profile 的验证结果不得互相覆盖。
+- 聚合健康视图必须按 `ability_ref + profile_ref` 唯一隔离；不同 profile 的验证结果不得互相覆盖。当前 formal trust domain 只覆盖 `candidate_ability_descriptor.ability_kind=read|download`；`write` descriptor 不得物化普通聚合健康视图。
 - `health_state` 与 `validation_coverage_state` 是两个独立的正式字段：前者表达“现在是否可用”，后者表达“验证覆盖做到哪里”；两者都不能由调用方自由解释。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能保留一条 latest 记录；它们共同构成当前能力的正式 latest-validation truth source。
-- `ability_validation_record` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
+- `ability_validation_record` 是每个处于 FR-0018 支持域内的 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
-- 当前 formal baseline 下，`ability_kind=write` 不得通过普通 `smoke_validation` 进入该聚合视图的 current healthy 路径；状态变更能力如需最小验证，必须先引入显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据。
+- 当前 formal baseline 下，`ability_kind=write` 不得进入 FR-0018 的普通 trust 域：既不得通过普通 `smoke_validation` 进入该聚合视图的 current healthy 路径，也不得被压成普通 `unknown`。状态变更能力如需最小验证/可信判断，必须先引入显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
 - 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，`last_success_input_ref` 不得被冻结为可执行 replay truth source；写能力的输入快照只能作为 capture evidence 保留，不能自动升级为无门禁 replay 种子。
 - `divergence_reason` 只允许 `smoke_replay_mismatch`，且只能用于表达 smoke/replay current latest 的真实冲突。
 - 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> healthy -> degraded -> broken`；一旦命中前序状态，后续状态不得再覆盖。
+- `health_state=unknown` 只允许用于当前 FR-0018 支持域内、尚不存在任何 mode latest 的 `read|download` descriptor；`write` descriptor 不得复用该状态表达“当前 baseline 不支持”。
 - `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=healthy` 只允许在至少存在一条 current `verified` latest 且不存在任何 current `broken` latest 时出现；`health_state=degraded` 只允许在 current `verified` 与 current `broken` latest 并存时出现；`health_state=broken` 只允许在不存在任何 current `verified` latest 且至少存在一条 current `broken` latest 时出现。
 - 顶层 `validation_coverage_state` 必须按固定顺序计算：`none -> smoke_only -> replay_only -> smoke_plus_replay -> divergent`；其中 `none` 只允许在不存在任何 current latest 时出现，`smoke_only`/`replay_only` 只允许在单一 mode current latest 为 `verified` 时出现，`smoke_plus_replay` 只允许在 smoke/replay current latest 都为 `verified` 时出现，其余存在 current latest 的组合一律归入 `divergent`。
 - 对非状态变更能力，只有 smoke current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=smoke_only`；只有 replay current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=replay_only`；只有 stale latest 时必须生成 `health_state=stale + validation_coverage_state=none`。

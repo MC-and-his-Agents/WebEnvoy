@@ -90,16 +90,18 @@
 - 本 FR 必须明确：候选能力描述可以补充元数据，但不得重写 `FR-0007` 的最小输入/输出/错误结构。
 - 本 FR 不得新增并行顶层结果壳；成功结果仍只允许通过 `FR-0007.summary.capability_result` 暴露。
 
-### 4. L3 / L2 统一承载边界
+### 4. L3 / L2 / L1 统一承载边界
 
 - 必须明确同一套描述对象可以承载：
   - 已有 L3 平台样本
   - 未来 L2 未知网站首次可用样本
+  - 未来 L1 fallback 样本
 - 必须冻结 `capture_origin` 的最小来源类型，至少覆盖：
   - `l3_adapter_sample`
   - `l2_first_usable_sample`
+  - `l1_fallback_sample`
 - 必须明确：
-  - L3/L2 的差异体现在 `entrypoint`、`platform_scope`、`execution_layer_support` 与 `capture_origin`
+  - L3/L2/L1 的差异体现在 `entrypoint`、`platform_scope`、`execution_layer_support` 与 `capture_origin`
   - 不允许因为执行层不同而拆出第二套候选能力描述协议
 
 ### 5. 统一表达读 / 写 / 下载能力面
