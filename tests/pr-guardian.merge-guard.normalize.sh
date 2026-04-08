@@ -1277,6 +1277,45 @@ test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
   assert_file_not_contains "${call_log}" "merge_if_safe:274"
 }
 
+test_main_review_without_post_review_does_not_write_local_guardian_proof() {
+  setup_case_dir "main-review-without-post-review-proof"
+
+  local call_log="${TMP_DIR}/main.calls.log"
+  local proof_file
+  export call_log
+
+  proof_file="$(guardian_proof_store_file)"
+
+  (
+    require_cmd() { :; }
+    check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
+    prepare_pr_workspace() { printf '%s\n' "prepare_pr_workspace:$1" >> "${call_log}"; }
+    assert_required_review_context_available() { printf '%s\n' "assert_required_review_context_available" >> "${call_log}"; }
+    ensure_review_prompt_prepared() { printf '%s\n' "ensure_review_prompt_prepared:$1" >> "${call_log}"; }
+    run_codex_review() {
+      printf '%s\n' "run_codex_review:$1" >> "${call_log}"
+      RESULT_FILE="${TMP_DIR}/review.json"
+      REVIEW_MD_FILE="${TMP_DIR}/review.md"
+      printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true,"summary":"fresh","findings":[],"required_actions":[]}' > "${RESULT_FILE}"
+      printf '%s\n' "fresh review body" > "${REVIEW_MD_FILE}"
+      export RESULT_FILE REVIEW_MD_FILE
+    }
+    print_summary() { printf '%s\n' "print_summary" >> "${call_log}"; }
+    post_review() { printf '%s\n' "post_review:$1" >> "${call_log}"; }
+    merge_if_safe() { printf '%s\n' "merge_if_safe:$1:$2" >> "${call_log}"; }
+    cleanup() { :; }
+
+    assert_pass main review 274
+  )
+
+  assert_file_contains "${call_log}" "run_codex_review:274"
+  assert_file_not_contains "${call_log}" "post_review:274"
+  if [[ -e "${proof_file}" ]]; then
+    echo "expected no local guardian proof file at ${proof_file}" >&2
+    exit 1
+  fi
+}
+
 test_main_review_status_uses_lightweight_context_only() {
   setup_case_dir "main-review-status-lightweight"
 

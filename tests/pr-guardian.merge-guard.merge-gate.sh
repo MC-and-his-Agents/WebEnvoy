@@ -62,7 +62,7 @@ test_review_status_reports_reusable_review_for_matching_metadata() {
   setup_review_status_fixture \
     "review-status-reusable" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -70,7 +70,7 @@ test_review_status_reports_reusable_review_for_matching_metadata() {
     "valid"
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.verdict' "${status_file}")" "APPROVE"
@@ -144,13 +144,14 @@ test_review_status_allows_invoking_human_reviewer_in_strict_mode() {
     "valid"
 
   local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
   assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "human-reviewer"
 }
 
-test_light_review_status_allows_invoking_human_reviewer() {
+test_light_review_status_rejects_invoking_human_reviewer_without_proof() {
   setup_review_status_fixture \
     "review-status-invoking-human-light" \
     "pr-author" \
@@ -162,6 +163,24 @@ test_light_review_status_allows_invoking_human_reviewer() {
     "valid"
 
   local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_light_review_status_allows_invoking_human_reviewer_with_proof() {
+  setup_review_status_fixture \
+    "review-status-invoking-human-light-proof" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
   assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
@@ -183,6 +202,134 @@ test_light_review_status_rejects_other_human_reviewer() {
   assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_light_review_status_rejects_other_human_reviewer_even_with_proof() {
+  setup_review_status_fixture \
+    "review-status-other-human-light-proof" \
+    "pr-author" \
+    "other-human" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "other-human" "APPROVED" "2026-04-07T10:00:00Z"
+  assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_review_id_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-proof-review-id-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "99" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_body_hash_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-proof-body-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  override_local_guardian_proof_field "41" "review_body_sha256" "bad-proof-body"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_head_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-proof-head-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  override_local_guardian_proof_field "41" "head_sha" "other-head"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_merge_base_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-proof-merge-base-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  override_local_guardian_proof_field "41" "merge_base_sha" "other-merge-base"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_review_basis_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-proof-review-basis-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  override_local_guardian_proof_field "41" "review_basis_digest" "other-review-basis"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "missing_review"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_proof_store_is_invalid() {
+  setup_review_status_fixture \
+    "review-status-human-proof-store-invalid" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  printf '%s\n' '{invalid-json' > "$(guardian_proof_store_file)"
+  assert_fail write_review_status_json 274 human-reviewer "${status_file}"
 }
 
 test_review_status_reuses_valid_review_when_newer_trusted_comment_lacks_metadata() {
@@ -211,7 +358,7 @@ test_review_status_rejects_dismissed_latest_review() {
   setup_review_status_fixture \
     "review-status-dismissed-latest-review" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -221,9 +368,9 @@ test_review_status_rejects_dismissed_latest_review() {
   local status_file="${TMP_DIR}/review-status.json"
   local review_body_json
   review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
-  printf '[[{"id":41,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"DISMISSED","submitted_at":"2026-04-07T10:05:00Z","body":%s}]]\n' "${review_body_json}" "${review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+  printf '[[{"id":41,"user":{"login":"github-actions[bot]"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s},{"id":42,"user":{"login":"github-actions[bot]"},"commit_id":"head-sha-123","state":"DISMISSED","submitted_at":"2026-04-07T10:05:00Z","body":%s}]]\n' "${review_body_json}" "${review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
 
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "review_state_mismatch"
 }
@@ -265,7 +412,7 @@ test_review_status_rejects_prompt_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-prompt-digest-mismatch" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -276,7 +423,28 @@ test_review_status_rejects_prompt_digest_mismatch() {
   export PROMPT_DIGEST
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "prompt_digest_mismatch"
+}
+
+test_review_status_rejects_invoking_human_reviewer_when_prompt_digest_mismatches() {
+  setup_review_status_fixture \
+    "review-status-human-prompt-digest-mismatch" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  seed_local_guardian_proof "41" "human-reviewer" "APPROVED" "2026-04-07T10:00:00Z"
+  PROMPT_DIGEST="prompt-digest-new"
+  export PROMPT_DIGEST
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "prompt_digest_mismatch"
 }
@@ -285,7 +453,7 @@ test_light_review_status_ignores_prompt_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-light-prompt-digest-mismatch" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -296,7 +464,7 @@ test_light_review_status_ignores_prompt_digest_mismatch() {
   export PROMPT_DIGEST
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_light_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.review_basis_digest' "${status_file}")" "review-basis-digest-123"
@@ -307,7 +475,7 @@ test_review_status_rejects_review_basis_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-review-basis-digest-mismatch" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -318,7 +486,7 @@ test_review_status_rejects_review_basis_digest_mismatch() {
   export REVIEW_BASIS_DIGEST
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "review_basis_digest_mismatch"
   assert_equal "$(jq -r '.review_basis_digest' "${status_file}")" "review-basis-digest-new"
@@ -328,14 +496,14 @@ test_review_status_rejects_missing_metadata() {
   setup_review_status_fixture \
     "review-status-missing-metadata" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
     "0"
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "missing_metadata"
 }
@@ -344,7 +512,7 @@ test_review_status_rejects_invalid_metadata() {
   setup_review_status_fixture \
     "review-status-invalid-metadata" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -352,7 +520,7 @@ test_review_status_rejects_invalid_metadata() {
     "invalid"
 
   local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
 }
@@ -361,7 +529,7 @@ test_review_status_rejects_tampered_review_body() {
   setup_review_status_fixture \
     "review-status-tampered-review-body" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -373,9 +541,9 @@ test_review_status_rejects_tampered_review_body() {
   local tampered_review_body_json
   sed 's/\*\*摘要\*\*: summary/**摘要**: tampered review body/' "${REVIEW_MD_FILE}" > "${tampered_review_file}"
   tampered_review_body_json="$(jq -Rs . < "${tampered_review_file}")"
-  printf '[[{"id":41,"user":{"login":"review-bot"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${HEAD_SHA}" "${tampered_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+  printf '[[{"id":41,"user":{"login":"github-actions[bot]"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${HEAD_SHA}" "${tampered_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
 
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
 }
@@ -384,7 +552,7 @@ test_reused_request_changes_does_not_become_mergeable() {
   setup_review_status_fixture \
     "review-status-request-changes" \
     "pr-author" \
-    "review-bot" \
+    "github-actions[bot]" \
     "CHANGES_REQUESTED" \
     "REQUEST_CHANGES" \
     "false" \
@@ -393,7 +561,7 @@ test_reused_request_changes_does_not_become_mergeable() {
 
   local status_file="${TMP_DIR}/review-status.json"
   local err_file="${TMP_DIR}/merge.err"
-  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   hydrate_reused_review_result "${status_file}" || {
     echo "expected hydrate_reused_review_result to pass" >&2
@@ -685,6 +853,27 @@ test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api()
   assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/pulls/274/reviews"
   assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/issues/274/comments"
   assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+}
+
+test_post_review_records_local_guardian_proof_for_human_reviewer() {
+  setup_merge_if_safe_fixture \
+    "post-review-records-human-proof" \
+    "pr-author" \
+    "human-reviewer" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true,"summary":"summary","findings":[],"required_actions":[]}' > "${RESULT_FILE}"
+  build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
+  export RESULT_FILE REVIEW_MD_FILE
+
+  assert_pass post_review 274
+  assert_file_contains "$(guardian_proof_store_file)" '"1000"'
+  assert_file_contains "$(guardian_proof_store_file)" '"reviewer_login": "human-reviewer"'
+  assert_file_contains "$(guardian_proof_store_file)" '"head_sha": "head-sha-123"'
 }
 
 test_merge_if_safe_rejects_comment_marker_without_formal_review() {

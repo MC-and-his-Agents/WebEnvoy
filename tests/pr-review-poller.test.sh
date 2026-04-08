@@ -140,13 +140,13 @@ EOF
   export PATH="${mock_bin}:${PATH}"
 }
 
-test_poller_skips_pr_with_fresh_guardian_review() {
-  setup_case_dir "skip-fresh-guardian-review"
+test_poller_skips_pr_with_same_machine_same_user_human_proof() {
+  setup_case_dir "skip-fresh-human-proof-review"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
   export GUARDIAN_SCRIPT
 
-  printf '%s\n' '[{"number":274,"title":"Fresh review","headRefOid":"head-sha-123","headRefName":"feat/fresh","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/274","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-123","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-123","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/274.json"
+  printf '%s\n' '[{"number":274,"title":"Fresh human proof review","headRefOid":"head-sha-123","headRefName":"feat/fresh","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/274","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-123","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-123","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true,"reviewer_login":"human-reviewer"}' > "${MOCK_GUARDIAN_STATUS_DIR}/274.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 274"
@@ -155,19 +155,34 @@ test_poller_skips_pr_with_fresh_guardian_review() {
   assert_equal "$(jq -r '.prs["274"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-123"
 }
 
-test_poller_reviews_pr_when_metadata_is_missing() {
-  setup_case_dir "review-missing-metadata"
+test_poller_reviews_pr_when_human_review_has_only_remote_metadata() {
+  setup_case_dir "review-human-without-proof"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
   export GUARDIAN_SCRIPT
 
-  printf '%s\n' '[{"number":275,"title":"Missing metadata","headRefOid":"head-sha-275","headRefName":"feat/missing","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/275","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-275","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-275","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/275.json"
+  printf '%s\n' '[{"number":275,"title":"Human metadata without proof","headRefOid":"head-sha-275","headRefName":"feat/missing","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/275","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_review","head_sha":"head-sha-275","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-275","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true,"reviewer_login":"human-reviewer"}' > "${MOCK_GUARDIAN_STATUS_DIR}/275.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 275"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 275"
   assert_equal "$(jq -r '.prs["275"].head_sha' "${STATE_FILE}")" "head-sha-275"
   assert_equal "$(jq -r '.prs["275"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-275"
+}
+
+test_poller_skips_pr_with_trusted_bot_review_without_local_proof() {
+  setup_case_dir "skip-fresh-bot-review"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+
+  printf '%s\n' '[{"number":288,"title":"Fresh bot review","headRefOid":"head-sha-288","headRefName":"feat/bot","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/288","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-288","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-288","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true,"reviewer_login":"github-actions[bot]"}' > "${MOCK_GUARDIAN_STATUS_DIR}/288.json"
+
+  assert_pass main --state-file "${STATE_FILE}"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 288"
+  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 288"
+  assert_equal "$(jq -r '.prs["288"].head_sha' "${STATE_FILE}")" "head-sha-288"
+  assert_equal "$(jq -r '.prs["288"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-288"
 }
 
 test_poller_reviews_pr_when_metadata_is_stale() {
@@ -311,8 +326,9 @@ EOF
 
 main() {
   load_poller_without_main
-  test_poller_skips_pr_with_fresh_guardian_review
-  test_poller_reviews_pr_when_metadata_is_missing
+  test_poller_skips_pr_with_same_machine_same_user_human_proof
+  test_poller_reviews_pr_when_human_review_has_only_remote_metadata
+  test_poller_skips_pr_with_trusted_bot_review_without_local_proof
   test_poller_reviews_pr_when_metadata_is_stale
   test_poller_reviews_pr_when_review_basis_digest_changes_on_same_head
   test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
