@@ -17,6 +17,7 @@
 - `candidate_status`
 - `capture_run_id`
 - `capture_profile`
+- `seed_replay_input_ref`
 - `captured_at`
 
 生命周期：
@@ -29,6 +30,7 @@
 
 - `candidate_ability_descriptor` 必须自包含输入/输出/错误契约引用；不得再拆出独立 `ability_contract_binding` 或其他平行绑定对象。
 - `ability_id` 是候选能力描述与 `FR-0007` 最小能力壳之间的正式绑定键。
+- `seed_replay_input_ref` 是首个 replay 输入快照的正式引用字段；它必须稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`，而不是要求下游再从 `capture_run_id` 或 artifact 侧推。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 descriptor 成立的强制前置。
 
 ## 2. 与既有对象的关系

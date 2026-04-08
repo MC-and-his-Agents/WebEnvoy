@@ -16,9 +16,11 @@
 - 本模型冻结“每个 `ability_ref + profile_ref` 的聚合健康视图 + 按 mode 的 latest 结果子视图”，不要求在本 FR 中定义完整历史版本表。
 - 聚合健康视图必须按 `ability_ref + profile_ref` 唯一隔离；不同 profile 的验证结果不得互相覆盖。
 - `health_state` 必须按 `unknown/verified/degraded/broken/stale` 的最小判定标准生成，不能由调用方自由解释。
+- `health_state=verified` 只允许在 `smoke_validation` 与 `replay_validation` 的 latest 记录都存在且均为 `verified` 时生成；若只有单侧 mode 证据，顶层状态必须降为 `degraded`。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能保留一条 latest 记录；它们共同构成当前能力的正式 latest-validation truth source。
 - `ability_validation_record` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
+- `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
 
 ### `latest_validations[*]`
@@ -74,14 +76,14 @@
 - `replay_input_ref` 与 `last_success_input_ref` 的正式 truth source 都是该输入快照引用对象。
 - 输入快照引用对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
-- 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须从 `FR-0017.candidate_ability_descriptor.capture_run_id + capture_profile` 对应的成功捕获输入中规范化生成；该 seed 的 `source_run_id` 必须等于 `capture_run_id`。
+- 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须直接由 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 指向；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
-- 若实现层无法从 `capture_run_id` 物化出稳定输入快照，能力可以继续存在于 descriptor 层，但 replay 绑定不得被标记为 ready。
+- 若上游未提供稳定的 `seed_replay_input_ref`，能力可以继续存在于 descriptor 层，但 replay 绑定不得被标记为 ready。
 
 ## 4. 与既有对象的关系
 
 - 与 `FR-0017`：
-  - `ability_ref` 必须引用已存在的候选能力描述
+  - `ability_ref` 必须直接等于已存在 `candidate_ability_descriptor.ability_id`
 - 与 `FR-0004`：
   - 最小失败大类可以继续引用最小诊断结果，但不在本 FR 中扩展诊断 schema
 - 与 `FR-0006`：

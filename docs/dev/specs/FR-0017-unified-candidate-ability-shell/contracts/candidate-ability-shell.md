@@ -20,6 +20,7 @@ interface CandidateAbilityDescriptor {
   candidate_status: "draft_candidate" | "candidate_ready"
   capture_run_id: string
   capture_profile: string
+  seed_replay_input_ref: string
   capture_artifact_refs?: string[]
   captured_at: string
 }
@@ -32,6 +33,8 @@ interface CandidateAbilityDescriptor {
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；不得用它替代验证结果。
 - `capture_run_id` 是候选能力来源证据的最小硬锚点。
+- `seed_replay_input_ref` 必须指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；它是初始 replay seed 的正式真相源，而不是从 `capture_run_id` 临时反推的实现细节。
+- `seed_replay_input_ref` 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；`capture_artifact_refs` 不能充当该字段的替代值。
 - `capture_artifact_refs` 如存在，必须是与 `capture_run_id` 同属一次运行的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 candidate 成立的强制前置。
 
 ## 2. `candidate_ability_invocation`

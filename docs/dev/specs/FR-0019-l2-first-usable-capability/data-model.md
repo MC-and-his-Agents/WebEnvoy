@@ -47,6 +47,7 @@
 - `capture_origin="l2_first_usable_sample"`
 - `capture_run_id`
 - `capture_profile`
+- `seed_replay_input_ref`
 - `captured_at`
 - `candidate_status="draft_candidate"`
 
@@ -54,6 +55,7 @@
 
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
 - 当前 FR 产出的 `candidate_shell_seed.ability_kind` 只允许 `read` / `write`；`download` 仍保留给上游共享模型与后续独立 FR。
+- `seed_replay_input_ref` 必须是首个 replay 输入快照的正式 handoff 引用；producer 必须先把本次成功运行的 concrete input 物化为 `FR-0018.ReplayInputSnapshotRef`，再把 ref 写入 `candidate_shell_seed`。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
 ## 4. `failure_result`

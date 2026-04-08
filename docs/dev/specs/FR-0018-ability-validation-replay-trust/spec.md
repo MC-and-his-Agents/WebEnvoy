@@ -59,6 +59,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `replay_validation` 用于重放上一次成功边界或显式指定的最小输入
   - 当 `validation_mode=replay_validation` 且 `input_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
+  - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
 
 ### 3. 最小重放对象
 
@@ -86,9 +87,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - `replay_input_ref` 只能引用已存在的输入快照引用对象
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
-  - 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须从 `FR-0017.candidate_ability_descriptor.capture_run_id + capture_profile` 对应的成功捕获输入中规范化生成，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
+  - 对新进入 `FR-0018` 的能力，首个输入快照引用对象必须由 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 直接提供，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
-  - 若 `capture_run_id` 对应的成功捕获输入无法物化为稳定输入快照，则该能力可以被保存，但不得宣称 replay-ready
+  - `seed_replay_input_ref` 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；若上游未提供该稳定引用，该能力可以被保存，但不得宣称 replay-ready
 
 ### 4. 最小可信判断对象
 
@@ -104,8 +105,8 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 是否需要重新验证或人工修复
 - 最小判定标准：
   - `unknown`：在给定 `ability_ref + profile_ref` 视图内，尚不存在任何完成态 latest 记录
-  - `verified`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `verified`，且不存在分叉
-  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，能力仍保留有限可用性
+  - `verified`：在给定 `ability_ref + profile_ref` 视图内，`smoke_validation` 与 `replay_validation` 的 latest 记录都已存在且均为 `verified`，并且不存在分叉
+  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉、成功/失败并存，或仅有单侧 smoke/replay 结果而另一侧尚未完成，能力仍保留有限可用性
   - `broken`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
   - `stale`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果；单条 mode latest 只有在 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与该记录保存的 `baseline_descriptor` 不一致时才能被标记为 `stale`
 
@@ -141,10 +142,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `divergence_reason`
 - 本 FR 必须明确：
   - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
+  - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
-  - 对新进入 `FR-0018` 的能力，初始 `last_success_input_ref` 只能由 `candidate_ability_descriptor.capture_run_id + capture_profile` 派生出的首个 `ReplayInputSnapshotRef` 建立；不得靠带外默认值、人工口头输入或跨 profile 复制补齐
+  - 对新进入 `FR-0018` 的能力，初始 `last_success_input_ref` 只能由 `candidate_ability_descriptor.seed_replay_input_ref` 建立；不得靠带外默认值、人工口头输入或跨 profile 复制补齐
   - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref` 下的输入快照引用对象；引用不存在、owner 不符或 profile 不符时，请求必须视为无效
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
@@ -168,6 +170,7 @@ When 用户请求一次 `smoke_validation`
 Then 系统能构造 `ability_validation_request`
 And 验证结果会落回稳定的 `ability_health_view`
 And 该结果只会写入本次 `profile_ref` 对应的聚合健康视图
+And `ability_ref` 会直接复用该候选能力的 `ability_id`
 
 ### 场景 2：最近一次验证结果可被用户理解
 
@@ -216,7 +219,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
-5. 新能力进入验证链路时，没有先从 `capture_run_id + capture_profile` 规范化出首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
+5. 新能力进入验证链路时，没有先通过 `seed_replay_input_ref` 提供首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
 6. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
 7. 失败大类被写成低层错误码镜像：视为边界漂移。
 8. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
@@ -228,7 +231,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
 3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
-4. 首个 replay 输入快照必须由 `capture_run_id + capture_profile` 派生并初始化到对应 `last_success_input_ref` 的规则已冻结。
+4. 首个 replay 输入快照必须由 `seed_replay_input_ref` 提供并初始化到对应 `last_success_input_ref` 的规则已冻结。
 5. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
 6. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
 7. 本 PR 只冻结规约，不混入实现代码。
