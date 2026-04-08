@@ -7,6 +7,7 @@
 - `ability_ref`
 - `profile_ref`
 - `health_state`
+- `validation_coverage_state`
 - `latest_validations`
 - `last_success_input_ref`
 - `divergence_reason`
@@ -15,16 +16,17 @@
 
 - 本模型冻结“每个 `ability_ref + profile_ref` 的聚合健康视图 + 按 mode 的 latest 结果子视图”，不要求在本 FR 中定义完整历史版本表。
 - 聚合健康视图必须按 `ability_ref + profile_ref` 唯一隔离；不同 profile 的验证结果不得互相覆盖。
-- `health_state` 必须按 `unknown/verified/degraded/broken/stale` 的最小判定标准生成，不能由调用方自由解释。
+- `health_state` 与 `validation_coverage_state` 是两个独立的正式字段：前者表达“现在是否可用”，后者表达“验证覆盖做到哪里”；两者都不能由调用方自由解释。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能保留一条 latest 记录；它们共同构成当前能力的正式 latest-validation truth source。
 - `ability_validation_record` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
-- `divergence_reason` 至少支持 `smoke_replay_mismatch` 与 `missing_mode_evidence`；其中后者专用于“smoke/replay 之一缺失”的状态。
-- 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> verified -> broken -> degraded`；一旦命中前序状态，后续状态不得再覆盖。
-- `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=verified` 只允许在 smoke/replay 两个 mode latest 都存在且都为 `verified` 时出现；`health_state=broken` 只允许在至少存在一条非 `stale` latest、且不存在任何 `verified` latest、且所有非 `stale` latest 都为 `broken` 时出现。
-- 其余存在 latest 的场景一律归入 `degraded`，包括 smoke-only verified、replay-only verified、success/failure 并存与 verified/stale 并存。
+- `divergence_reason` 只允许 `smoke_replay_mismatch`，且只能用于表达 smoke/replay current latest 的真实冲突。
+- 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> healthy -> degraded -> broken`；一旦命中前序状态，后续状态不得再覆盖。
+- `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=healthy` 只允许在至少存在一条 current `verified` latest 且不存在任何 current `broken` latest 时出现；`health_state=degraded` 只允许在 current `verified` 与 current `broken` latest 并存时出现；`health_state=broken` 只允许在不存在任何 current `verified` latest 且至少存在一条 current `broken` latest 时出现。
+- 顶层 `validation_coverage_state` 必须按固定顺序计算：`none -> smoke_only -> replay_only -> smoke_plus_replay -> divergent`；其中 `none` 只允许在不存在任何 current latest 时出现，`smoke_only`/`replay_only` 只允许在单一 mode current latest 为 `verified` 时出现，`smoke_plus_replay` 只允许在 smoke/replay current latest 都为 `verified` 时出现，其余存在 current latest 的组合一律归入 `divergent`。
+- 只有 smoke current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=smoke_only`；只有 replay current latest 为 `verified` 时，必须生成 `health_state=healthy + validation_coverage_state=replay_only`；只有 stale latest 时必须生成 `health_state=stale + validation_coverage_state=none`。
 
 ### `latest_validations[*]`
 

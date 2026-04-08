@@ -49,6 +49,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 面向上游/下游共享对象时，能力目标类型必须与 Phase 2 统一模型保持一致：
   - `read`
   - `write`
+  - `download`
 - 当前 FR 的请求面只冻结：
   - `read`
   - `write`
@@ -63,12 +64,15 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 本 FR 必须明确：
   - 这些能力是为了达成首次成功路径
   - 不等于已经形成平台专用适配器或完整命令集
-  - 本 FR 中的基础交互在共享枚举上归入 `write`，但不代表恢复高风险 live 写路径
   - `L2FirstUsableRequest` 只允许携带站点无关的 `risk_gate_context`，至少包含 `run_id`、`profile`、`target_domain`、`target_tab_id`、`target_page`、`risk_state`；`session_id` 如 runtime 已提供则携带，否则不得因其缺失而判定请求无效
-  - `goal_kind` 是本 FR 唯一正式的能力目标类型；FR-0019 不引入 `irreversible_write`、`requested_execution_mode` 或 XHS live lane 一类平台专用 gate 枚举
+  - `goal_kind` 是本 FR 唯一正式的能力目标类型；`interaction_safety_class` 是与之分离的正式动作纯度轴；FR-0019 不引入 `irreversible_write`、`requested_execution_mode` 或 XHS live lane 一类平台专用 gate 枚举
   - `target_url` 的域名必须能回链到 `risk_gate_context.target_domain`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
   - 若上游门禁请求仍携带 `irreversible_write` 或平台专用 live lane 语义，必须在映射到 `risk_gate_context` 之前就被阻断或归一化；FR-0019 不消费这类平台专用输入
-  - `goal_kind=read` 只允许放行 `navigate`、`locate`、`extract`、`wait_settled`；不得把 `click`、`type` 一类变更动作白名单放进读请求
+  - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
+  - `goal_kind=write` 必须固定映射到 `interaction_safety_class=state_changing_write`
+  - `goal_kind=read` 时允许放行 `navigate`、`locate`、`click`、`extract`、`wait_settled`，但其中 `click` 的正式语义必须收敛为 `reveal_only_click`
+  - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
+  - `interaction_safety_class=pure_read` 时，必须显式禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击
   - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出
@@ -85,6 +89,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 它不等于候选能力描述本身
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
   - `candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind`；若目标类型与 handoff seed 不一致，不得把该结果视为首次成功成立
+  - `interaction_safety_class` 只描述本次首次可用路径允许的动作纯度，不改变 `candidate_shell_seed.ability_kind`；`pure_read` / `state_changing_write` 必须自然回落到 `FR-0017.ability_kind=read|write`
   - L2 首次可用成功的上报不依赖 replay artifact；首次 replay snapshot 的生成与持久化由后续 `FR-0018` 验证链路承接
 
 ### 4. 成功判定与失败分类
@@ -130,14 +135,38 @@ When 用户通过 L2 首次可用能力执行最小读取或基础交互
 Then 系统可以返回结构化结果
 And 这次成功不会只停留在临时操作里
 
-### 场景 2：首次成功路径可以进入候选能力链路
+### 场景 2：read 目标允许 reveal-only click
+
+Given 某个未知网站的读取目标需要先展开折叠区或切换内容标签才能看到内容
+When 请求以 `goal_kind=read` 进入 L2 首次可用
+Then 正式动作纯度必须是 `interaction_safety_class=pure_read`
+And `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 这类 `reveal_only_click` 可以被视为合法读取路径的一部分
+And 不会因此把该请求升级为 `write`
+
+### 场景 3：read 目标中的 type 或 submit 不合法
+
+Given 某个未知网站的读取路径要求先输入文本或触发 submit/confirm
+When 请求仍以 `goal_kind=read` 进入 L2 首次可用
+Then 系统不得把该路径视为合法 `pure_read`
+And 必须阻断该动作组合、返回失败或进入 fallback
+
+### 场景 4：write 目标保留状态变更类交互，但必须受安全边界约束
+
+Given 某个未知网站的首次可用目标属于 `write`
+When 请求进入 L2 首次可用
+Then 正式动作纯度必须是 `interaction_safety_class=state_changing_write`
+And `click` 与 `type` 可以被纳入成功路径
+And `risk_gate_context.risk_state` 必须是 `allowed`
+And `write_safety_boundary` 必须继续约束不可逆控件
+
+### 场景 5：首次成功路径可以进入候选能力链路
 
 Given 某次 L2 首次可用执行成功
 When reviewer 检查本 FR 的输出对象
 Then 能看到 `candidate_shell_seed`
 And 该输出能作为 `FR-0017` 的 handoff 输入
 
-### 场景 3：L2 失败时不会伪装为成功
+### 场景 6：L2 失败时不会伪装为成功
 
 Given 页面缺少足够语义结构或连续无法定位目标
 When L2 无法稳定完成首次成功路径
@@ -146,7 +175,7 @@ And `success=false` 的结果对象中必须包含 `failure_class`
 And 当 `failure_class=requires_l1_fallback` 时必须同时包含结构化 `l1_fallback_payload`
 And 不会返回 `candidate_shell_seed` 冒充候选能力输入
 
-### 场景 4：L2 首次可用不等于正式复用
+### 场景 7：L2 首次可用不等于正式复用
 
 Given 某次 L2 路径已经成功一次
 When reviewer 检查本 FR 的边界
@@ -164,7 +193,8 @@ And 不会把它直接描述成正式可复用能力
 7. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
 8. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
 9. 把 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入：视为共享请求边界漂移。
-10. `goal_kind=read` 却仍白名单放行 `click`、`type` 等变更动作：视为绕过写入安全边界。
+10. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
+11. `goal_kind=read` 中允许的 `click` 没有被正式收敛为 `reveal_only_click`，或放行了会持久改变账号、内容或表单状态的点击：视为读取边界未冻结。
 
 ## 验收标准
 

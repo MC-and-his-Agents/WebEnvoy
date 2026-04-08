@@ -73,7 +73,31 @@
 - `write_safety_boundary` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
 - 命中 `blocked_control_kinds` 的未知站点控件不得被纳入 L2 first-usable 成功路径；实现层必须返回失败或 fallback，而不是继续推进不可逆动作。
 
-## 5. `risk_gate_context`
+## 5. `interaction_safety_class`
+
+用途：
+
+- 把“目标类型是 read 还是 write”和“本次执行允许的动作纯度”拆成两个正式语义轴
+
+最小字段：
+
+- `interaction_safety_class`
+
+允许值：
+
+- `pure_read`
+- `state_changing_write`
+
+补充约束：
+
+- `goal_kind=read` 时必须固定映射到 `interaction_safety_class=pure_read`；`goal_kind=write` 时必须固定映射到 `interaction_safety_class=state_changing_write`。
+- `interaction_safety_class=pure_read` 的允许动作集合只允许 `navigate`、`locate`、`click`、`extract`、`wait_settled`；其中 `click` 的正式语义必须收敛为 `reveal_only_click`。
+- `reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类揭示型点击。
+- `interaction_safety_class=pure_read` 明确禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击。
+- `interaction_safety_class=state_changing_write` 时，允许动作集合可以包含 `navigate`、`locate`、`click`、`type`、`extract`、`wait_settled`，但仍必须受 `risk_state=allowed` 与 `write_safety_boundary` 约束。
+- `interaction_safety_class` 只描述动作纯度，不改变 `candidate_shell_seed.ability_kind`；后者必须继续直接等于 `goal_kind`，并自然回落到 `FR-0017.ability_kind=read|write`。
+
+## 6. `risk_gate_context`
 
 用途：
 
@@ -100,10 +124,9 @@
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；任一缺失都不得进入 L2 首次可用请求。
 - `risk_state` 只表达统一风险状态机的站点无关输入状态；当前最小集合为 `paused | limited | allowed`。
 - 若上游门禁仍持有 `irreversible_write`、平台专用 live lane 或其他站点专用 gate 语义，必须在进入本 FR 请求面前完成阻断或归一化。
-- `goal_kind=read` 的允许动作集合只允许 `navigate`、`locate`、`extract`、`wait_settled`；`click`、`type` 只能落在 `goal_kind=write` 的请求路径内。
 - `goal_kind=write` 且 `risk_gate_context.risk_state` 不是 `allowed` 时，不得进入成功路径；实现层必须返回 `risk_gate_blocked` 或更早阻断。
 
-## 6. `failure_result`
+## 7. `failure_result`
 
 用途：
 
@@ -120,7 +143,7 @@
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
 - `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
 
-## 7. `l1_fallback_payload`
+## 8. `l1_fallback_payload`
 
 用途：
 
@@ -139,10 +162,11 @@
 - `fallback_reason` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`，用于说明触发 L2 停止的最小原因。
 - `recommended_strategy` 只允许 `visual_reacquire`、`visual_state_check`、`visual_then_physical_act`，用于冻结 L1 的最小方向，而不是完整 L1 工作流。
 
-## 8. 与既有对象的关系
+## 9. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
+  - `candidate_shell_seed.ability_kind` 必须继续直接等于本次请求 `goal_kind`；`interaction_safety_class` 不能引入新的共享能力类型
 - 与 `FR-0004`：
   - 失败大类可以引用最小诊断，但不扩展诊断 schema
 - 与 `FR-0010/0011`：
