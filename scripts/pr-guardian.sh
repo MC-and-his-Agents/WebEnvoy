@@ -532,7 +532,19 @@ build_lightweight_review_baseline() {
 
 hash_guardian_script_review_basis_sha256() {
   local relative_path="scripts/pr-guardian.sh"
+  local repo_script_path="${REPO_ROOT:-}/scripts/pr-guardian.sh"
+  local running_script_path="${SCRIPT_DIR}/pr-guardian.sh"
   local worktree_script_path=""
+
+  if [[ -n "${REPO_ROOT:-}" && -f "${repo_script_path}" ]]; then
+    hash_normalized_file_sha256 "${repo_script_path}"
+    return 0
+  fi
+
+  if [[ -f "${running_script_path}" ]]; then
+    hash_normalized_file_sha256 "${running_script_path}"
+    return 0
+  fi
 
   if [[ -n "${WORKTREE_DIR:-}" ]]; then
     worktree_script_path="${WORKTREE_DIR}/${relative_path}"
