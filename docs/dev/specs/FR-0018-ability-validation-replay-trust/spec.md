@@ -50,6 +50,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref`
   - `validation_mode`
   - `profile_ref`
+  - `requested_execution_layer`
   - `expected_capability_kind`
   - `smoke_input`
 - `validation_mode` 在本 FR 中至少支持：
@@ -59,8 +60,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `validation_mode=smoke_validation` 时，请求必须显式给出满足 `input_contract_ref` 的 `smoke_input`
   - `validation_mode=smoke_validation` 在当前 formal baseline 下只允许用于 `expected_capability_kind=read|download`；`ability_kind=write` 不得通过该请求面被 rerun、写入 latest 或标记为 `healthy`
   - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
+  - `requested_execution_layer` 必须显式给出，且必须落在目标 `candidate_ability_descriptor.execution_layer_support` 之内；验证层不得在未指定执行层时宣称“当前可用”
   - `expected_capability_kind` 如保留在请求面，必须直接等于该 descriptor 的 `ability_kind`；若不一致，验证层必须按结构化输入错误拒绝请求
-  - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
+  - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref + requested_execution_layer` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
   - 若目标 `candidate_ability_descriptor.ability_kind=write`，验证层必须在请求阶段拒绝 `smoke_validation`；如未来要支持状态变更能力的最小验证，必须先在独立 FR 中冻结显式 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
   - `ability_validation_request` 是唯一的 smoke 请求契约；replay 不得复用或平行复制到该对象中
 
@@ -69,6 +71,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须冻结 `ability_replay_request` 的最小边界，至少包含：
   - `ability_ref`
   - `profile_ref`
+  - `requested_execution_layer`
   - `expected_capability_kind`
   - `replay_source`
   - `replay_reason`
@@ -81,25 +84,29 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 不等于重新训练、重新学习或自动修复
   - `ability_replay_request` 是唯一的 replay 请求契约；`latest_validations.validation_mode=replay_validation` 只能由 replay 请求结果产出
   - 任何 replay 持久化 / 投影对象都只能作为 `ability_replay_request` 的存储投影，不得额外冻结第二套 replay 请求面或 `ready` 一类独立状态
+  - `requested_execution_layer` 必须显式给出，且必须落在目标 `candidate_ability_descriptor.execution_layer_support` 之内；重放资格必须按 execution layer 单独判断
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
   - `expected_capability_kind` 在当前 formal baseline 下只允许 `read|download`，并且必须直接等于目标 `candidate_ability_descriptor.ability_kind`
   - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
-  - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `last_success_input_ref`
+  - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref + requested_execution_layer` 视图内的 `last_success_input_ref`
 - 必须冻结 `replay_input_ref` 背后的最小输入快照引用对象，至少包含：
   - `snapshot_ref`
   - `ability_ref`
   - `profile_ref`
+  - `execution_layer`
+  - `captured_input_contract_ref`
   - `source_run_id`
   - `payload_locator`
   - `captured_at`
 - 必须明确：
   - `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用已存在的输入快照引用对象
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
+  - 输入快照引用对象必须记录自己的 `execution_layer` 与 `captured_input_contract_ref`；当前请求的 `requested_execution_layer` 或当前 descriptor 的 `input_contract_ref` 任一不匹配时，该快照不得继续复用为可执行 replay 输入
   - `payload_locator` 是 replay snapshot 的正式可解析 payload 边界；重放层必须通过它重新取回已保存输入，不得仅靠 `source_run_id`、artifact refs 或带外扫描临时反推
-  - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
-  - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
+  - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并且只允许回写为该 `capture_profile + capture_origin` 对应执行层视图的初始 `last_success_input_ref`
+  - 非 `capture_profile` 的其他 profile 视图，或 descriptor 其他受支持 execution layer 视图，都不得继承这条初始 seed；它们只能在各自作用域下首次成功验证/重放后刷新自己的 `last_success_input_ref`
   - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref`、`replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 冻结为可执行 replay 入口；显式 snapshot 也只能作为 capture evidence 保留，不能绕过当前缺失的 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续建立 `last_success_input_ref`
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref + requested_execution_layer` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续建立同 layer 视图的 `last_success_input_ref`
 
 ### 4. 最小可信判断对象
 
@@ -120,8 +127,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `divergent`
 - “当前 latest” 继续沿用现有 stale 规则：只有同时满足 7 天 freshness window 且 `baseline_descriptor` 与当前 descriptor/view 基线一致的 mode latest，才可被视为 current latest；其余 latest 必须失效为 `stale`。
 - `baseline_descriptor` 的 current/stale 判定必须把执行层支持视为正式基线的一部分；候选能力的 `execution_layer_support` 发生变化时，旧 latest 不得继续被视为 current。
+- `ability_health_view`、`latest_validations` 与 replay eligibility 必须按 `ability_ref + profile_ref + execution_layer` 作用域隔离；不同执行层不得共享同一条 current healthy evidence 或 `last_success_input_ref`。
 - 顶层 `health_state` 必须按固定顺序判定，分支互斥且穷尽：
-  1. `unknown`：在给定 `ability_ref + profile_ref` 的受支持视图内，不存在任何 mode latest 记录
+  1. `unknown`：在给定 `ability_ref + profile_ref + execution_layer` 的受支持视图内，不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
   3. `healthy`：至少存在一条 current latest 为 `verified`，且不存在任何 current latest 为 `broken`
   4. `degraded`：同时存在 current `verified` latest 与 current `broken` latest
@@ -149,7 +157,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 
 ### 6. 最近一次验证结果与证据引用
 
-- 每个 `ability_ref + profile_ref` 组合必须能引用“按验证模式分开保存的最近一次验证结果”，每条 mode latest 至少包含：
+- 每个 `ability_ref + profile_ref + execution_layer` 组合必须能引用“按验证模式分开保存的最近一次验证结果”，每条 mode latest 至少包含：
   - `validation_mode`
   - `validated_at`
   - `result_state`
@@ -159,35 +167,37 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `baseline_descriptor`
 - 每条 mode latest 可在上游 evidence carrier 已冻结时补充：
   - `artifact_refs`
-- 每个 `ability_ref + profile_ref` 组合还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
+- 每个 `ability_ref + profile_ref + execution_layer` 组合还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
   - `ability_ref`
   - `profile_ref`
+  - `execution_layer`
   - `health_state`
   - `validation_coverage_state`
   - `latest_validations`
   - `last_success_input_ref`
   - `divergence_reason`
 - 本 FR 必须明确：
-  - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
+  - `ability_validation_request.profile_ref` 与 `ability_validation_request.requested_execution_layer` 都必须存在，验证结果与健康视图按 `ability_ref + profile_ref + execution_layer` 维度隔离
   - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `ability_validation_request` 只负责 `smoke_validation`；任何 replay 入口都必须走 `ability_replay_request`，不得冻结第二套 replay 请求面
   - `expected_capability_kind` 只允许作为对 `candidate_ability_descriptor.ability_kind` 的显式断言；不一致时不得写入任何 latest 结果
   - `candidate_ability_descriptor.ability_kind=write` 时，不得生成或消费无门禁 `smoke_validation` latest；当前 formal baseline 下，状态变更能力不得通过普通 smoke 路径被 rerun、标记为 `healthy`，也不得物化普通 `ability_health_view`
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
-  - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
-  - 对新进入 `FR-0018` 的能力，初始 `last_success_input_ref` 可以来自上游提供的 `candidate_ability_descriptor.seed_replay_input_ref`，也可以来自同一 `ability_ref + profile_ref` 下首次成功的验证/重放输入；不得靠带外默认值、人工口头输入或跨 profile 复制补齐
+  - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref + execution_layer` 下最近一次成功验证/重放刷新
+  - 若 `last_success_input_ref` 指向的 snapshot 的 `captured_input_contract_ref` 与当前 descriptor 的 `input_contract_ref` 不一致，则该 truth source 必须立即失效，不得继续被 `replay_source=last_success_input` 复用
+  - 对新进入 `FR-0018` 的能力，初始 `last_success_input_ref` 可以来自上游提供的 `candidate_ability_descriptor.seed_replay_input_ref`，也可以来自同一 `ability_ref + profile_ref + execution_layer` 下首次成功的验证/重放输入；不得靠带外默认值、人工口头输入、跨 profile 或跨 execution layer 复制补齐
   - `candidate_ability_descriptor.ability_kind=write` 时，`seed_replay_input_ref` 与输入快照引用对象最多只承担 capture evidence 角色，不得自动初始化 `last_success_input_ref`，也不得形成无门禁 replay 入口
-  - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref` 下的输入快照引用对象；引用不存在、owner 不符或 profile 不符时，请求必须视为无效
+  - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref + execution_layer` 下的输入快照引用对象；引用不存在、owner 不符、profile 不符、execution layer 不符，或 `captured_input_contract_ref` 与当前 descriptor 的 `input_contract_ref` 不一致时，请求必须视为无效并要求 fresh capture
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
-  - `validated_execution_layer` 必须记录该次验证实际走通的执行层；它来自实际 invocation layer，而不是 descriptor 的支持层集合
+  - `validated_execution_layer` 必须记录该次验证实际走通的执行层；它来自实际 invocation layer，而不是 descriptor 的支持层集合，并且必须直接等于所在 `ability_health_view.execution_layer`
   - `baseline_descriptor` 必须至少冻结 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`；任一字段与当前 descriptor/view 基线不一致时，该条 latest 结果必须失效为 `stale`
   - `execution_layer_support` 的 current/stale 比较必须按归一化集合语义完成，而不是按数组顺序比较
   - 若当前 `candidate_ability_descriptor.execution_layer_support` 不再覆盖该条 latest 的 `validated_execution_layer`，该条 latest 结果也必须失效为 `stale`
   - 每条 latest 只证明自己的 `validated_execution_layer` 曾经被验证成功或失败；不得把同一条 latest 自动外推为 descriptor 其他支持层也已被验证
-  - `ability_health_view` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state` 与 `validation_coverage_state`
-  - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
+  - `ability_health_view` 是每个 `ability_ref + profile_ref + execution_layer` 的唯一聚合健康视图；消费者必须读取目标 layer 对应的视图判断顶层 `health_state` 与 `validation_coverage_state`
+  - 在同一 `ability_ref + profile_ref + execution_layer` 视图内，`latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
 ### 7. 与候选能力和 L2 首次可用的衔接
 
@@ -204,7 +214,7 @@ Given 某个候选能力已存在
 When 用户请求一次 `smoke_validation`
 Then 系统能构造 `ability_validation_request`
 And 验证结果会落回稳定的 `ability_health_view`
-And 该结果只会写入本次 `profile_ref` 对应的聚合健康视图
+And 该结果只会写入本次 `profile_ref + requested_execution_layer` 对应的聚合健康视图
 And `ability_ref` 会直接复用该候选能力的 `ability_id`
 And 在缺少上游 `seed_replay_input_ref` 时，首次 `smoke_validation` 仍可通过显式 `smoke_input` 启动
 
@@ -221,7 +231,7 @@ And 不需要直接阅读原始运行日志才能知道大概问题
 
 ### 场景 3：smoke 与 replay 分叉时不会被压扁成单一结果
 
-Given 同一个能力在同一个 `profile_ref` 下最近一次 `smoke_validation` 成功而 `replay_validation` 失败
+Given 同一个能力在同一个 `profile_ref + execution_layer` 视图下最近一次 `smoke_validation` 成功而 `replay_validation` 失败
 When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `degraded`
 And `validation_coverage_state` 必须是 `divergent`
@@ -230,7 +240,7 @@ And `divergence_reason` 必须解释当前是 smoke/replay 分叉
 
 ### 场景 4：只有 smoke 成功时仍会呈现当前可用
 
-Given 同一个 `ability_kind=read|download` 的能力在同一个 `profile_ref` 下已经成功完成一次 `smoke_validation`
+Given 同一个 `ability_kind=read|download` 的能力在同一个 `profile_ref + execution_layer` 视图下已经成功完成一次 `smoke_validation`
 And 当前还没有任何 `replay_validation` current latest
 When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `healthy`
@@ -249,7 +259,7 @@ And 若未来要支持状态变更能力的最小验证，必须先冻结显式 
 
 ### 场景 6：只有 replay 成功时也能呈现当前可用
 
-Given 同一个 `ability_kind=read|download` 的能力在同一个 `profile_ref` 下已经成功完成一次 `smoke_validation`
+Given 同一个 `ability_kind=read|download` 的能力在同一个 `profile_ref + execution_layer` 视图下已经成功完成一次 `smoke_validation`
 And 当前 `smoke_validation` latest 不存在或已经 `stale`
 And 已存在一个 current `replay_validation` latest 为 `verified`
 When 用户查看能力当前状态
@@ -284,7 +294,7 @@ And 不会创建第二套运行真相源
 
 ### 场景 10：只有 stale latest 时会退回 stale / none
 
-Given 同一个能力在同一个 `profile_ref` 下存在历史 latest
+Given 同一个能力在同一个 `profile_ref + execution_layer` 视图下存在历史 latest
 And 这些 latest 全部因 freshness window 或 `baseline_descriptor` 漂移而失效为 `stale`
 When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `stale`
@@ -292,14 +302,24 @@ And `validation_coverage_state` 必须是 `none`
 
 ### 场景 11：执行层支持变化会使旧验证失效
 
-Given 某个能力在同一个 `profile_ref` 下已有一条 `validated_execution_layer=L2` 的 current latest
+Given 某个能力在同一个 `profile_ref + execution_layer` 视图下已有一条 `validated_execution_layer=L2` 的 current latest
 And 该条 latest 生成时记录的 `baseline_descriptor.execution_layer_support` 仍包含 `L2`
 When 当前 `candidate_ability_descriptor.execution_layer_support` 发生变化
 And 新的执行层支持集合与该条 latest 的 `baseline_descriptor.execution_layer_support` 不一致
 Then 该条 latest 必须失效为 `stale`
 And 不得继续被当作 current healthy evidence
 
-### 场景 11：L2 样本也能进入同一验证链路
+### 场景 12：输入契约变化会使旧 replay snapshot 失效
+
+Given 某个 `ability_ref + profile_ref + execution_layer` 视图已经保存了 `last_success_input_ref`
+And 它指向的 snapshot 记录了旧的 `captured_input_contract_ref`
+When 当前 `candidate_ability_descriptor.input_contract_ref` 发生变化
+Then 旧 snapshot 只能保留为历史 evidence
+And 不得继续作为 `replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 的可执行输入
+And 当前视图中的 `last_success_input_ref` 必须视为失效或缺省
+And 系统必须要求 fresh smoke/replay capture 生成绑定新 contract 的 snapshot
+
+### 场景 13：L2 样本也能进入同一验证链路
 
 Given 后续已有一个来自 L2 首次可用的候选能力
 When 该能力进入验证链路
@@ -309,7 +329,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 ## 异常与边界场景
 
 1. 验证结果缺少 `validated_at` 或 `run_id`：不得宣称“最近一次验证已成立”。
-2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
+2. 同一个 `ability_ref` 在不同 `profile_ref` 或不同 `execution_layer` 下共用一条健康视图：视为作用域污染。
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
 5. 输入快照引用对象缺少 `payload_locator`，或该 locator 无法解析到对应 payload：不得视为可执行 replay。
@@ -324,11 +344,12 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
 15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun、写出 `healthy`，或被压成普通 `health_state=unknown`：视为状态变更验证门禁缺失。
 16. `candidate_ability_descriptor.execution_layer_support` 发生变化后，旧 latest 仍继续被视为 current：视为执行层变更没有进入 stale baseline。
+17. `last_success_input_ref` 指向的 snapshot 在 `captured_input_contract_ref` 与当前 `input_contract_ref` 不一致时仍可执行 replay：视为 replay snapshot 没有按输入契约版本失效。
 
 ## 验收标准
 
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
-2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结；当前 health/trust 视图只覆盖 `read|download`，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
+2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结；当前 health/trust 视图只覆盖 `read|download`，且健康视图按 `ability_ref + profile_ref + execution_layer` 唯一隔离。
 3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
 4. 首个 replay 输入快照必须由可选上游 `seed_replay_input_ref` 或首次成功验证/重放输入建立；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许初始化到对应 `last_success_input_ref`，`write` 只允许作为 capture evidence 保留。
 5. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
