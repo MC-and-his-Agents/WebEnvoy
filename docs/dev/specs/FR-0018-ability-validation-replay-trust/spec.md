@@ -76,6 +76,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 重放是“已保存能力的再运行入口”
   - 不等于重新训练、重新学习或自动修复
   - `ability_replay_request` 是唯一的 replay 请求契约；`latest_validations.validation_mode=replay_validation` 只能由 replay 请求结果产出
+  - 任何 replay 持久化 / 投影对象都只能作为 `ability_replay_request` 的存储投影，不得额外冻结第二套 replay 请求面或 `ready` 一类独立状态
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
   - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `last_success_input_ref`
@@ -108,7 +109,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   1. `unknown`：在给定 `ability_ref + profile_ref` 视图内，不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
   3. `verified`：`smoke_validation` 与 `replay_validation` 的 latest 记录都存在，且都为 `verified`
-  4. `broken`：不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
+  4. `broken`：至少存在一条非 `stale` latest，不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
   5. `degraded`：除以上情况外的其余所有视图，包括 smoke-only verified、replay-only verified、success/failure 并存、verified/stale 并存、以及双 mode 结果分叉
 - `smoke_validation` 成功可以被下游消费为“仍有可用证据”的最小信号，但在未形成 replay latest 前，只能把顶层状态落在 `degraded`，并使用 `divergence_reason=missing_mode_evidence`。
 - `degraded` 场景中，若 smoke/replay 之一缺失，则 `divergence_reason` 必须是 `missing_mode_evidence`；若两个 mode 都存在但结果不一致，则 `divergence_reason` 必须是 `smoke_replay_mismatch`。

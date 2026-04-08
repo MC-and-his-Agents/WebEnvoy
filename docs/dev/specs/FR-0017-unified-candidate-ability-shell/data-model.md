@@ -22,6 +22,7 @@
 可选字段：
 
 - `seed_replay_input_ref`
+- `capture_artifact_refs`
 
 生命周期：
 
@@ -33,6 +34,7 @@
 
 - `candidate_ability_descriptor` 必须自包含输入/输出/错误契约引用；不得再拆出独立 `ability_contract_binding` 或其他平行绑定对象。
 - `ability_id` 是候选能力描述与 `FR-0007` 最小能力壳之间的正式绑定键。
+- `execution_layer_support` 的共享正式枚举必须覆盖 `L1`、`L2`、`L3`；当前样本可只声明其中子集，但 descriptor 模型不得把未来 `L1` 候选层排除在外。
 - `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须是稳定、机器可读的契约标识；相同 ref 代表兼容的同一份契约边界，不兼容变化必须生成新的 ref。
 - `*_contract_ref` 的 canonical namespace 固定为 `cad::<ability_id>::<input|output|error>::v<major>`；其中 owner 必须是当前 `ability_id`，契约种类必须与 ref 中的 `<input|output|error>` 一致。
 - `candidate_ability_contract_registry` 是该 `ability_id` 下 `*_contract_ref` 的唯一正式解引用模型；它必须与 descriptor 同 owner 落库或原子发布。

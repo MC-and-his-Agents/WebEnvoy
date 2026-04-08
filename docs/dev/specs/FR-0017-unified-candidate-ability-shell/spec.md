@@ -63,7 +63,7 @@
   - `seed_replay_input_ref`
 - 其中：
   - `ability_kind` 必须至少支持 `read`、`write`、`download`
-  - `execution_layer_support` 必须至少能表达 `L3`、`L2`
+  - `execution_layer_support` 必须至少能表达 `L3`、`L2`、`L1`；即使当前主闭环样本主要来自 `L3/L2`，共享 descriptor 也不得把未来 `L1` 候选层排除在正式枚举之外
   - `candidate_status` 在本 FR 内只冻结最小生命周期，不承担可信判断
   - `platform_family` 必须使用稳定、归一化的平台键，不能把共享描述符冻结成 XHS-only 枚举
 

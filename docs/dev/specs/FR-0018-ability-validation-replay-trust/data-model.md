@@ -23,7 +23,7 @@
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
 - `divergence_reason` 至少支持 `smoke_replay_mismatch` 与 `missing_mode_evidence`；其中后者专用于“smoke/replay 之一缺失”的状态。
 - 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> verified -> broken -> degraded`；一旦命中前序状态，后续状态不得再覆盖。
-- `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=verified` 只允许在 smoke/replay 两个 mode latest 都存在且都为 `verified` 时出现；`health_state=broken` 只允许在不存在任何 `verified` latest 且所有非 `stale` latest 都为 `broken` 时出现。
+- `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=verified` 只允许在 smoke/replay 两个 mode latest 都存在且都为 `verified` 时出现；`health_state=broken` 只允许在至少存在一条非 `stale` latest、且不存在任何 `verified` latest、且所有非 `stale` latest 都为 `broken` 时出现。
 - 其余存在 latest 的场景一律归入 `degraded`，包括 smoke-only verified、replay-only verified、success/failure 并存与 verified/stale 并存。
 
 ### `latest_validations[*]`
@@ -49,7 +49,7 @@
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
 - `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线与 `baseline_descriptor` 任一字段不一致。
 
-## 2. `ability_replay_binding`
+## 2. `ability_replay_request_projection`
 
 核心字段：
 
@@ -61,7 +61,8 @@
 
 说明：
 
-- 重放对象只说明“这次重放从哪里来的输入”，不承担自动修复语义。
+- 本对象只是 `ability_replay_request` 的存储投影，不是第二套正式 replay 请求契约。
+- 投影对象只说明“这次重放从哪里来的输入”，不承担自动修复语义，也不得额外引入 `ready` 一类未在 `spec.md` / `contracts/` 冻结的独立状态。
 - `profile_ref` 是 replay 绑定的正式作用域；当 `replay_source=last_success_input` 时，必须只在同一 `ability_ref + profile_ref` 下解析最近成功输入。
 - 当 `replay_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在，且只能指向已保存的显式输入快照。
 - 当 `replay_source=last_success_input` 时，`replay_input_ref` 必须缺省，并改由同一视图内的 `last_success_input_ref` 解引用输入快照。
@@ -83,7 +84,7 @@
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；在此之前 replay 绑定不得被标记为 ready。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
 
 ## 4. 与既有对象的关系
 

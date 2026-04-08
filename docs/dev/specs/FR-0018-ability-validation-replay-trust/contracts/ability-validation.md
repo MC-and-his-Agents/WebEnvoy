@@ -83,6 +83,7 @@ interface AbilityHealthView {
 - `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；`replay_source=last_success_input` 分支必须缺省该字段。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个 `ReplayInputSnapshotRef` 的正式上游 seed，且只允许落在 `capture_profile` 对应的健康视图内。
 - `ability_validation_request` 是唯一的 smoke 请求契约；所有 replay 执行必须只通过 `ability_replay_request` 发起，`latest_validations.validation_mode=replay_validation` 也只能由 replay 请求结果写入。
+- 任何 replay 持久化 / 投影对象都只能表达 `ability_replay_request` 的存储投影，不得再冻结第二套 replay 请求契约或 `ready` 一类独立状态位。
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并回写为 `ability_health_view.last_success_input_ref`。
 - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
@@ -101,7 +102,7 @@ interface AbilityHealthView {
   1. `unknown`：不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
   3. `verified`：`smoke_validation` 与 `replay_validation` 的 latest 都存在，且都为 `verified`
-  4. `broken`：不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
+  4. `broken`：至少存在一条非 `stale` latest，不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
   5. `degraded`：除以上情况外的其余所有视图
 - `smoke_validation` 成功可以作为“能力仍可用”的最小证据，也可以建立首个 `last_success_input_ref`，但在缺少 `replay_validation` latest 时不得单独把顶层健康状态提升为 `verified`。
 - `degraded` 场景中，若 smoke/replay 之一缺失，则 `divergence_reason` 必须是 `missing_mode_evidence`；若两个 mode 都存在但结果不一致，`divergence_reason` 必须是 `smoke_replay_mismatch`。

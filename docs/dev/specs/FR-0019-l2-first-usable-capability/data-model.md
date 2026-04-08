@@ -73,13 +73,13 @@
 - `write_safety_boundary` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
 - 命中 `blocked_control_kinds` 的未知站点控件不得被纳入 L2 first-usable 成功路径；实现层必须返回失败或 fallback，而不是继续推进不可逆动作。
 
-## 5. `gate_input`
+## 5. `risk_gate_context`
 
 用途：
 
-- 作为 `FR-0010.gate_input` 的直接复用输入，向 L2 first-usable 提供统一门禁上下文
+- 作为未知网站 L2 首次可用请求的站点无关最小门禁上下文，向请求面提供统一坐标与风险状态
 
-继承字段：
+最小字段：
 
 - `run_id`
 - `session_id`
@@ -87,17 +87,16 @@
 - `target_domain`
 - `target_tab_id`
 - `target_page`
-- `action_type`
-- `requested_execution_mode`
 - `risk_state`
 
 补充约束：
 
-- `gate_input` 必须与 `FR-0010.gate_input` 保持同字段形状与同语义，不得在 L2 first-usable request 中重新命名或拆分成私有别名。
-- `gate_input` 的子字段、执行模式与风险状态枚举以 `FR-0010.gate_input` 为唯一正式来源；FR-0019 不在本地重新冻结分叉版本。
-- `goal_kind` 必须直接等于 `gate_input.action_type`，`target_url` 必须能够回链到 `gate_input.target_domain`。
-- `gate_input.target_tab_id` 与 `gate_input.target_page` 必须共同存在；任一缺失都不得进入 `goal_kind=write` 的风险门禁消费路径。
-- 若 `gate_input.action_type=irreversible_write` 或命中只在 XHS live lane 内成立的执行模式，FR-0019 必须阻断该请求，不得把站点专用 gate 语义下沉为通用 L2 流程常量。
+- `risk_gate_context` 只冻结站点无关的最小字段，不直接复用 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象。
+- `goal_kind` 是本 FR 唯一正式的能力目标类型；`target_url` 必须能够回链到 `risk_gate_context.target_domain`。
+- `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；任一缺失都不得进入 L2 首次可用请求。
+- `risk_state` 只表达统一风险状态机的站点无关输入状态；当前最小集合为 `paused | limited | allowed`。
+- 若上游门禁仍持有 `irreversible_write`、平台专用 live lane 或其他站点专用 gate 语义，必须在进入本 FR 请求面前完成阻断或归一化。
+- `goal_kind=write` 且 `risk_gate_context.risk_state` 不是 `allowed` 时，不得进入成功路径；实现层必须返回 `risk_gate_blocked` 或更早阻断。
 
 ## 6. `failure_result`
 
@@ -142,5 +141,5 @@
 - 与 `FR-0004`：
   - 失败大类可以引用最小诊断，但不扩展诊断 schema
 - 与 `FR-0010/0011`：
-  - `gate_input` 必须直接复用 `FR-0010.gate_input` 的冻结字段形状
-  - 只继承站点无关的风险门禁结果语义，不继承 XHS 专用 gate 条件
+  - `risk_gate_context` 只继承站点无关的风险门禁原则与最小坐标，不直接复用 `FR-0010.gate_input`
+  - 平台专用 gate 请求对象如需进入本 FR，必须先映射为站点无关的最小门禁上下文

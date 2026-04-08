@@ -37,6 +37,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 与 `FR-0010/0011` 一致的站点无关最小风险门禁原则（如 `risk_gate_blocked`、人工确认、审计留痕）
 - 本 FR 只承接“先做成一次”的最小能力，不承诺长期稳定性与正式复用。
 - 本 FR 不得把 XHS 专用 gate 条件、账号特有反风控假设或平台特有审批路径直接当成未知网站的实现前置。
+- 本 FR 的请求面只冻结站点无关的 `risk_gate_context`，不得把 `FR-0010.gate_input` 或其他平台专用 gate 请求对象整体别名为通用 L2 输入。
 - 在 Phase 2 Spike D/E 完成并把相关实现输入冻结前，本 FR 只能作为 formal spec baseline；不得被表述成已经具备 implementation-ready 状态。
 
 ### 2. L2 首次可用的最小能力面
@@ -63,9 +64,10 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 这些能力是为了达成首次成功路径
   - 不等于已经形成平台专用适配器或完整命令集
   - 本 FR 中的基础交互在共享枚举上归入 `write`，但不代表恢复高风险 live 写路径
-  - `L2FirstUsableRequest.gate_input` 必须直接引用 `FR-0010.gate_input`；FR-0019 不得在本地再次枚举其子字段、执行模式或风险状态
-  - `goal_kind` 必须直接等于 `gate_input.action_type`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
-  - 若 `gate_input` 落在 `irreversible_write` 或 XHS 专用 live lane，FR-0019 必须把它视为越界输入而不是通用 L2 请求能力
+  - `L2FirstUsableRequest` 只允许携带站点无关的 `risk_gate_context`，至少包含 `run_id`、`session_id`、`profile`、`target_domain`、`target_tab_id`、`target_page`、`risk_state`
+  - `goal_kind` 是本 FR 唯一正式的能力目标类型；FR-0019 不引入 `irreversible_write`、`requested_execution_mode` 或 XHS live lane 一类平台专用 gate 枚举
+  - `target_url` 的域名必须能回链到 `risk_gate_context.target_domain`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
+  - 若上游门禁请求仍携带 `irreversible_write` 或平台专用 live lane 语义，必须在映射到 `risk_gate_context` 之前就被阻断或归一化；FR-0019 不消费这类平台专用输入
   - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出
@@ -160,6 +162,7 @@ And 不会把它直接描述成正式可复用能力
 6. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
 7. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
 8. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
+9. 把 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入：视为共享请求边界漂移。
 
 ## 验收标准
 
