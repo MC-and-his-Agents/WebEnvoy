@@ -56,7 +56,23 @@
 - 当前 FR 产出的 `candidate_shell_seed.ability_kind` 只允许 `read` / `write`；`download` 仍保留给上游共享模型与后续独立 FR。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
-## 4. `failure_result`
+## 4. `write_safety_boundary`
+
+用途：
+
+- 在未知站点 `goal_kind=write` 时，提供机器可读的最小安全边界，防止 L2 first-usable 进入不可逆 live-write 路径
+
+最小字段：
+
+- `irreversible_controls_blocked=true`
+- `blocked_control_kinds=["submit" | "publish" | "purchase" | "confirm_final"]`
+
+补充约束：
+
+- `write_safety_boundary` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
+- 命中 `blocked_control_kinds` 的未知站点控件不得被纳入 L2 first-usable 成功路径；实现层必须返回失败或 fallback，而不是继续推进不可逆动作。
+
+## 5. `failure_result`
 
 用途：
 
@@ -73,7 +89,7 @@
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
 - `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
 
-## 5. `l1_fallback_payload`
+## 6. `l1_fallback_payload`
 
 用途：
 
@@ -92,7 +108,7 @@
 - `fallback_reason` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`，用于说明触发 L2 停止的最小原因。
 - `recommended_strategy` 只允许 `visual_reacquire`、`visual_state_check`、`visual_then_physical_act`，用于冻结 L1 的最小方向，而不是完整 L1 工作流。
 
-## 6. 与既有对象的关系
+## 7. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值

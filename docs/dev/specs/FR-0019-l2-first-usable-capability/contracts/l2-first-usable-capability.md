@@ -3,18 +3,30 @@
 ## 1. `l2_first_usable_request`
 
 ```ts
-interface L2FirstUsableRequest {
-  target_url: string
-  goal_kind: "read" | "write"
-  goal_hint?: string
-  allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
-}
+type L2FirstUsableRequest =
+  | {
+      target_url: string
+      goal_kind: "read"
+      goal_hint?: string
+      allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
+    }
+  | {
+      target_url: string
+      goal_kind: "write"
+      goal_hint?: string
+      allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
+      write_safety_boundary: {
+        irreversible_controls_blocked: true
+        blocked_control_kinds: Array<"submit" | "publish" | "purchase" | "confirm_final">
+      }
+    }
 ```
 
 约束：
 
 - 当前 FR 的请求面只冻结 `read` / `write`；`download` 仍保留在上游共享模型中，但不属于本 FR 的可请求能力。
 - 本 FR 中的最小基础交互统一归入 `write`，但不等于恢复高风险 live 写路径或账号敏感提交。
+- `goal_kind=write` 时，`write_safety_boundary` 必须存在，并且必须明确阻断不可逆控件；未知站点的 `write` 范围不允许覆盖 submit、publish、purchase、final confirm 一类动作。
 
 ## 2. `l2_first_usable_result`
 

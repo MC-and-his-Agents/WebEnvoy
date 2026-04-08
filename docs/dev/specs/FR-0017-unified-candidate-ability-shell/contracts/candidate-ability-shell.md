@@ -32,6 +32,8 @@ interface CandidateAbilityDescriptor {
 - `platform_family` 必须使用稳定、归一化的平台键；`generic_web` 用于站点无关场景，`other` 只能作为临时兜底，不得把新的一等平台永久冻结进 `other`。
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；不得用它替代验证结果。
+- `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 都必须指向稳定、机器可读的契约标识；它们的 ownership 属于 `candidate_ability_descriptor` 命名空间，而不是 runtime-store、validation view 或下游实现私有映射。
+- 同一个 `*_contract_ref` 在所有实现中都必须代表同一份兼容契约边界；若输入、输出或错误语义发生不兼容变化，必须生成新的 ref，不得静默复用旧值。
 - `capture_run_id` 是候选能力来源证据的最小硬锚点。
 - `seed_replay_input_ref` 如存在，必须指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；它是可选的上游 replay seed，而不是 `draft_candidate` 的强制前置。
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；`capture_artifact_refs` 不能充当该字段的替代值。

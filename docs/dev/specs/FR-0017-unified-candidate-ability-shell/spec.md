@@ -81,6 +81,8 @@
   - `ability.action` 继续复用 `read` / `write` / `download`
 - `ability.layer` 必须落在 `candidate_ability_descriptor.execution_layer_support` 之内；未声明支持的执行层不得被当作合法 invocation 层。
 - `candidate_ability_descriptor` 必须自包含 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`；本 FR 不再拆出独立 binding 对象或 `descriptor_ref` 平行引用。
+- `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须被定义为稳定、机器可读的契约标识；它们由 `candidate_ability_descriptor` 命名空间持有，下游 FR 只能按 ref 消费，不得自行猜测路径或重建私有映射。
+- 相同 `*_contract_ref` 只能代表兼容的同一份契约边界；若输入、输出或错误语义发生不兼容变化，必须生成新的 ref。
 - 本 FR 必须明确：候选能力描述可以补充元数据，但不得重写 `FR-0007` 的最小输入/输出/错误结构。
 - 本 FR 不得新增并行顶层结果壳；成功结果仍只允许通过 `FR-0007.summary.capability_result` 暴露。
 

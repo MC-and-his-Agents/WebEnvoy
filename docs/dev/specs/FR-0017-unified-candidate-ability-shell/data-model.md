@@ -33,6 +33,7 @@
 
 - `candidate_ability_descriptor` 必须自包含输入/输出/错误契约引用；不得再拆出独立 `ability_contract_binding` 或其他平行绑定对象。
 - `ability_id` 是候选能力描述与 `FR-0007` 最小能力壳之间的正式绑定键。
+- `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须是稳定、机器可读的契约标识；相同 ref 代表兼容的同一份契约边界，不兼容变化必须生成新的 ref。
 - `seed_replay_input_ref` 如存在，是首个 replay 输入快照的正式引用字段；它必须稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`，但缺失时不得阻塞 `draft_candidate` 落库。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 descriptor 成立的强制前置。
 
