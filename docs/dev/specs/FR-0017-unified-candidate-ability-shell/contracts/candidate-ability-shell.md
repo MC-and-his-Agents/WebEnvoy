@@ -12,7 +12,7 @@ interface CandidateAbilityDescriptor {
     platform_family: string
     site_pattern?: string
   }
-  execution_layer_support: Array<"L3" | "L2" | "L1">
+  execution_layer_support: ["L3" | "L2" | "L1", ...Array<"L3" | "L2" | "L1">]
   input_contract_ref: string
   output_contract_ref: string
   error_contract_ref: string
@@ -32,6 +32,8 @@ interface CandidateAbilityDescriptor {
 - `platform_family` 必须使用稳定、归一化的平台键；`generic_web` 用于站点无关场景，`other` 只能作为临时兜底，不得把新的一等平台永久冻结进 `other`。
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；共享正式枚举必须保留 `L1` / `L2` / `L3`，不得把未来 L1 候选层排除在 descriptor 模型之外，也不得用该字段替代验证结果。
+- `execution_layer_support` 必须是非空集合；descriptor 不得以空数组冒充“支持层待定”。
+- `capture_origin` 必须与 `execution_layer_support` 至少共享一个对应执行层：`l3_adapter_sample -> L3`、`l2_first_usable_sample -> L2`、`l1_fallback_sample -> L1`。
 - `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 都必须指向稳定、机器可读的契约标识；它们的 ownership 属于 `candidate_ability_descriptor` 命名空间，而不是 runtime-store、validation view 或下游实现私有映射。
 - `*_contract_ref` 的 canonical namespace 必须统一为 `cad::<ability_id>::<input|output|error>::v<major>`；其中 `cad` 固定表示 `candidate_ability_descriptor` contract namespace，`ability_id` 必须直接等于当前 descriptor 的 `ability_id`，`<input|output|error>` 只能表达该 ref 的契约种类，`v<major>` 只在发生不兼容变化时递增。
 - `*_contract_ref` 的 authoritative resolver 只能是该 `ability_id` 对应的 descriptor-owned contract registry；lookup 必须按完整 ref 精确匹配，并校验 `ability_id` 与契约种类同时一致。下游实现不得把 ref 自行解释成 repo 路径、runtime-store 主键或私有别名。
