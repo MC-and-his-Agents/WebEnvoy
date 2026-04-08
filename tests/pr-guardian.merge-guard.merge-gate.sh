@@ -21,24 +21,22 @@ setup_review_status_fixture() {
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
   printf '{"verdict":"%s","safe_to_merge":%s,"summary":"summary","findings":[],"required_actions":[]}\n' "${verdict}" "${safe_to_merge}" > "${RESULT_FILE}"
-  printf '%s\n' "## PR Review 结论" > "${REVIEW_MD_FILE}"
-  printf '%s\n' "" >> "${REVIEW_MD_FILE}"
-  printf '%s\n' "body for ${case_name}" >> "${REVIEW_MD_FILE}"
+  build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
 
-  if [[ "${include_metadata}" == "1" ]]; then
-    case "${metadata_mode}" in
-      valid)
-        append_guardian_metadata_comment "${RESULT_FILE}" "${REVIEW_MD_FILE}"
-        ;;
-      invalid)
-        printf '\n<!-- webenvoy-guardian-meta:v1 bm90LWpzb24= -->\n' >> "${REVIEW_MD_FILE}"
-        ;;
-      *)
-        echo "unknown metadata mode: ${metadata_mode}" >&2
-        exit 1
-        ;;
-    esac
-  fi
+  case "${include_metadata}:${metadata_mode}" in
+    1:valid)
+      ;;
+    1:invalid)
+      perl -0pi -e 's/\n<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+\/=]+ -->\n?/\n<!-- webenvoy-guardian-meta:v1 bm90LWpzb24= -->\n/s' "${REVIEW_MD_FILE}"
+      ;;
+    0:*)
+      perl -0pi -e 's/\n<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+\/=]+ -->\n?/\n/s' "${REVIEW_MD_FILE}"
+      ;;
+    *)
+      echo "unknown metadata mode: ${metadata_mode}" >&2
+      exit 1
+      ;;
+  esac
 
   local review_body_json
   review_body_json="$(jq -Rs . < "${REVIEW_MD_FILE}")"
@@ -223,7 +221,7 @@ test_review_status_rejects_tampered_review_body() {
   local status_file="${TMP_DIR}/review-status.json"
   local tampered_review_file="${TMP_DIR}/tampered-review.md"
   local tampered_review_body_json
-  sed 's/body for review-status-tampered-review-body/tampered review body/' "${REVIEW_MD_FILE}" > "${tampered_review_file}"
+  sed 's/\*\*摘要\*\*: summary/**摘要**: tampered review body/' "${REVIEW_MD_FILE}" > "${tampered_review_file}"
   tampered_review_body_json="$(jq -Rs . < "${tampered_review_file}")"
   printf '[[{"id":41,"user":{"login":"review-bot"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${HEAD_SHA}" "${tampered_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
 

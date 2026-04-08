@@ -293,6 +293,14 @@ hash_string_sha256() {
   die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
 }
 
+hash_normalized_review_body_sha256() {
+  local review_file="$1"
+  local normalized_body
+
+  normalized_body="$(perl -0pe 's/\s+\z//s' "${review_file}")"
+  hash_string_sha256 "${normalized_body}"
+}
+
 reviewer_has_guardian_reuse_permission() {
   local reviewer="$1"
   local permission_json
@@ -395,8 +403,8 @@ guardian_metadata_json() {
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
+    --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${review_file}")" \
     --argjson result "$(jq -c '.' "${result_file}")" \
-    --rawfile review_body "${review_file}" \
     '
       {
         head_sha: $head_sha,
@@ -407,7 +415,7 @@ guardian_metadata_json() {
         verdict: $result.verdict,
         safe_to_merge: $result.safe_to_merge,
         result: $result,
-        review_body: $review_body
+        review_body_sha256: $review_body_sha256
       }
     '
 }
@@ -2665,6 +2673,28 @@ load_pull_reviews() {
   gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
 }
 
+annotate_pull_reviews_for_reuse() {
+  local input_file="$1"
+  local output_file="$2"
+
+  perl -MJSON::PP -MDigest::SHA=sha256_hex -MEncode=encode -0e '
+    my $json = JSON::PP->new->utf8->canonical;
+    my $data = $json->decode(do { local $/; <> });
+
+    for my $page (@{$data}) {
+      for my $review (@{$page}) {
+        my $body = $review->{body} // q{};
+        $body =~ s/\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+\/=]+ -->\n?/\n/g;
+        $body =~ s/\s+\z//s;
+        $review->{cleaned_body} = $body;
+        $review->{cleaned_body_sha256} = sha256_hex(encode("UTF-8", $body));
+      }
+    }
+
+    print $json->encode($data);
+  ' < "${input_file}" > "${output_file}"
+}
+
 head_has_expected_review_state() {
   local pr_number="$1"
   local head_sha="$2"
@@ -2702,10 +2732,12 @@ write_review_status_json() {
   local pr_number="$1"
   local requesting_user="$2"
   local output_file="$3"
+  local raw_reviews_file="${TMP_DIR}/reviews-status.raw.json"
   local reviews_file="${TMP_DIR}/reviews-status.json"
   local trusted_reviewers_json
 
-  load_pull_reviews "${pr_number}" "${reviews_file}"
+  load_pull_reviews "${pr_number}" "${raw_reviews_file}"
+  annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}"
   trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${reviews_file}")"
 
   jq -c \
@@ -2736,13 +2768,9 @@ write_review_status_json() {
           | last
           | .value
         );
-      def body_without_meta($body):
-        ($body // "") | gsub("\\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+/=]+ -->\\n?"; "\n");
-      def normalized_review_body($body):
-        ($body // "") | gsub("[[:space:]]+$"; "");
       def normalize_review:
         (.body // "") as $body
-        | body_without_meta($body) as $cleaned_body
+        | (.cleaned_body // "") as $cleaned_body
         | (([$body | match("<!-- webenvoy-guardian-meta:v1 (?<meta>[A-Za-z0-9+/=]+) -->"; "g")?] | last | .captures[0].string?) // "") as $meta_b64
         | if ($meta_b64 | length) == 0 then
             . + {
@@ -2758,7 +2786,7 @@ write_review_status_json() {
                 or (($meta.result | type) != "object")
                 or (($meta.result.verdict // "") != ($meta.verdict // ""))
                 or (($meta.result.safe_to_merge // null) != ($meta.safe_to_merge // null))
-                or (normalized_review_body($meta.review_body // "") != normalized_review_body($cleaned_body)) then
+                or (($meta.review_body_sha256 // "") != (.cleaned_body_sha256 // "")) then
                 . + {
                   meta_status: "invalid_metadata",
                   meta: $meta,
