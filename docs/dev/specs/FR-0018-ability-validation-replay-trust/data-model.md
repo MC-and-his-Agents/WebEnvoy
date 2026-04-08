@@ -50,11 +50,13 @@
 
 - `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
 - `validation_mode=smoke_validation` 的 latest 只允许来自 `ability_validation_request`；`validation_mode=replay_validation` 的 latest 只允许来自 `ability_replay_request`。
+- 当前 formal baseline 下，`ability_validation_request` 与 `ability_replay_request` 都不得 cross-layer auto-fallback；若 `requested_execution_layer` 无法执行，请求必须在该 layer 视图内失败或失效，不得静默改走其他 execution layer。
 - `candidate_ability_descriptor.ability_kind=write` 时，`validation_mode=smoke_validation` 不得落成 current latest；实现层必须在请求阶段拒绝该组合，历史遗留的无门禁 write smoke 结果也不得再被消费为 `health_state=healthy` 的依据。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
 - `validated_execution_layer` 必须记录该条 latest 实际跑通的执行层；它来自 invocation layer，而不是 descriptor 的支持层集合。
 - `validated_execution_layer` 必须直接等于所在 `ability_validation_record.execution_layer`；它只承担证据含义，不再承担作用域键以外的额外语义。
+- 当前 formal baseline 下，`validated_execution_layer` 还必须直接等于触发本次 smoke/replay 的 `requested_execution_layer`；FR-0018 不允许把请求结果静默落账到其他 execution layer。
 - `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`；其中 `execution_layer_support` 在 layer-scoped 视图里仍作为证据快照保留，但不再要求与当前 support set 完整相等才算 current。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置。
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
@@ -80,6 +82,7 @@
 - 本对象只是 `ability_replay_request` 的存储投影，不是第二套正式 replay 请求契约。
 - 投影对象只说明“这次重放从哪里来的输入”，不承担自动修复语义，也不得额外引入 `ready` 一类未在 `spec.md` / `contracts/` 冻结的独立状态。
 - `profile_ref` 与 `requested_execution_layer` 一起构成 replay 绑定的正式作用域；当 `replay_source=last_success_input` 时，必须只在同一 `ability_ref + profile_ref + requested_execution_layer` 下解析最近成功输入。
+- 当前 formal baseline 下，`requested_execution_layer` 不允许跨 layer 自动降级、升级或 fallback；若该 layer 无法执行，重放请求必须在该 layer 视图内失败或失效。
 - `expected_capability_kind` 在当前 formal baseline 下只允许 `read|download`，并且必须直接等于目标 `candidate_ability_descriptor.ability_kind`；不一致时不得执行 replay，也不得写入 `replay_validation` latest。
 - 当 `replay_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在，且只能指向已保存的显式输入快照。
 - 当 `replay_source=last_success_input` 时，`replay_input_ref` 必须缺省，并改由同一 layer 视图内的 `last_success_input_ref` 解引用输入快照。
@@ -110,7 +113,8 @@
 - `payload_locator` 的 cleanup 只能发生在所属 `snapshot_ref` 被正式退休，且不再被任何当前 `replay_input_ref` / `last_success_input_ref` 引用之后；它不得依赖临时目录或 run artifact 的保留时长碰运气。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile + capture_origin` 对应执行层视图的初始 `last_success_input_ref`；其他 profile 或其他 execution layer 视图不得复用该 seed。
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref + execution_layer` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref + execution_layer` 下首次成功的 `smoke_validation.smoke_input` 必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
+- 成功 replay 只允许在同一 `ability_ref + profile_ref + execution_layer` 已存在合法 replay source 之后刷新后续 snapshot；它不得承担无 seed 场景下的首个 snapshot bootstrap。
 - 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，上述输入快照引用对象只能作为 capture evidence 保留；当前 formal baseline 下不得把它解析为可执行 replay 输入来源，也不得自动回写 `last_success_input_ref`。这条禁止同时覆盖 `replay_source=last_success_input` 与 `replay_source=explicit_input_snapshot`。
 - 当 `captured_input_contract_ref` 与当前 descriptor 的 `input_contract_ref` 不一致时，上述输入快照引用对象只能作为历史 evidence 保留；不得继续被复用为 `last_success_input_ref` 或显式 replay 输入，直到 fresh capture 生成绑定新 contract 的 snapshot。
 
