@@ -77,7 +77,7 @@
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的验证/重放输入必须物化为首个输入快照引用对象；在此之前 replay 绑定不得被标记为 ready。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；在此之前 replay 绑定不得被标记为 ready。
 
 ## 4. 与既有对象的关系
 

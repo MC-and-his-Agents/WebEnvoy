@@ -48,16 +48,18 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须冻结稳定的 `ability_validation_request` 对象，至少包含：
   - `ability_ref`
   - `validation_mode`
-  - `input_source`
-  - `replay_input_ref`
   - `profile_ref`
   - `expected_capability_kind`
+  - `smoke_input`
+  - `input_source`
+  - `replay_input_ref`
 - `validation_mode` 在本 FR 中至少支持：
   - `smoke_validation`
   - `replay_validation`
 - 必须明确：
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `replay_validation` 用于重放上一次成功边界或显式指定的最小输入
+  - `validation_mode=smoke_validation` 时，请求必须显式给出满足 `input_contract_ref` 的 `smoke_input`
   - 当 `validation_mode=replay_validation` 且 `input_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
@@ -90,7 +92,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
-  - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 或 `replay_validation` 必须把本次成功输入物化为首个 `ReplayInputSnapshotRef`，并建立 `last_success_input_ref`
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 `replay_validation` 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并建立 `last_success_input_ref`
 
 ### 4. 最小可信判断对象
 
@@ -172,6 +174,7 @@ Then 系统能构造 `ability_validation_request`
 And 验证结果会落回稳定的 `ability_health_view`
 And 该结果只会写入本次 `profile_ref` 对应的聚合健康视图
 And `ability_ref` 会直接复用该候选能力的 `ability_id`
+And 在缺少上游 `seed_replay_input_ref` 时，首次 `smoke_validation` 仍可通过显式 `smoke_input` 启动
 
 ### 场景 2：最近一次验证结果可被用户理解
 
