@@ -4,7 +4,7 @@
 
 ## 持久化与派生边界
 
-- **持久化实体**：`AntiDetectionValidationRequest`、`AntiDetectionBaselineSnapshot`、`AntiDetectionValidationRecord`。
+- **持久化实体**：`AntiDetectionValidationRequest`、`AntiDetectionBaselineSnapshot`、`AntiDetectionBaselineRegistryEntry`、`AntiDetectionValidationRecord`。
 - **派生视图**：`AntiDetectionValidationView` 仅由持久化实体投影得到，不作为事实来源写回或复用为 gate 依据。
 
 ## 1. `AntiDetectionValidationRequest`
@@ -31,13 +31,38 @@
 - `captured_at`
 - `source_run_ids`
 
-### 不可变与替换规则
+### 不可变规则
 
 - `baseline_ref` 是不可变的快照标识，不允许复写或复用。
-- 若生成新的基线，应创建新的 `baseline_ref`；旧快照通过外部基线索引标记为 `superseded`，但快照内容不得变更。
-- 引用已 `superseded` 的 `baseline_ref` 的验证记录应进入 `stale` 或 `insufficient_baseline` 语义范围（见下文）。
+- baseline snapshot 只承载采样事实，不负责声明自己是否仍为 active baseline。
 
-## 3. `AntiDetectionValidationRecord`
+## 3. `AntiDetectionBaselineRegistryEntry`
+
+- `target_fr_ref`
+- `validation_scope`
+- `profile_ref`
+- `browser_channel`
+- `execution_surface`
+- `active_baseline_ref`
+- `superseded_baseline_refs`
+- `replacement_reason`
+- `updated_at`
+
+### 作用域键与 ownership
+
+- registry entry 的唯一作用域键为 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface)`。
+- `active_baseline_ref` 是该作用域下唯一正式生效的 baseline。
+- `superseded_baseline_refs` 记录此前被该 entry 替换掉的 baseline；允许为空数组，但不得为 `null`。
+- `replacement_reason` 记录当前 active baseline 成为正式基线的原因。
+
+### baseline replacement 真相源
+
+- baseline replacement 的正式真相只存在于 `AntiDetectionBaselineRegistryEntry`；snapshot、record 或共享视图都不得单独宣布某条 baseline 已被替换。
+- 若生成新的基线，应创建新的 `baseline_ref`，并通过更新同作用域 registry entry 的 `active_baseline_ref` 来完成替换。
+- 只有当旧 `baseline_ref` 不再等于 registry entry 的 `active_baseline_ref`，并被纳入 `superseded_baseline_refs` 后，旧 baseline 才进入 `superseded` 语义。
+- 视图层的 `stale`、`insufficient_baseline` 判定必须消费 registry entry，而不能只依赖记录自身状态。
+
+## 4. `AntiDetectionValidationRecord`
 
 - `record_ref`
 - `target_fr_ref`
@@ -69,7 +94,7 @@
 - `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时必填。
 - `probe_bundle_ref` 必须在 baseline snapshot 与 validation record 中同时保留，以保证落库后仍可追溯探针身份。
 
-## 4. `AntiDetectionValidationView`
+## 5. `AntiDetectionValidationView`
 
 - `target_fr_ref`
 - `validation_scope`
@@ -84,11 +109,12 @@
 
 ### 派生规则
 
-- 当 `latest_record_ref` 指向的记录为 `stale` 或其 `baseline_ref` 已 `superseded`，视图应将 `current_result_state` 置为 `stale`，并将 `current_drift_state` 置为 `insufficient_baseline`。
+- 当 `latest_record_ref` 指向的记录所引用 `baseline_ref` 不再等于同作用域 registry entry 的 `active_baseline_ref` 时，视图应将 `current_result_state` 置为 `stale`，并将 `current_drift_state` 置为 `insufficient_baseline`。
 - 当目标 scope 不存在可用基线或样本覆盖不足时，视图应将 `baseline_status` 标记为 `insufficient`，并将 `current_drift_state` 置为 `insufficient_baseline`。
 
 ## 约束
 
 - baseline snapshot 与 validation record 不得共用同一对象。
+- baseline replacement 的 active/superseded 判定只能来自 `AntiDetectionBaselineRegistryEntry`。
 - `target_fr_ref` 只允许指向反风控能力 FR。
 - 本 FR 的对象只承载能力级验证，不承载 PR 级 merge gate。

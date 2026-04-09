@@ -1,60 +1,91 @@
 # FR-0020 契约：反风控验证与基线评估
 
+## Ownership 与兼容性
+
+- `FR-0020` 是以下共享对象的唯一 formal owner：`anti_detection_validation_request`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record`、`anti_detection_validation_view`。
+- 下游 `FR-0012`、`FR-0013`、`FR-0014` 与后续 Layer 4 FR 只能消费本契约，不得各自重定义同名字段、枚举或空值语义。
+- 本契约以当前 FR 套件为版本边界；在显式 runtime schema 落地前，字段集与枚举集均视为 closed contract，不允许带外扩写或静默改义。
+- 向后兼容的新增字段只允许是可选字段，并且必须在同一 spec review PR 中同步更新 `spec.md`、本契约与 `data-model.md`。
+- 任何既有字段的必填/可空规则变更、枚举成员变更或语义重定义，都按 breaking change 处理，必须重新进入 spec review。
+
 ## 对象
 
 ### `anti_detection_validation_request`
 
-- `validation_scope`
-- `target_fr_ref`
-- `profile_ref`
-- `browser_channel`
-- `execution_surface`
-- `sample_goal`
-- `probe_bundle_ref`
+| 字段 | 必填 | 可空 | 语义 |
+| --- | --- | --- | --- |
+| `validation_scope` | 是 | 否 | closed enum；当前只允许 `layer1_consistency`、`layer2_interaction`、`layer3_session_rhythm`、`cross_layer_baseline` |
+| `target_fr_ref` | 是 | 否 | 只允许指向 `FR-0012/0013/0014` 或后续 Layer 4 FR |
+| `profile_ref` | 是 | 否 | 验证目标所使用的身份/环境配置引用 |
+| `browser_channel` | 是 | 否 | 样本采集所用浏览器通道 |
+| `execution_surface` | 是 | 否 | 样本采集执行面；不等于 `FR-0016` merge gate verdict |
+| `sample_goal` | 是 | 否 | 本次验证希望采集的最小目标，不承载产品功能请求 |
+| `probe_bundle_ref` | 是 | 否 | 稳定、可复用的探针集合引用 |
 
 ### `anti_detection_baseline_snapshot`
 
-- `baseline_ref`
-- `validation_scope`
-- `probe_bundle_ref`
-- `profile_ref`
-- `browser_channel`
-- `execution_surface`
-- `signal_vector`
-- `captured_at`
-- `source_run_ids`
+| 字段 | 必填 | 可空 | 语义 |
+| --- | --- | --- | --- |
+| `baseline_ref` | 是 | 否 | 不可变快照标识；不得复写或复用 |
+| `validation_scope` | 是 | 否 | 与 request 同源的 closed enum |
+| `probe_bundle_ref` | 是 | 否 | 本快照的探针集合引用，必须落库 |
+| `profile_ref` | 是 | 否 | 与该快照绑定的 profile 维度 |
+| `browser_channel` | 是 | 否 | 与该快照绑定的浏览器通道 |
+| `execution_surface` | 是 | 否 | 与该快照绑定的执行面 |
+| `signal_vector` | 是 | 否 | 结构化信号集合；不得退化为自由文本 |
+| `captured_at` | 是 | 否 | 快照完成采集时间 |
+| `source_run_ids` | 是 | 否 | 支撑该快照的 run id 列表；空列表不合法 |
+
+### `anti_detection_baseline_registry_entry`
+
+| 字段 | 必填 | 可空 | 语义 |
+| --- | --- | --- | --- |
+| `target_fr_ref` | 是 | 否 | registry 作用域的 FR 维度 |
+| `validation_scope` | 是 | 否 | registry 作用域的验证范围 |
+| `profile_ref` | 是 | 否 | registry 作用域的 profile 维度 |
+| `browser_channel` | 是 | 否 | registry 作用域的浏览器通道 |
+| `execution_surface` | 是 | 否 | registry 作用域的执行面 |
+| `active_baseline_ref` | 是 | 否 | 当前唯一生效的 baseline；是 active/superseded 判定的正式真相源 |
+| `superseded_baseline_refs` | 是 | 否 | 已被该 entry 替换掉的 baseline 列表；可为空数组，但不得为 `null` |
+| `replacement_reason` | 是 | 否 | 当前 active baseline 成为生效基线的原因，如 `initial_seed`、`reseed_after_drift` |
+| `updated_at` | 是 | 否 | 最近一次切换 active baseline 的时间 |
 
 ### `anti_detection_validation_record`
 
-- `record_ref`
-- `target_fr_ref`
-- `validation_scope`
-- `probe_bundle_ref`
-- `sample_ref`
-- `baseline_ref`
-- `result_state`
-- `drift_state`
-- `failure_class`
-- `run_id`
-- `validated_at`
+| 字段 | 必填 | 可空 | 语义 |
+| --- | --- | --- | --- |
+| `record_ref` | 是 | 否 | 验证记录主标识 |
+| `target_fr_ref` | 是 | 否 | 该次验证服务的 FR |
+| `validation_scope` | 是 | 否 | 与 request 同源的 closed enum |
+| `probe_bundle_ref` | 是 | 否 | 实际用于本次验证的探针集合 |
+| `sample_ref` | 条件 | 是 | `result_state=captured` 时必填；其他状态允许保留但不得伪造 |
+| `baseline_ref` | 条件 | 是 | 存在可用 baseline 且已绑定时必填；仅在 `drift_state=insufficient_baseline` 且当前无可用 baseline 时允许为空 |
+| `result_state` | 是 | 否 | closed enum；见下方状态机语义 |
+| `drift_state` | 是 | 否 | closed enum；见下方状态机语义 |
+| `failure_class` | 条件 | 是 | 仅 `result_state=broken` 时必填；其他状态必须为空 |
+| `run_id` | 是 | 否 | 指向本次验证执行 run 的稳定引用 |
+| `validated_at` | 是 | 否 | 本次验证结果定稿时间 |
 
 ### `anti_detection_validation_view`
 
-- `target_fr_ref`
-- `validation_scope`
-- `profile_ref`
-- `browser_channel`
-- `execution_surface`
-- `latest_record_ref`
-- `baseline_status`
-- `current_result_state`
-- `current_drift_state`
-- `last_success_at`
+| 字段 | 必填 | 可空 | 语义 |
+| --- | --- | --- | --- |
+| `target_fr_ref` | 是 | 否 | 视图作用域的 FR 维度 |
+| `validation_scope` | 是 | 否 | 视图作用域的验证范围 |
+| `profile_ref` | 是 | 否 | 视图作用域的 profile 维度 |
+| `browser_channel` | 是 | 否 | 视图作用域的浏览器通道 |
+| `execution_surface` | 是 | 否 | 视图作用域的执行面 |
+| `latest_record_ref` | 是 | 否 | 当前作用域最新一条 validation record |
+| `baseline_status` | 是 | 否 | 基于 registry entry 与 latest record 派生出的基线可用状态 |
+| `current_result_state` | 是 | 否 | latest record 在当前 registry 语义下的有效结果态 |
+| `current_drift_state` | 是 | 否 | latest record 在当前 registry 语义下的有效漂移态 |
+| `last_success_at` | 否 | 是 | 最近一次 `result_state=verified` 的时间；不存在成功记录时允许为空 |
 
 ## 契约约束
 
 - `validation_scope=cross_layer_baseline` 是唯一 Layer 4 编码入口，仅用于跨 Layer 1-3 信号聚合后的基线评估，不承载 Layer 4 模型本体输出。
 - baseline snapshot 不得仅以自由文本或 issue comment 充当正式载体。
+- baseline replacement 的唯一正式真相源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；snapshot 与 record 都不得自带可写的 active/superseded 状态。
 - validation record 不得替代 `FR-0016` 的 PR 级 gate 对象。
 - Layer 4 只能消费本契约对象，不得借此引入长期运营系统对象。
 
@@ -89,3 +120,57 @@
 
 - 仅在 `result_state=broken` 时允许出现且必须填写。
 - 在 `result_state=captured/verified/stale` 时必须为空。
+
+## 最小兼容 payload 示例
+
+```json
+{
+  "anti_detection_validation_request": {
+    "validation_scope": "layer2_interaction",
+    "target_fr_ref": "FR-0013",
+    "profile_ref": "profile/default",
+    "browser_channel": "chrome-stable",
+    "execution_surface": "real_browser",
+    "sample_goal": "capture interaction safety baseline",
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1"
+  },
+  "anti_detection_baseline_snapshot": {
+    "baseline_ref": "baseline/layer2/2026-04-10T10:00:00Z",
+    "validation_scope": "layer2_interaction",
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1",
+    "profile_ref": "profile/default",
+    "browser_channel": "chrome-stable",
+    "execution_surface": "real_browser",
+    "signal_vector": {
+      "dom_settle_ms_p95": 420,
+      "locate_success_ratio": 0.99
+    },
+    "captured_at": "2026-04-10T10:00:00Z",
+    "source_run_ids": ["run-20260410-100000-001"]
+  },
+  "anti_detection_baseline_registry_entry": {
+    "target_fr_ref": "FR-0013",
+    "validation_scope": "layer2_interaction",
+    "profile_ref": "profile/default",
+    "browser_channel": "chrome-stable",
+    "execution_surface": "real_browser",
+    "active_baseline_ref": "baseline/layer2/2026-04-10T10:00:00Z",
+    "superseded_baseline_refs": [],
+    "replacement_reason": "initial_seed",
+    "updated_at": "2026-04-10T10:05:00Z"
+  },
+  "anti_detection_validation_record": {
+    "record_ref": "validation/layer2/2026-04-10T10:06:00Z",
+    "target_fr_ref": "FR-0013",
+    "validation_scope": "layer2_interaction",
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1",
+    "sample_ref": "sample/layer2/2026-04-10T10:06:00Z",
+    "baseline_ref": "baseline/layer2/2026-04-10T10:00:00Z",
+    "result_state": "verified",
+    "drift_state": "no_drift",
+    "failure_class": null,
+    "run_id": "run-20260410-100600-001",
+    "validated_at": "2026-04-10T10:06:30Z"
+  }
+}
+```

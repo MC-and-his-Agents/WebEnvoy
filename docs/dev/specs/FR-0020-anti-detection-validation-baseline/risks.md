@@ -17,3 +17,9 @@
 - 表现：行为模型被直接扩张到养号、运营、评分或配额系统
 - 缓解：明确 Layer 4 只承接平台行为模型与长期基线，不进入上层运营系统
 - 回滚：将越界内容拆回后续独立事项
+
+## 风险 4：baseline replacement 出现第二真相源
+
+- 表现：snapshot、record、issue comment 或自由文本与 registry entry 对 active baseline 的判定不一致
+- 缓解：明确只有 `AntiDetectionBaselineRegistryEntry` 可以声明 active/superseded baseline；其余对象只能引用和投影
+- 回滚：撤销带外声明，仅保留 registry entry 的正式判定，再重算视图
