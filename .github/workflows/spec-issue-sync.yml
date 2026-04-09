@@ -30,11 +30,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          full_sync=false
-
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            full_sync=true
-            changed_files=""
+            spec_files="$(git ls-files 'docs/dev/specs/**/spec.md' | sort -u)"
           else
             before_sha="${{ github.event.before }}"
             after_sha="${{ github.sha }}"
@@ -44,30 +41,7 @@ jobs:
             else
               changed_files="$(git diff --name-only "$before_sha" "$after_sha" || true)"
             fi
-          fi
 
-          map_changed=false
-          sync_logic_changed=false
-
-          while IFS= read -r changed_file; do
-            [ -n "$changed_file" ] || continue
-            case "$changed_file" in
-              .github/spec-issue-sync-map.yml)
-                map_changed=true
-                ;;
-              scripts/spec-issue-sync.sh|scripts/spec-issue-sync-map.sh|.github/workflows/spec-issue-sync.yml)
-                sync_logic_changed=true
-                ;;
-            esac
-          done <<< "$changed_files"
-
-          if [ "$map_changed" = true ] || [ "$sync_logic_changed" = true ]; then
-            full_sync=true
-          fi
-
-          if [ "$full_sync" = true ]; then
-            spec_files="$(git ls-files 'docs/dev/specs/**/spec.md' | sort -u)"
-          else
             spec_files="$(grep '^docs/dev/specs/.*/spec\.md$' <<< "$changed_files" | sort -u || true)"
           fi
 

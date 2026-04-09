@@ -136,7 +136,7 @@ resolve_issue_number() {
 
 validate_issue_targets() {
   local repo="$1"
-  local spec_path issue_number spec_abs output status
+  local spec_path issue_number spec_abs output status seed_output seed_status
 
   require_cmd gh
   validate_map
@@ -157,8 +157,14 @@ validate_issue_targets() {
 
     status=$?
     if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
-      warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；canonical issue 尚未带 FR 锚点，待首次受控同步落地"
-      continue
+      if seed_output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" can-seed-missing-anchor "${spec_path}" "${issue_number}" 2>&1)"; then
+        warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
+        continue
+      fi
+
+      seed_status=$?
+      printf '%s\n' "${seed_output}" >&2
+      return "${seed_status}"
     fi
 
     printf '%s\n' "${output}" >&2

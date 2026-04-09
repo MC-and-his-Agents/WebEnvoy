@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANCHOR_CONFLICT_EXIT=42
 ANCHOR_MISSING_EXIT=43
+SUITE_ANCHOR_MISMATCH_EXIT=44
 ANCHOR_STATUS_MESSAGE=""
 
 die() {
@@ -75,6 +76,35 @@ normalize_spec_path() {
   fi
 
   return 1
+}
+
+suite_dir_for_spec() {
+  local spec_path="$1"
+  printf '%s/%s\n' "${REPO_ROOT}" "${spec_path%/spec.md}"
+}
+
+suite_mentions_issue() {
+  local spec_path="$1"
+  local issue_number="$2"
+  local suite_dir
+
+  suite_dir="$(suite_dir_for_spec "${spec_path}")"
+  [[ -d "${suite_dir}" ]] || return 1
+
+  find "${suite_dir}" -type f -name '*.md' -exec grep -F -q -- "#${issue_number}" {} +
+}
+
+assert_missing_anchor_seed_safe() {
+  local spec_path="$1"
+  local issue_number="$2"
+
+  if suite_mentions_issue "${spec_path}" "${issue_number}"; then
+    return 0
+  fi
+
+  printf 'Issue #%s 缺少 FR 锚定信息，且 formal suite 未显式引用 #%s，拒绝首次受控补锚到 %s\n' \
+    "${issue_number}" "${issue_number}" "${spec_path}" >&2
+  return "${SUITE_ANCHOR_MISMATCH_EXIT}"
 }
 
 extract_spec_path_from_title() {
@@ -197,6 +227,8 @@ assert_issue_anchor() {
 
 assert_syncable_issue_anchor() {
   local status=0
+  local issue_number="$1"
+  local spec_path="$4"
 
   if issue_anchor_status "$@"; then
     return 0
@@ -205,6 +237,7 @@ assert_syncable_issue_anchor() {
   fi
 
   if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
+    assert_missing_anchor_seed_safe "${spec_path}" "${issue_number}" || exit "$?"
     return 0
   fi
 
@@ -271,6 +304,7 @@ usage() {
 用法:
   bash scripts/spec-issue-sync.sh sync <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh can-seed-missing-anchor <spec_path> <issue_number>
 EOF
 }
 
@@ -290,6 +324,11 @@ main() {
       shift
       [[ "$#" -eq 3 ]] || die "check-anchor 需要 <repo> <spec_path> <issue_number>"
       check_issue_anchor "$1" "$2" "$3"
+      ;;
+    can-seed-missing-anchor)
+      shift
+      [[ "$#" -eq 2 ]] || die "can-seed-missing-anchor 需要 <spec_path> <issue_number>"
+      assert_missing_anchor_seed_safe "$1" "$2"
       ;;
     *)
       usage
