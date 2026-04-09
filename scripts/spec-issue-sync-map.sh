@@ -68,8 +68,8 @@ validate_map() {
   seen_issues="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-issues.XXXXXX")"
   current_specs="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-current-specs.XXXXXX")"
   missing_specs="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-missing-specs.XXXXXX")"
-  stale_map_entries="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-stale-map-entries.XXXXXX")"
-  trap 'rm -f "${seen_specs:-}" "${seen_issues:-}" "${current_specs:-}" "${missing_specs:-}" "${stale_map_entries:-}"' RETURN
+  future_map_entries="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-future-map-entries.XXXXXX")"
+  trap 'rm -f "${seen_specs:-}" "${seen_issues:-}" "${current_specs:-}" "${missing_specs:-}" "${future_map_entries:-}"' RETURN
 
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ "${spec_path}" =~ ${SPEC_PATH_REGEX} ]] || die "映射路径不符合正式 spec 规则: ${spec_path}"
@@ -82,7 +82,10 @@ validate_map() {
     fi
 
     spec_abs="${REPO_ROOT}/${spec_path}"
-    [[ -f "${spec_abs}" ]] || die "映射项指向的 spec.md 不存在: ${spec_path}"
+    if [[ ! -f "${spec_abs}" ]]; then
+      printf '%s\n' "${spec_path}" >> "${future_map_entries}"
+      continue
+    fi
 
     printf '%s\n' "${spec_path}" >> "${seen_specs}"
     printf '%s\n' "${issue_number}" >> "${seen_issues}"
@@ -107,17 +110,9 @@ validate_map() {
     die "同步映射未覆盖全部现有 spec"
   fi
 
-  while IFS= read -r spec_path; do
-    [[ -n "${spec_path}" ]] || continue
-    if ! grep -Fxq "${spec_path}" "${current_specs}"; then
-      printf '%s\n' "${spec_path}" >> "${stale_map_entries}"
-    fi
-  done < "${seen_specs}"
-
-  if [[ -s "${stale_map_entries}" ]]; then
-    echo "以下映射项已无对应 spec.md（fail-closed）:" >&2
-    cat "${stale_map_entries}" >&2
-    die "同步映射包含失效 spec_path"
+  if [[ -s "${future_map_entries}" ]]; then
+    warn "以下映射项当前未在仓库中落地 spec.md；如为待合入 formal FR 的预挂接可忽略："
+    cat "${future_map_entries}" >&2
   fi
 }
 
