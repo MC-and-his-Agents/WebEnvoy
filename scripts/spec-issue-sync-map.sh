@@ -142,6 +142,10 @@ resolve_issue_number() {
   return 4
 }
 
+resolve_without_revalidation_allowed() {
+  [[ "${SPEC_SYNC_MAP_SKIP_VALIDATE:-0}" == "1" ]]
+}
+
 diff_specs() {
   local old_map_file="$1"
   local new_map_file="$2"
@@ -187,43 +191,68 @@ spec_skips_target_validation() {
   grep -Fxq "${spec_path}" "${skiplist_file}"
 }
 
+validate_single_issue_target() {
+  local repo="$1"
+  local spec_path="$2"
+  local issue_number="$3"
+  local allow_bootstrap_file="${4:-}"
+  local skip_validation_file="${5:-}"
+  local spec_abs output status
+
+  spec_abs="${REPO_ROOT}/${spec_path}"
+  if [[ ! -f "${spec_abs}" ]]; then
+    warn "跳过未来映射项 ${spec_path} -> #${issue_number} 的锚点预校验；对应 spec.md 尚未落地"
+    return 0
+  fi
+
+  if spec_skips_target_validation "${skip_validation_file}" "${spec_path}"; then
+    return 0
+  fi
+
+  if output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1)"; then
+    return 0
+  else
+    status=$?
+  fi
+
+  if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]] && spec_allows_anchor_bootstrap "${allow_bootstrap_file}" "${spec_path}"; then
+    warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
+    return 0
+  fi
+
+  printf '%s\n' "${output}" >&2
+  return "${status}"
+}
+
 validate_issue_targets() {
   local repo="$1"
   local allow_bootstrap_file="${2:-}"
   local skip_validation_file="${3:-}"
-  local spec_path issue_number spec_abs output status
+  local target_validation_file="${4:-}"
+  local spec_path issue_number
 
   require_cmd gh
   validate_map
 
+  if [[ -n "${target_validation_file}" ]]; then
+    [[ -f "${target_validation_file}" ]] || die "target_validation_file 不存在: ${target_validation_file}"
+
+    while IFS= read -r spec_path; do
+      [[ -n "${spec_path}" ]] || continue
+
+      if ! issue_number="$(resolve_issue_number "${spec_path}")"; then
+        die "缺少 spec_path -> canonical_issue_number 映射: ${spec_path}"
+      fi
+
+      validate_single_issue_target "${repo}" "${spec_path}" "${issue_number}" "${allow_bootstrap_file}" "${skip_validation_file}" || return $?
+    done < <(sort -u "${target_validation_file}")
+
+    return 0
+  fi
+
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ -n "${spec_path}" ]] || continue
-
-    spec_abs="${REPO_ROOT}/${spec_path}"
-    if [[ ! -f "${spec_abs}" ]]; then
-      warn "跳过未来映射项 ${spec_path} -> #${issue_number} 的锚点预校验；对应 spec.md 尚未落地"
-      continue
-    fi
-
-    if spec_skips_target_validation "${skip_validation_file}" "${spec_path}"; then
-      continue
-    fi
-
-    gh issue view "${issue_number}" --repo "${repo}" --json number >/dev/null
-
-    if output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1)"; then
-      continue
-    else
-      status=$?
-    fi
-
-    if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]] && spec_allows_anchor_bootstrap "${allow_bootstrap_file}" "${spec_path}"; then
-      warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
-      continue
-    fi
-
-    printf '%s\n' "${output}" >&2
-    return "${status}"
+    validate_single_issue_target "${repo}" "${spec_path}" "${issue_number}" "${allow_bootstrap_file}" "${skip_validation_file}" || return $?
   done < <(parse_map_entries)
 }
 
@@ -245,7 +274,7 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync-map.sh validate
-  bash scripts/spec-issue-sync-map.sh validate-issues <repo> [allow_bootstrap_list_file] [skip_validation_list_file]
+  bash scripts/spec-issue-sync-map.sh validate-issues <repo> [allow_bootstrap_list_file] [skip_validation_list_file] [target_validation_file]
   bash scripts/spec-issue-sync-map.sh diff-specs <old_map_file> <new_map_file>
   bash scripts/spec-issue-sync-map.sh resolve <spec_path>
   bash scripts/spec-issue-sync-map.sh assert-mapped <spec_path> [spec_path...]
@@ -269,7 +298,7 @@ main() {
       ;;
     validate-issues)
       shift
-      [[ "$#" -ge 1 && "$#" -le 3 ]] || die "validate-issues 需要 <repo> [allow_bootstrap_list_file] [skip_validation_list_file]"
+      [[ "$#" -ge 1 && "$#" -le 4 ]] || die "validate-issues 需要 <repo> [allow_bootstrap_list_file] [skip_validation_list_file] [target_validation_file]"
       validate_issue_targets "$@"
       ;;
     diff-specs)
@@ -280,7 +309,9 @@ main() {
     resolve)
       shift
       [[ "$#" -eq 1 ]] || die "resolve 需要 1 个 spec_path 参数"
-      validate_map
+      if ! resolve_without_revalidation_allowed; then
+        validate_map
+      fi
       resolve_issue_number "$1" || die "缺少 spec_path -> canonical_issue_number 映射: $1"
       ;;
     assert-mapped)

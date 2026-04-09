@@ -14,8 +14,59 @@ die() {
   exit 1
 }
 
+warn() {
+  echo "[spec-issue-sync] 提示: $*" >&2
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
+}
+
+fetch_issue_snapshot() {
+  local repo="$1"
+  local issue_number="$2"
+  local output_file="$3"
+  local endpoint status attempt
+  local stderr_file
+
+  endpoint="repos/${repo}/issues/${issue_number}"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-fetch.XXXXXX")"
+
+  for attempt in 1 2 3; do
+    if gh api "${endpoint}" > "${output_file}" 2> "${stderr_file}"; then
+      rm -f "${stderr_file}"
+      return 0
+    fi
+
+    status=$?
+    if [[ "${attempt}" -lt 3 ]] && grep -Eq 'HTTP 5[0-9][0-9]|timed out|EOF|connection reset|TLS handshake timeout' "${stderr_file}"; then
+      warn "读取 issue #${issue_number} 时遇到瞬时错误，准备重试 (${attempt}/3)"
+      sleep $((attempt * 2))
+      continue
+    fi
+
+    cat "${stderr_file}" >&2
+    rm -f "${stderr_file}"
+    return "${status}"
+  done
+
+  cat "${stderr_file}" >&2
+  rm -f "${stderr_file}"
+  return 1
+}
+
+extract_issue_snapshot_field() {
+  local snapshot_file="$1"
+  local field="$2"
+
+  perl -MJSON::PP -0ne '
+    BEGIN {
+      $field = shift @ARGV;
+    }
+    my $decoded = decode_json($_);
+    my $value = $decoded->{$field};
+    print $value if defined $value;
+  ' -- "${field}" "${snapshot_file}"
 }
 
 extract_title() {
@@ -252,13 +303,15 @@ check_issue_anchor() {
   local repo="$1"
   local spec_path="$2"
   local issue_number="$3"
-  local tmp_body issue_title
+  local tmp_body tmp_snapshot issue_title
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
-  trap 'rm -f "${tmp_body:-}"' RETURN
+  tmp_snapshot="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-snapshot.XXXXXX")"
+  trap 'rm -f "${tmp_body:-}" "${tmp_snapshot:-}"' RETURN
 
-  gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
-  issue_title="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+  fetch_issue_snapshot "${repo}" "${issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  issue_title="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
   assert_issue_anchor "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"
 }
 
@@ -267,13 +320,15 @@ can_sync_map_remap() {
   local spec_path="$2"
   local old_issue_number="$3"
   local issue_number="$4"
-  local tmp_body issue_title status=0
+  local tmp_body tmp_snapshot issue_title status=0
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
-  trap 'rm -f "${tmp_body:-}"' RETURN
+  tmp_snapshot="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-snapshot.XXXXXX")"
+  trap 'rm -f "${tmp_body:-}" "${tmp_snapshot:-}"' RETURN
 
-  gh issue view "${old_issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
-  issue_title="$(gh issue view "${old_issue_number}" --repo "${repo}" --json title --jq .title)"
+  fetch_issue_snapshot "${repo}" "${old_issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  issue_title="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
 
   if issue_anchor_status "${old_issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
     :
@@ -286,8 +341,9 @@ can_sync_map_remap() {
     return "${status}"
   fi
 
-  gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
-  issue_title="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+  fetch_issue_snapshot "${repo}" "${issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  issue_title="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
 
   if issue_anchor_status "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
     return 0
@@ -296,7 +352,11 @@ can_sync_map_remap() {
   fi
 
   if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
-    printf 'Issue #%s 缺少 FR 锚定信息；map-only remap 不允许首次补锚到 %s\n' \
+    if suite_mentions_issue "${spec_path}" "${issue_number}"; then
+      return 0
+    fi
+
+    printf 'Issue #%s 缺少 FR 锚定信息；remap 仅允许在 formal suite 显式声明 Canonical Issue 时首次补锚到 %s\n' \
       "${issue_number}" "${spec_path}" >&2
     return "${SAFE_REMAP_REQUIRED_EXIT}"
   fi
@@ -310,15 +370,36 @@ sync_map_remap() {
   local spec_path="$2"
   local old_issue_number="$3"
   local new_issue_number="$4"
-  local tmp_body cleaned_body final_body old_issue_title status=0
+  local tmp_body tmp_snapshot cleaned_body final_body old_issue_title new_issue_title status=0
+  local allow_missing_anchor_bootstrap=false
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
+  tmp_snapshot="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-snapshot.XXXXXX")"
   cleaned_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-clean.XXXXXX")"
   final_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-final.XXXXXX")"
-  trap 'rm -f "${tmp_body:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
+  trap 'rm -f "${tmp_body:-}" "${tmp_snapshot:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
 
-  gh issue view "${old_issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
-  old_issue_title="$(gh issue view "${old_issue_number}" --repo "${repo}" --json title --jq .title)"
+  fetch_issue_snapshot "${repo}" "${new_issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  new_issue_title="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
+
+  if issue_anchor_status "${new_issue_number}" "${new_issue_title}" "${tmp_body}" "${spec_path}"; then
+    :
+  else
+    status=$?
+  fi
+
+  if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]] && suite_mentions_issue "${spec_path}" "${new_issue_number}"; then
+    allow_missing_anchor_bootstrap=true
+  elif [[ "${status}" -ne 0 ]]; then
+    [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
+    return "${status}"
+  fi
+
+  status=0
+  fetch_issue_snapshot "${repo}" "${old_issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  old_issue_title="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
 
   if issue_anchor_status "${old_issue_number}" "${old_issue_title}" "${tmp_body}" "${spec_path}"; then
     strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
@@ -344,7 +425,7 @@ sync_map_remap() {
     fi
   fi
 
-  sync_issue "${repo}" "${spec_path}" "${new_issue_number}"
+  sync_issue "${repo}" "${spec_path}" "${new_issue_number}" "${allow_missing_anchor_bootstrap}"
 }
 
 sync_issue() {
@@ -352,7 +433,7 @@ sync_issue() {
   local spec_path="$2"
   local issue_number="$3"
   local allow_missing_anchor_bootstrap="${4:-false}"
-  local title issue_title tmp_body cleaned_body final_body meta_block issue_title_raw
+  local title issue_title tmp_body tmp_snapshot cleaned_body final_body meta_block issue_title_raw
 
   title="$(extract_title "${spec_path}")"
   [[ -n "${title}" ]] || die "无法从 ${spec_path} 提取标题"
@@ -361,12 +442,14 @@ sync_issue() {
   issue_title="${issue_title%%/spec.md}] ${title}"
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
+  tmp_snapshot="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-snapshot.XXXXXX")"
   cleaned_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-clean.XXXXXX")"
   final_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-final.XXXXXX")"
-  trap 'rm -f "${tmp_body:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
+  trap 'rm -f "${tmp_body:-}" "${tmp_snapshot:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
 
-  gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
-  issue_title_raw="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+  fetch_issue_snapshot "${repo}" "${issue_number}" "${tmp_snapshot}"
+  extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
+  issue_title_raw="$(extract_issue_snapshot_field "${tmp_snapshot}" title)"
   assert_syncable_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}" "${allow_missing_anchor_bootstrap}"
   strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
   meta_block="$(normalized_meta_block "${tmp_body}" "${spec_path}")"
@@ -402,6 +485,7 @@ EOF
 
 main() {
   require_cmd gh
+  require_cmd grep
   require_cmd mktemp
   require_cmd perl
   require_cmd sed

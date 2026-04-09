@@ -76,7 +76,7 @@ jobs:
 
           while IFS= read -r file; do
             [ -n "$file" ] || continue
-            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            issue_number="$(SPEC_SYNC_MAP_SKIP_VALIDATE=1 bash scripts/spec-issue-sync-map.sh resolve "$file")"
             if bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
               printf '%s\n' "$file" >> "$allow_bootstrap_file"
             fi
@@ -84,7 +84,7 @@ jobs:
 
           while IFS= read -r file; do
             [ -n "$file" ] || continue
-            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            issue_number="$(SPEC_SYNC_MAP_SKIP_VALIDATE=1 bash scripts/spec-issue-sync-map.sh resolve "$file")"
             if bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
               printf '%s\n' "$file" >> "$allow_bootstrap_file"
             fi
@@ -120,18 +120,23 @@ jobs:
           initial_mapped_spec_file="$(mktemp)"
           remapped_spec_file="$(mktemp)"
           skip_validation_file="$(mktemp)"
+          target_validation_file="$(mktemp)"
 
           printf '%s\n' "${{ steps.changed-specs.outputs.allow_bootstrap }}" | sed '/^$/d' | sort -u > "$allow_bootstrap_file"
           printf '%s\n' "${{ steps.changed-specs.outputs.files }}" | sed '/^$/d' | sort -u > "$changed_spec_file"
           printf '%s\n' "${{ steps.changed-specs.outputs.initial_mapped }}" | sed '/^$/d' | sort -u > "$initial_mapped_spec_file"
           printf '%s\n' "${{ steps.changed-specs.outputs.remapped }}" | sed '/^$/d' | sort -u > "$remapped_spec_file"
           cut -f1 "$remapped_spec_file" | sed '/^$/d' | sort -u > "$skip_validation_file"
+          cat "$changed_spec_file" "$initial_mapped_spec_file" | sed '/^$/d' | sort -u > "$target_validation_file"
 
-          bash scripts/spec-issue-sync-map.sh validate-issues "${{ github.repository }}" "$allow_bootstrap_file" "$skip_validation_file"
+          bash scripts/spec-issue-sync-map.sh validate-issues "${{ github.repository }}" "$allow_bootstrap_file" "$skip_validation_file" "$target_validation_file"
 
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi
-            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            if grep -Fxq "$file" "$skip_validation_file"; then
+              continue
+            fi
+            issue_number="$(SPEC_SYNC_MAP_SKIP_VALIDATE=1 bash scripts/spec-issue-sync-map.sh resolve "$file")"
 
             if bash scripts/spec-issue-sync.sh check-anchor "${{ github.repository }}" "$file" "${issue_number}" >/dev/null 2>&1; then
               echo "同步 ${file} -> canonical issue #${issue_number}"
@@ -165,7 +170,7 @@ jobs:
               continue
             fi
 
-            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            issue_number="$(SPEC_SYNC_MAP_SKIP_VALIDATE=1 bash scripts/spec-issue-sync-map.sh resolve "$file")"
             if bash scripts/spec-issue-sync.sh check-anchor "${{ github.repository }}" "$file" "${issue_number}" >/dev/null 2>&1; then
               echo "同步首次映射 ${file} -> canonical issue #${issue_number}"
               bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${issue_number}"
@@ -205,4 +210,4 @@ jobs:
             exit "$status"
           done < "$remapped_spec_file"
 
-          rm -f "$allow_bootstrap_file" "$changed_spec_file" "$initial_mapped_spec_file" "$remapped_spec_file" "$skip_validation_file"
+          rm -f "$allow_bootstrap_file" "$changed_spec_file" "$initial_mapped_spec_file" "$remapped_spec_file" "$skip_validation_file" "$target_validation_file"
