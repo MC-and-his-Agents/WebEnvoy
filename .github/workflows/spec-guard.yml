@@ -16,7 +16,11 @@ on:
       - 'code_review.md'
       - 'spec_review.md'
       - 'scripts/spec-guard.sh'
+      - 'scripts/spec-issue-sync-map.sh'
+      - 'scripts/spec-issue-sync.sh'
       - '.github/workflows/spec-guard.yml'
+      - '.github/workflows/spec-issue-sync.yml'
+      - '.github/spec-issue-sync-map.yml'
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - '.githooks/**'
 

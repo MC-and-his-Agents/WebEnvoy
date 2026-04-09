@@ -46,41 +46,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          bash scripts/spec-issue-sync-map.sh validate
+
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi
-            
-            DIR_NAME=$(dirname "$file" | xargs basename)
-            TITLE=$(head -n 1 "$file" | sed 's/^# //')
-            ISSUE_TITLE="[$DIR_NAME] $TITLE"
-            
-            EXISTING_ISSUE="$(
-              gh issue list \
-                --repo "${{ github.repository }}" \
-                --state all \
-                --search "\"[$DIR_NAME]\" in:title" \
-                --limit 100 \
-                --json number,title \
-                --jq '.[] | select(.title | startswith("['"$DIR_NAME"'] ")) | .number' \
-                | head -n 1
-            )"
-
-            ISSUE_BODY="$(printf '%s\n\n- 规范路径：`%s`\n- 目录标识：`%s`\n\n%s' \
-              '此 Issue 由 CI 自动同步维护。' \
-              "$file" \
-              "$DIR_NAME" \
-              '如需修订正式契约，请修改对应 `spec.md` 并通过独立 PR 合入。')"
-            
-            if [ -z "$EXISTING_ISSUE" ]; then
-              echo "创建新的 Issue: $TITLE ($DIR_NAME)"
-              gh issue create \
-                --repo "${{ github.repository }}" \
-                --title "[$DIR_NAME] $TITLE" \
-                --body "$ISSUE_BODY"
-            else
-              echo "Issue #$EXISTING_ISSUE 已存在，更新正文。"
-              gh issue edit "$EXISTING_ISSUE" \
-                --repo "${{ github.repository }}" \
-                --title "$ISSUE_TITLE" \
-                --body "$ISSUE_BODY"
-            fi
+            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            echo "同步 ${file} -> canonical issue #${issue_number}"
+            bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${issue_number}"
           done <<< "${{ steps.changed-specs.outputs.files }}"

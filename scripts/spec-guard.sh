@@ -19,7 +19,7 @@ warn() {
 }
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
-GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
+GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then
@@ -172,6 +172,13 @@ validate_governance_changes() {
         grep -q "docs/dev/architecture/" "${abs_path}" || die "${file} 未覆盖 docs/dev/architecture/** 触发路径"
         grep -q "spec_review.md" "${abs_path}" || die "${file} 未覆盖 spec_review.md 触发路径"
         ;;
+      .github/workflows/spec-issue-sync.yml)
+        grep -q 'bash scripts/spec-issue-sync-map.sh validate' "${abs_path}" || die "${file} 未校验同步映射"
+        grep -q 'bash scripts/spec-issue-sync.sh sync' "${abs_path}" || die "${file} 未调用 canonical FR 同步脚本"
+        ;;
+      .github/spec-issue-sync-map.yml)
+        bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate >/dev/null
+        ;;
     esac
   done <<< "${changed}"
 }
@@ -218,6 +225,11 @@ main() {
       [[ -n "${dir}" ]] || continue
       validate_fr_suite "${REPO_ROOT}/${dir}"
     done <<< "${fr_dirs}"
+
+    while IFS= read -r spec_file; do
+      [[ -n "${spec_file}" ]] || continue
+      bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
+    done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 
     disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"
     if [[ -n "${disallowed}" ]]; then
