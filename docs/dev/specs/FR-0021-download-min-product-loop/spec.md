@@ -104,6 +104,11 @@ Canonical Issue: #153
   - `output_contract_ref`
   - `error_contract_ref`
   - `execution_layer_support`
+- `candidate_shell_seed.contract_registry_seed` 必须显式继承 `FR-0017` 的 `candidate_ability_contract_registry` 有效性规则：
+  - `contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`
+  - `entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
+  - 同一 `contract_ref` 不得出现冲突 entry，且 `contract_kind` 必须与 ref kind 一致
+  - 对 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 的 lookup 必须都能得到唯一有效结果；否则不得上报成功 handoff
 
 ### 5. 最小落盘与冲突策略
 
@@ -159,6 +164,7 @@ And 不需要为下载能力另建第二套验证协议
 3. `replace_existing` 被默认放行但没有风险对齐说明：视为高风险边界未冻结。
 4. 下载结果另起顶层返回壳：视为与 `FR-0017` 冲突。
 5. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
+6. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
 
 ## 验收标准
 

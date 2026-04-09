@@ -43,3 +43,8 @@
 - 下载能力不得绕过浏览器内执行边界。
 - 下载能力必须继续进入统一能力模型与普通 `read|download` trust 域。
 - 在 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只允许作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源。
+- `candidate_shell_seed.contract_registry_seed` 必须继承 `FR-0017.candidate_ability_contract_registry` 的有效性规则：
+  - `contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`
+  - `entries[*].contract_ref` 至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
+  - 同一 `contract_ref` 不得出现冲突 entry，且 `contract_kind` 必须与 ref kind 一致
+  - 三类 `*_contract_ref` 必须都能唯一解引用；否则不得上报成功 handoff

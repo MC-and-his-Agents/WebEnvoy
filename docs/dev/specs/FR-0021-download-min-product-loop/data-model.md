@@ -42,3 +42,8 @@
 - `result_state=downloaded` 时，`resolved_output_path` 必须存在；`saved_artifact_refs` 仅在存在已冻结的 run-scoped evidence refs 时返回。
 - `partial` 只能用于已有可保留产物但整体未满足目标的场景。
 - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`。
+- `candidate_shell_seed.contract_registry_seed` 必须满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：
+  - `contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`
+  - `entries[*].contract_ref` 至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
+  - 同一 `contract_ref` 不得出现冲突 entry，`contract_kind` 必须与 ref kind 一致
+  - 三类 `*_contract_ref` 的 lookup 都必须可唯一解引用；否则不得返回成功结果
