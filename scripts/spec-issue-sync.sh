@@ -137,13 +137,19 @@ suite_dir_for_spec() {
 suite_mentions_issue() {
   local spec_path="$1"
   local issue_number="$2"
-  local suite_dir
+  local marker_lines marker_count
+  local spec_file="${REPO_ROOT}/${spec_path}"
 
-  suite_dir="$(suite_dir_for_spec "${spec_path}")"
-  [[ -d "${suite_dir}" ]] || return 1
+  [[ -f "${spec_file}" ]] || return 1
 
-  find "${suite_dir}" -type f -name '*.md' \
-    -exec grep -E -q -- "^[[:space:]]*(-[[:space:]]*)?Canonical Issue:[[:space:]]*#${issue_number}[[:space:]]*$" {} +
+  marker_lines="$(
+    sed -n 's/^[[:space:]]*\(-[[:space:]]*\)\?Canonical Issue:[[:space:]]*#\([0-9][0-9]*\)[[:space:]]*$/\2/p' "${spec_file}"
+  )"
+  marker_lines="$(printf '%s\n' "${marker_lines}" | sed '/^$/d')"
+  marker_count="$(printf '%s\n' "${marker_lines}" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+  [[ "${marker_count}" == "1" ]] || return 1
+  [[ "${marker_lines}" == "${issue_number}" ]]
 }
 
 extract_spec_path_from_title() {

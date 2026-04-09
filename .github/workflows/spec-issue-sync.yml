@@ -204,8 +204,8 @@ jobs:
             fi
 
             if [ "$status" -eq 44 ]; then
-              echo "跳过 remapped ${file} -> #${new_issue_number}：新 canonical issue 尚未满足受控同步前置"
-              continue
+              echo "拒绝 remapped ${file} -> #${new_issue_number}：新 canonical issue 尚未满足受控同步前置" >&2
+              exit 44
             fi
             exit "$status"
           done < "$remapped_spec_file"
