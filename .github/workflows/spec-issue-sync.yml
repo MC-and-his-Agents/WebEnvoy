@@ -109,10 +109,6 @@ jobs:
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi
             issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
-            if ! grep -Fxq "$file" "$allow_bootstrap_file"; then
-              echo "拒绝同步 ${file}：formal suite 未显式绑定 mapped canonical issue #${issue_number}" >&2
-              exit 44
-            fi
 
             if bash scripts/spec-issue-sync.sh check-anchor "${{ github.repository }}" "$file" "${issue_number}" >/dev/null 2>&1; then
               echo "同步 ${file} -> canonical issue #${issue_number}"
@@ -123,6 +119,11 @@ jobs:
             fi
 
             if [ "$status" -eq 43 ]; then
+              if ! grep -Fxq "$file" "$allow_bootstrap_file"; then
+                echo "拒绝首次补锚 ${file}：canonical issue #${issue_number} 尚无 FR 锚定，且 formal suite 未显式绑定该 issue" >&2
+                exit 44
+              fi
+
               echo "首次补锚 ${file} -> canonical issue #${issue_number}"
               bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
               continue

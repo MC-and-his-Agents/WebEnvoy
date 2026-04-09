@@ -124,16 +124,41 @@ build_anchor_bootstrap_allowlist() {
   sort -u -o "${output_file}" "${output_file}"
 }
 
-validate_spec_issue_anchor_bindings() {
+validate_changed_spec_targets() {
   local spec_files="$1"
-  local spec_path issue_number
+  local repo spec_path issue_number status output
+
+  repo="$(resolve_github_repo || true)"
+  [[ -n "${repo}" ]] || die "无法解析 GitHub 仓库标识；请设置 GITHUB_REPOSITORY 或 SPEC_GUARD_GITHUB_REPOSITORY"
+
+  require_cmd gh
+  gh auth status >/dev/null 2>&1 || die "spec-guard 需要可用的 gh 认证来校验 canonical issue 目标"
 
   while IFS= read -r spec_path; do
     [[ -n "${spec_path}" ]] || continue
     issue_number="$(bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
-    if ! bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
-      die "${spec_path} 未在 formal suite 中显式绑定 mapped canonical issue #${issue_number}；拒绝同步到未绑定 issue。"
+
+    set +e
+    output="$(
+      bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1
+    )"
+    status=$?
+    set -e
+
+    if [[ "${status}" -eq 0 ]]; then
+      continue
     fi
+
+    if [[ "${status}" -eq 43 ]]; then
+      if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+        continue
+      fi
+
+      die "${spec_path} 对应 canonical issue #${issue_number} 尚无 FR 锚定，且 formal suite 未显式绑定该 issue；拒绝首次补锚。"
+    fi
+
+    [[ -n "${output}" ]] && printf '%s\n' "${output}" >&2
+    exit "${status}"
   done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 }
 
@@ -330,7 +355,7 @@ main() {
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 
-    validate_spec_issue_anchor_bindings "${spec_files}"
+    validate_changed_spec_targets "${spec_files}"
 
     local allow_bootstrap_file
     allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
