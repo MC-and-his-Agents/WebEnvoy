@@ -64,6 +64,11 @@ normalize_spec_path() {
     return 0
   fi
 
+  if [[ "${value}" =~ ^FR-[0-9]{4}-[^/]+$ ]]; then
+    printf 'docs/dev/specs/%s/spec.md\n' "${value}"
+    return 0
+  fi
+
   return 1
 }
 
