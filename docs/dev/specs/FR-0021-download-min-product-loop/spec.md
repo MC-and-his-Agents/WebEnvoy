@@ -1,5 +1,7 @@
 # FR-0021 网页文件下载最小产品闭环
 
+Canonical Issue: #153
+
 ## 背景
 
 下载是 WebEnvoy 面向用户交付的三类核心能力之一，但当前 Phase 2 backlog 里只有 `#153` 作为子级 issue，尚未形成正式 FR。若继续缺少 formal suite，后续实现很容易把以下边界混成一团：
