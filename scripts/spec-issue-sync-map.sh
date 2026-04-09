@@ -94,14 +94,14 @@ validate_map() {
       die "重复的 canonical_issue_number 映射: ${issue_number}"
     fi
 
+    printf '%s\n' "${spec_path}" >> "${seen_specs}"
+    printf '%s\n' "${issue_number}" >> "${seen_issues}"
+
     spec_abs="${REPO_ROOT}/${spec_path}"
     if [[ ! -f "${spec_abs}" ]]; then
       printf '%s\n' "${spec_path}" >> "${future_map_entries}"
       continue
     fi
-
-    printf '%s\n' "${spec_path}" >> "${seen_specs}"
-    printf '%s\n' "${issue_number}" >> "${seen_issues}"
   done <<< "${entries}"
 
   spec_files="$(list_spec_files)"
