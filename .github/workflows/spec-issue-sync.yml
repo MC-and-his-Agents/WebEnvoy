@@ -36,6 +36,7 @@ jobs:
           initial_mapped_spec_file="$(mktemp)"
           remapped_spec_file="$(mktemp)"
           allow_bootstrap_file="$(mktemp)"
+          before_sha=""
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             git ls-files 'docs/dev/specs/**/spec.md' | sort -u > "$changed_spec_file"
@@ -76,7 +77,8 @@ jobs:
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
-            if bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
+            if [ -z "$before_sha" ] || ! git cat-file -e "${before_sha}:${file}" 2>/dev/null || \
+              bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
               printf '%s\n' "$file" >> "$allow_bootstrap_file"
             fi
           done < "$changed_spec_file"
