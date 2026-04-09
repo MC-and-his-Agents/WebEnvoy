@@ -254,6 +254,24 @@ classify_map_diff_targets() {
     | sort -u > "${skip_validation_file}"
 }
 
+append_explicit_bootstrap_specs() {
+  local candidate_file="$1"
+  local output_file="$2"
+  local spec_path issue_number
+
+  [[ -f "${candidate_file}" ]] || return 0
+
+  while IFS= read -r spec_path; do
+    [[ -n "${spec_path}" ]] || continue
+    issue_number="$(bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
+    if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+      printf '%s\n' "${spec_path}" >> "${output_file}"
+    fi
+  done < "${candidate_file}"
+
+  sort -u -o "${output_file}" "${output_file}"
+}
+
 changed_files() {
   local base_ref="$1"
   git -C "${REPO_ROOT}" diff --name-only "${base_ref}...HEAD"
@@ -457,8 +475,7 @@ main() {
       map_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-bootstrap.XXXXXX")"
       skip_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-skip-validation.XXXXXX")"
       classify_map_diff_targets "${base_ref}" "${map_bootstrap_file}" "${skip_validation_file}"
-      cat "${map_bootstrap_file}" >> "${allow_bootstrap_file}"
-      sort -u -o "${allow_bootstrap_file}" "${allow_bootstrap_file}"
+      append_explicit_bootstrap_specs "${map_bootstrap_file}" "${allow_bootstrap_file}"
       validate_remapped_issue_transitions "${base_ref}"
       validate_canonical_issue_targets "${allow_bootstrap_file}" "${skip_validation_file}"
       rm -f "${map_bootstrap_file}" "${skip_validation_file}"
@@ -480,17 +497,20 @@ main() {
 
   if [[ -n "${governance_files}" ]]; then
     local allow_bootstrap_file
+    local map_bootstrap_file
     local skip_validation_file
 
     echo "[spec-guard] 检测到治理/架构规则变更"
     validate_governance_changes "${changed}" "${base_ref}"
     if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
       allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
+      map_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-bootstrap.XXXXXX")"
       skip_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-skip-validation.XXXXXX")"
-      classify_map_diff_targets "${base_ref}" "${allow_bootstrap_file}" "${skip_validation_file}"
+      classify_map_diff_targets "${base_ref}" "${map_bootstrap_file}" "${skip_validation_file}"
+      append_explicit_bootstrap_specs "${map_bootstrap_file}" "${allow_bootstrap_file}"
       validate_remapped_issue_transitions "${base_ref}"
       validate_canonical_issue_targets "${allow_bootstrap_file}" "${skip_validation_file}"
-      rm -f "${allow_bootstrap_file}" "${skip_validation_file}"
+      rm -f "${allow_bootstrap_file}" "${map_bootstrap_file}" "${skip_validation_file}"
     fi
     echo "[spec-guard] 通过"
     exit 0
