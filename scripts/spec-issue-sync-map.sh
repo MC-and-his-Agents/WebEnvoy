@@ -57,7 +57,7 @@ validate_map() {
 
   seen_specs="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-specs.XXXXXX")"
   seen_issues="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-issues.XXXXXX")"
-  trap 'rm -f "${seen_specs}" "${seen_issues}"' RETURN
+  trap 'rm -f "${seen_specs:-}" "${seen_issues:-}"' RETURN
 
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ "${spec_path}" =~ ${SPEC_PATH_REGEX} ]] || die "映射路径不符合正式 spec 规则: ${spec_path}"
