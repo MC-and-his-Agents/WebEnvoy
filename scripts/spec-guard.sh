@@ -90,6 +90,7 @@ resolve_github_repo() {
 validate_canonical_issue_targets() {
   local repo
   local allow_bootstrap_file="${1:-}"
+  local skip_validation_file="${2:-}"
 
   repo="$(resolve_github_repo || true)"
   [[ -n "${repo}" ]] || die "无法解析 GitHub 仓库标识；请设置 GITHUB_REPOSITORY 或 SPEC_GUARD_GITHUB_REPOSITORY"
@@ -98,7 +99,17 @@ validate_canonical_issue_targets() {
   gh auth status >/dev/null 2>&1 || die "spec-guard 需要可用的 gh 认证来校验 canonical issue 目标"
 
   if [[ -n "${allow_bootstrap_file}" ]]; then
+    if [[ -n "${skip_validation_file}" ]]; then
+      bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" "${allow_bootstrap_file}" "${skip_validation_file}" >/dev/null
+      return
+    fi
+
     bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" "${allow_bootstrap_file}" >/dev/null
+    return
+  fi
+
+  if [[ -n "${skip_validation_file}" ]]; then
+    bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" "" "${skip_validation_file}" >/dev/null
     return
   fi
 
@@ -210,6 +221,36 @@ validate_remapped_issue_transitions() {
       "${REPO_ROOT}/.github/spec-issue-sync-map.yml" \
       | awk -F'\t' 'NF == 3 && $2 != "" && $3 != ""'
   )
+}
+
+classify_map_diff_targets() {
+  local base_ref="$1"
+  local bootstrap_file="$2"
+  local skip_validation_file="$3"
+  local old_map_file diff_file
+
+  : > "${bootstrap_file}"
+  : > "${skip_validation_file}"
+
+  old_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-old-map.XXXXXX")"
+  diff_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-diff.XXXXXX")"
+  trap 'rm -f "${old_map_file:-}" "${diff_file:-}"' RETURN
+
+  if git cat-file -e "${base_ref}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+    git show "${base_ref}:.github/spec-issue-sync-map.yml" > "${old_map_file}"
+  else
+    : > "${old_map_file}"
+  fi
+
+  bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" diff-specs \
+    "${old_map_file}" \
+    "${REPO_ROOT}/.github/spec-issue-sync-map.yml" > "${diff_file}"
+
+  awk -F'\t' 'NF == 3 && $2 == "" && $3 != "" { print $1 }' "${diff_file}" \
+    | sort -u > "${bootstrap_file}"
+
+  awk -F'\t' 'NF == 3 && $2 != "" && $3 != "" { print $1 }' "${diff_file}" \
+    | sort -u > "${skip_validation_file}"
 }
 
 changed_files() {
@@ -347,11 +388,6 @@ validate_governance_changes() {
         ;;
       .github/spec-issue-sync-map.yml)
         bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate >/dev/null
-        local allow_bootstrap_file
-        allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
-        build_anchor_bootstrap_allowlist "${base_ref}" "${changed}" "${allow_bootstrap_file}"
-        validate_canonical_issue_targets "${allow_bootstrap_file}"
-        rm -f "${allow_bootstrap_file}"
         ;;
     esac
   done <<< "${changed}"
@@ -428,10 +464,18 @@ main() {
   fi
 
   if [[ -n "${governance_files}" ]]; then
+    local allow_bootstrap_file
+    local skip_validation_file
+
     echo "[spec-guard] 检测到治理/架构规则变更"
     validate_governance_changes "${changed}" "${base_ref}"
     if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
+      allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
+      skip_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-skip-validation.XXXXXX")"
+      classify_map_diff_targets "${base_ref}" "${allow_bootstrap_file}" "${skip_validation_file}"
       validate_remapped_issue_transitions "${base_ref}"
+      validate_canonical_issue_targets "${allow_bootstrap_file}" "${skip_validation_file}"
+      rm -f "${allow_bootstrap_file}" "${skip_validation_file}"
     fi
     echo "[spec-guard] 通过"
     exit 0

@@ -177,9 +177,20 @@ spec_allows_anchor_bootstrap() {
   grep -Fxq "${spec_path}" "${allowlist_file}"
 }
 
+spec_skips_target_validation() {
+  local skiplist_file="$1"
+  local spec_path="$2"
+
+  [[ -n "${skiplist_file}" ]] || return 1
+  [[ -f "${skiplist_file}" ]] || return 1
+
+  grep -Fxq "${spec_path}" "${skiplist_file}"
+}
+
 validate_issue_targets() {
   local repo="$1"
   local allow_bootstrap_file="${2:-}"
+  local skip_validation_file="${3:-}"
   local spec_path issue_number spec_abs output status
 
   require_cmd gh
@@ -191,6 +202,10 @@ validate_issue_targets() {
     spec_abs="${REPO_ROOT}/${spec_path}"
     if [[ ! -f "${spec_abs}" ]]; then
       warn "跳过未来映射项 ${spec_path} -> #${issue_number} 的锚点预校验；对应 spec.md 尚未落地"
+      continue
+    fi
+
+    if spec_skips_target_validation "${skip_validation_file}" "${spec_path}"; then
       continue
     fi
 
@@ -230,7 +245,7 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync-map.sh validate
-  bash scripts/spec-issue-sync-map.sh validate-issues <repo> [allow_bootstrap_list_file]
+  bash scripts/spec-issue-sync-map.sh validate-issues <repo> [allow_bootstrap_list_file] [skip_validation_list_file]
   bash scripts/spec-issue-sync-map.sh diff-specs <old_map_file> <new_map_file>
   bash scripts/spec-issue-sync-map.sh resolve <spec_path>
   bash scripts/spec-issue-sync-map.sh assert-mapped <spec_path> [spec_path...]
@@ -254,7 +269,7 @@ main() {
       ;;
     validate-issues)
       shift
-      [[ "$#" -ge 1 && "$#" -le 2 ]] || die "validate-issues 需要 <repo> [allow_bootstrap_list_file]"
+      [[ "$#" -ge 1 && "$#" -le 3 ]] || die "validate-issues 需要 <repo> [allow_bootstrap_list_file] [skip_validation_list_file]"
       validate_issue_targets "$@"
       ;;
     diff-specs)
