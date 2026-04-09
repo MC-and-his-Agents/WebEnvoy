@@ -57,7 +57,7 @@
   - `layer1_consistency`
   - `layer2_interaction`
   - `layer3_session_rhythm`
-  - `cross_layer_baseline`
+  - `cross_layer_baseline`（Layer 4 平台行为基线的唯一编码，跨 Layer 1-3 统一聚合信号）
 - 必须明确：
   - 当前 formal baseline 下，`target_fr_ref` 只允许命中 `FR-0012`、`FR-0013`、`FR-0014` 或后续 Layer 4 FR
   - `execution_surface` 只描述样本采集执行面，不等于 `FR-0016` 的 merge gate verdict
@@ -118,6 +118,7 @@
 
 - 本 FR 必须明确：
   - Layer 4 平台行为模型消费本 FR 的 baseline snapshot 与 validation record
+  - `validation_scope=cross_layer_baseline` 是唯一 Layer 4 编码入口，仅用于跨 Layer 1-3 的基线聚合与评估，不承载 Layer 4 模型本体输出
   - 本 FR 不定义 Layer 4 的长期行为模型本体
   - 本 FR 不得提前冻结跨 session 的运营策略、账号人格或长期分群对象
 
