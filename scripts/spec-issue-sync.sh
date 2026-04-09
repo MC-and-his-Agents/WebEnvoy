@@ -402,6 +402,8 @@ sync_map_remap() {
     return "${status}"
   fi
 
+  sync_issue "${repo}" "${spec_path}" "${new_issue_number}" "${allow_missing_anchor_bootstrap}"
+
   status=0
   fetch_issue_snapshot "${repo}" "${old_issue_number}" "${tmp_snapshot}"
   extract_issue_snapshot_field "${tmp_snapshot}" body > "${tmp_body}"
@@ -430,8 +432,6 @@ sync_map_remap() {
       return "${status}"
     fi
   fi
-
-  sync_issue "${repo}" "${spec_path}" "${new_issue_number}" "${allow_missing_anchor_bootstrap}"
 }
 
 sync_issue() {
