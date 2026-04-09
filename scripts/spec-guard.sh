@@ -50,6 +50,55 @@ ensure_ref_available() {
   git rev-parse --verify "${ref}" >/dev/null 2>&1 || die "无法解析基线引用: ${ref}"
 }
 
+resolve_github_repo() {
+  local remote_url repo
+
+  if [[ -n "${SPEC_GUARD_GITHUB_REPOSITORY:-}" ]]; then
+    printf '%s\n' "${SPEC_GUARD_GITHUB_REPOSITORY}"
+    return 0
+  fi
+
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    printf '%s\n' "${GITHUB_REPOSITORY}"
+    return 0
+  fi
+
+  remote_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+  [[ -n "${remote_url}" ]] || return 1
+
+  if [[ "${remote_url}" =~ ^git@github\.com:([^/]+/[^/]+)(\.git)?$ ]]; then
+    repo="${BASH_REMATCH[1]}"
+    printf '%s\n' "${repo%.git}"
+    return 0
+  fi
+
+  if [[ "${remote_url}" =~ ^https://github\.com/([^/]+/[^/]+)(\.git)?$ ]]; then
+    repo="${BASH_REMATCH[1]}"
+    printf '%s\n' "${repo%.git}"
+    return 0
+  fi
+
+  if [[ "${remote_url}" =~ ^ssh://git@github\.com/([^/]+/[^/]+)(\.git)?$ ]]; then
+    repo="${BASH_REMATCH[1]}"
+    printf '%s\n' "${repo%.git}"
+    return 0
+  fi
+
+  return 1
+}
+
+validate_canonical_issue_targets() {
+  local repo
+
+  repo="$(resolve_github_repo || true)"
+  [[ -n "${repo}" ]] || die "无法解析 GitHub 仓库标识；请设置 GITHUB_REPOSITORY 或 SPEC_GUARD_GITHUB_REPOSITORY"
+
+  require_cmd gh
+  gh auth status >/dev/null 2>&1 || die "spec-guard 需要可用的 gh 认证来校验 canonical issue 目标"
+
+  bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" >/dev/null
+}
+
 changed_files() {
   local base_ref="$1"
   git -C "${REPO_ROOT}" diff --name-only "${base_ref}...HEAD"
@@ -169,6 +218,8 @@ validate_governance_changes() {
         ;;
       .github/workflows/spec-guard.yml)
         grep -q 'bash scripts/spec-guard.sh' "${abs_path}" || die "${file} 未调用 scripts/spec-guard.sh"
+        grep -q 'issues: read' "${abs_path}" || die "${file} 未声明 issues: read 权限"
+        grep -q 'GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}' "${abs_path}" || die "${file} 未向 spec-guard 注入 GH_TOKEN"
         grep -q "docs/dev/roadmap.md" "${abs_path}" || die "${file} 未覆盖 docs/dev/roadmap.md 触发路径"
         grep -q "docs/dev/architecture/" "${abs_path}" || die "${file} 未覆盖 docs/dev/architecture/** 触发路径"
         grep -q "spec_review.md" "${abs_path}" || die "${file} 未覆盖 spec_review.md 触发路径"
@@ -180,6 +231,7 @@ validate_governance_changes() {
         ;;
       .github/spec-issue-sync-map.yml)
         bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate >/dev/null
+        validate_canonical_issue_targets
         ;;
     esac
   done <<< "${changed}"
@@ -232,6 +284,8 @@ main() {
       [[ -n "${spec_file}" ]] || continue
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
+
+    validate_canonical_issue_targets
 
     disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}|${SPEC_SUPPORT_FILE_REGEX}" <<< "${changed}" || true)"
     if [[ -n "${disallowed}" ]]; then

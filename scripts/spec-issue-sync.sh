@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANCHOR_CONFLICT_EXIT=42
 ANCHOR_MISSING_EXIT=43
+ANCHOR_STATUS_MESSAGE=""
 
 die() {
   echo "错误: $*" >&2
@@ -155,6 +156,7 @@ issue_anchor_status() {
   local spec_path="$4"
   local meta_spec title_spec
 
+  ANCHOR_STATUS_MESSAGE=""
   meta_spec="$(extract_issue_spec_path "${issue_body_file}" || true)"
   title_spec="$(extract_spec_path_from_title "${issue_title}" || true)"
 
@@ -163,17 +165,17 @@ issue_anchor_status() {
   fi
 
   if [[ -n "${meta_spec}" ]] && [[ "${meta_spec}" != "${spec_path}" ]]; then
-    echo "Issue #${issue_number} 已绑定 ${meta_spec}，拒绝同步到 ${spec_path}" >&2
+    ANCHOR_STATUS_MESSAGE="Issue #${issue_number} 已绑定 ${meta_spec}，拒绝同步到 ${spec_path}"
     return "${ANCHOR_CONFLICT_EXIT}"
   fi
 
   if [[ -n "${title_spec}" ]] && [[ "${title_spec}" != "${spec_path}" ]]; then
-    echo "Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}" >&2
+    ANCHOR_STATUS_MESSAGE="Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}"
     return "${ANCHOR_CONFLICT_EXIT}"
   fi
 
   if [[ -z "${meta_spec}" ]] && [[ -z "${title_spec}" ]]; then
-    echo "Issue #${issue_number} 缺少 FR 锚定信息，拒绝同步到 ${spec_path}" >&2
+    ANCHOR_STATUS_MESSAGE="Issue #${issue_number} 缺少 FR 锚定信息，拒绝同步到 ${spec_path}"
     return "${ANCHOR_MISSING_EXIT}"
   fi
 
@@ -189,6 +191,24 @@ assert_issue_anchor() {
     status=$?
   fi
 
+  [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
+  exit "${status}"
+}
+
+assert_syncable_issue_anchor() {
+  local status=0
+
+  if issue_anchor_status "$@"; then
+    return 0
+  else
+    status=$?
+  fi
+
+  if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
+    return 0
+  fi
+
+  [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
   exit "${status}"
 }
 
@@ -225,7 +245,7 @@ sync_issue() {
 
   gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
   issue_title_raw="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
-  assert_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}"
+  assert_syncable_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}"
   strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
   meta_block="$(normalized_meta_block "${tmp_body}" "${spec_path}")"
 

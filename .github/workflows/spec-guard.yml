@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -44,6 +45,7 @@ jobs:
 
       - name: Run spec guard
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPEC_GUARD_BASE_REF: "origin/${{ github.base_ref }}"
         run: |
           set -euo pipefail
