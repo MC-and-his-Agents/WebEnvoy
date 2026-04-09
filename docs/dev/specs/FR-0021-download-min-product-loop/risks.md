@@ -9,7 +9,7 @@
 ## 风险 2：只返回 URL 不落盘
 
 - 表现：系统宣称下载成功，但没有本地产物或 artifact 引用
-- 缓解：把 `resolved_output_path` 设为成功态必备字段，并将 `saved_artifact_refs` 明确为可选 run-scoped evidence refs
+- 缓解：把 `resolved_output_path`、`source_url`、`file_name_hint` 设为成功态必备字段，并将 `saved_artifact_refs` 明确为可选 run-scoped evidence refs
 - 回滚：未满足最小落盘条件的结果只允许标为失败或部分成功
 
 ## 风险 3：覆盖已有文件导致不可逆结果

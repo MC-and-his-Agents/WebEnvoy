@@ -18,6 +18,8 @@
 - `failure_class`
 - `saved_artifact_refs`
 - `resolved_output_path`
+- `source_url`
+- `file_name_hint`
 - `content_descriptor`
 
 ### `saved_artifact_refs` 语义
@@ -40,8 +42,10 @@
 ## 约束
 
 - `result_state=downloaded` 时，`resolved_output_path` 必须存在；`saved_artifact_refs` 仅在存在已冻结的 run-scoped evidence refs 时返回。
+- `result_state=downloaded` 时，`source_url` 与 `file_name_hint` 必须存在，用于审计与最小复现场景定位。
 - `partial` 只能用于已有可保留产物但整体未满足目标的场景。
 - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`。
+- `candidate_shell_seed.input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `cad::<ability_id>::<input|output|error>::v<major>` 命名空间；发生不兼容语义变更时必须递增 `v<major>`。
 - `candidate_shell_seed.contract_registry_seed` 必须满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：
   - `contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`
   - `entries[*].contract_ref` 至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`

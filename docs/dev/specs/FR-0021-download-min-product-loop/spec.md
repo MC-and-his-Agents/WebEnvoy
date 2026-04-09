@@ -70,6 +70,8 @@ Canonical Issue: #153
   - `failure_class`
   - `saved_artifact_refs`
   - `resolved_output_path`
+  - `source_url`
+  - `file_name_hint`
   - `content_descriptor`
 - `result_state` 至少支持：
   - `downloaded`
@@ -87,6 +89,8 @@ Canonical Issue: #153
 - 必须明确：
   - 在上游 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源
   - `resolved_output_path` 是本次执行结果的落盘结果，不等于能力定义时的固定安装路径
+  - `source_url` 必须回传本次下载最终使用的源 URL（可归一化），用于审计与复现定位
+  - `file_name_hint` 用于回传下载结果的文件名提示（可来自目标 URL、页面信号或响应头），不得替代最终落盘路径
   - `partial` 只能用于存在可保留产物但整体目标未完全满足的场景
 
 ### 4. 与统一能力模型的接线
@@ -104,6 +108,10 @@ Canonical Issue: #153
   - `output_contract_ref`
   - `error_contract_ref`
   - `execution_layer_support`
+- `candidate_shell_seed` 中的 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `FR-0017` 的 canonical namespace：
+  - 格式固定为 `cad::<ability_id>::<input|output|error>::v<major>`
+  - `ability_id` 必须直接等于当前 `candidate_shell_seed.ability_id`
+  - `<input|output|error>` 只能表达该 ref 的契约种类；不兼容语义变更时必须递增 `v<major>`
 - `candidate_shell_seed.contract_registry_seed` 必须显式继承 `FR-0017` 的 `candidate_ability_contract_registry` 有效性规则：
   - `contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`
   - `entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
@@ -139,6 +147,7 @@ Given 某次下载请求成功
 When 系统返回 `download_result_summary`
 Then `result_state=downloaded`
 And `resolved_output_path` 存在
+And `source_url` 与 `file_name_hint` 均存在
 And `saved_artifact_refs` 若存在，只作为 run-scoped evidence refs 返回
 And 不会只返回源 URL 冒充成功
 
