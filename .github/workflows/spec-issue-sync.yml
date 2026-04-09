@@ -27,6 +27,8 @@ jobs:
 
       - name: Detect Changed Specs
         id: changed-specs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -64,7 +66,14 @@ jobs:
             fi
           fi
 
-          sed '/^$/d' "$changed_spec_file" | sort -u > "$allow_bootstrap_file"
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            if bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
+              printf '%s\n' "$file" >> "$allow_bootstrap_file"
+            fi
+          done < "$changed_spec_file"
+          sort -u -o "$allow_bootstrap_file" "$allow_bootstrap_file"
 
           {
             echo 'files<<EOF'
@@ -100,8 +109,26 @@ jobs:
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi
             issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
-            echo "同步 ${file} -> canonical issue #${issue_number}"
-            bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
+            if ! grep -Fxq "$file" "$allow_bootstrap_file"; then
+              echo "拒绝同步 ${file}：formal suite 未显式绑定 mapped canonical issue #${issue_number}" >&2
+              exit 44
+            fi
+
+            if bash scripts/spec-issue-sync.sh check-anchor "${{ github.repository }}" "$file" "${issue_number}" >/dev/null 2>&1; then
+              echo "同步 ${file} -> canonical issue #${issue_number}"
+              bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${issue_number}"
+              continue
+            else
+              status=$?
+            fi
+
+            if [ "$status" -eq 43 ]; then
+              echo "首次补锚 ${file} -> canonical issue #${issue_number}"
+              bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
+              continue
+            fi
+
+            exit "$status"
           done < "$changed_spec_file"
 
           while IFS= read -r file; do

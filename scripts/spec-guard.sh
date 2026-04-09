@@ -109,11 +109,32 @@ build_anchor_bootstrap_allowlist() {
   local _base_ref="$1"
   local changed="$2"
   local output_file="$3"
+  local spec_path issue_number
 
   : > "${output_file}"
 
-  grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${changed}" | sort -u >> "${output_file}" || true
+  while IFS= read -r spec_path; do
+    [[ -n "${spec_path}" ]] || continue
+    issue_number="$(bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
+    if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+      printf '%s\n' "${spec_path}" >> "${output_file}"
+    fi
+  done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${changed}" | sort -u || true)
+
   sort -u -o "${output_file}" "${output_file}"
+}
+
+validate_spec_issue_anchor_bindings() {
+  local spec_files="$1"
+  local spec_path issue_number
+
+  while IFS= read -r spec_path; do
+    [[ -n "${spec_path}" ]] || continue
+    issue_number="$(bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
+    if ! bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+      die "${spec_path} 未在 formal suite 中显式绑定 mapped canonical issue #${issue_number}；拒绝同步到未绑定 issue。"
+    fi
+  done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 }
 
 changed_files() {
@@ -308,6 +329,8 @@ main() {
       [[ -n "${spec_file}" ]] || continue
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
+
+    validate_spec_issue_anchor_bindings "${spec_files}"
 
     local allow_bootstrap_file
     allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"

@@ -330,6 +330,7 @@ usage() {
   bash scripts/spec-issue-sync.sh sync-bootstrap <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh can-sync-map-remap <repo> <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh suite-mentions-issue <spec_path> <issue_number>
 EOF
 }
 
@@ -359,6 +360,11 @@ main() {
       shift
       [[ "$#" -eq 3 ]] || die "can-sync-map-remap 需要 <repo> <spec_path> <issue_number>"
       can_sync_map_remap "$1" "$2" "$3"
+      ;;
+    suite-mentions-issue)
+      shift
+      [[ "$#" -eq 2 ]] || die "suite-mentions-issue 需要 <spec_path> <issue_number>"
+      suite_mentions_issue "$1" "$2"
       ;;
     *)
       usage
