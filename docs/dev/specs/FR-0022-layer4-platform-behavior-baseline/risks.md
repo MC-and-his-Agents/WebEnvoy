@@ -10,6 +10,7 @@
   - 冷启动和学习期与 ready 分离。
   - 对 `high/critical` 判定要求最小样本阈值与证据回链。
   - `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 都必须持久化 `threshold_config_snapshot_ref`，避免阈值变更后静默重解释旧状态。
+  - `goal_kind=write` 的健康基线只能输出“Layer 4 不额外加严”的非阻断 hint，不得把该 hint 误写成 live write 自动放行真相源。
   - Layer 4 的共享证据输入必须回链 `FR-0020`（`#239`）的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`；active baseline 只能通过 registry 判定；若后续需要冻结更细的阈值、假阳性/漏报口径，必须单独进入 spec review。
 - 回滚：
   - 临时关闭 Layer 4 高偏移强约束，只保留 `allow_read_only` 建议输出。
@@ -25,7 +26,7 @@
   - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 作为可写隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 明确 `FR-0020` registry 只拥有 shared upstream scope；`platform/target_domain` 继续属于 `FR-0022` downstream writable isolation，不得被误写成上游 active baseline selector。
-  - 同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 复用；一旦发现，必须按隔离破坏处理并触发 reseed。
+  - 同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用；真正需要阻断的是把多个 scope 的学习/ready/degraded/reseed 历史折叠到同一条状态对象。
   - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
@@ -56,7 +57,7 @@
   - 学习完成条件需同时满足样本量、时间跨度、字段完整性。
   - freshness window 过期、连续高漂移或样本完整性失效时，必须显式降级到 `degraded`，不得继续伪装为 `ready`。
   - 命中 reseed threshold、registry invalidation 或污染场景时，必须把 `reseed_required` 置为 `true`。
-  - 未达标前默认 `allow_read_only` 或 `require_manual_review`。
+  - `goal_kind=read` 未达标前默认 `allow_read_only` 或 `require_manual_review`；`goal_kind=write` 未达标前默认 `hold_live_write` 或 `require_manual_review`。
 - 回滚：
   - 发现误放行后统一降级到 `learning`，并暂停 Layer 4 放行建议消费。
 

@@ -17,7 +17,9 @@
 - [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 已保留 `profile_ref`、`effective_execution_mode`、`probe_bundle_ref` 与 `goal_kind`，不再丢失 `FR-0020` formal baseline scope keys，也不会把读写历史混入同一 Layer 4 baseline。
 - [ ] reviewer 已确认 `FR-0019.risk_gate_context.target_domain` 已被保留到 `platform_behavior_baseline_state` / `platform_behavior_assessment` identity，不会把不同域名样本合并到同一 Layer 4 baseline。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 都已补齐 `threshold_config_snapshot_ref`，且 `platform_behavior_assessment` 继续保留 `baseline_ref`，满足 replay / audit 对基线快照与阈值快照的最小回链要求。
-- [ ] reviewer 已确认 `platform_behavior_baseline_state` 以 `baseline_ref` 对齐上游 `active_baseline_ref`，不再使用未定义的 `baseline_version` 作为并行标识。
+- [ ] reviewer 已确认 `platform_behavior_baseline_state` 以 `baseline_ref` 对齐上游 `active_baseline_ref`，不再使用未定义的 `baseline_version` 作为并行标识，且 shared upstream `active_baseline_ref` 不再被误写成 downstream state identity。
+- [ ] reviewer 已确认同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用，但不会导致这些 scope 的学习/漂移/审计历史被折叠到同一条状态对象。
+- [ ] reviewer 已确认 `decision_hint` 已包含 healthy write baseline 的非阻断输出 `no_additional_restriction`，且该值只表示 Layer 4 不额外加严，不等于 live write 自动放行。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016.execution_surface=real_browser`，`stub | fake_host | other` 不再被当作当前 Layer 4 formal input。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 `session_id` 只作为可选会话坐标，不再被写成每个 Layer 4 signal batch 的硬前置。
@@ -29,7 +31,7 @@
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
 - [ ] `data-model.md` 已明确 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 维度隔离，且未把未 canonical 的 proxy binding 写成当前 formal 必填输入。
-- [ ] `data-model.md` 与 `contracts/` 已明确：同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` 下游 Layer 4 状态对象复用；若发生则视为隔离破坏，而不是合法共享。
+- [ ] `data-model.md` 与 `contracts/` 已明确：同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` 下游 Layer 4 状态对象并行引用，但隔离要求约束的是 downstream state/history，而不是禁止共享该上游 lineage 引用。
 - [ ] `risks.md` 已覆盖假阳性、样本污染、并行真相源和隐私最小化风险。
 
 ## 进入实现前必须完成

@@ -55,8 +55,8 @@ Canonical Issue: #238
   - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
   - `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，而不是改写成 GitHub issue 号；二者必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
-  - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform` 与 `target_domain` 属于 `FR-0022` 自己的 downstream writable scope，不得被倒灌成上游 registry key
-  - 同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 被复用；一旦发生跨域或跨 goal 复用，必须视为隔离破坏，而不是当作合法共享 lineage
+  - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform`、`target_domain` 与 `goal_kind` 属于 `FR-0022` 自己的 downstream writable scope，不得被倒灌成上游 registry key
+  - 同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用为 shared lineage input；真正需要禁止的是把多个 downstream scope 的 `platform_behavior_baseline_state` / assessment 历史折叠到同一条可写状态对象
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | click | extract | wait_settled`
@@ -93,7 +93,7 @@ Canonical Issue: #238
 - `platform_behavior_baseline_state` 的条件字段必须固定为：
   - `ready_at`：仅 `baseline_state=ready` 时必填
   - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
-  - `baseline_ref`：当前状态已绑定到对应 shared upstream scope 的 `FR-0020` active baseline 时必填；`unseeded | learning` 阶段允许为空
+  - `baseline_ref`：当前状态已绑定到对应 shared upstream scope 的 `FR-0020` active baseline 时必填；它记录该 downstream scope 当前对齐的 shared upstream baseline snapshot，但不构成 downstream state 自身的唯一 identity；`unseeded | learning` 阶段允许为空
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -112,7 +112,7 @@ Canonical Issue: #238
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
   - 对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
-  - 观测到同一 `baseline_ref` 被复用到另一个 `(platform, target_domain, goal_kind)` downstream scope
+  - 检测到多个 `(platform, target_domain, goal_kind)` downstream scope 的样本、学习状态或 assessment 历史被错误折叠到同一条可写状态对象
   - 检测到跨 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
@@ -195,9 +195,11 @@ Canonical Issue: #238
   - `click_kind`
 - `decision_hint` 最小枚举：
   - `allow_read_only`
+  - `no_additional_restriction`
   - `hold_live_write`
   - `require_manual_review`
   - `require_reseed`
+- `decision_hint=no_additional_restriction` 只表示 Layer 4 对当前 write-path assessment 不新增额外降级/阻断建议；它不是 live write 自动放行信号，最终门禁状态仍必须由 `FR-0010/0011` 决定。
 - Layer 4 输出是“建议”而不是“门禁最终裁决”：
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
   - 必须经 `FR-0010/0011` 既有门禁链路消费
@@ -207,6 +209,7 @@ Canonical Issue: #238
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
 - `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内、由对应 shared upstream scope registry 选中的 active baseline；不得跨域、跨 mode、跨 probe bundle 或跨 goal 混用。
+- 多个 downstream scope 可以各自比较同一条 shared upstream `active_baseline_ref`，但每个 scope 仍必须维护独立的学习/ready/degraded/reseed 状态，不得因为上游 lineage 共用而折叠状态真相源。
 
 ### 5. 冷启动（cold start）与学习期约束
 
@@ -218,7 +221,9 @@ Canonical Issue: #238
   - 最小样本量阈值
   - 最小时间跨度阈值
   - 样本完整性阈值（关键字段覆盖率）
-- 任一阈值未满足时，`decision_hint` 必须返回 `require_manual_review` 或 `allow_read_only`。
+- `goal_kind=read` 且任一阈值未满足时，`decision_hint` 必须返回 `allow_read_only` 或 `require_manual_review`。
+- `goal_kind=write` 且任一阈值未满足时，`decision_hint` 必须返回 `hold_live_write` 或 `require_manual_review`。
+- `goal_kind=write` 且 `baseline_state=ready`、`drift_level=none|low`、`reseed_required=false` 时，`decision_hint` 必须允许返回 `no_additional_restriction`，用于表达“Layer 4 不额外加严”，而不是新增放行真相源。
 
 ### 6. 审计、留痕与数据最小化
 
@@ -252,17 +257,19 @@ Canonical Issue: #238
 
 ### 场景 1：冷启动 profile 不会被误判为 ready
 
-Given 一个 profile 首次进入某平台且没有历史样本  
-When 触发 Layer 4 评估  
-Then `baseline_state` 必须是 `unseeded` 或 `learning`  
+Given 一个 profile 首次进入某平台且没有历史样本
+When 触发 Layer 4 评估
+Then `baseline_state` 必须是 `unseeded` 或 `learning`
 And `decision_hint` 不能直接放行为高风险 live write
+And `goal_kind=write` 时不得返回 `no_additional_restriction`
 
 ### 场景 2：学习窗口达标后可进入 ready
 
-Given 某 profile/platform 已满足最小样本量、时间跨度和字段完整性阈值  
-When 触发评估  
-Then `baseline_state` 可以进入 `ready`  
+Given 某 profile/platform 已满足最小样本量、时间跨度和字段完整性阈值
+When 触发评估
+Then `baseline_state` 可以进入 `ready`
 And 输出必须包含可追溯 `evidence_refs`
+And 若 `goal_kind=write` 且未命中高偏移或 reseed 条件，`decision_hint` 可以是 `no_additional_restriction`
 
 ### 场景 3：高偏移会触发保守建议
 
@@ -335,8 +342,8 @@ And 不应包含运行时实现代码
 
 ## 异常与边界场景
 
-1. 学习样本不足却输出 `ready + allow_read_only`：视为学习阈值失效。  
-2. 漂移达到 `critical` 仍输出放行建议：视为风险边界失效。  
+1. 学习样本不足却输出 `ready + allow_read_only`，或 write-path 输出 `ready + no_additional_restriction`：视为学习阈值失效。
+2. `goal_kind=write` 在 `drift_level=high|critical`、`reseed_required=true` 或其他保守条件下仍输出 `no_additional_restriction`：视为风险边界失效。
 3. assessment 无 `evidence_refs`：视为审计链断裂。  
 4. Layer 4 直接改写 `risk_state_output`：视为契约越界。  
 5. 把 Layer 4 误写成“账号运营系统”：视为范围漂移。  

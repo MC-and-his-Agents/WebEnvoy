@@ -16,8 +16,8 @@
   - 明确 Layer 4 只消费 `FR-0020` 的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
   - 明确固定 lane 常量是 `target_fr_ref=FR-0022`，继续复用 `FR-0020` 的 FR 标识语义，而不是写成 GitHub issue 号。
   - 明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不能由 Layer 4 直接根据 snapshot / record 自行决定。
-  - 明确 `FR-0020` registry 只拥有 shared upstream scope，`platform/target_domain` 仍属于 `FR-0022` 自己的 downstream writable isolation。
-  - 明确同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 复用；若发生则按隔离破坏处理。
+  - 明确 `FR-0020` registry 只拥有 shared upstream scope，`platform/target_domain/goal_kind` 仍属于 `FR-0022` 自己的 downstream writable isolation。
+  - 明确同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用为 shared lineage input，但不得因此折叠这些 scope 的独立状态对象与历史。
   - 明确 `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
   - 明确当前 implementation-ready formal input 只接受 `execution_surface=real_browser`；`stub | fake_host | other` 不进入 Layer 4 baseline 输入。
@@ -33,6 +33,7 @@
   - 冻结 `platform_behavior_signal_batch` 对 `FR-0020` 的 lineage keys：`request_ref`、`sample_ref`、`record_ref`。
   - 冻结 reveal-only click 的保真字段，确保 `FR-0019` 的 `interaction_semantics` 与 `click_kind` 不在 Layer 4 汇总时丢失。
   - 冻结 `degraded` 与 `reseed_required` 的最小触发准则，使 freshness window、连续高漂移与污染场景都能直接形成实现断言。
+  - 冻结 healthy write baseline 的非阻断 `decision_hint`，使 Layer 4 能表达“当前不额外加严”，而不是被迫退化为 hold/manual/reseed。
   - 冻结下载链路进入 Layer 4 前的 `goal_kind` 映射，避免把 `download` 另起为独立 Layer 4 goal 枚举。
   - 明确 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的审计回放字段：`baseline_ref` 与 `threshold_config_snapshot_ref`。
   - 统一 `baseline_state` / `assessment` 的条件字段语义，避免 `ready_at`、`last_assessed_at`、`decision_id`、`audit_record_ref` 在 spec、contracts、data-model 之间漂移。
@@ -79,7 +80,8 @@
   - `target_domain` 是否已从 signal batch 继续保留到 baseline / assessment identity
   - `goal_kind=read|write` 是否已进入 baseline / assessment 隔离，避免读写历史混用
   - shared upstream scope 与 downstream writable scope 是否已被清晰拆分，不再把 `platform/target_domain` 误写成 `FR-0020` registry key
-  - 是否已明确禁止同一 `active_baseline_ref` 跨 domain/goal downstream scope 复用
+  - 是否已明确同一 `active_baseline_ref` 可被多个 domain/goal downstream scope 并行引用，但不会导致 downstream state/history 折叠
+  - `goal_kind=write` 健康基线是否已具备非阻断 `decision_hint`，且该 hint 不被误写成 live write 自动放行
   - `platform_behavior_baseline_state` 是否已持久化 `threshold_config_snapshot_ref`
   - 当前 formal input 是否已明确只接受 `execution_surface=real_browser`
   - pure-read 场景中的 `click` 是否继续保留 `interaction_semantics=reveal_only_click` 与 `click_kind`
@@ -96,6 +98,7 @@
   - 基线状态迁移逻辑
   - 漂移等级判定逻辑
   - 决策建议映射逻辑
+  - healthy write baseline 的非阻断 `decision_hint` 映射
   - 基线数据隔离（profile_ref/platform/target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/goal_kind 维度）
   - proxy binding 在上游 canonical contract 落地前不会被误当作当前 formal 必填输入的约束
   - `FR-0020` lineage keys 到 Layer 4 signal batch 的回链约束
