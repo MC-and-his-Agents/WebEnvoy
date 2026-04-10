@@ -48,6 +48,10 @@ Canonical Issue: #238
   - `FR-0014`：session 节律输出边界
   - `FR-0019`：read lane 语义继承
   - `FR-0003`：profile/session 最小身份边界
+- `FR-0020` 必须是 Layer 4 共享验证输入的唯一 formal owner：
+  - `FR-0022` 只消费 `anti_detection_baseline_snapshot` 与 `anti_detection_validation_record`
+  - `validation_scope=cross_layer_baseline` 是 Layer 4 唯一正式编码入口
+  - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
@@ -59,6 +63,21 @@ Canonical Issue: #238
   - `platform_behavior_signal_batch`
   - `platform_behavior_baseline_state`
   - `platform_behavior_assessment`
+- `platform_behavior_baseline_state` 的最小必填字段至少包含：
+  - `profile`
+  - `platform`
+  - `browser_channel`
+  - `execution_surface`
+  - `proxy_binding_ref`
+  - `baseline_state`
+  - `baseline_version`
+  - `learned_sample_count`
+  - `learning_window_started_at`
+  - `drift_level`
+  - `reseed_required`
+- `platform_behavior_baseline_state` 的条件字段必须固定为：
+  - `ready_at`：仅 `baseline_state=ready` 时必填
+  - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -76,6 +95,7 @@ Canonical Issue: #238
 
 - Layer 4 只接收结构化行为摘要，不接收页面原文、用户输入原文或媒体内容。
 - `platform_behavior_signal_batch` 最小字段必须包含：
+  - `batch_id`
   - `run_id`
   - `session_id`
   - `profile`
@@ -91,6 +111,9 @@ Canonical Issue: #238
   - `action_mix`
   - `timing_summary`
   - `risk_feedback_signals`
+- `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
+- `execution_surface` 必须直接复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
+- `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `wait_settled` 计数。
@@ -99,8 +122,10 @@ Canonical Issue: #238
 
 ### 4. 偏移评估与输出边界
 
-- 必须冻结 `platform_behavior_assessment` 输出对象，至少包含：
+- 必须冻结 `platform_behavior_assessment` 输出对象，必填字段至少包含：
   - `assessment_id`
+  - `profile`
+  - `platform`
   - `browser_channel`
   - `execution_surface`
   - `runtime_context_id`
@@ -112,11 +137,13 @@ Canonical Issue: #238
   - `requested_execution_mode`
   - `effective_execution_mode`
   - `decision_hint`
-  - `decision_id`
-  - `audit_record_ref`
   - `confidence`
   - `evidence_refs`
   - `assessed_at`
+  - `model_version`
+- 当门禁链路已消费 assessment 并产出正式决策/审计对象时，还必须回填条件字段：
+  - `decision_id`
+  - `audit_record_ref`
 - `decision_hint` 最小枚举：
   - `allow_read_only`
   - `hold_live_write`
@@ -125,6 +152,7 @@ Canonical Issue: #238
 - Layer 4 输出是“建议”而不是“门禁最终裁决”：
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
   - 必须经 `FR-0010/0011` 既有门禁链路消费
+- `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 
 ### 5. 冷启动（cold start）与学习期约束
 
@@ -153,6 +181,12 @@ Canonical Issue: #238
 - 本 FR 仅冻结 formal 套件，不混入实现代码。
 - 后续实现 PR 必须先满足本 FR 的“进入实现前条件”。
 - 在 `FR-0020`（`#239`）完成合并前，不得将 `FR-0022` 标记为 implementation-ready。
+- `FR-0022` 进入 implementation-ready 的前置固定为：
+  - `FR-0020` 已合入
+  - `FR-0020` 已提供 `anti_detection_baseline_snapshot`
+  - `FR-0020` 已提供 `anti_detection_validation_record`
+  - `FR-0020.validation_scope=cross_layer_baseline` 已可作为 Layer 4 正式输入
+- 更细的阈值冻结、假阳性/漏报研究若需进入正式契约，必须通过后续独立 spec review，不得反向要求本 FR 先承诺这些细节已冻结。
 - 若实现需要扩展 `FR-0010/0011` 正式字段，必须先补充 spec review，不得边实现边改主契约。
 
 ## GWT 验收场景
@@ -248,7 +282,7 @@ And 不应包含运行时实现代码
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`
   - `FR-0014-layer3-session-rhythm-engine`
-  - `FR-0019-layer4-read-lane-gating-and-audit`
+  - `FR-0019-l2-first-usable-capability`
 - 架构依据：
   - `docs/dev/architecture/anti-detection.md`
   - `docs/dev/architecture/system-design/account.md`

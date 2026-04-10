@@ -13,6 +13,7 @@
 - 目标：
   - 明确 Layer 4 的职责是长期行为基线与偏移评估，不是账号运营系统。
   - 明确 Layer 4 只输出建议，不直接改写门禁状态真相源。
+  - 明确 Layer 4 只消费 `FR-0020` 的 `anti_detection_baseline_snapshot` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
 
 ### 阶段 B：稳定对象与数据模型冻结
@@ -23,6 +24,7 @@
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
   - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/proxy_binding_ref` 分区隔离。
+  - 统一 `baseline_state` / `assessment` 的条件字段语义，避免 `ready_at`、`last_assessed_at`、`decision_id`、`audit_record_ref` 在 spec、contracts、data-model 之间漂移。
 
 ### 阶段 C：风险、审计与回滚冻结
 
@@ -38,7 +40,7 @@
 - 产出：
   - “进入实现前条件”审查结论
 - 目标：
-  - 保证 `FR-0020`（`#239`）已合入且验证前置、阈值与证据链可复核后再进入实现。
+  - 保证 `FR-0020`（`#239`）已合入，且 Layer 4 所需共享验证输入已正式可达后再进入实现。
 
 ## 实现约束
 
@@ -88,7 +90,7 @@
 
 ### 可并行
 
-- Layer 4 指标阈值研究可与 `FR-0020`（`#239`）并行推进。  
+- Layer 4 指标阈值研究可与 `FR-0020`（`#239`）并行推进；若后续需要把阈值、假阳性/漏报口径升级为正式共享契约，应再进入独立 spec review。
 - 数据保留策略细化可与实现设计并行，但最终以本 FR 冻结对象为准。  
 
 ### 串行后置
@@ -104,8 +106,9 @@
 3. reviewer 确认 Layer 4 不直接改写门禁真相源。  
 4. `contracts/` 与 `data-model.md` 被确认足以支撑实现与测试。  
 5. `FR-0020`（`#239`）已合入，且至少冻结：
-  - 漂移判定阈值的验证方法
-  - 假阳性/漏报的最小评估口径
+  - Layer 4 可消费的 `anti_detection_baseline_snapshot`
+  - Layer 4 可消费的 `anti_detection_validation_record`
+  - `validation_scope=cross_layer_baseline` 作为 Layer 4 唯一正式输入入口
 6. 后续实现 PR 必须明确：
   - 持久化落点
   - 审计落点

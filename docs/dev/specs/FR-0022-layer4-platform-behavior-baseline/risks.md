@@ -9,7 +9,7 @@
 - 缓解：
   - 冷启动和学习期与 ready 分离。
   - 对 `high/critical` 判定要求最小样本阈值与证据回链。
-  - 漂移阈值验证纳入 `FR-0020`（`#239`）。
+  - Layer 4 的共享证据输入必须回链 `FR-0020`（`#239`）的 `anti_detection_baseline_snapshot` / `anti_detection_validation_record`；若后续需要冻结更细的阈值、假阳性/漏报口径，必须单独进入 spec review。
 - 回滚：
   - 临时关闭 Layer 4 高偏移强约束，只保留 `allow_read_only` 建议输出。
 

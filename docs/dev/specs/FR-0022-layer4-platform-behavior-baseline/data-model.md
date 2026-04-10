@@ -28,9 +28,12 @@
 补充约束：
 
 - 输入必须可回链 `runtime.audit`；缺少 `run_id/session_id/profile/platform` 任一字段时拒绝入库。
+- `browser_channel` 当前 formal baseline 只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
+- `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`reveal_only_click`、`wait_settled`、`type`、`submit` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值；若出现 `type` 或 `submit`，不得标记为 `pure_read`。
+- 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
 
 ## 2. `platform_behavior_baseline_state`
 
@@ -49,10 +52,16 @@
 - `baseline_version`
 - `learned_sample_count`
 - `learning_window_started_at`
-- `ready_at`
 - `drift_level`
-- `last_assessed_at`
 - `reseed_required`
+
+条件字段：
+
+- `ready_at`
+  - 仅 `baseline_state=ready` 时必填
+- `last_assessed_at`
+  - 尚未形成 assessment 前允许为空
+  - 一旦状态对象已被至少一次 assessment 消费，后续写回不得继续缺失
 
 `baseline_state` 允许值：
 
@@ -98,12 +107,17 @@
 - `requested_execution_mode`
 - `effective_execution_mode`
 - `decision_hint`
-- `decision_id`
-- `audit_record_ref`
 - `confidence`
 - `evidence_refs`
 - `assessed_at`
 - `model_version`
+
+条件字段：
+
+- `decision_id`
+- `audit_record_ref`
+  - 仅在门禁链路已消费 assessment 并产出正式决策/审计对象时必填
+  - 未消费前必须同时为空
 
 `decision_hint` 允许值：
 
@@ -121,6 +135,9 @@
 
 ## 4. 与既有对象的关系
 
+- 与 `FR-0020`：
+  - Layer 4 只消费 `anti_detection_baseline_snapshot` 与 `anti_detection_validation_record`。
+  - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
 - 与 `FR-0014`：
   - Layer 4 读取 session 节律摘要，但不重定义 Layer 3 状态机。
 - 与 `FR-0010/0011`：
