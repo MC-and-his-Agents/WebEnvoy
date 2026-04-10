@@ -54,3 +54,28 @@
   - `entries[*].contract_ref` 至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`
   - 同一 `contract_ref` 不得出现冲突 entry，`contract_kind` 必须与 ref kind 一致
   - 三类 `*_contract_ref` 的 lookup 都必须可唯一解引用；否则不得返回成功结果
+
+## 生命周期语义
+
+### `download_result_summary.result_state`
+
+- 初始态：`pending`（仅执行中内部态，不属于正式返回值）
+- 终态：`downloaded` / `partial` / `failed`
+- 终态转换约束：
+  - `pending -> downloaded`：目标文件已完成落盘，且满足最小结果字段要求
+  - `pending -> partial`：存在可保留产物，但整体下载目标未满足
+  - `pending -> failed`：无可用产物或执行被阻断/失败
+  - 终态一旦返回，不允许在同一次 `download_ref` 响应中回退为其他状态
+
+### `saved_artifact_refs` 推进关系
+
+- `saved_artifact_refs` 仅是 run-scoped evidence refs 的可选补充，不是下载成功判定主键。
+- `result_state=downloaded`：
+  - 必须有 `resolved_output_path`
+  - 可以有 `saved_artifact_refs`（当运行期已有可用 evidence refs）
+- `result_state=partial`：
+  - 至少应存在可保留产物线索（`resolved_output_path` 或 `saved_artifact_refs` 至少其一）
+  - 不得上报为完整成功
+- `result_state=failed`：
+  - 必须给出 `failure_class`
+  - `resolved_output_path` 与 `saved_artifact_refs` 都可以缺失
