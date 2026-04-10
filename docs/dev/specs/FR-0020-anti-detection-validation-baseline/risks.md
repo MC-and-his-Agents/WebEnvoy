@@ -23,3 +23,15 @@
 - 表现：snapshot、record、issue comment 或自由文本与 registry entry 对 active baseline 的判定不一致
 - 缓解：明确只有 `AntiDetectionBaselineRegistryEntry` 可以声明 active/superseded baseline；其余对象只能引用和投影
 - 回滚：撤销带外声明，仅保留 registry entry 的正式判定，再重算视图
+
+## 风险 5：不同 execution mode 的证据被混入同一 baseline
+
+- 表现：`dry_run`、`recon` 与 live 证据共享同一 baseline key，导致后续对比和诊断结果失真
+- 缓解：把 `effective_execution_mode` 纳入 sample / baseline / view 的正式分区维度，并继承 `FR-0010/0011` 的 mode 语义
+- 回滚：按 execution mode 重建 baseline 分区，废弃混合快照
+
+## 风险 6：`sample_ref` 指向的样本对象缺少统一 payload
+
+- 表现：不同下游 FR 各自把 `sample_ref` 解释为截图、临时日志或私有 JSON，导致 replay、比对与诊断失去统一输入
+- 缓解：冻结 `AntiDetectionStructuredSample` 的最小字段和 ownership，要求 `structured_payload` 为正式承载
+- 回滚：拒绝消费不符合正式样本结构的记录，只保留原始 evidence

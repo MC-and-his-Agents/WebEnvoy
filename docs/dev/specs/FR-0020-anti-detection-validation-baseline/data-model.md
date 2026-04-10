@@ -4,7 +4,7 @@
 
 ## 持久化与派生边界
 
-- **持久化实体**：`AntiDetectionValidationRequest`、`AntiDetectionBaselineSnapshot`、`AntiDetectionBaselineRegistryEntry`、`AntiDetectionValidationRecord`。
+- **持久化实体**：`AntiDetectionValidationRequest`、`AntiDetectionStructuredSample`、`AntiDetectionBaselineSnapshot`、`AntiDetectionBaselineRegistryEntry`、`AntiDetectionValidationRecord`。
 - **派生视图**：`AntiDetectionValidationView` 仅由持久化实体投影得到，不作为事实来源写回或复用为 gate 依据。
 
 ## 1. `AntiDetectionValidationRequest`
@@ -15,18 +15,44 @@
 - `browser_channel`
 - `execution_surface`
 - `sample_goal`
+- `requested_execution_mode`
 - `probe_bundle_ref`
 
 `validation_scope=cross_layer_baseline` 是唯一 Layer 4 编码入口，仅用于跨 Layer 1-3 信号聚合后的基线评估。
+`requested_execution_mode` 的正式语义一律继承 `FR-0010/0011`。
 
-## 2. `AntiDetectionBaselineSnapshot`
+## 2. `AntiDetectionStructuredSample`
+
+- `sample_ref`
+- `target_fr_ref`
+- `validation_scope`
+- `profile_ref`
+- `browser_channel`
+- `execution_surface`
+- `effective_execution_mode`
+- `probe_bundle_ref`
+- `run_id`
+- `captured_at`
+- `structured_payload`
+- `artifact_refs`
+
+### 样本对象边界
+
+- `AntiDetectionStructuredSample` 是 `sample_ref` 的唯一正式归属对象。
+- `structured_payload` 必须承载可重放、可比对、可诊断的最小结构化样本，不得退化为纯文本摘要。
+- `artifact_refs` 只承载原始证据引用，不替代 `structured_payload`。
+- `effective_execution_mode` 继承 `FR-0010/0011` 的正式语义，并与 `profile_ref`、`browser_channel`、`execution_surface` 一起构成样本隔离维度。
+
+## 3. `AntiDetectionBaselineSnapshot`
 
 - `baseline_ref`
+- `target_fr_ref`
 - `validation_scope`
 - `probe_bundle_ref`
 - `profile_ref`
 - `browser_channel`
 - `execution_surface`
+- `effective_execution_mode`
 - `signal_vector`
 - `captured_at`
 - `source_run_ids`
@@ -35,14 +61,16 @@
 
 - `baseline_ref` 是不可变的快照标识，不允许复写或复用。
 - baseline snapshot 只承载采样事实，不负责声明自己是否仍为 active baseline。
+- `effective_execution_mode` 是 baseline 的正式分区维度；不得把 `dry_run`、`recon` 与 live 证据混成同一条 baseline。
 
-## 3. `AntiDetectionBaselineRegistryEntry`
+## 4. `AntiDetectionBaselineRegistryEntry`
 
 - `target_fr_ref`
 - `validation_scope`
 - `profile_ref`
 - `browser_channel`
 - `execution_surface`
+- `effective_execution_mode`
 - `active_baseline_ref`
 - `superseded_baseline_refs`
 - `replacement_reason`
@@ -50,7 +78,7 @@
 
 ### 作用域键与 ownership
 
-- registry entry 的唯一作用域键为 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface)`。
+- registry entry 的唯一作用域键为 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)`。
 - `active_baseline_ref` 是该作用域下唯一正式生效的 baseline。
 - `superseded_baseline_refs` 记录此前被该 entry 替换掉的 baseline；允许为空数组，但不得为 `null`。
 - `replacement_reason` 记录当前 active baseline 成为正式基线的原因。
@@ -62,11 +90,12 @@
 - 只有当旧 `baseline_ref` 不再等于 registry entry 的 `active_baseline_ref`，并被纳入 `superseded_baseline_refs` 后，旧 baseline 才进入 `superseded` 语义。
 - 视图层的 `stale`、`insufficient_baseline` 判定必须消费 registry entry，而不能只依赖记录自身状态。
 
-## 4. `AntiDetectionValidationRecord`
+## 5. `AntiDetectionValidationRecord`
 
 - `record_ref`
 - `target_fr_ref`
 - `validation_scope`
+- `effective_execution_mode`
 - `probe_bundle_ref`
 - `sample_ref`
 - `baseline_ref`
@@ -91,16 +120,17 @@
 
 ### `sample_ref` 与 `probe_bundle_ref` 规则
 
-- `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时必填。
+- `sample_ref` 必须指向 `AntiDetectionStructuredSample.sample_ref`；`result_state=captured` 时必填。
 - `probe_bundle_ref` 必须在 baseline snapshot 与 validation record 中同时保留，以保证落库后仍可追溯探针身份。
 
-## 5. `AntiDetectionValidationView`
+## 6. `AntiDetectionValidationView`
 
 - `target_fr_ref`
 - `validation_scope`
 - `profile_ref`
 - `browser_channel`
 - `execution_surface`
+- `effective_execution_mode`
 - `latest_record_ref`
 - `baseline_status`
 - `current_result_state`
@@ -116,5 +146,6 @@
 
 - baseline snapshot 与 validation record 不得共用同一对象。
 - baseline replacement 的 active/superseded 判定只能来自 `AntiDetectionBaselineRegistryEntry`。
+- `dry_run`、`recon` 与 live 证据必须按 `effective_execution_mode` 分开建 baseline，不得共享同一 registry entry。
 - `target_fr_ref` 只允许指向反风控能力 FR。
 - 本 FR 的对象只承载能力级验证，不承载 PR 级 merge gate。

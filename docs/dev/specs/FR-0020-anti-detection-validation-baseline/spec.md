@@ -54,6 +54,7 @@ Canonical Issue: #239
   - `browser_channel`
   - `execution_surface`
   - `sample_goal`
+  - `requested_execution_mode`
   - `probe_bundle_ref`
 - `validation_scope` 至少支持：
   - `layer1_consistency`
@@ -64,17 +65,33 @@ Canonical Issue: #239
   - 当前 formal baseline 下，`target_fr_ref` 只允许命中 `FR-0012`、`FR-0013`、`FR-0014` 或后续 Layer 4 FR
   - `execution_surface` 只描述样本采集执行面，不等于 `FR-0016` 的 merge gate verdict
   - `sample_goal` 只描述本次验证目标，不承载产品功能请求
+  - `requested_execution_mode` 继承 `FR-0010/0011` 已冻结的 execution mode 语义；本 FR 不并行发明私有模式
   - `probe_bundle_ref` 必须指向稳定、可复用的最小探针集合，而不是一次性手工步骤
 
 ### 3. 基线快照、基线权威索引与验证记录
 
+- 必须冻结 `anti_detection_structured_sample`，至少包含：
+  - `sample_ref`
+  - `target_fr_ref`
+  - `validation_scope`
+  - `profile_ref`
+  - `browser_channel`
+  - `execution_surface`
+  - `effective_execution_mode`
+  - `probe_bundle_ref`
+  - `run_id`
+  - `captured_at`
+  - `structured_payload`
+  - `artifact_refs`
 - 必须冻结 `anti_detection_baseline_snapshot`，至少包含：
   - `baseline_ref`
+  - `target_fr_ref`
   - `validation_scope`
   - `probe_bundle_ref`
   - `profile_ref`
   - `browser_channel`
   - `execution_surface`
+  - `effective_execution_mode`
   - `signal_vector`
   - `captured_at`
   - `source_run_ids`
@@ -84,6 +101,7 @@ Canonical Issue: #239
   - `profile_ref`
   - `browser_channel`
   - `execution_surface`
+  - `effective_execution_mode`
   - `active_baseline_ref`
   - `superseded_baseline_refs`
   - `replacement_reason`
@@ -92,6 +110,7 @@ Canonical Issue: #239
   - `record_ref`
   - `target_fr_ref`
   - `validation_scope`
+  - `effective_execution_mode`
   - `probe_bundle_ref`
   - `sample_ref`
   - `baseline_ref`（存在可用 baseline 时必填；`drift_state=insufficient_baseline` 且当前无可用 baseline 时允许为空）
@@ -110,9 +129,12 @@ Canonical Issue: #239
   - `drift_detected`
   - `insufficient_baseline`
 - 必须明确：
+  - `anti_detection_structured_sample` 是 `sample_ref` 的唯一正式归属对象；下游 FR 不得把它各自解释成私有日志、截图集合或自由文本摘要
+  - `structured_payload` 必须是可重放、可比对、可诊断的最小结构化样本；`artifact_refs` 只作为原始证据引用，不替代结构化 payload 本身
   - baseline snapshot 与 validation record 是两类对象，不得混写成同一条 run 日志
   - `anti_detection_baseline_registry_entry` 是 baseline replacement 的唯一正式真相源；baseline snapshot 本身不得自带“当前生效”或 `superseded` 的可写状态
-  - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
+  - `effective_execution_mode` 继承 `FR-0010/0011` 的正式语义，并作为 baseline/sample/record/view 的共享分区维度；不得把 `dry_run`、`recon` 与任意 live 模式落入同一 baseline scope
+  - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
   - `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时不得只剩自由文本结论
   - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
@@ -126,6 +148,7 @@ Canonical Issue: #239
   - `profile_ref`
   - `browser_channel`
   - `execution_surface`
+  - `effective_execution_mode`
   - `latest_record_ref`
   - `baseline_status`
   - `current_result_state`
@@ -140,7 +163,7 @@ Canonical Issue: #239
 ### 5. 共享契约 ownership 与兼容性
 
 - 本 FR 必须明确：
-  - `FR-0020` 独占 `anti_detection_validation_request`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record`、`anti_detection_validation_view` 的正式 ownership
+  - `FR-0020` 独占 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record`、`anti_detection_validation_view` 的正式 ownership
   - 下游 `FR-0012`、`FR-0013`、`FR-0014` 与后续 Layer 4 FR 只能消费这些共享对象，不得各自重定义同名字段、枚举或空值语义
   - `contracts/anti-detection-validation.md` 必须冻结对象字段的必填/可空规则、状态枚举、条件字段与最小兼容 payload 示例
   - 共享对象新增字段时，只允许新增向后兼容的可选字段，并且必须在同一 spec review PR 内同步更新 `spec.md`、`contracts/` 与 `data-model.md`
@@ -191,23 +214,33 @@ When reviewer 检查本 FR 的正式对象
 Then 能看到 `anti_detection_baseline_registry_entry` 是唯一的 active/superseded 判定来源
 And baseline snapshot 本身不会被原地改写成另一条基线
 
+### 场景 6：不同 execution mode 不混用同一 baseline
+
+Given 同一 profile 与浏览器 surface 既跑过 `recon` 也跑过受控 live
+When reviewer 检查本 FR 的共享 key
+Then 能看到 `effective_execution_mode` 是 baseline/sample/record/view 的正式分区维度
+And `dry_run`、`recon` 与 live 证据不会落入同一条 baseline
+
 ## 异常与边界场景
 
 1. 只有一次 live 试验截图，没有 `signal_vector` 或 `source_run_ids`：不得视为 baseline。
 2. `target_fr_ref` 指向 `FR-0016`、`FR-0015` 或其他非反风控能力 FR：视为范围越界。
 3. `anti_detection_validation_view` 被直接当成 PR merge gate：视为与 `FR-0016` 边界冲突。
 4. baseline snapshot 只保存自由文本结论，不保存结构化信号：视为契约未冻结。
-5. 通过 snapshot、record 或自由文本直接宣布某条 baseline 已被替换，但未更新 `anti_detection_baseline_registry_entry`：视为真相源冲突。
-6. Layer 4 需求被直接塞入账号健康、长期养号或运营系统：视为越过当前产品边界。
+5. `sample_ref` 只指向截图、issue comment 或自由文本，没有正式 `anti_detection_structured_sample`：视为共享输入未冻结。
+6. 通过 snapshot、record 或自由文本直接宣布某条 baseline 已被替换，但未更新 `anti_detection_baseline_registry_entry`：视为真相源冲突。
+7. `dry_run`、`recon` 与 live 证据被落入同一 baseline scope：视为 execution mode 维度缺失。
+8. Layer 4 需求被直接塞入账号健康、长期养号或运营系统：视为越过当前产品边界。
 
 ## 验收标准
 
 1. FR-0020 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
-2. 已冻结验证请求、baseline snapshot、baseline registry entry、validation record 与共享视图的最小边界。
+2. 已冻结验证请求、structured sample、baseline snapshot、baseline registry entry、validation record 与共享视图的最小边界。
 3. 已明确 `FR-0012/0013/0014` 与后续 Layer 4 的共享方式。
 4. 已明确 baseline replacement 的唯一正式真相源，以及 `stale/superseded` 的判定来源。
-5. 已明确与 `FR-0016`、`FR-0015` 的边界，不混入 PR 门禁或 runtime 主链。
-6. 本 PR 只冻结规约，不混入实现代码。
+5. 已明确 `requested_execution_mode/effective_execution_mode` 的继承关系与 baseline 分区边界。
+6. 已明确与 `FR-0016`、`FR-0015` 的边界，不混入 PR 门禁或 runtime 主链。
+7. 本 PR 只冻结规约，不混入实现代码。
 
 ## 依赖与前置条件
 
