@@ -260,15 +260,15 @@ And 不会把它直接描述成正式可复用能力
 ## 依赖与前置条件
 
 - GitHub 事项：
-  - Phase 2 parent issue
-  - FR-0019 canonical issue
-  - FR-0019 owning Work Item
+  - `#427` Phase 2
+  - `#419` Canonical FR issue: FR-0019
+  - `#157` Owning Work Item
 - 上游 FR：
   - `FR-0017-unified-candidate-ability-shell`
   - `FR-0004-runtime-observability`
 - 相关但不由本 FR 关闭的事项：
-  - `FR-0018`
-  - `FR-0021`
+  - `#155` / `FR-0018`
+  - `#153` / `FR-0021`
   - 后续 L1 兜底与交付类事项
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`

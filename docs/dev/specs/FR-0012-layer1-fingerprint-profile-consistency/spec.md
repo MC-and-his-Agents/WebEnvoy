@@ -171,9 +171,9 @@ And 不会把本 FR 表述成完整 JS 指纹闭环
 ## 依赖与前置条件
 
 - GitHub 事项：
-  - Phase 2 parent issue
-  - FR-0012 canonical issue
-  - Layer 1 owning Work Item
+  - `#427` Phase 2
+  - `#265` Canonical FR issue: FR-0012
+  - `#235` Owning Work Item: Layer 1 scope
 - 上游 FR：
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`

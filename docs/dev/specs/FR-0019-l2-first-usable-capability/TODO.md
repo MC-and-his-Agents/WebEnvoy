@@ -17,7 +17,7 @@
 ## 进入实现前必须完成
 
 - [ ] FR-0019 spec review 通过并形成明确结论。
-- [ ] reviewer 确认 FR-0019 owning Work Item 在 Phase 2 -> FR-0019 主树中的定位已表述清楚。
+- [ ] reviewer 确认 `#157` 在 Phase 2 -> FR-0019 主树中的定位已表述清楚。
 - [ ] reviewer 确认本 FR 没有重写现有运行主链、诊断与风控对象。
 - [ ] reviewer 确认 L2 首次可用与 L1 fallback 的边界无冲突。
 
@@ -30,8 +30,8 @@
 
 ## 关联事项
 
-- [ ] Refs Phase 2 parent issue
-- [ ] Refs FR-0019 canonical issue
-- [ ] Refs FR-0019 owning Work Item
-- [ ] Refs FR-0018 downstream issue
-- [ ] Refs FR-0021 downstream issue
+- [ ] Refs #427
+- [ ] Refs #419
+- [ ] Refs #157
+- [ ] Refs #155
+- [ ] Refs #153

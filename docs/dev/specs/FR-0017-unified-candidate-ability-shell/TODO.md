@@ -15,7 +15,7 @@
 ## 进入实现前必须完成
 
 - [ ] FR-0017 spec review 通过并形成明确结论。
-- [ ] reviewer 确认 FR-0017 owning Work Item 在 Phase 2 -> FR-0017 主树中的定位已表述清楚。
+- [ ] reviewer 确认 `#156` 在 Phase 2 -> FR-0017 主树中的定位已表述清楚。
 - [ ] reviewer 确认 FR-0017 没有重写 `FR-0007` 的既有对象语义。
 - [ ] reviewer 确认 `FR-0018/0019/0021` 的消费边界在 review 中无冲突。
 
@@ -29,9 +29,9 @@
 
 ## 关联事项
 
-- [ ] Refs Phase 2 parent issue
-- [ ] Refs FR-0017 canonical issue
-- [ ] Refs FR-0017 owning Work Item
-- [ ] Refs FR-0018 downstream issue
-- [ ] Refs FR-0019 downstream issue
-- [ ] Refs FR-0021 downstream issue
+- [ ] Refs #427
+- [ ] Refs #418
+- [ ] Refs #156
+- [ ] Refs #155
+- [ ] Refs #157
+- [ ] Refs #153

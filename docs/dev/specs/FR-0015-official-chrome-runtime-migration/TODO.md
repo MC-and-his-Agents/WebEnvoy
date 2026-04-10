@@ -11,9 +11,9 @@
 
 ## GitHub backlog 承接
 
-- 当前 formal 对应关系以 GitHub 上的 FR-0015 canonical issue 页面为准；新的实现或收口事项必须挂到 FR-0015 主树下，不再以 `#281` 或 `#361` 充当当前结构父级。
+- 当前 formal 对应关系以 canonical FR issue `#435` 为准；新的实现或收口事项必须挂到 FR-0015 主树下，不再以 `#281` 或 `#361` 充当当前结构父级。
 - `#281` 与 `#361` 只保留为历史实现链路参考；scope、stop-ship、验证入口与恢复边界仍只以 `spec.md`、`plan.md`、`implementation-prep.md`、`contracts/`、`risks.md` 为准，本文件不再重复维护一份缩写版 contract，也不把 issue 正文升格为 formal 来源。
-- 后续任何仍承接 FR-0015 implementation-prep / backlog handoff 的 issue / PR，都应在不外扩 scope 的前提下至少显式挂接 FR-0015 当前 canonical issue。纯验证后续事项继续归属 `FR-0020`，不在 FR-0015 主树下重复挂接。
+- 后续任何仍承接 FR-0015 implementation-prep / backlog handoff 的 issue / PR，都应在不外扩 scope 的前提下至少显式挂接 `#435`。纯验证后续事项继续归属 `FR-0020`（`#239`），不在 FR-0015 主树下重复挂接。
 
 ## 进入实现前条件
 

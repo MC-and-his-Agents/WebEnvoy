@@ -31,8 +31,8 @@
 
 ## 关联
 
-- Parent Phase issue
-- Canonical FR issue
-- Owning Work Item
+- Parent Phase: `#427`
+- Canonical FR Issue: `#267`
+- Owning Work Item: `#236`
 - Upstream: `FR-0011`
 - Downstream: Layer 2 实现 PR（待立项）

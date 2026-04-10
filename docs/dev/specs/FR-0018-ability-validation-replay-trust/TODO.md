@@ -20,7 +20,7 @@
 ## 进入实现前必须完成
 
 - [ ] FR-0018 spec review 通过并形成明确结论。
-- [ ] reviewer 确认 FR-0018 owning Work Item 在 Phase 2 -> FR-0018 主树中的定位已表述清楚。
+- [ ] reviewer 确认 `#155` 在 Phase 2 -> FR-0018 主树中的定位已表述清楚。
 - [ ] reviewer 确认本 FR 未与 `FR-0017` 生命周期边界冲突。
 - [ ] reviewer 确认健康状态与失败大类足以支撑最小用户判断，不需要再临时补第二套状态。
 
@@ -34,8 +34,8 @@
 
 ## 关联事项
 
-- [ ] Refs Phase 2 parent issue
-- [ ] Refs FR-0018 canonical issue
-- [ ] Refs FR-0018 owning Work Item
-- [ ] Refs FR-0019 downstream issue
-- [ ] Refs FR-0021 downstream issue
+- [ ] Refs #427
+- [ ] Refs #420
+- [ ] Refs #155
+- [ ] Refs #157
+- [ ] Refs #153

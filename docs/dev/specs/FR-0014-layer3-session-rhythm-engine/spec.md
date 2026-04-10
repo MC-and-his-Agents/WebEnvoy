@@ -87,9 +87,9 @@
 ### 6. Issue 映射与 PR 边界
 
 - 本 FR 必须显式引用：
-  - Phase 2 parent issue
-  - FR-0014 canonical issue
-  - Layer 3 owning Work Item
+  - `#427`（Phase 2）
+  - `#266`（Canonical FR issue: FR-0014）
+  - `#237`（Owning Work Item: Layer 3 scope）
 - 本 PR 仅完成 `FR-0014` 规约评审输入，不混入实现代码，不关闭实现 issue。
 
 ## GWT 验收场景
@@ -154,13 +154,13 @@ And 不包含 Layer 3 引擎实现承诺
 4. 与 `profile/session/runtime.audit/approval_record/audit_record` 的关系已冻结，且未并行重定义审批/审计对象。
 5. 非目标已明确排除 Layer1/2 细节、Layer4、`#208` 实现。
 6. `warmup/afterglow` 被限定为 Phase 2 阶段挂点，不构成完整 persona/内容编排实现承诺。
-7. 已引用 Phase 2 parent issue / FR-0014 canonical issue / Layer 3 owning Work Item，并明确本 PR 为 spec review 而非实现 PR。
+7. 已引用 `#427/#266/#237`，并明确本 PR 为 spec review 而非实现 PR。
 
 ## 依赖与前置条件
 
 - 最小可执行前置：`#226` / `FR-0011`
 - 门禁与审批审计基线：`FR-0010`
-- 父级与映射：Phase 2 parent issue、FR-0014 canonical issue、Layer 3 owning Work Item
+- 父级与映射：`#427`（Phase 2）、`#266`（Canonical FR issue）、`#237`（Layer 3 Work Item）
 - 架构依据：
   - `docs/dev/architecture/anti-detection.md`
   - `docs/dev/architecture/system-design/execution.md`

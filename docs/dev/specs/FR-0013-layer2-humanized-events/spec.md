@@ -172,9 +172,9 @@ And 不需要新增另一套 CLI 或风险门禁契约
 
 ## 依赖与前置条件
 
-- 父级 Phase：Phase 2 parent issue
-- Canonical FR issue：FR-0013 canonical issue
-- Owning Work Item：Layer 2 owning Work Item
+- 父级 Phase：`#427`
+- Canonical FR issue：`#267`
+- Owning Work Item：`#236`
 - 最小前置：`FR-0011` / `#217`
 - 相关背景：
   - `docs/dev/architecture/anti-detection.md`

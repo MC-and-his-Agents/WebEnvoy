@@ -382,14 +382,14 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 ## 依赖与前置条件
 
 - GitHub 事项：
-  - Phase 2 parent issue
-  - FR-0018 canonical issue
-  - FR-0018 owning Work Item
+  - `#427` Phase 2
+  - `#420` Canonical FR issue: FR-0018
+  - `#155` Owning Work Item
 - 上游 FR：
   - `FR-0017-unified-candidate-ability-shell`
   - `FR-0004-runtime-observability`
   - `FR-0006-runtime-sqlite-store`
 - 相关但不由本 FR 关闭的事项：
-  - `FR-0019`
-  - `FR-0021`
+  - `#157` / `FR-0019`
+  - `#153` / `FR-0021`
   - 后续导入/交付类事项
