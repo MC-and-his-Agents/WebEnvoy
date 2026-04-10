@@ -54,7 +54,7 @@
 - [x] 上述 `No-Go/paused` 继续保留为带日期的历史 closeout；当前 formal FR 何时解除停点，取决于 WebEnvoy-managed profile 下剩余同口径复核是否补齐
 - [x] 2026-04-10 晚间已按最新 managed-profile / official runtime 现场重做 Go/No-Go 判定，结论继续维持 `No-Go/paused`
 - [x] 2026-04-11 已在 main 目录完成恢复后再复核，并把 “worktree 路径污染不是最终结论” 写回正式记录
-- [ ] 修复 latest head 的 XHS read 执行 bundle 缺陷后，补齐 `search/detail/user_home` 的 API primary 复核，并再次判定当前 Go/No-Go
+- [ ] 先确认当前实现头是否仍存在 XHS read 执行层失败；若存在则完成修复，再补齐 `search/detail/user_home` 的 API primary 复核，并再次判定当前 Go/No-Go
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
 - [ ] 创建“小红书 L3 读适配实现 FR”并引用 FR-0005 已复核结论
