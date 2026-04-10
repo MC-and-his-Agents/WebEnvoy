@@ -56,12 +56,12 @@ Canonical Issue: #238
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
-  - 只要出现 `type` 或 `submit`，不得标记为 `pure_read`
+  - 只要出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`，不得标记为 `pure_read`
 - 本 FR 当前只冻结 `goal_kind=read|write` 两类 Layer 4 输入；`download` 不作为独立 Layer 4 goal 枚举冻结。
 - 下载链路在进入 Layer 4 前必须完成正式映射：
   - 若下载来源解析只包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read` 并继续满足 `pure_read`
-  - 若下载链路包含 `type`、`submit` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`
-- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作（例如 `extract`、`reveal_only_click`、`type`、`submit`），不得平行引入 `download` 作为新的 Layer 4 action shortcut。
+  - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`
+- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作（至少覆盖 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind`），不得平行引入 `download` 作为新的 Layer 4 action shortcut。
 
 ### 2. Layer 4 最小对象与状态机
 
@@ -76,7 +76,6 @@ Canonical Issue: #238
   - `execution_surface`
   - `effective_execution_mode`
   - `probe_bundle_ref`
-  - `proxy_binding_ref`
   - `baseline_state`
   - `baseline_version`
   - `learned_sample_count`
@@ -104,7 +103,7 @@ Canonical Issue: #238
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
   - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 baseline version，或该 baseline 被显式 supersede / invalidate
-  - 检测到跨 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 的样本污染或隔离破坏
+  - 检测到跨 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
 
@@ -135,11 +134,12 @@ Canonical Issue: #238
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
+- `proxy_binding_ref` 只允许作为本次运行批次与 assessment 的代理绑定证据；在 `FR-0020` registry scope 未正式扩展前，Layer 4 不得把它提升为 active baseline key 或 `platform_behavior_baseline_state` 可写主键。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
-- `action_mix` 必须显式包含 `wait_settled` 计数。
-- `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)`。
-- `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
+- `action_mix` 必须显式包含 `wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 pure-read 禁止集合可以被稳定编码。
+- `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
+- `runtime_context_id` 与 `proxy_binding_ref` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
 ### 4. 偏移评估与输出边界
 
@@ -180,7 +180,8 @@ Canonical Issue: #238
 - `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；只有在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
-- `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
+- `proxy_binding_ref` 只用于标注本次 assessment 对应输入批次的代理绑定证据，不参与 active baseline 选择。
+- `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
 
@@ -284,7 +285,7 @@ When 进入 Layer 4 信号采样
 Then 该链路必须被映射为 `goal_kind=read`
 And 仍可标记为 `pure_read`
 
-Given 一条下载链路包含 `type` 或 `submit`
+Given 一条下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`
 When 进入 Layer 4 信号采样
 Then 该链路必须被映射为 `goal_kind=write`
 And 不得标记为 `pure_read`

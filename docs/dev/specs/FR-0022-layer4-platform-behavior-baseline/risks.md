@@ -17,11 +17,12 @@
 
 - 场景：
   - 不同 profile/platform，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
+  - Layer 4 把 `proxy_binding_ref` 升格为 `FR-0020` registry 之外的并行 active baseline key。
 - 影响：
-  - 基线失真，后续评估不可用。
+  - 基线失真，后续评估不可用，或引入第二条 active baseline 真相源。
 - 缓解：
-  - 以 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 作为隔离主键。
-  - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
+  - 以 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
+  - `runtime_context_id` 与 `proxy_binding_ref` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
   - 发现污染后冻结对应基线，回退 `baseline_state=learning` 并触发 `require_reseed`。
@@ -79,13 +80,14 @@
 ## 风险 7：pure-read 误标导致 read lane 边界失效
 
 - 场景：
-  - `goal_kind=read` 的批次包含 `type` 或 `submit`，却仍被标记为 `pure_read`。
+  - `goal_kind=read` 的批次包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`，却仍被标记为 `pure_read`。
   - 下载链路未经正式映射就被直接写成独立 `download` goal，导致与 `action_type`/pure-read 边界脱节。
 - 影响：
   - `FR-0019` 的 read lane 边界被绕过，评估结果不可解释。
 - 缓解：
   - 强制执行 pure-read 动作白名单：`navigate | locate | reveal_only_click | extract | wait_settled`。
-  - 只要 `type` 或 `submit` 非零，立即禁止标记为 `pure_read`。
-  - 下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`；若包含 `type|submit`，只能映射为 `write`。
+  - `ActionMix` 与 `action_type` 必须稳定编码 `type | submit | confirm | publish | purchase | dispatch | bind` 等非读动作。
+  - 只要上述非读动作任一非零，立即禁止标记为 `pure_read`。
+  - 下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`；若包含上述非读动作，只能映射为 `write`。
 - 回滚：
   - 发现误标后回滚该批次评估，重算并强制转入 `require_manual_review`。

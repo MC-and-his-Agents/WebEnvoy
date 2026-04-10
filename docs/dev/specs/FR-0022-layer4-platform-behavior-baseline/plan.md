@@ -25,7 +25,7 @@
   - `data-model.md`
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
-  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/proxy_binding_ref` 分区隔离。
+  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref` 分区隔离，同时把 `proxy_binding_ref` 收敛为 batch/assessment 审计证据字段。
   - 冻结 `degraded` 与 `reseed_required` 的最小触发准则，使 freshness window、连续高漂移与污染场景都能直接形成实现断言。
   - 冻结下载链路进入 Layer 4 前的 `goal_kind` 映射，避免把 `download` 另起为独立 Layer 4 goal 枚举。
   - 明确 `platform_behavior_assessment` 的审计回放字段：`baseline_ref` 与 `threshold_config_snapshot_ref`。
@@ -55,7 +55,7 @@
 4. 不得把 Layer 4 结果直接当作放行裁决，必须经既有门禁链路消费。  
 5. 不得在本 FR 中混入 Layer 5、Camoufox 或 C++ 内核级方案承诺。  
 6. 采集字段必须遵守数据最小化，不写入页面正文、私密输入明文或媒体内容。  
-7. `goal_kind=read` 的采样必须继承 `FR-0019` pure-read 语义；出现 `type`/`submit` 时不得继续标记为 `pure_read`。  
+7. `goal_kind=read` 的采样必须继承 `FR-0019` pure-read 语义；出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一动作时不得继续标记为 `pure_read`。
 8. 下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`，不能把 `download` 冻结为独立 Layer 4 goal 枚举。
 
 ## 测试与验证策略
@@ -67,7 +67,8 @@
 - 评审重点：
   - Layer 4 与 Layer 1/2/3 及门禁主链边界是否清晰
   - 状态枚举与对象字段是否足够稳定
-  - 可写基线主键是否已收敛到 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)`
+  - 可写基线主键是否已收敛到 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`
+  - `proxy_binding_ref` 是否只保留为 signal batch / assessment 审计证据，而未被提升为并行 active baseline key
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言
   - 下载链路进入 Layer 4 前的 `goal_kind` 映射是否已与 pure-read / write 边界保持一致
 - 实现前验证前置（由后续 PR 承担）：
@@ -81,7 +82,8 @@
   - 基线状态迁移逻辑
   - 漂移等级判定逻辑
   - 决策建议映射逻辑
-  - 基线数据隔离（profile/platform/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/proxy_binding_ref 维度）
+  - 基线数据隔离（profile/platform/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref 维度）
+  - `proxy_binding_ref` 仅作审计证据、不参与 active baseline 选择的约束
   - 审计对象生成与回链
 - 不在本 FR 强制 TDD：
   - 真实平台长期运营实验

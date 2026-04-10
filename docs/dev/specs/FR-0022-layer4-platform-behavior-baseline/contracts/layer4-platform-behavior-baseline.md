@@ -4,6 +4,19 @@
 
 ```ts
 type GoalKind = "read" | "write"
+type ActionType =
+  | "navigate"
+  | "locate"
+  | "extract"
+  | "reveal_only_click"
+  | "wait_settled"
+  | "type"
+  | "submit"
+  | "confirm"
+  | "publish"
+  | "purchase"
+  | "dispatch"
+  | "bind"
 type InteractionSafetyClass = "pure_read" | "controlled_write" | "high_risk_write"
 type BrowserChannel = "Google Chrome stable"
 type ExecutionSurface = "real_browser" | "stub" | "fake_host" | "other"
@@ -16,6 +29,11 @@ interface ActionMix {
   wait_settled: number
   type: number
   submit: number
+  confirm: number
+  publish: number
+  purchase: number
+  dispatch: number
+  bind: number
 }
 
 interface TimingSummary {
@@ -63,13 +81,15 @@ interface PlatformBehaviorSignalBatch {
 - `execution_surface` 必须直接复用 `FR-0016` 的正式枚举，不得回退为本 FR 私有取值。
 - `goal_kind` 与 `interaction_safety_class` 必须保持可解释映射，不得出现“高风险写动作却标成 `pure_read`”。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值。
-- 只要 `type` 或 `submit` 出现非零值，该批次就不得标记为 `pure_read`。
+- `ActionMix` 的最小稳定动作集合必须至少覆盖 `navigate | locate | reveal_only_click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`。
+- 只要 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一出现非零值，该批次就不得标记为 `pure_read`。
 - 本 FR 不冻结 `download` 为独立 Layer 4 goal；下载链路在进入本对象前必须先完成 `read/write` 映射。
 - 若下载链路仅包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read`。
-- 若下载链路包含 `type`、`submit` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
+- 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
 - 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须直接继承 `FR-0020` 的 formal baseline scope；不得把不同 recon/live scope 或不同 probe bundle 归一化到同一批 Layer 4 输入。
+- `proxy_binding_ref` 只允许记录本次批次的代理绑定证据；当前不得把它提升为 `FR-0020` registry 之外的 active baseline scope key。
 - 只允许结构化摘要，不允许正文/敏感原文字段进入该契约。
 
 ## 2. `platform_behavior_baseline_state`
@@ -85,7 +105,6 @@ interface PlatformBehaviorBaselineState {
   execution_surface: ExecutionSurface
   effective_execution_mode: string
   probe_bundle_ref: string
-  proxy_binding_ref: string
   baseline_state: BaselineState
   baseline_version: string
   learned_sample_count: number
@@ -99,8 +118,8 @@ interface PlatformBehaviorBaselineState {
 
 约束：
 
-- `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 是可写隔离主键。
-- `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
+- `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键。
+- `runtime_context_id` 与 `proxy_binding_ref` 仅属于 run/session 证据回链，不得进入可写基线主键。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。
 - `baseline_state=ready` 时，`learned_sample_count` 必须满足学习阈值且 `ready_at` 不得缺失。
 - `baseline_state!=ready` 时，`ready_at` 不得伪装为稳定就绪时间。
@@ -133,7 +152,7 @@ interface PlatformBehaviorAssessment {
   baseline_state: BaselineState
   drift_level: DriftLevel
   issue_scope: string
-  action_type: string
+  action_type: ActionType
   requested_execution_mode: string
   effective_execution_mode: string
   threshold_config_snapshot_ref: string
@@ -156,5 +175,7 @@ interface PlatformBehaviorAssessment {
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的回链，不得被解释为新增 gate result。
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
-- 该对象只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
+- `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | reveal_only_click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
+- `proxy_binding_ref` 只用于记录本次 assessment 所对应批次的代理绑定证据，不参与 active baseline 选择。
+- 该对象只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。
