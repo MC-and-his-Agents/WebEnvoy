@@ -121,12 +121,14 @@ interface PlatformBehaviorAssessment {
   probe_bundle_ref: string
   runtime_context_id: string
   proxy_binding_ref: string
+  baseline_ref?: string
   baseline_state: BaselineState
   drift_level: DriftLevel
   issue_scope: string
   action_type: string
   requested_execution_mode: string
   effective_execution_mode: string
+  threshold_config_snapshot_ref: string
   decision_hint: DecisionHint
   decision_id?: string
   audit_record_ref?: string
@@ -142,6 +144,8 @@ interface PlatformBehaviorAssessment {
 - `confidence` 必须位于 `[0,1]`。
 - `evidence_refs` 不得为空，且至少包含一条可回链信号批次或审计记录的引用。
 - `decision_hint` 仅为建议输出，不能直接改写 `FR-0010/0011` 的门禁最终状态。
+- `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；仅在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时允许为空。
+- `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的回链，不得被解释为新增 gate result。
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
 - 该对象只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。

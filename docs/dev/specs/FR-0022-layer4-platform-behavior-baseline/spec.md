@@ -144,12 +144,14 @@ Canonical Issue: #238
   - `action_type`
   - `requested_execution_mode`
   - `effective_execution_mode`
+  - `threshold_config_snapshot_ref`
   - `decision_hint`
   - `confidence`
   - `evidence_refs`
   - `assessed_at`
   - `model_version`
 - 当门禁链路已消费 assessment 并产出正式决策/审计对象时，还必须回填条件字段：
+  - `baseline_ref`
   - `decision_id`
   - `audit_record_ref`
 - `decision_hint` 最小枚举：
@@ -160,6 +162,8 @@ Canonical Issue: #238
 - Layer 4 输出是“建议”而不是“门禁最终裁决”：
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
   - 必须经 `FR-0010/0011` 既有门禁链路消费
+- `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；只有在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
+- `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
 

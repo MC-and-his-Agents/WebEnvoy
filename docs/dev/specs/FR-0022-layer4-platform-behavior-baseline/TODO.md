@@ -12,6 +12,7 @@
 - [ ] reviewer 已确认 Layer 4 结果只作为 `decision_hint`，不直接改写门禁真相源。
 - [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 已补齐 `browser_channel/execution_surface/runtime_context_id/proxy_binding_ref` 等必填语义。
 - [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 已保留 `effective_execution_mode` 与 `probe_bundle_ref`，不再丢失 `FR-0020` formal baseline scope keys。
+- [ ] reviewer 已确认 `platform_behavior_assessment` 已补齐 `baseline_ref` 与 `threshold_config_snapshot_ref`，满足 replay / audit 对基线快照与阈值快照的最小回链要求。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016` 共享枚举，不再并行发明私有编码。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 pure-read 继承 `FR-0019`：只允许 `navigate|locate|reveal_only_click|extract|wait_settled`，出现 `type|submit` 即不得标记为 `pure_read`。

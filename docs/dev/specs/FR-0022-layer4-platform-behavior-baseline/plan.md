@@ -26,6 +26,7 @@
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
   - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/proxy_binding_ref` 分区隔离。
+  - 明确 `platform_behavior_assessment` 的审计回放字段：`baseline_ref` 与 `threshold_config_snapshot_ref`。
   - 统一 `baseline_state` / `assessment` 的条件字段语义，避免 `ready_at`、`last_assessed_at`、`decision_id`、`audit_record_ref` 在 spec、contracts、data-model 之间漂移。
 
 ### 阶段 C：风险、审计与回滚冻结

@@ -23,4 +23,5 @@
 6. active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行声明当前生效基线。
 7. `effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity；不同 recon/live scope 或不同 probe bundle 不得被折叠到同一条 Layer 4 baseline / assessment。
 8. `browser_channel` 与 `execution_surface` 必须直接复用共享 canonical 编码：当前只允许 `Google Chrome stable` 与 `FR-0016` 的 `real_browser | stub | fake_host | other`。
-9. `FR-0022` 进入 implementation-ready 的必要前置是 `FR-0020` 已合入并提供上述正式输入；更细的阈值、假阳性/漏报口径如需冻结，应另行进入 spec review。
+9. `platform_behavior_assessment` 需要显式保留 `baseline_ref` 与 `threshold_config_snapshot_ref`，否则漂移判定无法稳定回放或审计。
+10. `FR-0022` 进入 implementation-ready 的必要前置是 `FR-0020` 已合入并提供上述正式输入；更细的阈值、假阳性/漏报口径如需冻结，应另行进入 spec review。

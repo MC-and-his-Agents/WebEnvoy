@@ -107,6 +107,7 @@
 - `probe_bundle_ref`
 - `runtime_context_id`
 - `proxy_binding_ref`
+- `threshold_config_snapshot_ref`
 - `baseline_state`
 - `drift_level`
 - `issue_scope`
@@ -121,6 +122,9 @@
 
 条件字段：
 
+- `baseline_ref`
+  - 本次 assessment 实际比较了 active baseline 时必填
+  - 仅在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时允许为空
 - `decision_id`
 - `audit_record_ref`
   - 仅在门禁链路已消费 assessment 并产出正式决策/审计对象时必填
@@ -137,6 +141,7 @@
 
 - `decision_hint` 是建议，不是门禁最终结果；不得直接覆盖 `FR-0010/0011` 最终状态字段。
 - `evidence_refs` 至少能回链到输入批次或运行审计记录，禁止“无证据评估”。
+- `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
