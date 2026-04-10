@@ -78,7 +78,6 @@ Canonical Issue: #238
   - `effective_execution_mode`
   - `probe_bundle_ref`
   - `baseline_state`
-  - `baseline_version`
   - `learned_sample_count`
   - `learning_window_started_at`
   - `drift_level`
@@ -86,6 +85,7 @@ Canonical Issue: #238
 - `platform_behavior_baseline_state` 的条件字段必须固定为：
   - `ready_at`：仅 `baseline_state=ready` 时必填
   - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
+  - `baseline_ref`：当前状态已对应到 `FR-0020` registry 的 active baseline 时必填；`unseeded | learning` 阶段允许为空
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -103,7 +103,7 @@ Canonical Issue: #238
   - 同 scope 最新一次 assessment 返回 `drift_level=high|critical`
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
-  - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 baseline version，或该 baseline 被显式 supersede / invalidate
+  - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
   - 检测到跨 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
@@ -114,7 +114,6 @@ Canonical Issue: #238
 - `platform_behavior_signal_batch` 最小字段必须包含：
   - `batch_id`
   - `run_id`
-  - `session_id`
   - `profile`
   - `platform`
   - `browser_channel`
@@ -136,7 +135,8 @@ Canonical Issue: #238
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
 - 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 冻结后再进入独立 spec review。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
-- 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
+- `session_id` 只在 runtime 已提供稳定会话坐标时回填；缺少 `session_id` 不得单独阻断合法 batch 入库。
+- 缺少 `run_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `click`、`wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 trace 语义与 pure-read 禁止集合可以被稳定编码。
 - `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
 - `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
@@ -249,10 +249,16 @@ And Layer 4 只作为风险证据输入
 
 ### 场景 5：无来源信号会被拒绝
 
-Given 输入信号缺少 `run_id` 或 `session_id`  
+Given 输入信号缺少 `run_id`
 When 尝试写入 `platform_behavior_signal_batch`  
 Then 系统必须拒绝入库  
 And 返回结构化错误而不是静默跳过
+
+Given 输入信号缺少 `session_id`
+And 仍具备 `run_id/profile/platform`
+When 尝试写入 `platform_behavior_signal_batch`
+Then 系统不得仅因缺少 `session_id` 就拒绝该批次
+And 仍需保持 `runtime.audit` 回链与其他主键坐标完整
 
 ### 场景 6：跨 profile 隔离成立
 

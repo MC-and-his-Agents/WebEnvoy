@@ -13,8 +13,10 @@
 - [ ] reviewer 已确认当前 implementation-ready formal 输入不再把未 canonical 的 proxy binding 标为 Layer 4 必填字段；如未来要引入 `proxy_binding_ref`，必须先补上游 formal contract。
 - [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 已保留 `effective_execution_mode` 与 `probe_bundle_ref`，不再丢失 `FR-0020` formal baseline scope keys。
 - [ ] reviewer 已确认 `platform_behavior_assessment` 已补齐 `baseline_ref` 与 `threshold_config_snapshot_ref`，满足 replay / audit 对基线快照与阈值快照的最小回链要求。
+- [ ] reviewer 已确认 `platform_behavior_baseline_state` 以 `baseline_ref` 对齐上游 `active_baseline_ref`，不再使用未定义的 `baseline_version` 作为并行标识。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016` 共享枚举，不再并行发明私有编码。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
+- [ ] reviewer 已确认 `session_id` 只作为可选会话坐标，不再被写成每个 Layer 4 signal batch 的硬前置。
 - [ ] reviewer 已确认 pure-read 继承 `FR-0019`：只允许 `navigate|locate|click|extract|wait_settled`，且 `click` 只复用 `action=click + interaction_semantics=reveal_only_click`；出现 `type|submit|confirm|publish|purchase|dispatch|bind` 任一动作即不得标记为 `pure_read`。
 - [ ] reviewer 已确认下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`，不再把 `download` 冻结为独立 Layer 4 goal。
 - [ ] reviewer 已确认冷启动、学习期、ready、degraded、reseed 条件描述可形成实现断言。

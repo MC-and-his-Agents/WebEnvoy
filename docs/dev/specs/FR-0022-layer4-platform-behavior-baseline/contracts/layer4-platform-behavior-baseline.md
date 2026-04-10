@@ -54,7 +54,7 @@ interface RiskFeedbackSignals {
 interface PlatformBehaviorSignalBatch {
   batch_id: string
   run_id: string
-  session_id: string
+  session_id?: string
   profile: string
   platform: string
   browser_channel: BrowserChannel
@@ -74,7 +74,8 @@ interface PlatformBehaviorSignalBatch {
 
 约束：
 
-- `run_id/session_id/profile/platform` 任一缺失时，必须拒绝入库。
+- `run_id/profile/platform` 任一缺失时，必须拒绝入库。
+- `session_id` 只在 runtime 已提供稳定会话坐标时回填；其缺失不得单独阻断合法的 Layer 4 signal batch。
 - `observed_at` 必须是可解析时间戳。
 - `browser_channel` 当前只允许 `Google Chrome stable`，且必须与 `FR-0015`、`FR-0016`、`FR-0020` 复用同一 canonical label。
 - `execution_surface` 必须直接复用 `FR-0016` 的正式枚举，不得回退为本 FR 私有取值。
@@ -106,7 +107,7 @@ interface PlatformBehaviorBaselineState {
   effective_execution_mode: string
   probe_bundle_ref: string
   baseline_state: BaselineState
-  baseline_version: string
+  baseline_ref?: string
   learned_sample_count: number
   learning_window_started_at: string
   ready_at?: string
@@ -120,6 +121,7 @@ interface PlatformBehaviorBaselineState {
 
 - `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
+- `baseline_ref` 在当前状态已对应到 `FR-0020` registry 的 active baseline 时必填，并且必须直接等于该 scope 的 `active_baseline_ref`；`unseeded | learning` 阶段允许为空。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。
 - `baseline_state=ready` 时，`learned_sample_count` 必须满足学习阈值且 `ready_at` 不得缺失。
 - `baseline_state!=ready` 时，`ready_at` 不得伪装为稳定就绪时间。

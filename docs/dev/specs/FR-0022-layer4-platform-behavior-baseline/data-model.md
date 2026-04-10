@@ -10,7 +10,6 @@
 
 - `batch_id`
 - `run_id`
-- `session_id`
 - `profile`
 - `platform`
 - `browser_channel`
@@ -26,9 +25,14 @@
 - `timing_summary`
 - `risk_feedback_signals`
 
+可选字段：
+
+- `session_id`
+
 补充约束：
 
-- 输入必须可回链 `runtime.audit`；缺少 `run_id/session_id/profile/platform` 任一字段时拒绝入库。
+- 输入必须可回链 `runtime.audit`；缺少 `run_id/profile/platform` 任一字段时拒绝入库。
+- `session_id` 只在 runtime 已提供稳定会话坐标时回填；其缺失不得单独阻断合法 batch 入库。
 - `browser_channel` 当前 formal baseline 只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
@@ -58,7 +62,6 @@
 - `effective_execution_mode`
 - `probe_bundle_ref`
 - `baseline_state`
-- `baseline_version`
 - `learned_sample_count`
 - `learning_window_started_at`
 - `drift_level`
@@ -71,6 +74,9 @@
 - `last_assessed_at`
   - 尚未形成 assessment 前允许为空
   - 一旦状态对象已被至少一次 assessment 消费，后续写回不得继续缺失
+- `baseline_ref`
+  - 当前状态已对应到 `FR-0020` registry 的 active baseline 时必填
+  - `unseeded | learning` 阶段允许为空
 
 `baseline_state` 允许值：
 
@@ -91,6 +97,7 @@
 
 - `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式或 probe bundle 共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
+- `baseline_ref` 一旦存在，必须直接等于同 scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
 - 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，则必须降级为 `degraded` 或回退到 `learning`。
