@@ -214,7 +214,7 @@
 - 流程与元数据不合规，且会影响合并判断，例如在 `spike/spec-ready` 阶段误用 `Fixes #...`
 - formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
 - 治理落库 PR 未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过
-- 同一 PR 同时触碰 FR-0016 正式契约文件或 `TODO.md` handoff 文件，以及任一治理落库目标文件
+- 同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件
 - 落入“真实 Live Evidence 专项门禁”的 PR 缺少 latest head 新鲜复验，或把 stub/fake host / `runtime.ping` / `runtime.bootstrap` 误写成真实闭环证据
 - 证据不足，无法支持放行
 
