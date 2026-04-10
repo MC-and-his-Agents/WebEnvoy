@@ -44,9 +44,9 @@
   - 停止实现分支推进
   - 回到 FR-0005 规约补齐评审阻断项
 
-## 风险 5：WebEnvoy-managed XHS 现场虽已恢复，但准入证据仍不足
+## 风险 5：若执行现场已恢复 managed-profile，准入证据仍可能不足
 
-- 触发条件：managed-profile official runtime 已可启动，但 `search/detail/user_home` 仍未形成 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round` 的同口径证据闭环
+- 触发条件：执行现场已恢复到可尝试 managed-profile official runtime 复核的状态，但 `search/detail/user_home` 仍未形成 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round` 的同口径证据闭环
 - 影响：formal FR 会错误地把单轮样本、fallback 页面证据或某次运行时失败事实误写成实现准入结论，导致 Go/No-Go 失真
 - 缓解：
   - 先保留 managed-profile 准入预检与 2026-04-11 fresh rerun 的历史事实，但不把其直接升级为 formal 准入
