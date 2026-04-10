@@ -24,6 +24,7 @@
 - FR-0003 不另起第二套运行标识体系，也不把 `run_id` 写成 Profile 元数据主键。
 - `run_id` 是单次命令调用标识，不是浏览器实例 ID、Profile ID 或长期 session ID。
 - 同一 Profile 上的连续 `start/login/status/stop` 调用必须各自拥有独立 `run_id`，即使它们操作的是同一浏览器目录与同一锁文件。
+- 唯一例外是 `runtime.login` 的显式确认续调用：当同一手动登录流程通过 `params.confirm=true` 收口时，确认调用必须复用首次 `runtime.login` 的同一个 `run_id`。
 - `ProfileLock.ownerRunId` 仅用于锁审计、陈旧锁识别和异常恢复，不对外替代 FR-0001 的命令级 `run_id` 语义。
 - FR-0002 的握手字段不承载 `run_id`；FR-0015 的 bootstrap 字段虽然会使用 `run_id`，但它仍属于单次运行上下文，不能回写成 FR-0003 的持久化身份字段。
 
@@ -132,6 +133,7 @@ disconnected -> starting
 - 若 Profile 尚未初始化，则先创建最小目录与最小元数据
 - 首次调用返回 `confirmationRequired`，由调用方在用户完成手动登录后再次调用 `runtime.login` 并传入 `params.confirm=true`
 - 二次确认调用在 `params.confirm=true` 时回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
+- 二次确认调用必须复用首次登录调用的同一个 `run_id`
 - 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话
 
 首次调用成功结果至少包含：
@@ -220,6 +222,7 @@ disconnected -> starting
 
 - `runtime.login` 采用显式二次确认模型：首次调用只进入 `logging_in` 并返回 `confirmationRequired`，不会在单次命令内等待用户登录确认直到超时。
 - `runtime.login` 在二次调用且 `params.confirm=true` 时承接显式确认收口；若确认时登录浏览器已断开、锁持有状态失效或当前状态不再兼容，统一返回 `ERR_PROFILE_STATE_CONFLICT`。
+- `runtime.login` 的二次确认调用必须复用首次登录调用的同一个命令级 `run_id`；当前实现不支持以新的 `run_id` 接管尚未完成的登录确认。
 - 如需引入登录确认 deadline / timeout 语义，必须在后续 formal 变更中新增对应状态机、错误码与测试；在该变更落地前，不得把 `ERR_PROFILE_LOGIN_TIMEOUT` 视为稳定契约。
 
 ## 持久化边界
