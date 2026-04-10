@@ -497,7 +497,7 @@
 `search`
 
 - `run_id=issue445-main-search-dryrun-001`
-- `evidence_collected_at=2026-04-10T16:18:22Z`
+- `evidence_collected_at=2026-04-10T16:18:22Z`（即 `Asia/Shanghai` 时区的 `2026-04-11T00:18:22+08:00`，属于本节记录的 post-restore rerun）
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
