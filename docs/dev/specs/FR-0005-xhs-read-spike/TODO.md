@@ -31,7 +31,7 @@
 - [x] 2026-04-10/2026-04-11 已确认此前 `IDENTITY_MANIFEST_MISSING` 属于 worktree/main 路径污染后的中间现场，不再作为最终停点
 - [x] 2026-04-11 已在 `main` 目录恢复 `xhs_001` 的 managed-profile official runtime 绑定，并通过 `runtime.status/runtime.start/runtime.ping/runtime.tabs` 完成只读预检与真实 tab 回读
 - [x] 2026-04-11 已确认当前 latest head 的 fresh rerun 新阻断点不是 profile root，而是 XHS read 执行 bundle 在 `search` 首次同口径 rerun 中返回 `executeXhsSearchImpl is not defined`
-- [x] 当前 formal FR 的本地停点已更新为：managed-profile 同口径复核已完成，但 `search/detail/user_home` 仍缺 API primary 成功与矩阵证据，正式结论继续 `No-Go/paused`
+- [x] 当前 formal FR 的本地停点已更新为：managed-profile 准入预检与 `search` 首次同口径 fresh rerun 已完成，但 `detail/user_home` 仍未获得合法 fresh rerun 样本，且三场景仍缺 API primary 成功与矩阵证据，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
 
