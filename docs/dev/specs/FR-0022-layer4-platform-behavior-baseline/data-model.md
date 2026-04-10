@@ -54,7 +54,7 @@
 - `request_ref` 与 `sample_ref` 的 formal ownership 仍分别属于 `FR-0020.anti_detection_validation_request` 与 `FR-0020.anti_detection_structured_sample`；Layer 4 只允许读取这些上游对象以完成 lineage 校验，不得在本 FR 中复制它们的真相源。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
 - 当前 formal baseline 不把 proxy binding 作为 Layer 4 必填输入；若未来需要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
-- 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
+- 若后续评估需要解析当前 shared upstream lineage，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再选择同 scope 的 `platform_behavior_baseline_snapshot` 作为实际 drift comparison object；不得直接把 upstream `active_baseline_ref` 当作下游比较对象。
 
 ## 2. `platform_behavior_baseline_snapshot`
 
@@ -85,8 +85,10 @@
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind, baseline_ref)` 必须唯一；不同 downstream scope 不得共享同一条 `baseline_ref`。
 - `upstream_active_baseline_ref` 必须直接记录生成该 downstream baseline 时，对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`。
 - 多个 downstream scope 允许并行引用同一条 `upstream_active_baseline_ref`，但必须各自拥有独立的 `baseline_ref`。
-- `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内的 `platform_behavior_signal_batch`。
+- `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内、同一 shared upstream lineage 下的 `platform_behavior_signal_batch`。
 - `behavior_vector` 只允许保留结构化聚合字段，不得退化为页面正文、私密输入或自由文本摘要。
+- 当 `behavior_vector.action_mix.click > 0` 时，`behavior_vector.click_kind_mix` 必须存在，且总计数必须等于 `behavior_vector.action_mix.click`。
+- `goal_kind=read` 的 downstream baseline snapshot 只允许沉淀 `pure_read` 合法动作，不得把非读动作写入 read snapshot。
 
 ## 3. `platform_behavior_baseline_state`
 
@@ -107,7 +109,6 @@
 - `threshold_config_snapshot_ref`
 - `baseline_state`
 - `learned_sample_count`
-- `learning_window_started_at`
 - `drift_level`
 - `reseed_required`
 
@@ -115,6 +116,9 @@
 
 - `ready_at`
   - 仅 `baseline_state=ready` 时必填
+- `learning_window_started_at`
+  - 仅 `baseline_state=learning|ready|degraded` 时必填
+  - `baseline_state=unseeded` 时必须允许为空或缺失
 - `last_assessed_at`
   - 尚未形成 assessment 前允许为空
   - 一旦状态对象已被至少一次 assessment 消费，后续写回不得继续缺失
@@ -145,6 +149,7 @@
 - `baseline_ref` 一旦存在，必须引用同 scope 的 `platform_behavior_baseline_snapshot.baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
 - `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 可以被多个 downstream scope 作为 shared lineage 输入并行引用，但不得把这些 scope 的学习状态、漂移状态或 assessment 历史折叠到同一条可写状态对象，也不得共用同一条 downstream `baseline_ref`。
 - `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；若阈值快照变化，必须重新评估该状态是否继续有效，必要时降级或触发 reseed。
+- `baseline_state=unseeded` 时，`learned_sample_count` 必须允许为 `0`，且不得伪造 `baseline_ref`、`ready_at` 或已开始学习窗口的时间戳。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
 - 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，则必须降级为 `degraded` 或回退到 `learning`。

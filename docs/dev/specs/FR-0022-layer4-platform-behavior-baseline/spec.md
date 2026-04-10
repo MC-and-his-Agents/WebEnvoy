@@ -95,7 +95,9 @@ Canonical Issue: #238
   - `baseline_ref` 是 `FR-0022` 自有的 downstream drift baseline 标识，不得与 `FR-0020.anti_detection_baseline_snapshot.baseline_ref` 混用为同一对象
   - `upstream_active_baseline_ref` 必须记录生成该 downstream baseline 时所依赖的 `FR-0020` shared upstream active baseline
   - 多个 `(platform, target_domain, goal_kind)` downstream scope 可以共享同一条 `upstream_active_baseline_ref`，但必须拥有各自独立的 `baseline_ref`
-  - `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内的 `platform_behavior_signal_batch`
+  - `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内、同一 shared upstream lineage 下的 `platform_behavior_signal_batch`
+  - 当 `behavior_vector.action_mix.click > 0` 时，`behavior_vector.click_kind_mix` 必须存在，且总计数必须等于 `action_mix.click`
+  - `goal_kind=read` 的 downstream baseline snapshot 只允许沉淀 `pure_read` 合法动作，不得把非读动作写入 read snapshot
 - `platform_behavior_baseline_state` 的最小必填字段至少包含：
   - `profile_ref`
   - `platform`
@@ -108,13 +110,14 @@ Canonical Issue: #238
   - `threshold_config_snapshot_ref`
   - `baseline_state`
   - `learned_sample_count`
-  - `learning_window_started_at`
   - `drift_level`
   - `reseed_required`
 - `platform_behavior_baseline_state` 的条件字段必须固定为：
+  - `learning_window_started_at`：仅 `baseline_state=learning|ready|degraded` 时必填；`unseeded` 时必须允许为空或缺失
   - `ready_at`：仅 `baseline_state=ready` 时必填
   - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
   - `baseline_ref`：当前状态已绑定到该 downstream scope 的 `platform_behavior_baseline_snapshot.baseline_ref` 时必填；它记录当前可写状态正在消费的下游 drift baseline，而不是 shared upstream baseline 本身；`unseeded | learning` 阶段允许为空
+- `baseline_state=unseeded` 时，`learned_sample_count` 必须允许为 `0`，且不得伪造 `baseline_ref`、`ready_at` 或已开始学习窗口的时间戳。
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -284,6 +287,9 @@ When 触发 Layer 4 评估
 Then `baseline_state` 必须是 `unseeded` 或 `learning`
 And `decision_hint` 不能直接放行为高风险 live write
 And `goal_kind=write` 时不得返回 `no_additional_restriction`
+And 若 `baseline_state=unseeded`，则 `learning_window_started_at` 必须允许为空或缺失
+And `learned_sample_count` 必须允许为 `0`
+And `baseline_ref` 与 `ready_at` 不得被伪造为已学习/已就绪
 
 ### 场景 2：学习窗口达标后可进入 ready
 

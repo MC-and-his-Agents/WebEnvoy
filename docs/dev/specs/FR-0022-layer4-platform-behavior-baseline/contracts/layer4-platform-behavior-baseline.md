@@ -151,8 +151,10 @@ interface PlatformBehaviorBaselineSnapshot {
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind, baseline_ref)` 必须唯一；不同 downstream scope 不得共享同一条 `baseline_ref`。
 - `upstream_active_baseline_ref` 必须直接记录生成该 downstream baseline 时，对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`。
 - 多个 downstream scope 允许并行引用同一条 `upstream_active_baseline_ref`，但必须各自拥有独立的 `baseline_ref`。
-- `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内的 `platform_behavior_signal_batch`。
+- `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内、同一 shared upstream lineage 下的 `platform_behavior_signal_batch`。
 - `behavior_vector` 只允许保留结构化聚合字段，不得退化为页面正文、私密输入或自由文本摘要。
+- 当 `behavior_vector.action_mix.click > 0` 时，`behavior_vector.click_kind_mix` 必须存在，且总计数必须等于 `behavior_vector.action_mix.click`。
+- `goal_kind=read` 的 downstream baseline snapshot 只允许沉淀 `pure_read` 合法动作，不得把非读动作写入 read snapshot。
 
 ## 3. `platform_behavior_baseline_state`
 
@@ -173,7 +175,7 @@ interface PlatformBehaviorBaselineState {
   baseline_state: BaselineState
   baseline_ref?: string
   learned_sample_count: number
-  learning_window_started_at: string
+  learning_window_started_at?: string
   ready_at?: string
   drift_level: DriftLevel
   last_assessed_at?: string
@@ -186,6 +188,8 @@ interface PlatformBehaviorBaselineState {
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
 - `baseline_ref` 在当前状态已绑定到该 downstream scope 的 `platform_behavior_baseline_snapshot.baseline_ref` 时必填；它记录当前可写状态正在消费的下游 drift baseline，而不是 shared upstream baseline 本身；`unseeded | learning` 阶段允许为空。
+- `learning_window_started_at` 仅在 `baseline_state=learning|ready|degraded` 时必填；`baseline_state=unseeded` 时必须允许为空或缺失。
+- `baseline_state=unseeded` 时，`learned_sample_count` 必须允许为 `0`，且不得伪造 `baseline_ref`、`ready_at` 或已开始学习窗口的时间戳。
 - 多个 `(platform, target_domain, goal_kind)` 下游状态对象允许并行引用同一条 shared upstream `upstream_active_baseline_ref` 作为 lineage 输入；需要禁止的是把这些 scope 的学习/ready/degraded/reseed 历史折叠到同一条可写状态对象，或让它们共用同一条 downstream `baseline_ref`。
 - `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；阈值快照变化后，不得静默沿用旧状态解释新漂移结果。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。

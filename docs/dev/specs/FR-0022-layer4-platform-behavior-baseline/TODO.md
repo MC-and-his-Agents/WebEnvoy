@@ -23,6 +23,7 @@
 - [ ] reviewer 已确认 `decision_hint` 已包含 healthy write baseline 的非阻断输出 `no_additional_restriction`，且该值只表示 Layer 4 不额外加严，不等于 live write 自动放行。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016.execution_surface=real_browser`，`stub | fake_host | other` 不再被当作当前 Layer 4 formal input。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
+- [ ] reviewer 已确认 `baseline_state=unseeded` 时 `learning_window_started_at` 允许为空或缺失，不会把“尚未开始学习窗口”的状态误写成已进入 learning。
 - [ ] reviewer 已确认 `session_id` 只作为可选会话坐标，不再被写成每个 Layer 4 signal batch 的硬前置。
 - [ ] reviewer 已确认 pure-read 继承 `FR-0019`：只允许 `navigate|locate|click|extract|wait_settled`，且 `click` 只复用 `action=click + interaction_semantics=reveal_only_click`；出现 `type|submit|confirm|publish|purchase|dispatch|bind` 任一动作即不得标记为 `pure_read`。
 - [ ] reviewer 已确认 `click_kind_mix`、`interaction_semantics` 与 `click_kind` 已保留 reveal-only click 语义，不会把 `FR-0019` 的合法点击退化为裸 `click`。
