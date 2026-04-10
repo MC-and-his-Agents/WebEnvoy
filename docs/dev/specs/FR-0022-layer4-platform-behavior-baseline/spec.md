@@ -69,6 +69,8 @@ Canonical Issue: #238
   - `platform`
   - `browser_channel`
   - `execution_surface`
+  - `effective_execution_mode`
+  - `probe_bundle_ref`
   - `proxy_binding_ref`
   - `baseline_state`
   - `baseline_version`
@@ -103,6 +105,8 @@ Canonical Issue: #238
   - `platform`
   - `browser_channel`
   - `execution_surface`
+  - `effective_execution_mode`
+  - `probe_bundle_ref`
   - `runtime_context_id`
   - `proxy_binding_ref`
   - `target_domain`
@@ -116,10 +120,11 @@ Canonical Issue: #238
 - `execution_surface` 必须直接复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
+- Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `wait_settled` 计数。
-- `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)`。
+- `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)`。
 - `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
 ### 4. 偏移评估与输出边界
@@ -130,6 +135,7 @@ Canonical Issue: #238
   - `platform`
   - `browser_channel`
   - `execution_surface`
+  - `probe_bundle_ref`
   - `runtime_context_id`
   - `proxy_binding_ref`
   - `baseline_state`
@@ -155,6 +161,7 @@ Canonical Issue: #238
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
   - 必须经 `FR-0010/0011` 既有门禁链路消费
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
+- `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
 

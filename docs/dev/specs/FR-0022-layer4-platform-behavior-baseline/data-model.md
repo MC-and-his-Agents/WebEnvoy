@@ -15,6 +15,8 @@
 - `platform`
 - `browser_channel`
 - `execution_surface`
+- `effective_execution_mode`
+- `probe_bundle_ref`
 - `runtime_context_id`
 - `proxy_binding_ref`
 - `target_domain`
@@ -34,6 +36,7 @@
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`reveal_only_click`、`wait_settled`、`type`、`submit` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值；若出现 `type` 或 `submit`，不得标记为 `pure_read`。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
+- `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
 
 ## 2. `platform_behavior_baseline_state`
@@ -48,6 +51,8 @@
 - `platform`
 - `browser_channel`
 - `execution_surface`
+- `effective_execution_mode`
+- `probe_bundle_ref`
 - `proxy_binding_ref`
 - `baseline_state`
 - `baseline_version`
@@ -81,7 +86,7 @@
 
 补充约束：
 
-- `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面或代理绑定共用同一可写状态对象。
+- `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式、probe bundle 或代理绑定共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - `reseed_required=true` 时不得把状态误报为稳定 `ready`。
@@ -99,6 +104,7 @@
 - `platform`
 - `browser_channel`
 - `execution_surface`
+- `probe_bundle_ref`
 - `runtime_context_id`
 - `proxy_binding_ref`
 - `baseline_state`
@@ -132,6 +138,7 @@
 - `decision_hint` 是建议，不是门禁最终结果；不得直接覆盖 `FR-0010/0011` 最终状态字段。
 - `evidence_refs` 至少能回链到输入批次或运行审计记录，禁止“无证据评估”。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
+- `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
 
 ## 4. 与既有对象的关系
@@ -140,6 +147,7 @@
   - Layer 4 只消费 `anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
   - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
   - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
+  - `effective_execution_mode` 与 `probe_bundle_ref` 是 shared scope keys；Layer 4 baseline identity 必须保留这两个维度，不得把不同 mode / bundle 的 baseline 混写到同一状态对象。
 - 与 `FR-0014`：
   - Layer 4 读取 session 节律摘要，但不重定义 Layer 3 状态机。
 - 与 `FR-0010/0011`：

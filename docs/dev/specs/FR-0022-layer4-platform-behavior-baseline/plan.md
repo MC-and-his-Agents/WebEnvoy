@@ -15,6 +15,7 @@
   - 明确 Layer 4 只输出建议，不直接改写门禁状态真相源。
   - 明确 Layer 4 只消费 `FR-0020` 的 `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
   - 明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不能由 Layer 4 直接根据 snapshot / record 自行决定。
+  - 明确 `effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
 
 ### 阶段 B：稳定对象与数据模型冻结
@@ -24,7 +25,7 @@
   - `data-model.md`
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
-  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/proxy_binding_ref` 分区隔离。
+  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/proxy_binding_ref` 分区隔离。
   - 统一 `baseline_state` / `assessment` 的条件字段语义，避免 `ready_at`、`last_assessed_at`、`decision_id`、`audit_record_ref` 在 spec、contracts、data-model 之间漂移。
 
 ### 阶段 C：风险、审计与回滚冻结
@@ -111,6 +112,7 @@
   - Layer 4 可消费的 `anti_detection_baseline_registry_entry`
   - Layer 4 可消费的 `anti_detection_validation_record`
   - `validation_scope=cross_layer_baseline` 作为 Layer 4 唯一正式输入入口
+  - `effective_execution_mode` 与 `probe_bundle_ref` 继续作为 Layer 4 baseline identity 的正式 scope keys
 6. 后续实现 PR 必须明确：
   - 持久化落点
   - 审计落点

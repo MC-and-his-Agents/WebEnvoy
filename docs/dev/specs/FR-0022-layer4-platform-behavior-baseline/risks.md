@@ -16,11 +16,11 @@
 ## 风险 2：样本污染与跨 profile 串扰
 
 - 场景：
-  - 不同 profile/platform 的行为样本被合并写入同一基线。
+  - 不同 profile/platform，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
 - 影响：
   - 基线失真，后续评估不可用。
 - 缓解：
-  - 以 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)` 作为隔离主键。
+  - 以 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 作为隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
