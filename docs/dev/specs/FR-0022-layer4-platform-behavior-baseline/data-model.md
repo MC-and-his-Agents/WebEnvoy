@@ -34,6 +34,7 @@
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`reveal_only_click`、`wait_settled`、`type`、`submit` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值；若出现 `type` 或 `submit`，不得标记为 `pure_read`。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
+- 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
 
 ## 2. `platform_behavior_baseline_state`
 
@@ -136,8 +137,9 @@
 ## 4. 与既有对象的关系
 
 - 与 `FR-0020`：
-  - Layer 4 只消费 `anti_detection_baseline_snapshot` 与 `anti_detection_validation_record`。
+  - Layer 4 只消费 `anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
   - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
+  - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
 - 与 `FR-0014`：
   - Layer 4 读取 session 节律摘要，但不重定义 Layer 3 状态机。
 - 与 `FR-0010/0011`：

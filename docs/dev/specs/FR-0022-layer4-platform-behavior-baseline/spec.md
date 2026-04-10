@@ -49,9 +49,10 @@ Canonical Issue: #238
   - `FR-0019`：read lane 语义继承
   - `FR-0003`：profile/session 最小身份边界
 - `FR-0020` 必须是 Layer 4 共享验证输入的唯一 formal owner：
-  - `FR-0022` 只消费 `anti_detection_baseline_snapshot` 与 `anti_detection_validation_record`
+  - `FR-0022` 只消费 `anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`
   - `validation_scope=cross_layer_baseline` 是 Layer 4 唯一正式编码入口
   - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
+  - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
@@ -114,6 +115,7 @@ Canonical Issue: #238
 - `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 必须直接复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
+- Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `wait_settled` 计数。
@@ -184,6 +186,7 @@ Canonical Issue: #238
 - `FR-0022` 进入 implementation-ready 的前置固定为：
   - `FR-0020` 已合入
   - `FR-0020` 已提供 `anti_detection_baseline_snapshot`
+  - `FR-0020` 已提供 `anti_detection_baseline_registry_entry`
   - `FR-0020` 已提供 `anti_detection_validation_record`
   - `FR-0020.validation_scope=cross_layer_baseline` 已可作为 Layer 4 正式输入
 - 更细的阈值冻结、假阳性/漏报研究若需进入正式契约，必须通过后续独立 spec review，不得反向要求本 FR 先承诺这些细节已冻结。
