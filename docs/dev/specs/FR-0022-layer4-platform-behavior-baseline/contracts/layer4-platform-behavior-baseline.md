@@ -21,6 +21,13 @@ type InteractionSafetyClass = "pure_read" | "controlled_write" | "high_risk_writ
 type InteractionSemantics = "reveal_only_click"
 type BrowserChannel = "Google Chrome stable"
 type ExecutionSurface = "real_browser"
+type IssueScope = "issue_208" | "issue_209" | "shared"
+type GateExecutionMode =
+  | "dry_run"
+  | "recon"
+  | "live_read_limited"
+  | "live_read_high_risk"
+  | "live_write"
 type ClickKind =
   | "expand_or_collapse"
   | "switch_content_tab"
@@ -226,12 +233,12 @@ interface PlatformBehaviorAssessment {
   baseline_ref?: string
   baseline_state: BaselineState
   drift_level: DriftLevel
-  issue_scope: string
+  issue_scope: IssueScope
   action_type: ActionType
   interaction_semantics?: InteractionSemantics
   click_kind?: ClickKind
-  requested_execution_mode: string
-  effective_execution_mode: string
+  requested_execution_mode: GateExecutionMode
+  effective_execution_mode: GateExecutionMode
   threshold_config_snapshot_ref: string
   decision_hint: DecisionHint
   decision_id?: string
@@ -249,6 +256,8 @@ interface PlatformBehaviorAssessment {
 - `evidence_refs` 不得为空，且至少包含一条可回链信号批次或审计记录的引用。
 - `decision_hint` 仅为建议输出，不能直接改写 `FR-0010/0011` 的门禁最终状态。
 - `decision_hint=no_additional_restriction` 只表示 Layer 4 对当前 write-path assessment 不新增额外降级/阻断建议，不等于 live write 自动放行。
+- `issue_scope` 必须直接复用 `FR-0011` 已冻结的 issue scope 枚举：`issue_208 | issue_209 | shared`。
+- `requested_execution_mode` 与 `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 assessment 中扩写私有 mode。
 - `baseline_ref` 必须指向本次 assessment 实际比较所用的 `platform_behavior_baseline_snapshot.baseline_ref`；仅在当前 scope 尚无可用 downstream drift baseline、assessment 处于冷启动/学习期保守判定时允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的回链，不得被解释为新增 gate result。
@@ -260,4 +269,4 @@ interface PlatformBehaviorAssessment {
 - 同一条 shared upstream `active_baseline_ref` 可以被多个 downstream scope 的 assessment 并行引用，但每个 scope 都必须比较自己的 `platform_behavior_baseline_snapshot.baseline_ref`，不得因此合并不同 scope 的状态历史或审计对象。
 - `anti_detection_validation_view` 是上游派生读模型，不作为该 assessment 对象的正式输入或回写真相源。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。
-- `goal_kind=write` 且对应 downstream `platform_behavior_baseline_state` 已处于 `ready`、未标记 `reseed_required=true`，并且本次 assessment 的 `drift_level=none|low` 时，`decision_hint` 必须允许返回 `no_additional_restriction`；任一条件不满足时不得返回该值。
+- `decision_hint=no_additional_restriction` 仅允许在 `goal_kind=write`、对应 downstream `platform_behavior_baseline_state` 已处于 `ready`、未标记 `reseed_required=true`，并且本次 assessment 的 `drift_level=none|low` 时出现；它不得被解释为 write-ready 例外规则或 `gate_decision=allowed` 代理。

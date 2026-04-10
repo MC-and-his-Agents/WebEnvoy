@@ -20,7 +20,8 @@
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 都已补齐 `threshold_config_snapshot_ref`，且 `platform_behavior_assessment` 继续保留 `baseline_ref`，满足 replay / audit 对基线快照与阈值快照的最小回链要求。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state.baseline_ref` 现已指向 `platform_behavior_baseline_snapshot.baseline_ref`，不再把 `FR-0020.active_baseline_ref` 直接误写成 downstream drift baseline identity。
 - [ ] reviewer 已确认同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用，但这些 scope 仍拥有彼此独立的 `platform_behavior_baseline_snapshot` 与学习/漂移/审计历史。
-- [ ] reviewer 已确认 `decision_hint` 已包含 healthy write baseline 的非阻断输出 `no_additional_restriction`，且该值只表示 Layer 4 不额外加严，不等于 live write 自动放行。
+- [ ] reviewer 已确认 `decision_hint=no_additional_restriction` 只表示 Layer 4 不新增 gate restriction，不等于 write-ready 例外规则或 live write 自动放行。
+- [ ] reviewer 已确认 `issue_scope`、`requested_execution_mode`、`effective_execution_mode` 已直接复用 `FR-0010/0011` 的冻结枚举，不存在 Layer 4 私有 gate 消费字段取值。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016.execution_surface=real_browser`，`stub | fake_host | other` 不再被当作当前 Layer 4 formal input。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 `baseline_state=unseeded` 时 `learning_window_started_at` 允许为空或缺失，不会把“尚未开始学习窗口”的状态误写成已进入 learning。
