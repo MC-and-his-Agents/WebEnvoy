@@ -392,8 +392,173 @@
 - 截至当前 PR，WebEnvoy-managed profile 下的后续同口径复核尚未作为正式结论收口；因此 formal FR 的当前状态仍保持 blocked。
 - 若后续执行现场已恢复受管 XHS profile，应继续补齐 `search/detail/user_home` 的同口径复核，并在结论收口后再更新正式状态。
 
+### 5.2 2026-04-10 WebEnvoy-managed official runtime 再预检（issue #445，中间现场）
+
+2026-04-10 晚间为执行 issue `#445`，先在独立 worktree `/Users/mc/dev/WebEnvoy-445` 建立文档收口现场，再按当前仓库 formal 口径对 `xhs_001` 做 managed-profile official runtime 复核。
+
+本轮先确认到的受管 profile 事实：
+
+- `.webenvoy/profiles/xhs_001/__webenvoy_meta.json` 已存在，且 `lastLoginAt=2026-04-06T14:13:38.670Z`。
+- `persistentExtensionBinding` 已存在，字段为：
+  - `extensionId=peblekhliiiadkpnelonclgcdhmpgppm`
+  - `nativeHostName=com.webenvoy.host`
+  - `browserChannel=chrome`
+  - `manifestPath=/Users/mc/dev/WebEnvoy/.webenvoy/profiles/xhs_001/NativeMessagingHosts/com.webenvoy.host.json`
+- `xhs_001` 已不再是“仓库内完全不存在受管 XHS profile”的状态；但这只证明 profile 元数据存在，不等于本轮已经满足 official runtime live 复核前提。
+
+随后执行的 runtime 预检与启动事实如下：
+
+- 在 worktree 现场执行：
+  - `./bin/webenvoy runtime.status --profile xhs_001 --run-id issue445-status-preflight`
+  - 结果：`identityBindingState=bound`、`transportState=disconnected`、`bootstrapState=pending`、`runtimeReadiness=recoverable`
+  - 同时 `fingerprint_runtime.execution.live_allowed=false`，仅允许 `dry_run/recon`，原因码为 `LEGACY_PROFILE_BUNDLE_MIGRATED`
+- 在 worktree 现场执行默认 `runtime.start`：
+  - `./bin/webenvoy runtime.start --profile xhs_001 --run-id issue445-start-preflight`
+  - 结果：浏览器以 `--headless=new about:blank` 方式被拉起；该执行面不满足 FR-0005 需要的 `real_browser` live 复核前提，不能作为 fresh live evidence
+- 停止上述 headless 现场后，在 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行可见模式启动：
+  - `./bin/webenvoy runtime.start --profile xhs_001 --params '{"headless":false,"startUrl":"https://www.xiaohongshu.com/search_result?keyword=AI"}' --run-id issue445-main-start-visible-002`
+  - 结果：直接返回 `ERR_RUNTIME_IDENTITY_MISMATCH`
+  - 结构化错误明细显示：
+    - `reason=IDENTITY_MANIFEST_MISSING`
+    - `launcher_profile_root=/Users/mc/dev/WebEnvoy/.webenvoy/profiles`
+    - `expected_profile_root=/Users/mc/dev/WebEnvoy-445/.webenvoy/profiles`
+    - `profile_root_matches=false`
+
+本轮同时确认到一个新的执行现场事实：
+
+- `xhs_001` 的 `__webenvoy_meta.json.profileDir` 当前已被写成 `/Users/mc/dev/WebEnvoy-445/.webenvoy/profiles/xhs_001`
+- 而 native host launcher 固定导出的 `WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT` 仍是 `/Users/mc/dev/WebEnvoy/.webenvoy/profiles`
+- 在当前现场下，这会把 official Chrome persistent extension identity preflight 稳定判成 `mismatch`
+
+由此得到的正式结论：
+
+- 2026-04-10 这轮与 2026-04-06 不同，阻断点已不再是“没有受管 XHS profile”，而是“受管 profile 的 official runtime identity preflight 不满足当前 live 复核前提”。
+- 在 `ERR_RUNTIME_IDENTITY_MISMATCH / IDENTITY_MANIFEST_MISSING` 未解除前，本轮不能合法进入 `search/detail/user_home` 的 managed-profile fresh live rerun。
+- 因为合法的 `real_browser` official runtime rerun 根本没有开始，本轮没有新增 `search/detail/user_home` 的 API primary 成功样本，也没有新增 `required_headers` 最小必要集矩阵证据。
+- 因此 `search` 仍停留在 `observed_once` 的 `primary` 成功样本；`detail` 与 `user_home` 仍分别停留在 `fallback-only` 与 `candidate/failed` 组合。
+- issue `#445` 本轮已按同一 formal 口径重做 Go/No-Go 判定，结论维持 `No-Go/paused`，formal FR 当前状态继续保持 blocked。
+- 在修复 `xhs_001` 的 official runtime identity mismatch、并恢复合法的 `real_browser` 执行面之前，不得把外部手工浏览器、旧 head、旧 artifact 或 headless `about:blank` 现场补写成 managed-profile live 复核结论。
+
+### 5.3 2026-04-11 main 目录恢复后再复核（issue #445 正式收口）
+
+2026-04-11 在 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 继续复核。与 5.2 的中间现场不同，本轮先把受污染的本地 runtime 资产恢复到 main 目录口径，然后只在 `main` 目录执行 fresh rerun；worktree 现场不再作为 formal 结论依据。
+
+#### 5.3.1 准入预检结果
+
+本轮先确认并恢复的执行现场事实：
+
+- `.webenvoy/profiles/xhs_001/__webenvoy_meta.json.profileDir` 已恢复为 `/Users/mc/dev/WebEnvoy/.webenvoy/profiles/xhs_001`，不再指向 worktree。
+- `persistentExtensionBinding` 仍指向：
+  - `extensionId=peblekhliiiadkpnelonclgcdhmpgppm`
+  - `nativeHostName=com.webenvoy.host`
+  - `browserChannel=chrome`
+  - `manifestPath=/Users/mc/dev/WebEnvoy/.webenvoy/profiles/xhs_001/NativeMessagingHosts/com.webenvoy.host.json`
+- profile 元数据中补入了非 legacy 的 `fingerprintProfileBundle`，因此 `fingerprint_runtime.execution.live_allowed=true`，允许 `dry_run/recon/live_read_limited/live_read_high_risk/live_write`。
+
+只读预检与启动结果：
+
+- `run_id=issue445-main-verify-status-restore-001`
+  - `command=runtime.status`
+  - 结果：`identityBindingState=bound`、`profileRootMatches=true`、`failureReason=IDENTITY_PREFLIGHT_PASSED`
+- `run_id=issue445-main-start-visible-clean-001`
+  - `command=runtime.start`
+  - `profile=xhs_001`
+  - `browser_channel=chrome`
+  - `execution_surface=real_browser`
+  - `page_url=https://www.xiaohongshu.com/search_result?keyword=AI`
+  - 结果：`browserState=ready`、`transportState=ready`、`bootstrapState=ready`、`runtimeReadiness=ready`
+- `run_id=issue445-main-ping-clean-001`
+  - `command=runtime.ping`
+  - 结果：`relay_path=host>background>content-script>background>host`
+
+由此可确认：issue `#445` 在 main 目录恢复后的正式阻断点，已不再是 `profileDir/profile_root` 污染，也不再是 legacy 指纹 bundle 拒绝 live。
+
+#### 5.3.2 fresh rerun 事实
+
+本轮 fresh rerun 统一执行口径：
+
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57`
+- Chrome 页面：`https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
+
+运行时 tab 诊断：
+
+- `run_id=issue445-main-runtime-tabs-001`
+- 桥接命令：`runtime.tabs`
+- `page_url=https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
+- `target_tab_id=1230416592`
+- `relay_path=host>background`
+- 结果：成功回读当前 XHS 搜索页 tab，说明本轮不再是“猜错 tab id”导致的转发失败
+
+#### 5.3.3 三场景 endpoint 证据更新
+
+`search`
+
+- `run_id=issue445-main-search-dryrun-001`
+- `evidence_collected_at=2026-04-10T16:18:22Z`（即 `Asia/Shanghai` 时区的 `2026-04-11T00:18:22+08:00`，属于本节记录的 post-restore rerun）
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `page_url=https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
+- `target_tab_id=1230416592`
+- `relay_path=host>background>content-script>background>host`（由同会话 `runtime.ping` 与 `runtime.start`/`runtime.tabs` 成功链路共同确认）
+- `interaction_locator=search_result_tab + query=AI`
+- 最小 replay：
+  - `runtime.start --profile xhs_001 --params {"headless":false,"startUrl":"https://www.xiaohongshu.com/search_result?keyword=AI"}`
+  - `runtime.tabs` 回读当前 XHS tab，确认 `target_tab_id=1230416592`
+  - 以 `target_domain=www.xiaohongshu.com`、`target_page=search_result_tab`、`requested_execution_mode=dry_run` 执行 `xhs.search`
+- 成功信号：
+  - `consumer_gate_result.gate_decision=allowed`
+  - `requested_execution_mode=dry_run`
+  - `effective_execution_mode=dry_run`
+  - `target_tab_id` / `target_domain` / `target_page` 均被 background 接受
+- 失败事实：
+  - 执行层返回 `ERR_EXECUTION_FAILED`
+  - 失败原文：`executeXhsSearchImpl is not defined`
+  - `blocker_level=repo_latest_head_execution_bundle`
+- 成熟度结论：
+  - 本轮只证明 managed-profile + official runtime + real browser + explicit target gate 已恢复
+  - 但 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的执行 bundle 在 fresh rerun 首次进入 content script 时即失败，`search` 不能升级为 `reproduced_multi_round`，也不能补齐 required headers 矩阵
+
+`detail`
+
+- 本轮未获得合法 fresh rerun 样本
+- 阻断原因不是 profile 不存在，而是 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 在共享执行 bundle 层已出现 `executeXhsSearchImpl is not defined`
+- 由于 `search` 的同口径 fresh rerun 尚未通过，`detail` 无法在同一 managed-profile official runtime 边界内继续补做 API primary 复核
+- 需与早期 `#306` 语义区分：此前“详情页可读取”的成功，指向的是 `detail-fallback-01` 这类 page-state/fallback 证据（`window.__INITIAL_STATE__.note.noteDetailMap` 可读），不是 `detail primary api` 已成功，更不是 `search` 主路径已成功
+- 当前维持既有结论：`fallback-only + candidate/failed`，未新增 primary success 样本
+
+`user_home`
+
+- 本轮未获得合法 fresh rerun 样本
+- 阻断原因同上：`tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的共享执行 bundle 已在最早的 XHS read fresh rerun 中失败
+- 当前维持既有结论：`fallback-only + candidate/failed`，未新增 `/api/sns/web/v1/user/otherinfo` 或候选聚合端点的 primary success 样本
+
+#### 5.3.4 required headers / 关键字段矩阵是否提升
+
+- `search`：未提升。虽然本轮重新确认了 explicit target gate 与 real-browser relay 可达，但由于执行 bundle 在 `dry_run` 即失败，本轮没有新增 API 请求成功样本，仍不能把 `required_headers_observed/candidate` 从 `observed_once` 升级到 `reproduced_multi_round`。
+- `detail`：未提升。无新增 API primary success 样本。
+- `user_home`：未提升。无新增 API primary success 样本。
+
+#### 5.3.5 本轮正式结论
+
+2026-04-11 的 main 目录恢复后复核，已经推翻了“当前唯一阻断是 worktree/main profile root mismatch”的中间判断；但没有推翻 FR-0005 的正式 `No-Go/paused` 结论，原因如下：
+
+- `xhs_001` 现在可被认定为可启动的 WebEnvoy-managed official runtime profile。
+- `real_browser` fresh rerun 已成功达到 `runtime.start ready`、`runtime.tabs` 成功回读真实 tab、`runtime.ping` 成功回读真实 relay path。
+- 但是 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的 XHS read 执行 bundle 在 `search` 首次 fresh rerun 就失败，错误为 `executeXhsSearchImpl is not defined`；这属于当前仓库该提交的执行层阻断，不是外部 profile 根目录问题。
+- 同时，`risk_state_output.current_state=paused` 仍未解除，本轮也没有新增 approval / headers matrix / API primary success 样本。
+- 因此 `search/detail/user_home` 三类场景都没有达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
+- issue `#445` 本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
+- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`。
+
 ## 未决项（进入下一轮复核前保留）
 
+- 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
+- 修复后续实现中的 XHS read 执行 bundle 缺陷（当前已记录的 fresh rerun 失败原文：`executeXhsSearchImpl is not defined`）
+- 在完成上述执行层修复后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
 - 对 `search/detail/user_home` 分别完成“required_headers 最小必要集”实验矩阵
