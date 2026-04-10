@@ -709,7 +709,7 @@ AI 发出第一条操作命令
 | 风险审查与保护门禁基线 | `Phase 1.x / #426 -> FR-0009 / #215` |
 | Sprint 2 风险门禁与执行硬化 | `Phase 1.x / #426 -> FR-0010 / #230` |
 | Sprint 3 最小反风控执行能力 | `Phase 1.x / #426 -> FR-0011 / #231` |
-| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> FR-0015 / #435`（在对应 formal suite cleanup PR 合入前，repo formal suite 仍可能保留 `#281/#361` 作为 historical refs） |
+| official Chrome runtime migration implementation-prep | GitHub issue 层当前挂接为 `Phase 1.x / #426 -> FR-0015 / #435`；在对应 formal suite cleanup PR 合入前，repo formal suite 仍以 `#281/#361` 承接 implementation-prep 主线叙述 |
 
 ### 11.4 当前 GitHub 主树与 formal suite 收口状态
 
@@ -717,8 +717,8 @@ AI 发出第一条操作命令
 
 | 层级 | GitHub 当前 canonical 挂接 | formal suite 当前收口状态 |
 | --- | --- | --- |
-| `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 在 cleanup PR 合入前仍可能保留 `#281/#361` implementation-prep historical refs |
-| `Phase 2` | `#427 -> #265/#267/#266/#239` | 相关 formal suites 在 cleanup PR 合入前仍可能保留 `#233/#368` 等历史 anchor 作为过渡引用 |
+| `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 在 cleanup PR 合入前仍以 `#281/#361` 承接 implementation-prep 主线叙述 |
+| `Phase 2` | `#427 -> #265/#267/#266/#239` | 相关 formal suites 在 cleanup PR 合入前仍以 `#232/#233/#368` 作为 formal 参考锚点 |
 | `Phase 4` | `#423 -> #238` | `FR-0022` formal suite 已合入；不再需要旧父级过渡说明 |
 
 ### 11.5 哪些能力进入近期 backlog，哪些只冻结在蓝图
@@ -745,6 +745,6 @@ AI 发出第一条操作命令
 ### 11.6 执行约束
 
 - 后续若新增反风控 backlog，应在 GitHub issue 层直接挂到 owning `Phase -> FR -> Work Item` 主树，不再新增活跃 umbrella 或平行父级 issue。
-- 在对应 formal suite cleanup PR 合入前，`#232/#281/#361/#233/#368` 等历史 issue 仍可能作为文档内的过渡引用存在；不得把这些 historical refs 误写成当前 GitHub 父级结构。
+- 在对应 formal suite cleanup PR 合入前，`#232/#281/#361/#233/#368` 等 issue 仍可能作为当前文档中的 formal 参考锚点存在；不得把 GitHub canonical tree 与这些 formal 参考锚点混写成同一层结构真相。
 - `Phase 2` 不得再被表述为“反风控建设已完成后的纯封装阶段”；它仍承接 Layer 1/2/3 的延续建设。
 - 若某能力尚未进入 backlog，但已在本蓝图中被标记为“应尽早落地”或“后层扩展”，后续 roadmap / Sprint 调整时必须显式处理，不能视为不存在。
