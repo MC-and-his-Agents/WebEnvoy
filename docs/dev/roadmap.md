@@ -147,11 +147,8 @@ WebEnvoy 当前主线专注于：
 
 - `#280`：证据输入与 Go / No-Go 结论
 - `#279`：roadmap / architecture 正式冻结
-- `#281`：repo formal suite 当前仍沿用的 implementation-prep 主线表达
-- `#435`：GitHub issue 层当前 canonical FR 容器
+- `#435`：official Chrome runtime migration implementation-prep 的当前 canonical FR issue
 - `FR-0020 / #239`：后续验证与基线评估归属
-
-也就是说，GitHub issue 层的 canonical 挂接已经迁到 `#435`，但 repo formal suite 里的 implementation-prep 叙述当前仍沿用 `#281`；在 formal suite cleanup PR 合入前，roadmap 需要同时承认这两个层面的过渡关系。
 
 ---
 
@@ -192,7 +189,7 @@ WebEnvoy 当前主线专注于：
 - Sprint 2 的门禁能力已可执行，不再是文档口径。
 - Sprint 3 的最小反风控执行能力已落地，能约束后续 live 扩展。
 - `#208` 的恢复条件已从口头说明转为可验证前置。
-- 完整反风控体系在 GitHub issue 层已进入当前单一主树，不再只停留在 Sprint 2/3 的最小前置描述中；`Phase 2 / #427` 直接承接 `#265`、`#267`、`#266`、`#239`，`Phase 4 / #423` 当前挂接 `#238`。repo formal suite 中仍存在 `#232/#233/#368` 等历史引用，需由后续 cleanup PR 收口。
+- 完整反风控体系在 GitHub issue 层已进入当前单一主树，不再只停留在 Sprint 2/3 的最小前置描述中；`Phase 2 / #427` 直接承接 `#265`、`#267`、`#266`、`#239`，`Phase 4 / #423` 当前挂接 `#238`。
 
 ---
 
@@ -202,7 +199,18 @@ WebEnvoy 当前主线专注于：
 >
 > 指标：用户可以把一次成功路径快速留下为候选能力，并知道它当前是否仍可信；未知网站具备最小读取与基础交互能力；同一套封装机制已能同时承载首个 L3 样本与新的 L2 样本；读 / 写 / 下载三类能力已具备统一封装方向。
 >
-> 说明：Phase 2 不是“反风控建设结束后才开始的纯能力封装阶段”。在 `Phase 1.x` 完成最小前置后，Phase 2 仍继续承接反风控延续主线，尤其是 Layer 1/2/3 的后续建设；当前 GitHub issue 层由 `Phase 2 / #427` 直接挂接 `#265`、`#267`、`#266`、`#239` 等 canonical FR issue，而 repo formal suites 中仍保留 `#232/#233` 的过渡引用，后续由 active FR cleanup PR 收口。
+> 说明：Phase 2 不是“反风控建设结束后才开始的纯能力封装阶段”。在 `Phase 1.x` 完成最小前置后，Phase 2 仍继续承接反风控延续建设，尤其是 Layer 1/2/3 的后续建设；当前 GitHub issue 层由 `Phase 2 / #427` 直接挂接 `#265`、`#267`、`#266`、`#418`、`#420`、`#419`、`#239`、`#153` 等 canonical FR issue。
+
+当前 canonical FR / Work Item 挂接如下：
+
+- `FR-0012 / #265` -> `#235`
+- `FR-0013 / #267` -> `#236`
+- `FR-0014 / #266` -> `#237`
+- `FR-0017 / #418` -> `#156`
+- `FR-0018 / #420` -> `#155`
+- `FR-0019 / #419` -> `#157`
+- `FR-0020 / #239`
+- `FR-0021 / #153`
 
 ### 本阶段建设
 

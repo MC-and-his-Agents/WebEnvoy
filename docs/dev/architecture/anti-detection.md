@@ -709,19 +709,17 @@ AI 发出第一条操作命令
 | 风险审查与保护门禁基线 | `Phase 1.x / #426 -> FR-0009 / #215` |
 | Sprint 2 风险门禁与执行硬化 | `Phase 1.x / #426 -> FR-0010 / #230` |
 | Sprint 3 最小反风控执行能力 | `Phase 1.x / #426 -> FR-0011 / #231` |
-| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> GitHub canonical FR issue #435；repo formal suite 当前仍沿用 #281/#361 的 implementation-prep 表达` |
+| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> FR-0015 / #435` |
 
-### 11.4 当前 GitHub 主树与 formal suite 迁移关系
+### 11.4 当前 GitHub 主树
 
-为避免完整体系继续散落在架构描述中，GitHub issue 层当前已收敛为 `Phase -> FR -> Work Item`；但 repo formal suites 仍有一部分历史 anchor 尚未完成 cleanup：
+为避免完整体系继续散落在架构描述中，GitHub issue 层当前以 `Phase -> FR -> Work Item` 作为唯一主树：
 
-| 层级 | GitHub 当前 canonical 挂接 | repo formal suite 当前状态 |
-| --- | --- | --- |
-| `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 当前仍沿用 `#281/#361` 的 implementation-prep 叙述 |
-| `Phase 2` | `#427 -> #265/#267/#266/#239` | `FR-0012/0013/0014` 与能力封装相关 formal suites 中仍保留 `#232/#233/#368` 等过渡引用，待后续 cleanup PR 收口 |
-| `Phase 4` | `#423 -> #238` | 对应 Layer 4 formal FR 套件仍在独立 spec review PR 中，尚未合入 `main` |
-
-GitHub issue 层的 Work Item 直接挂回 owning FR；repo formal suites 中的 `#232/#233/#368` 等历史 anchor 当前仍属于过渡引用，不能再被当作新的 GitHub 当前父级结构。
+| 层级 | GitHub 当前 canonical 挂接 |
+| --- | --- |
+| `Phase 1.x` | `#426 -> #215/#230/#231/#435` |
+| `Phase 2` | `#427 -> #265/#267/#266/#418/#420/#419/#239/#153` |
+| `Phase 4` | `#423 -> #238` |
 
 ### 11.5 哪些能力进入近期 backlog，哪些只冻结在蓝图
 
@@ -747,6 +745,5 @@ GitHub issue 层的 Work Item 直接挂回 owning FR；repo formal suites 中的
 ### 11.6 执行约束
 
 - 后续若新增反风控 backlog，应在 GitHub issue 层直接挂到 owning `Phase -> FR -> Work Item` 主树，不再新增活跃 umbrella 或平行父级 issue。
-- 在 formal suite cleanup PR 合入前，`#232/#233/#368` 等历史 anchor 仍可能作为过渡引用存在；不得把这种过渡引用误写成新的 GitHub 当前父级结构。
 - `Phase 2` 不得再被表述为“反风控建设已完成后的纯封装阶段”；它仍承接 Layer 1/2/3 的延续建设。
 - 若某能力尚未进入 backlog，但已在本蓝图中被标记为“应尽早落地”或“后层扩展”，后续 roadmap / Sprint 调整时必须显式处理，不能视为不存在。
