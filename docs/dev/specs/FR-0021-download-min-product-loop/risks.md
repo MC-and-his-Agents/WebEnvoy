@@ -30,6 +30,12 @@
 - 缓解：冻结 `download_source` 判别联合，显式覆盖 `direct_url`、`page_blob`、`page_derived`
 - 回滚：撤销 direct-URL-only 约束，恢复浏览器内三类下载来源路径
 
+## 风险 5.1：`page_blob` 只给 `blob_url`，却没有可落盘桥接
+
+- 表现：formal 契约允许 `page_blob` 只提供 `blob_url`，实现即使合法满足契约，也无法在脱离来源页面上下文后把 Blob 内容落盘到 CLI trusted download base
+- 缓解：冻结 `page_blob.blob_locator` 为必填桥接定位点；`blob_url` 只作为浏览器侧来源标识或审计线索
+- 回滚：撤销 `blob_url-only` 语义，恢复“浏览器执行面先物化 Blob 内容，再交由 CLI 落盘”的单一路径
+
 ## 风险 6：下载执行层枚举与共享能力模型分叉
 
 - 表现：`requested_execution_layer` 或 `candidate_shell_seed.execution_layer_support` 只允许 `L3/L2`，导致与 `FR-0017` 的 `L1/L2/L3` 正式枚举冲突

@@ -25,6 +25,7 @@
 
 - 不引入浏览器外异构抓取器作为正式主路径。
 - 下载请求不得冻结为 direct-URL-only；必须覆盖页内 `blob:` 与页面导出后解析来源的输入路径。
+- `page_blob` 不得把单独的 `blob_url` 冻结为充分输入；formal 契约必须保留可由浏览器执行面桥接到 CLI 落盘的 `blob_locator`。
 - `download_source` 只表达当前浏览器执行上下文内可解析输入，不扩张为新的全局 artifact/ref 真相源。
 - `destination_root` 只允许表达 CLI trusted download base 内的目标子目录；不得把任意宿主路径暴露给调用方。
 - 不把批量下载、断点续传或跨平台同步写进首刀。
@@ -40,6 +41,7 @@
   - 对照 `FR-0017/0018` 检查下载是否仍在统一能力模型内
   - 对照 `roadmap.md` 检查下载是否仍属于 Phase 2 能力面
   - 检查下载请求是否覆盖 direct URL、`blob:`、页面导出后解析三类路径
+  - 检查 `page_blob` 是否已禁止 `blob_url-only`，并冻结了浏览器执行面到 CLI 落盘的桥接定位语义
   - 检查 `source_url` 是否被定义为下载时最终浏览器侧来源标识，而非调用方预填稳定 URL
   - 检查 `destination_root` 是否已冻结为 trusted download base 内的子目录语义
   - 检查结构化下载结果是否直接暴露在 `summary.capability_result.download_result_summary`，不再依赖 opaque `data_ref`

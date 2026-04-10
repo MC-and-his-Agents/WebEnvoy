@@ -14,10 +14,10 @@
 ### `download_source` 语义
 
 - `direct_url`：调用方直接提供 `target_url`。
-- `page_blob`：调用方提供页面内 `blob:` URL 或页面内 `Blob` 定位线索（例如 `blob_locator`）。
+- `page_blob`：调用方必须提供页面执行面内可解析的 `blob_locator`，用于桥接读取页面内 `Blob`；`blob_url` 如存在，只作为浏览器侧来源标识或审计线索。
 - `page_derived`：调用方提供页面导出/执行线索，由浏览器执行面在运行时解析最终下载对象。
 - `download_source` 只用于表达当前浏览器执行上下文内可解析的请求输入，不是新的全局 artifact/ref 真相源。
-- `page_blob` 至少需要 `blob_url` 或 `blob_locator` 其一；`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一。
+- `page_blob` 不得只靠 `blob_url` 构成充分输入；浏览器执行面必须仍能通过 `blob_locator` 物化可交给 CLI 落盘的 Blob 内容。`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一。
 
 ## 2. `DownloadResultSummary`
 

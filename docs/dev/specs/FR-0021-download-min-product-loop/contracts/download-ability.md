@@ -38,8 +38,8 @@ type DownloadSource =
     }
   | {
       source_kind: "page_blob"
+      blob_locator: string
       blob_url?: string
-      blob_locator?: string
       page_context_hint?: string
     }
   | {
@@ -73,7 +73,8 @@ interface DownloadAbilityRequest {
 - `output_policy.destination_root` 只允许表达 CLI-owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径。
 - 实现必须先对 `destination_root` 做本地规范化，再拼接到 trusted download base；若输入为绝对路径、`..`、`~`、Windows drive/UNC 前缀，或规范化后逃逸 trusted base，必须在 `input_validation` 阶段直接拒绝。
 - `download_source` 的 `page_blob` / `page_derived` 只允许表达当前浏览器执行上下文内可解析的输入线索，不得被解释为新的全局 artifact/ref resolver。
-- `download_source.source_kind=page_blob` 时，`blob_url` 与 `blob_locator` 至少提供一项。
+- `download_source.source_kind=page_blob` 时，`blob_locator` 必须存在；它是页面执行面内可解析的 Blob 读取/桥接定位点，用于让浏览器侧把 Blob 内容交给 CLI 落盘。
+- `download_source.source_kind=page_blob` 时，`blob_url` 如存在，只能作为浏览器侧 source identity 或审计线索，不能单独构成足以落盘的输入。
 - `download_source.source_kind=page_derived` 时，`trigger_hint` 与 `page_context_hint` 至少提供一项。
 - `download_source.source_kind=page_derived` 时，不要求调用方预先给出最终下载 URL，最终来源通过 `download_result_summary.source_url` 回传。
 

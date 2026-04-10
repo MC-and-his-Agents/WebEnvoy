@@ -60,9 +60,9 @@ Canonical Issue: #153
 - `destination_root` 只允许表达 CLI owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径
 - `download_source` 必须覆盖三类输入路径：
   - `direct_url`：调用方直接提供可访问 URL
-  - `page_blob`：下载对象来自页面内 `blob:` URL 或页面内 `Blob` 句柄
+  - `page_blob`：下载对象来自页面内 `Blob` 句柄或 `blob:` URL，但正式输入必须给出可在页面执行面内桥接读取的 `blob_locator`
   - `page_derived`：需先执行页面导出/页面动作后，才能在浏览器侧解析出最终下载对象
-- `page_blob` 至少需要 `blob_url` 或 `blob_locator` 其一；`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一
+- `page_blob` 必须提供 `blob_locator`；`blob_url` 如存在，只能作为浏览器侧 source identity 或审计线索，不能单独构成足以落盘的输入。`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一
 - 必须明确：
   - 下载能力仍属于统一能力面中的 `download`
   - `download_ability_request` 只能作为 `FR-0007` `params.input` 下的下载输入对象，不得提升为新的顶层请求壳
@@ -71,6 +71,7 @@ Canonical Issue: #153
   - `ability_ref` 在进入候选能力描述后必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `requested_execution_layer` 的共享正式枚举必须保留 `L1`、`L2`、`L3`；当前最小实现切片可优先 `L3/L2`，但不得在 formal 契约层排除 `L1`
   - `download_source` 只描述“当前浏览器执行上下文内可解析的请求输入”，不得被提升为新的全局 artifact/ref 真相源
+  - `page_blob.blob_locator` 的正式语义是页面执行面内可解析的 Blob 读取/桥接定位点，用于让浏览器侧把 Blob 内容交给 CLI 落盘；不得把单独的 `blob_url` 视为足以完成落盘的充分输入
   - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器写成正式主路径
 
 ### 3. 最小下载结果对象
@@ -233,9 +234,10 @@ And 不会继续进入文件落盘阶段
 6. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
 7. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
 8. 把下载输入冻结为 direct-URL-only，排除 `blob:` 或页面导出路径：视为与既有下载架构冲突。
-9. `destination_root` 允许调用方直接写任意宿主绝对路径，或规范化后可逃逸 trusted download base：视为高风险写入边界未冻结。
-10. 把 `download_result_summary` 继续声明为 opaque `data_ref` 的解引用结果：视为与 `FR-0007` 的 opaque reference 契约冲突。
-11. `candidate_shell_seed` 缺少 `display_name`、`platform_scope`、`capture_origin`、`capture_run_id`、`capture_profile`、`captured_at` 或 `candidate_status` 等 descriptor 必填字段，却仍被当作成功 handoff：视为与 `FR-0017` 的 descriptor 物化边界冲突。
+9. `page_blob` 允许只靠 `blob_url` 就被视为合法输入，导致 CLI 无法在脱离页面上下文时实际落盘：视为浏览器到 CLI 的桥接边界未冻结。
+10. `destination_root` 允许调用方直接写任意宿主绝对路径，或规范化后可逃逸 trusted download base：视为高风险写入边界未冻结。
+11. 把 `download_result_summary` 继续声明为 opaque `data_ref` 的解引用结果：视为与 `FR-0007` 的 opaque reference 契约冲突。
+12. `candidate_shell_seed` 缺少 `display_name`、`platform_scope`、`capture_origin`、`capture_run_id`、`capture_profile`、`captured_at` 或 `candidate_status` 等 descriptor 必填字段，却仍被当作成功 handoff：视为与 `FR-0017` 的 descriptor 物化边界冲突。
 
 ## 验收标准
 
