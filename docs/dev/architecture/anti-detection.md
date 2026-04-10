@@ -677,14 +677,14 @@ AI 发出第一条操作命令
 
 ---
 
-## 十一、完整蓝图与 Backlog 映射
+## 十一、完整蓝图与单一主树映射
 
-本章用于把 `anti-detection.md` 中已经设计的完整体系，正式映射到阶段化落地与 GitHub backlog 真相源中，避免后续只围绕最小前置推进而遗漏长期能力。
+本章用于把 `anti-detection.md` 中已经设计的完整体系，正式映射到阶段化落地与 GitHub 单一主树中，避免后续只围绕最小前置推进而遗漏长期能力。
 
 ### 11.1 规划原则
 
 - 反风控完整体系以本架构文档为上位蓝图，不再新建平行蓝图文档。
-- GitHub Issues / Milestones 继续作为 backlog 真相源；本地文档只负责冻结能力地图、阶段顺序与 issue 映射。
+- GitHub Issues / Projects 继续作为真相源；Issue 页面承担结构与状态真相，Project 只做视图。本地文档只负责冻结能力地图、阶段顺序与 canonical Phase/FR 映射。
 - `Phase 1.x / Sprint 2 / Sprint 3` 只承接最小前置与最小执行能力，不等于完整反风控体系已经完成。
 - 后续能力按“必须前置 / 应尽早落地 / 后层扩展”分层推进，而不是一次性平铺成大量近期实现项。
 
@@ -705,38 +705,36 @@ AI 发出第一条操作命令
 
 | 范围 | 当前承接 |
 | --- | --- |
-| 反风控前置阶段治理 | `#216` |
-| 风险审查与保护门禁基线 | `#213` / `FR-0009` |
-| Sprint 2 风险门禁与执行硬化 | `#220`、`#218`、`#219`、`#221`、`#223` / `FR-0010` |
-| Sprint 3 最小反风控执行能力 | `#217`、`#224`、`#225`、`#226`、`#227` / `FR-0011` |
+| 反风控前置阶段治理 | `Phase 1.x / #426` |
+| 风险审查与保护门禁基线 | `Phase 1.x / #426 -> FR-0009 / #215` |
+| Sprint 2 风险门禁与执行硬化 | `Phase 1.x / #426 -> FR-0010 / #230` |
+| Sprint 3 最小反风控执行能力 | `Phase 1.x / #426 -> FR-0011 / #231` |
+| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> GitHub canonical FR issue #435；repo formal suite 当前仍沿用 #281/#361 的 implementation-prep 表达` |
 
-### 11.4 新增总控与后续 Backlog 映射
+### 11.4 当前 GitHub 主树与 formal suite 迁移关系
 
-为避免完整体系继续散落在架构描述中，新增以下 GitHub 真相源：
+为避免完整体系继续散落在架构描述中，GitHub issue 层当前已收敛为 `Phase -> FR -> Work Item`；但 repo formal suites 仍有一部分历史 anchor 尚未完成 cleanup：
 
-| 类型 | Issue | 作用 |
+| 层级 | GitHub 当前 canonical 挂接 | repo formal suite 当前状态 |
 | --- | --- | --- |
-| 总控 umbrella | `#232` | 反风控能力总蓝图与分层落地总控 |
-| Phase 2 延续 umbrella | `#233` | 承接最小前置之外、但应尽早实现的反风控主线 |
-| 后层扩展 umbrella | `#234` | 承接 Layer 4+ 与长期扩展能力 |
-| Layer 1 主线 | `#235` | JS 指纹补全与 profile 一致性 |
-| Layer 2 主线 | `#236` | 事件级拟人模拟增强 |
-| Layer 3 主线 | `#237` | 完整 session 行为节律引擎 |
-| Layer 4 主线 | `#238` | 平台行为模型与长期基线 |
-| 验证主线 | `#239` | 反风控验证与基线评估 |
+| `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 当前仍沿用 `#281/#361` 的 implementation-prep 叙述 |
+| `Phase 2` | `#427 -> #265/#267/#266/#239` | `FR-0012/0013/0014` 与能力封装相关 formal suites 中仍保留 `#232/#233/#368` 等过渡引用，待后续 cleanup PR 收口 |
+| `Phase 4` | `#423 -> #238` | 对应 Layer 4 formal FR 套件仍在独立 spec review PR 中，尚未合入 `main` |
+
+GitHub issue 层的 Work Item 直接挂回 owning FR；repo formal suites 中的 `#232/#233/#368` 等历史 anchor 当前仍属于过渡引用，不能再被当作新的 GitHub 当前父级结构。
 
 ### 11.5 哪些能力进入近期 backlog，哪些只冻结在蓝图
 
 **进入近期 backlog：**
 
-- Layer 1 JS 指纹补全与 profile 一致性（`#235`）
-- Layer 2 事件级拟人模拟增强（`#236`）
-- Layer 3 完整 session 行为节律引擎（`#237`）
-- 反风控验证与基线评估（`#239`）
+- Layer 1 JS 指纹补全与 profile 一致性（`Phase 2 / #427 -> #265`）
+- Layer 2 事件级拟人模拟增强（`Phase 2 / #427 -> #267`）
+- Layer 3 完整 session 行为节律引擎（`Phase 2 / #427 -> #266`）
+- 反风控验证与基线评估（`Phase 2 / #427 -> #239`）
 
 **进入后层扩展，但现在就冻结到蓝图：**
 
-- Layer 4 平台行为模型与长期基线（`#238`）
+- Layer 4 平台行为模型与长期基线（`Phase 4 / #423 -> #238`；formal FR 套件待独立 spec review PR 合入）
 - 行为人格（Behavior Persona）
 - 长期行为画像与跨平台策略扩展
 - Layer 5 / Camoufox 级极端场景策略
@@ -748,6 +746,7 @@ AI 发出第一条操作命令
 
 ### 11.6 执行约束
 
-- 后续若新增反风控 backlog，应优先引用 `#232`，再挂到对应 umbrella，而不是直接孤立开 issue。
+- 后续若新增反风控 backlog，应在 GitHub issue 层直接挂到 owning `Phase -> FR -> Work Item` 主树，不再新增活跃 umbrella 或平行父级 issue。
+- 在 formal suite cleanup PR 合入前，`#232/#233/#368` 等历史 anchor 仍可能作为过渡引用存在；不得把这种过渡引用误写成新的 GitHub 当前父级结构。
 - `Phase 2` 不得再被表述为“反风控建设已完成后的纯封装阶段”；它仍承接 Layer 1/2/3 的延续建设。
 - 若某能力尚未进入 backlog，但已在本蓝图中被标记为“应尽早落地”或“后层扩展”，后续 roadmap / Sprint 调整时必须显式处理，不能视为不存在。
