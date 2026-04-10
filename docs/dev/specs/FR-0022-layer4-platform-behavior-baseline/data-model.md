@@ -18,7 +18,6 @@
 - `effective_execution_mode`
 - `probe_bundle_ref`
 - `runtime_context_id`
-- `proxy_binding_ref`
 - `target_domain`
 - `goal_kind`
 - `interaction_safety_class`
@@ -41,7 +40,7 @@
 - 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作，不得另起 `download` 作为新的 Layer 4 action shortcut。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
-- `proxy_binding_ref` 只用于记录本次批次的代理绑定证据；当前不得把它提升为 `FR-0020` registry 并不存在的 active baseline scope key。
+- 当前 formal baseline 不把 proxy binding 作为 Layer 4 必填输入；若未来需要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
 
 ## 2. `platform_behavior_baseline_state`
@@ -91,7 +90,7 @@
 补充约束：
 
 - `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式或 probe bundle 共用同一可写状态对象。
-- `runtime_context_id` 与 `proxy_binding_ref` 仅用于 run/session 证据回链，不进入可写基线主键。
+- `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
 - 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，则必须降级为 `degraded` 或回退到 `learning`。
@@ -114,7 +113,6 @@
 - `execution_surface`
 - `probe_bundle_ref`
 - `runtime_context_id`
-- `proxy_binding_ref`
 - `threshold_config_snapshot_ref`
 - `baseline_state`
 - `drift_level`
@@ -152,7 +150,6 @@
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
 - `action_type` 必须落在稳定动作集合 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
-- `proxy_binding_ref` 只用于记录本次 assessment 所对应批次的代理绑定证据，不参与 active baseline 选择。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
 
@@ -163,7 +160,7 @@
   - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
   - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
   - `effective_execution_mode` 与 `probe_bundle_ref` 是 shared scope keys；Layer 4 baseline identity 必须保留这两个维度，不得把不同 mode / bundle 的 baseline 混写到同一状态对象。
-  - 在 `FR-0020` registry scope 未正式扩展前，Layer 4 不得把 `proxy_binding_ref` 升格为并行的 active baseline key；代理差异只能通过 signal batch / assessment 证据回链表达。
+  - 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 暴露后再进入独立 spec review。
 - 与 `FR-0014`：
   - Layer 4 读取 session 节律摘要，但不重定义 Layer 3 状态机。
 - 与 `FR-0010/0011`：

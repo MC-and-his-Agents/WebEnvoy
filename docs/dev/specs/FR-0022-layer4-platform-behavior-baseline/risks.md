@@ -17,12 +17,13 @@
 
 - 场景：
   - 不同 profile/platform，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
-  - Layer 4 把 `proxy_binding_ref` 升格为 `FR-0020` registry 之外的并行 active baseline key。
+  - Layer 4 把上游尚未 canonical 的 proxy binding 直接写成 formal 必填输入或并行 active baseline key。
 - 影响：
   - 基线失真，后续评估不可用，或引入第二条 active baseline 真相源。
 - 缓解：
   - 以 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
-  - `runtime_context_id` 与 `proxy_binding_ref` 仅用于 run/session 证据回链，不参与可写基线主键。
+  - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
+  - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
   - 发现污染后冻结对应基线，回退 `baseline_state=learning` 并触发 `require_reseed`。

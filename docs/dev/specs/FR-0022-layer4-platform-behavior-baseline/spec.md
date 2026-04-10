@@ -122,7 +122,6 @@ Canonical Issue: #238
   - `effective_execution_mode`
   - `probe_bundle_ref`
   - `runtime_context_id`
-  - `proxy_binding_ref`
   - `target_domain`
   - `goal_kind`
   - `interaction_safety_class`
@@ -135,12 +134,12 @@ Canonical Issue: #238
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
-- `proxy_binding_ref` 只允许作为本次运行批次与 assessment 的代理绑定证据；在 `FR-0020` registry scope 未正式扩展前，Layer 4 不得把它提升为 active baseline key 或 `platform_behavior_baseline_state` 可写主键。
+- 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 冻结后再进入独立 spec review。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `click`、`wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 trace 语义与 pure-read 禁止集合可以被稳定编码。
 - `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
-- `runtime_context_id` 与 `proxy_binding_ref` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
+- `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
 ### 4. 偏移评估与输出边界
 
@@ -152,7 +151,6 @@ Canonical Issue: #238
   - `execution_surface`
   - `probe_bundle_ref`
   - `runtime_context_id`
-  - `proxy_binding_ref`
   - `baseline_state`
   - `drift_level`
   - `issue_scope`
@@ -181,7 +179,6 @@ Canonical Issue: #238
 - `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；只有在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
-- `proxy_binding_ref` 只用于标注本次 assessment 对应输入批次的代理绑定证据，不参与 active baseline 选择。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
