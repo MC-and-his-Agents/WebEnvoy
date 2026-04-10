@@ -18,7 +18,7 @@
 ## 生产者 / 消费者
 
 - 生产者：
-  - 下载能力执行链路（L3/L2）
+  - 下载能力执行链路（共享枚举 L1/L2/L3；当前最小实现可先 L3/L2）
   - 候选能力 handoff 组装层
 - 直接消费者：
   - CLI 调用方（通过 `FR-0007` 统一能力壳消费）
@@ -31,9 +31,27 @@
 ## 1. `download_ability_request`
 
 ```ts
+type DownloadSource =
+  | {
+      source_kind: "direct_url"
+      target_url: string
+    }
+  | {
+      source_kind: "page_blob"
+      blob_url?: string
+      blob_locator?: string
+      page_context_hint?: string
+    }
+  | {
+      source_kind: "page_derived"
+      derive_mode: "export_flow" | "runtime_resolve"
+      trigger_hint?: string
+      page_context_hint?: string
+    }
+
 interface DownloadAbilityRequest {
   ability_ref: string
-  target_url: string
+  download_source: DownloadSource
   profile_ref: string
   download_goal: "single_file" | "single_media_asset"
   output_policy: {
@@ -41,7 +59,7 @@ interface DownloadAbilityRequest {
     file_name_policy: string
     conflict_policy: "fail_if_exists" | "rename_with_suffix" | "replace_existing"
   }
-  requested_execution_layer: "L3" | "L2"
+  requested_execution_layer: "L3" | "L2" | "L1"
 }
 ```
 
@@ -51,6 +69,10 @@ interface DownloadAbilityRequest {
 - `FR-0007.params.ability.id` 必须直接等于 `ability_ref`。
 - `FR-0007.params.ability.action` 必须固定为 `download`。
 - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器作为正式主路径。
+- `download_source` 的 `page_blob` / `page_derived` 只允许表达当前浏览器执行上下文内可解析的输入线索，不得被解释为新的全局 artifact/ref resolver。
+- `download_source.source_kind=page_blob` 时，`blob_url` 与 `blob_locator` 至少提供一项。
+- `download_source.source_kind=page_derived` 时，`trigger_hint` 与 `page_context_hint` 至少提供一项。
+- `download_source.source_kind=page_derived` 时，不要求调用方预先给出最终下载 URL，最终来源通过 `download_result_summary.source_url` 回传。
 
 ## 2. `download_result_summary`
 
@@ -79,6 +101,7 @@ interface DownloadResultSummary {
   - `partial -> partial`
 - 下载失败必须复用 `FR-0007` 外层错误壳：`status=error` + `error.*`。
 - `result_state=downloaded` 时，`resolved_output_path`、`source_url`、`file_name_hint` 必须存在。
+- `source_url` 必须回传本次下载最终使用的浏览器侧 source identity，可为 direct URL、`blob:` URL 或页面执行后解析出的最终来源。
 - `saved_artifact_refs` 仅可作为 run-scoped evidence refs 的可选补充，不得被提升为新的正式真相源。
 - `result_state=partial` 只用于存在可保留产物但目标未完全满足的场景。
 
@@ -95,7 +118,7 @@ interface CandidateShellSeed {
   ability_id: string
   ability_kind: "download"
   entrypoint: string
-  execution_layer_support: Array<"L3" | "L2">
+  execution_layer_support: ["L3" | "L2" | "L1", ...Array<"L3" | "L2" | "L1">]
   input_contract_ref: string
   output_contract_ref: string
   error_contract_ref: string
@@ -113,6 +136,7 @@ interface CandidateShellSeed {
 - `entries[*].contract_ref` 必须至少覆盖三类 `*_contract_ref`。
 - 同一 `contract_ref` 不得出现冲突 entry，且 `contract_kind` 必须与 ref kind 一致。
 - 三类 `*_contract_ref` 都必须可被唯一解引用；否则不得上报成功 handoff。
+- `execution_layer_support` 的共享正式枚举必须保留 `L1/L2/L3`，但这不构成“本 FR 已完成 L1 下载实现”的承诺。
 
 ## 4. 错误与状态契约
 

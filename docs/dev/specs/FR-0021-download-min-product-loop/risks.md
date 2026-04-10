@@ -23,3 +23,21 @@
 - 表现：`summary.capability_result` 下继续承载 `failed` 下载结果，导致与 `FR-0007` 的成功/错误分层冲突
 - 缓解：规定 `download_result_summary` 只承载 `downloaded|partial`，失败统一走 `status=error + error.*`
 - 回滚：移除失败态成功壳映射，回到 FR-0007 单一错误承载
+
+## 风险 5：把下载请求收窄为 direct-URL-only
+
+- 表现：formal 请求对象要求调用方必须预先给出稳定 `target_url`，导致页内 `blob:` / 导出后解析路径无法进入正式输入
+- 缓解：冻结 `download_source` 判别联合，显式覆盖 `direct_url`、`page_blob`、`page_derived`
+- 回滚：撤销 direct-URL-only 约束，恢复浏览器内三类下载来源路径
+
+## 风险 6：下载执行层枚举与共享能力模型分叉
+
+- 表现：`requested_execution_layer` 或 `candidate_shell_seed.execution_layer_support` 只允许 `L3/L2`，导致与 `FR-0017` 的 `L1/L2/L3` 正式枚举冲突
+- 缓解：formal 契约统一保留 `L1/L2/L3`，并明确“保留枚举不等于本 FR 已承诺完成 L1 实现”
+- 回滚：将分叉枚举回滚到共享正式枚举并重审 suite 内所有相关字段
+
+## 风险 7：`source_url` 被误写为调用方预填稳定 URL
+
+- 表现：结果对象沿用“请求时已知 URL”假设，无法审计 `blob:` 或页面执行后才解析出的真实下载来源
+- 缓解：冻结 `source_url` 为“本次下载最终使用的浏览器侧 source identity”，允许 direct URL、`blob:` URL、页面执行后解析来源
+- 回滚：废弃“预填稳定 URL”语义，按运行时最终来源重新定义并校验结果字段

@@ -5,11 +5,19 @@
 ## 1. `DownloadAbilityRequest`
 
 - `ability_ref`
-- `target_url`
+- `download_source`
 - `profile_ref`
 - `download_goal`
 - `output_policy`
 - `requested_execution_layer`
+
+### `download_source` 语义
+
+- `direct_url`：调用方直接提供 `target_url`。
+- `page_blob`：调用方提供页面内 `blob:` URL 或页面内 `Blob` 定位线索（例如 `blob_locator`）。
+- `page_derived`：调用方提供页面导出/执行线索，由浏览器执行面在运行时解析最终下载对象。
+- `download_source` 只用于表达当前浏览器执行上下文内可解析的请求输入，不是新的全局 artifact/ref 真相源。
+- `page_blob` 至少需要 `blob_url` 或 `blob_locator` 其一；`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一。
 
 ## 2. `DownloadResultSummary`
 
@@ -43,9 +51,11 @@
 - `download_ability_request` 只能作为 `FR-0007.params.input` 下的下载输入对象；能力外层调用仍固定为 `params.ability/input/options`。
 - `params.ability.id` 必须等于 `download_ability_request.ability_ref`，且 `params.ability.action` 固定为 `download`。
 - `result_state=downloaded` 时，`resolved_output_path` 必须存在；`saved_artifact_refs` 仅在存在已冻结的 run-scoped evidence refs 时返回。
-- `result_state=downloaded` 时，`source_url` 与 `file_name_hint` 必须存在，用于审计与最小复现场景定位。
+- `result_state=downloaded` 时，`source_url` 与 `file_name_hint` 必须存在；其中 `source_url` 用于回传本次下载最终使用的浏览器侧来源标识，可为 direct URL、`blob:` URL 或页面执行后解析出的最终来源。
 - `partial` 只能用于已有可保留产物但整体未满足目标的场景。
+- `requested_execution_layer` 的共享正式枚举必须保留 `L1/L2/L3`；当前最小实现可优先 `L3/L2`，但 formal 约束不得排除 `L1`。
 - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`。
+- `candidate_shell_seed.execution_layer_support` 必须使用 `L1/L2/L3` 共享枚举并保持非空集合。
 - `download_result_summary` 不得成为新的顶层返回壳；其能力结果语义必须挂接到 `FR-0007.summary.capability_result`，且 `action=download`、`outcome` 与 `result_state` 映射一致（`downloaded->success`，`partial->partial`）。
 - 下载失败路径必须复用 `FR-0007` 的错误壳：`status=error` + `error.*`；不得把失败结果继续挂到 `summary.capability_result` 下。
 - `candidate_shell_seed.input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `cad::<ability_id>::<input|output|error>::v<major>` 命名空间；发生不兼容语义变更时必须递增 `v<major>`。

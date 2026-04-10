@@ -45,7 +45,7 @@ Canonical Issue: #153
 
 - 必须冻结 `download_ability_request`，至少包含：
   - `ability_ref`
-  - `target_url`
+  - `download_source`
   - `profile_ref`
   - `download_goal`
   - `output_policy`
@@ -57,13 +57,19 @@ Canonical Issue: #153
   - `destination_root`
   - `file_name_policy`
   - `conflict_policy`
+- `download_source` 必须覆盖三类输入路径：
+  - `direct_url`：调用方直接提供可访问 URL
+  - `page_blob`：下载对象来自页面内 `blob:` URL 或页面内 `Blob` 句柄
+  - `page_derived`：需先执行页面导出/页面动作后，才能在浏览器侧解析出最终下载对象
+- `page_blob` 至少需要 `blob_url` 或 `blob_locator` 其一；`page_derived` 至少需要 `trigger_hint` 或 `page_context_hint` 其一
 - 必须明确：
   - 下载能力仍属于统一能力面中的 `download`
   - `download_ability_request` 只能作为 `FR-0007` `params.input` 下的下载输入对象，不得提升为新的顶层请求壳
   - `params.ability.id` 必须直接等于 `download_ability_request.ability_ref`
   - `params.ability.action` 必须固定为 `download`
   - `ability_ref` 在进入候选能力描述后必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
-  - `requested_execution_layer` 当前至少支持 `L3` 与 `L2`，不得绕过浏览器内执行边界
+  - `requested_execution_layer` 的共享正式枚举必须保留 `L1`、`L2`、`L3`；当前最小实现切片可优先 `L3/L2`，但不得在 formal 契约层排除 `L1`
+  - `download_source` 只描述“当前浏览器执行上下文内可解析的请求输入”，不得被提升为新的全局 artifact/ref 真相源
   - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器写成正式主路径
 
 ### 3. 最小下载结果对象
@@ -94,7 +100,7 @@ Canonical Issue: #153
     - `RUNTIME_ERROR`
   - 在上游 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源
   - `resolved_output_path` 是本次执行结果的落盘结果，不等于能力定义时的固定安装路径
-  - `source_url` 必须回传本次下载最终使用的源 URL（可归一化），用于审计与复现定位
+  - `source_url` 必须回传本次下载最终使用的浏览器侧 source identity（可归一化），可为 direct URL、`blob:` URL 或页面执行后解析出的最终下载来源，用于审计与复现定位
   - `file_name_hint` 用于回传下载结果的文件名提示（可来自目标 URL、页面信号或响应头），不得替代最终落盘路径
   - `partial` 只能用于存在可保留产物但整体目标未完全满足的场景
 
@@ -113,6 +119,7 @@ Canonical Issue: #153
   - `output_contract_ref`
   - `error_contract_ref`
   - `execution_layer_support`
+- `candidate_shell_seed.execution_layer_support` 的共享正式枚举必须保留 `L1`、`L2`、`L3`；当前最小实现切片可优先 `L3/L2`，但 formal 契约层不得排除 `L1`
 - `candidate_shell_seed` 中的 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `FR-0017` 的 canonical namespace：
   - 格式固定为 `cad::<ability_id>::<input|output|error>::v<major>`
   - `ability_id` 必须直接等于当前 `candidate_shell_seed.ability_id`
@@ -154,6 +161,7 @@ When 系统返回 `download_result_summary`
 Then `result_state=downloaded`
 And `resolved_output_path` 存在
 And `source_url` 与 `file_name_hint` 均存在
+And `source_url` 可以是 direct URL、`blob:` URL，或页面执行后解析出的最终浏览器侧来源标识
 And `saved_artifact_refs` 若存在，只作为 run-scoped evidence refs 返回
 And 不会只返回源 URL 冒充成功
 
@@ -180,6 +188,14 @@ Then 外层必须是 `status=error`
 And 下载失败原因通过 `error.details.reason` 表达
 And 不会把 `failed` 结果挂在 `summary.capability_result` 成功壳下
 
+### 场景 6：页内派生下载对象不要求预先给出最终 URL
+
+Given 下载对象需要先在页面内执行导出或解析 `Blob` 才能确定
+When 调用方提交 `download_ability_request.download_source`
+Then 请求仍然是合法输入
+And 不要求调用方预先提供稳定的最终 `target_url`
+And 最终来源通过结果中的 `source_url` 回传
+
 ## 异常与边界场景
 
 1. 只返回远程链接，没有本地产物或 `resolved_output_path`：不得视为下载成功。
@@ -189,6 +205,7 @@ And 不会把 `failed` 结果挂在 `summary.capability_result` 成功壳下
 5. 下载失败继续被挂在 `summary.capability_result` 成功壳下：视为与 `FR-0007` 能力壳冲突。
 6. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
 7. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
+8. 把下载输入冻结为 direct-URL-only，排除 `blob:` 或页面导出路径：视为与既有下载架构冲突。
 
 ## 验收标准
 
