@@ -718,7 +718,7 @@ AI 发出第一条操作命令
 | 层级 | GitHub 当前 canonical 挂接 | formal suite 当前收口状态 |
 | --- | --- | --- |
 | `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 在 cleanup PR 合入前仍可能保留 `#281/#361` implementation-prep historical refs |
-| `Phase 2` | `#427 -> #265/#267/#266/#418/#420/#419/#239/#153` | 相关 formal suites 在 cleanup PR 合入前仍可能保留 `#233/#368` 等历史 anchor 作为过渡引用 |
+| `Phase 2` | `#427 -> #265/#267/#266/#239` | 相关 formal suites 在 cleanup PR 合入前仍可能保留 `#233/#368` 等历史 anchor 作为过渡引用 |
 | `Phase 4` | `#423 -> #238` | `FR-0022` formal suite 已合入；不再需要旧父级过渡说明 |
 
 ### 11.5 哪些能力进入近期 backlog，哪些只冻结在蓝图
