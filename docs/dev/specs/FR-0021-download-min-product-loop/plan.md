@@ -26,8 +26,10 @@
 - 不引入浏览器外异构抓取器作为正式主路径。
 - 下载请求不得冻结为 direct-URL-only；必须覆盖页内 `blob:` 与页面导出后解析来源的输入路径。
 - `download_source` 只表达当前浏览器执行上下文内可解析输入，不扩张为新的全局 artifact/ref 真相源。
+- `destination_root` 只允许表达 CLI trusted download base 内的目标子目录；不得把任意宿主路径暴露给调用方。
 - 不把批量下载、断点续传或跨平台同步写进首刀。
 - 不把下载结果从统一能力壳中拆出去。
+- `download_result_summary` 必须直接挂在 `summary.capability_result` 内，不得继续依赖 opaque `data_ref` 作为结构化结果载体。
 - `requested_execution_layer` 与 `candidate_shell_seed.execution_layer_support` 共享正式枚举保留 `L1/L2/L3`，但当前最小实现切片可优先 `L3/L2`。
 - `replace_existing` 属于高风险路径，后续实现必须显式审计。
 
@@ -38,6 +40,8 @@
   - 对照 `roadmap.md` 检查下载是否仍属于 Phase 2 能力面
   - 检查下载请求是否覆盖 direct URL、`blob:`、页面导出后解析三类路径
   - 检查 `source_url` 是否被定义为下载时最终浏览器侧来源标识，而非调用方预填稳定 URL
+  - 检查 `destination_root` 是否已冻结为 trusted download base 内的子目录语义
+  - 检查结构化下载结果是否直接暴露在 `summary.capability_result.download_result_summary`，不再依赖 opaque `data_ref`
 - 校验：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`
@@ -66,5 +70,7 @@
 - `#153` 已被确认为 canonical FR 容器。
 - 下载请求、结果、落盘与冲突策略无阻断争议。
 - direct URL / page blob / page-derived 三类下载输入无阻断争议。
+- `destination_root` 的 trusted-base 约束无阻断争议。
+- `download_result_summary` 与 `summary.capability_result` 的挂载位置无阻断争议。
 - 下载失败路径与 `FR-0007` 错误壳的承载方式无阻断争议。
 - 后续 Work Item 已明确 ownership 与高风险边界。

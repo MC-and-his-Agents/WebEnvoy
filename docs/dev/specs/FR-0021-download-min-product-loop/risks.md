@@ -41,3 +41,15 @@
 - 表现：结果对象沿用“请求时已知 URL”假设，无法审计 `blob:` 或页面执行后才解析出的真实下载来源
 - 缓解：冻结 `source_url` 为“本次下载最终使用的浏览器侧 source identity”，允许 direct URL、`blob:` URL、页面执行后解析来源
 - 回滚：废弃“预填稳定 URL”语义，按运行时最终来源重新定义并校验结果字段
+
+## 风险 8：调用方可借 `destination_root` 指向任意宿主路径
+
+- 表现：`destination_root` 被解释为任意宿主绝对路径，下载实现可写入 CLI 进程可访问的任意位置
+- 缓解：冻结 `destination_root` 为 CLI trusted download base 内的目标子目录；绝对路径、`..`、`~`、Windows drive/UNC 和规范化后越界都必须拒绝
+- 回滚：撤销任意路径语义，恢复到 trusted-base 内子目录约束
+
+## 风险 9：结构化下载结果被藏进 opaque `data_ref`
+
+- 表现：`resolved_output_path`、`source_url`、`file_name_hint` 等字段只被声明为 `summary.capability_result.data_ref` 的解引用结果，下游实现无法一致消费
+- 缓解：冻结 `download_result_summary` 直接挂在 `summary.capability_result.download_result_summary`；`data_ref` 如存在只承载 opaque `download_ref`
+- 回滚：撤销对 `data_ref` 的结构化绑定，恢复 capability shell 内显式结果字段

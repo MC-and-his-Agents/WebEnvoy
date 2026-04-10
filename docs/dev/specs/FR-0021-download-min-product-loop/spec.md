@@ -57,6 +57,7 @@ Canonical Issue: #153
   - `destination_root`
   - `file_name_policy`
   - `conflict_policy`
+- `destination_root` 只允许表达 CLI owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径
 - `download_source` 必须覆盖三类输入路径：
   - `direct_url`：调用方直接提供可访问 URL
   - `page_blob`：下载对象来自页面内 `blob:` URL 或页面内 `Blob` 句柄
@@ -90,8 +91,9 @@ Canonical Issue: #153
   - `mime_type`
   - `size_bytes`
 - 必须明确：
-  - `download_result_summary` 只能作为 `FR-0007` 成功壳的 `summary.capability_result.data_ref` 所指向的能力级结果摘要，不得作为新的平行顶层返回结构
+  - `download_result_summary` 只能作为 `FR-0007` 成功壳内 `summary.capability_result.download_result_summary` 的下载专用结构化结果对象，不得再声明为 `summary.capability_result.data_ref` 的解引用结果，也不得作为新的平行顶层返回结构
   - `summary.capability_result.action` 必须固定为 `download`，且 `outcome` 只能与 `download_result_summary.result_state` 做一致映射（`downloaded->success`，`partial->partial`）
+  - `summary.capability_result.data_ref` 如存在，只能继续承载 opaque `download_ref` 或等价引用，不得成为 `resolved_output_path`、`source_url`、`file_name_hint`、`content_descriptor` 的唯一承载位置
   - 下载失败路径必须复用 `FR-0007` 的错误壳：`status=error` + `error.*`；不得把 `failed` 结果继续挂到 `summary.capability_result` 成功壳下
   - 下载能力的最小失败分类必须通过 `error.details.reason` 表达，至少支持：
     - `SOURCE_UNAVAILABLE`
@@ -141,6 +143,9 @@ Canonical Issue: #153
   - `rename_with_suffix`
   - `replace_existing`
 - 必须明确：
+  - `destination_root` 的正式语义是 trusted download base 内的目标子目录；真正的宿主写入根由 CLI 持有，调用方不得借此指定任意宿主绝对路径
+  - 实现必须先对 `destination_root` 做本地规范化，再拼接到 trusted download base；若输入为绝对路径、`..`、`~`、Windows drive/UNC 前缀，或规范化后逃逸 trusted base，必须在 `input_validation` 阶段直接拒绝
+  - `resolved_output_path` 必须是最终仍位于 trusted download base 内的实际落盘路径
   - 文件落盘是下载能力闭环的一部分，不得只返回远程 URL 冒充下载成功
   - `replace_existing` 属于高风险路径；后续实现必须与审计和风险策略对齐
 
@@ -162,6 +167,7 @@ Then `result_state=downloaded`
 And `resolved_output_path` 存在
 And `source_url` 与 `file_name_hint` 均存在
 And `source_url` 可以是 direct URL、`blob:` URL，或页面执行后解析出的最终浏览器侧来源标识
+And 结构化下载结果直接出现在 `summary.capability_result.download_result_summary`
 And `saved_artifact_refs` 若存在，只作为 run-scoped evidence refs 返回
 And 不会只返回源 URL 冒充成功
 
@@ -196,6 +202,13 @@ Then 请求仍然是合法输入
 And 不要求调用方预先提供稳定的最终 `target_url`
 And 最终来源通过结果中的 `source_url` 回传
 
+### 场景 7：越界的 `destination_root` 在输入校验阶段被拒绝
+
+Given 调用方提交的 `output_policy.destination_root` 是绝对路径、包含 `..`，或规范化后会逃逸 trusted download base
+When 系统执行下载请求输入校验
+Then 请求必须在 `input_validation` 阶段被拒绝
+And 不会继续进入文件落盘阶段
+
 ## 异常与边界场景
 
 1. 只返回远程链接，没有本地产物或 `resolved_output_path`：不得视为下载成功。
@@ -206,13 +219,15 @@ And 最终来源通过结果中的 `source_url` 回传
 6. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
 7. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
 8. 把下载输入冻结为 direct-URL-only，排除 `blob:` 或页面导出路径：视为与既有下载架构冲突。
+9. `destination_root` 允许调用方直接写任意宿主绝对路径，或规范化后可逃逸 trusted download base：视为高风险写入边界未冻结。
+10. 把 `download_result_summary` 继续声明为 opaque `data_ref` 的解引用结果：视为与 `FR-0007` 的 opaque reference 契约冲突。
 
 ## 验收标准
 
 1. FR-0021 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. 下载请求、结果、产物引用与最小落盘边界已冻结。
 3. 已明确与 `FR-0017/0018/0004/0006` 的继承关系。
-4. 已明确成功/部分成功继续挂在 `summary.capability_result`，失败统一走 `status=error + error.*`。
+4. 已明确成功/部分成功继续挂在 `summary.capability_result`，其中结构化下载结果直接位于 `summary.capability_result.download_result_summary`，失败统一走 `status=error + error.*`。
 5. 已明确下载能力不再是模型外特例。
 6. 本 PR 只冻结规约，不混入实现代码。
 

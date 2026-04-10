@@ -40,6 +40,12 @@
 - `file_name_policy`
 - `conflict_policy`
 
+### `destination_root` 语义
+
+- `destination_root` 只允许表达 CLI-owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径。
+- 实现必须先对 `destination_root` 做本地规范化，再与 trusted download base 拼接；若输入为绝对路径、`..`、`~`、Windows drive/UNC 前缀，或规范化后逃逸 trusted base，必须在 `input_validation` 阶段拒绝。
+- `resolved_output_path` 必须是最终仍位于 trusted download base 内的实际落盘路径。
+
 ## 4. `ContentDescriptor`
 
 - `content_kind`
@@ -56,7 +62,8 @@
 - `requested_execution_layer` 的共享正式枚举必须保留 `L1/L2/L3`；当前最小实现可优先 `L3/L2`，但 formal 约束不得排除 `L1`。
 - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`。
 - `candidate_shell_seed.execution_layer_support` 必须使用 `L1/L2/L3` 共享枚举并保持非空集合。
-- `download_result_summary` 不得成为新的顶层返回壳；其能力结果语义必须挂接到 `FR-0007.summary.capability_result`，且 `action=download`、`outcome` 与 `result_state` 映射一致（`downloaded->success`，`partial->partial`）。
+- `download_result_summary` 不得成为新的顶层返回壳；其正式暴露位置必须是 `FR-0007.summary.capability_result.download_result_summary`，且 `action=download`、`outcome` 与 `result_state` 映射一致（`downloaded->success`，`partial->partial`）。
+- `summary.capability_result.data_ref` 如存在，只能承载 opaque `download_ref` 或等价引用，不是 `download_result_summary` 的真相源，也不承诺结构化回读能力。
 - 下载失败路径必须复用 `FR-0007` 的错误壳：`status=error` + `error.*`；不得把失败结果继续挂到 `summary.capability_result` 下。
 - `candidate_shell_seed.input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `cad::<ability_id>::<input|output|error>::v<major>` 命名空间；发生不兼容语义变更时必须递增 `v<major>`。
 - `candidate_shell_seed.contract_registry_seed` 必须满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：

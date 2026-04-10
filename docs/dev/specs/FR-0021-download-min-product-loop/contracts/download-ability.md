@@ -55,6 +55,7 @@ interface DownloadAbilityRequest {
   profile_ref: string
   download_goal: "single_file" | "single_media_asset"
   output_policy: {
+    // Target subdirectory inside the CLI-owned trusted download base.
     destination_root: string
     file_name_policy: string
     conflict_policy: "fail_if_exists" | "rename_with_suffix" | "replace_existing"
@@ -69,6 +70,8 @@ interface DownloadAbilityRequest {
 - `FR-0007.params.ability.id` 必须直接等于 `ability_ref`。
 - `FR-0007.params.ability.action` 必须固定为 `download`。
 - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器作为正式主路径。
+- `output_policy.destination_root` 只允许表达 CLI-owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径。
+- 实现必须先对 `destination_root` 做本地规范化，再拼接到 trusted download base；若输入为绝对路径、`..`、`~`、Windows drive/UNC 前缀，或规范化后逃逸 trusted base，必须在 `input_validation` 阶段直接拒绝。
 - `download_source` 的 `page_blob` / `page_derived` 只允许表达当前浏览器执行上下文内可解析的输入线索，不得被解释为新的全局 artifact/ref resolver。
 - `download_source.source_kind=page_blob` 时，`blob_url` 与 `blob_locator` 至少提供一项。
 - `download_source.source_kind=page_derived` 时，`trigger_hint` 与 `page_context_hint` 至少提供一项。
@@ -94,14 +97,16 @@ interface DownloadResultSummary {
 
 约束：
 
-- `download_result_summary` 不得成为新的平行顶层返回壳；必须挂接在 `FR-0007.summary.capability_result` 语义内。
+- `download_result_summary` 不得成为新的平行顶层返回壳；必须内联暴露在 `FR-0007.summary.capability_result.download_result_summary`。
 - `summary.capability_result.action` 必须为 `download`。
 - `summary.capability_result.outcome` 与 `result_state` 映射固定：
   - `downloaded -> success`
   - `partial -> partial`
+- `summary.capability_result.data_ref` 如存在，只能承载 opaque `download_ref` 或等价引用，不得承载结构化下载字段。
 - 下载失败必须复用 `FR-0007` 外层错误壳：`status=error` + `error.*`。
 - `result_state=downloaded` 时，`resolved_output_path`、`source_url`、`file_name_hint` 必须存在。
 - `source_url` 必须回传本次下载最终使用的浏览器侧 source identity，可为 direct URL、`blob:` URL 或页面执行后解析出的最终来源。
+- `resolved_output_path` 必须是仍位于 trusted download base 内的实际落盘路径。
 - `saved_artifact_refs` 仅可作为 run-scoped evidence refs 的可选补充，不得被提升为新的正式真相源。
 - `result_state=partial` 只用于存在可保留产物但目标未完全满足的场景。
 
@@ -156,19 +161,32 @@ interface CandidateShellSeed {
 
 ## 最小示例
 
-### 示例 1：成功下载
+### 示例 1：成功下载能力壳
 
 ```json
 {
-  "download_ref": "dl-001",
-  "result_state": "downloaded",
-  "resolved_output_path": "/tmp/downloads/a.pdf",
-  "source_url": "https://example.com/a.pdf",
-  "file_name_hint": "a.pdf",
-  "content_descriptor": {
-    "content_kind": "file",
-    "mime_type": "application/pdf",
-    "size_bytes": 1024
+  "summary": {
+    "capability_result": {
+      "ability_id": "download.asset.v1",
+      "layer": "L3",
+      "action": "download",
+      "outcome": "success",
+      "data_ref": {
+        "download_ref": "dl-001"
+      },
+      "download_result_summary": {
+        "download_ref": "dl-001",
+        "result_state": "downloaded",
+        "resolved_output_path": "/trusted-downloads/cases/a.pdf",
+        "source_url": "https://example.com/a.pdf",
+        "file_name_hint": "a.pdf",
+        "content_descriptor": {
+          "content_kind": "file",
+          "mime_type": "application/pdf",
+          "size_bytes": 1024
+        }
+      }
+    }
   }
 }
 ```
