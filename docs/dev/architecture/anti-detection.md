@@ -745,6 +745,6 @@ AI 发出第一条操作命令
 ### 11.6 执行约束
 
 - 后续若新增反风控 backlog，应在 GitHub issue 层直接挂到 owning `Phase -> FR -> Work Item` 主树，不再新增活跃 umbrella 或平行父级 issue。
-- 在对应 formal suite cleanup PR 合入前，`#281/#361/#233/#368` 等历史 issue 仍可能作为文档内的过渡引用存在；不得把这些 historical refs 误写成当前 GitHub 父级结构。
+- 在对应 formal suite cleanup PR 合入前，`#232/#281/#361/#233/#368` 等历史 issue 仍可能作为文档内的过渡引用存在；不得把这些 historical refs 误写成当前 GitHub 父级结构。
 - `Phase 2` 不得再被表述为“反风控建设已完成后的纯封装阶段”；它仍承接 Layer 1/2/3 的延续建设。
 - 若某能力尚未进入 backlog，但已在本蓝图中被标记为“应尽早落地”或“后层扩展”，后续 roadmap / Sprint 调整时必须显式处理，不能视为不存在。
