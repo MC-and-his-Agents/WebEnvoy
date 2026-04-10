@@ -58,4 +58,4 @@
   - 在上述复核结论收口前，formal FR 的当前状态仍保持 blocked
 - 回滚/降级：
   - 暂停本轮 issue 的 live 扩展
-  - 待后续执行现场补齐 latest-head fresh rerun 与三场景证据矩阵后，再重新执行 `search/detail/user_home` 的同口径复核
+  - 待后续执行现场补齐新一轮 fresh rerun 与三场景证据矩阵后，再重新执行 `search/detail/user_home` 的同口径复核
