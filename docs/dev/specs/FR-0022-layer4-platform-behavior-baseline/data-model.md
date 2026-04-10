@@ -39,6 +39,7 @@
 - `session_id` 只在 runtime 已提供稳定会话坐标时回填；其缺失不得单独阻断合法 batch 入库。
 - `browser_channel` 当前 formal baseline 只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 当前 formal baseline 只允许 `real_browser`；`stub | fake_host | other` 仍属于 `FR-0016` 的上游证据枚举，但不得进入 FR-0022 formal input。
+- `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 signal batch 中退化为自由字符串。
 - `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
 - `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain`，并继续作为 downstream baseline / assessment identity 的正式域隔离键。
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
@@ -82,6 +83,7 @@
 补充约束：
 
 - `baseline_ref` 是 `FR-0022` 自有的 downstream drift baseline 标识，不得与 `FR-0020.anti_detection_baseline_snapshot.baseline_ref` 复用为同一对象。
+- `effective_execution_mode` 必须继续直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举；不得在 downstream baseline snapshot 中允许自由字符串覆盖 shared gate mode。
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind, baseline_ref)` 必须唯一；不同 downstream scope 不得共享同一条 `baseline_ref`。
 - `upstream_active_baseline_ref` 必须直接记录生成该 downstream baseline 时，对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`。
 - 多个 downstream scope 允许并行引用同一条 `upstream_active_baseline_ref`，但必须各自拥有独立的 `baseline_ref`。
@@ -145,6 +147,7 @@
 补充约束：
 
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键，不允许跨 profile、域名、浏览器通道、执行面、执行模式、probe bundle 或 read/write 目标共用同一可写状态对象。
+- `effective_execution_mode` 必须继续直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举；不得在 baseline state 中允许任意 mode 标签进入可写隔离主键。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `baseline_ref` 一旦存在，必须引用同 scope 的 `platform_behavior_baseline_snapshot.baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
 - `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 可以被多个 downstream scope 作为 shared lineage 输入并行引用，但不得把这些 scope 的学习状态、漂移状态或 assessment 历史折叠到同一条可写状态对象，也不得共用同一条 downstream `baseline_ref`。

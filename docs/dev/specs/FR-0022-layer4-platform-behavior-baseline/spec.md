@@ -167,6 +167,7 @@ Canonical Issue: #238
 - `click_kind_mix` 只在 `action_mix.click > 0` 时必填。
 - `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 的语义必须复用 `FR-0016` 已冻结枚举；但当前 implementation-ready formal input 只接受 `real_browser`，`stub | fake_host | other` 只允许停留在上游 live evidence，不得进入 Layer 4 signal batch / baseline / assessment。
+- `platform_behavior_signal_batch`、`platform_behavior_baseline_snapshot`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 中的 `effective_execution_mode` 都必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 formal object 中退化为自由字符串。
 - `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
 - `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain` 的 canonical 域坐标，不得在 Layer 4 baseline identity 中被丢弃。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。

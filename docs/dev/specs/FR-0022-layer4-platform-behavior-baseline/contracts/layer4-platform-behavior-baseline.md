@@ -82,7 +82,7 @@ interface PlatformBehaviorSignalBatch {
   platform: string
   browser_channel: BrowserChannel
   execution_surface: ExecutionSurface
-  effective_execution_mode: string
+  effective_execution_mode: GateExecutionMode
   probe_bundle_ref: string
   runtime_context_id: string
   target_domain: string
@@ -103,6 +103,7 @@ interface PlatformBehaviorSignalBatch {
 - `observed_at` 必须是可解析时间戳。
 - `browser_channel` 当前只允许 `Google Chrome stable`，且必须与 `FR-0015`、`FR-0016`、`FR-0020` 复用同一 canonical label。
 - `execution_surface` 当前只允许 `real_browser`；`stub | fake_host | other` 仍属于 `FR-0016` 的上游证据枚举，但不得进入 FR-0022 formal input。
+- `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 signal batch 中退化为自由字符串。
 - `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
 - `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain`，并继续作为 downstream baseline / assessment identity 的正式域隔离键。
 - `FR-0020` registry 只负责 shared upstream scope `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 的 active baseline ownership；`platform`、`target_domain` 与 `goal_kind` 继续属于 `FR-0022` 的 downstream drift baseline scope，不得被倒灌为上游 registry selector。
@@ -141,7 +142,7 @@ interface PlatformBehaviorBaselineSnapshot {
   target_domain: string
   browser_channel: BrowserChannel
   execution_surface: ExecutionSurface
-  effective_execution_mode: string
+  effective_execution_mode: GateExecutionMode
   probe_bundle_ref: string
   goal_kind: GoalKind
   upstream_active_baseline_ref: string
@@ -155,6 +156,7 @@ interface PlatformBehaviorBaselineSnapshot {
 约束：
 
 - `baseline_ref` 是 `FR-0022` 自有的 downstream drift baseline 标识，不得与 `FR-0020.anti_detection_baseline_snapshot.baseline_ref` 复用为同一对象。
+- `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举；不得在 downstream baseline snapshot 中以自由字符串存储 shared gate mode。
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind, baseline_ref)` 必须唯一；不同 downstream scope 不得共享同一条 `baseline_ref`。
 - `upstream_active_baseline_ref` 必须直接记录生成该 downstream baseline 时，对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`。
 - 多个 downstream scope 允许并行引用同一条 `upstream_active_baseline_ref`，但必须各自拥有独立的 `baseline_ref`。
@@ -175,7 +177,7 @@ interface PlatformBehaviorBaselineState {
   target_domain: string
   browser_channel: BrowserChannel
   execution_surface: ExecutionSurface
-  effective_execution_mode: string
+  effective_execution_mode: GateExecutionMode
   probe_bundle_ref: string
   goal_kind: GoalKind
   threshold_config_snapshot_ref: string
@@ -193,6 +195,7 @@ interface PlatformBehaviorBaselineState {
 约束：
 
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键。
+- `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举；不得在 baseline state 中允许任意 mode 标签写入该隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
 - `baseline_ref` 在当前状态已绑定到该 downstream scope 的 `platform_behavior_baseline_snapshot.baseline_ref` 时必填；它记录当前可写状态正在消费的下游 drift baseline，而不是 shared upstream baseline 本身；`unseeded | learning` 阶段允许为空。
 - `learning_window_started_at` 仅在 `baseline_state=learning|ready|degraded` 时必填；`baseline_state=unseeded` 时必须允许为空或缺失。
