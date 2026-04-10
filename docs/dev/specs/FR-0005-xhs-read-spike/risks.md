@@ -44,18 +44,18 @@
   - 停止实现分支推进
   - 回到 FR-0005 规约补齐评审阻断项
 
-## 风险 5：WebEnvoy-managed XHS 会话缺失或失效导致准入证据失真
+## 风险 5：WebEnvoy-managed XHS 现场虽已恢复，但准入证据仍不足
 
-- 触发条件：仓库内没有可由 WebEnvoy 管理且保持有效登录态的小红书 profile，只能依赖外部手工浏览器或历史 clone 样本
-- 影响：本轮复核无法绑定 official runtime / profile 边界，`reproduced_multi_round` 与 `admission_ready` 结论都可能失真
+- 触发条件：managed-profile official runtime 已可启动，但 `search/detail/user_home` 仍未形成 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round` 的同口径证据闭环
+- 影响：formal FR 会错误地把单轮样本、fallback 页面证据或某次运行时失败事实误写成实现准入结论，导致 Go/No-Go 失真
 - 缓解：
-  - 先做 `.webenvoy/profiles/**/__webenvoy_meta.json` 准入预检
-  - 没有可用 profile 时，直接按 `No-Go/paused` 收口，不继续 live 复核
-  - 将外部手工浏览器证据保留在 `browser_first_hand` / `candidate` 层，不升级为实现准入输入
+  - 先保留 managed-profile 准入预检与 2026-04-11 fresh rerun 的历史事实，但不把其直接升级为 formal 准入
+  - 继续把正式停点固定为“三场景 API primary 成功与矩阵证据不足”，而不是某一轮运行时缺陷
+  - 将单轮 fresh rerun 失败事实保留在 `research.md`，只作为后续复核和实现排障输入
 - 口径约束：
   - 作者本机 `.webenvoy/profiles/**` 的恢复状态，不在 formal spec 中写成静态当前事实
-  - 若执行现场已恢复受管 XHS profile，仍需继续完成 managed-profile 同口径复核后，才能更新正式结论
+  - 即使执行现场已恢复受管 XHS profile，仍需继续完成三场景 managed-profile 同口径复核后，才能更新正式结论
   - 在上述复核结论收口前，formal FR 的当前状态仍保持 blocked
 - 回滚/降级：
   - 暂停本轮 issue 的 live 扩展
-  - 待执行现场通过 WebEnvoy-managed XHS profile 准入预检后，再重新执行 `search/detail/user_home` 的同口径复核
+  - 待后续执行现场补齐 latest-head fresh rerun 与三场景证据矩阵后，再重新执行 `search/detail/user_home` 的同口径复核
