@@ -47,3 +47,9 @@
 - 表现：共享视图的 `baseline_status` 没有 closed enum，`FR-0012/0013/0014` 为同一字段各自发明不同取值
 - 缓解：把 `baseline_status` 冻结为 `ready | insufficient | superseded`，并要求新增取值必须重新走 spec review
 - 回滚：移除未冻结状态，回到正式枚举集合
+
+## 风险 9：validation request 缺少稳定 identity
+
+- 表现：同一参数元组的不同请求无法被稳定区分，导致持久化、审计与下游相关性漂移
+- 缓解：冻结 `request_ref`、`request_state`、`requested_at`，并要求 sample / record 回链到 request
+- 回滚：拒绝消费缺少稳定 request identity 的对象，只保留原始 evidence

@@ -14,6 +14,7 @@
 
 | 字段 | 必填 | 可空 | 语义 |
 | --- | --- | --- | --- |
+| `request_ref` | 是 | 否 | validation request 的稳定标识；不同请求不得复用 |
 | `validation_scope` | 是 | 否 | closed enum；当前只允许 `layer1_consistency`、`layer2_interaction`、`layer3_session_rhythm`、`cross_layer_baseline` |
 | `target_fr_ref` | 是 | 否 | 只允许指向 `FR-0012/0013/0014` 或后续 Layer 4 FR |
 | `profile_ref` | 是 | 否 | 验证目标所使用的身份/环境配置引用 |
@@ -22,12 +23,15 @@
 | `sample_goal` | 是 | 否 | 本次验证希望采集的最小目标，不承载产品功能请求 |
 | `requested_execution_mode` | 是 | 否 | 继承 `FR-0010/0011` 的正式 execution mode 语义；描述请求方目标模式 |
 | `probe_bundle_ref` | 是 | 否 | 稳定、可复用的探针集合引用 |
+| `request_state` | 是 | 否 | lifecycle enum：`accepted` \| `sampling` \| `completed` \| `aborted` |
+| `requested_at` | 是 | 否 | request 被持久化创建的时间 |
 
 ### `anti_detection_structured_sample`
 
 | 字段 | 必填 | 可空 | 语义 |
 | --- | --- | --- | --- |
 | `sample_ref` | 是 | 否 | 结构化样本主标识；`sample_ref` 只能引用该对象 |
+| `request_ref` | 是 | 否 | 回链到产生该样本的 validation request |
 | `target_fr_ref` | 是 | 否 | 样本服务的 FR |
 | `validation_scope` | 是 | 否 | 与 request 同源的 closed enum |
 | `profile_ref` | 是 | 否 | 样本采集时所用 profile |
@@ -54,6 +58,7 @@
 | `effective_execution_mode` | 是 | 否 | 继承 `FR-0010/0011` 的正式 execution mode；是 baseline 分区维度之一 |
 | `signal_vector` | 是 | 否 | 结构化信号集合；不得退化为自由文本 |
 | `captured_at` | 是 | 否 | 快照完成采集时间 |
+| `source_sample_refs` | 是 | 否 | 形成该 baseline 的结构化样本集合；空列表不合法 |
 | `source_run_ids` | 是 | 否 | 支撑该快照的 run id 列表；空列表不合法 |
 
 ### `anti_detection_baseline_registry_entry`
@@ -76,6 +81,7 @@
 | 字段 | 必填 | 可空 | 语义 |
 | --- | --- | --- | --- |
 | `record_ref` | 是 | 否 | 验证记录主标识 |
+| `request_ref` | 是 | 否 | 回链到本次验证所对应的 validation request |
 | `target_fr_ref` | 是 | 否 | 该次验证服务的 FR |
 | `validation_scope` | 是 | 否 | 与 request 同源的 closed enum |
 | `profile_ref` | 是 | 否 | 该次验证所属 profile 维度 |
@@ -83,7 +89,7 @@
 | `execution_surface` | 是 | 否 | 该次验证所属执行面 |
 | `effective_execution_mode` | 是 | 否 | 与实际采样/验证结果一致的 execution mode |
 | `probe_bundle_ref` | 是 | 否 | 实际用于本次验证的探针集合 |
-| `sample_ref` | 条件 | 是 | `result_state=captured` 时必填；其他状态允许保留但不得伪造 |
+| `sample_ref` | 是 | 否 | 必须引用结构化样本；`captured|verified|broken|stale` 全部终态都必须保留 |
 | `baseline_ref` | 条件 | 是 | 存在可用 baseline 且已绑定时必填；仅在 `drift_state=insufficient_baseline` 且当前无可用 baseline 时允许为空 |
 | `result_state` | 是 | 否 | closed enum；见下方状态机语义 |
 | `drift_state` | 是 | 否 | closed enum；见下方状态机语义 |
@@ -141,8 +147,15 @@
 ### `sample_ref`
 
 - `sample_ref` 必须引用 `anti_detection_structured_sample.sample_ref`，不得退化为 issue comment、自由文本摘要或临时控制台输出。
-- 在 `result_state=captured` 时必须填写。
-- 在 `result_state=verified/broken/stale` 时允许继续保留，用于追溯本次判定所依据的样本。
+- 在 `result_state=captured/verified/broken/stale` 时都必须填写，用于追溯本次判定所依据的样本。
+
+### `request_state`
+
+- `accepted`：request 已持久化创建，尚未开始正式采样。
+- `sampling`：已进入样本采集阶段，但尚未形成最终 validation record。
+- `completed`：已经形成至少一条终态 validation record。
+- `aborted`：执行在形成终态 validation record 前结束，后续只保留审计/诊断引用。
+- `request_state` 是 closed enum，且只能单向推进，不得从 `completed/aborted` 回退。
 
 ### `baseline_status`
 
@@ -166,6 +179,7 @@
 ```json
 {
   "anti_detection_validation_request": {
+    "request_ref": "validation-request/layer2/2026-04-10T10:00:00Z",
     "validation_scope": "layer2_interaction",
     "target_fr_ref": "FR-0013",
     "profile_ref": "profile/default",
@@ -173,10 +187,13 @@
     "execution_surface": "real_browser",
     "sample_goal": "capture interaction safety baseline",
     "requested_execution_mode": "recon",
-    "probe_bundle_ref": "probe-bundle/layer2-min-v1"
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1",
+    "request_state": "completed",
+    "requested_at": "2026-04-10T10:00:00Z"
   },
   "anti_detection_structured_sample": {
     "sample_ref": "sample/layer2/2026-04-10T10:02:00Z",
+    "request_ref": "validation-request/layer2/2026-04-10T10:00:00Z",
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",
@@ -207,6 +224,7 @@
       "locate_success_ratio": 0.99
     },
     "captured_at": "2026-04-10T10:00:00Z",
+    "source_sample_refs": ["sample/layer2/2026-04-10T10:02:00Z"],
     "source_run_ids": ["run-20260410-100000-001"]
   },
   "anti_detection_baseline_registry_entry": {
@@ -223,6 +241,7 @@
   },
   "anti_detection_validation_record": {
     "record_ref": "validation/layer2/2026-04-10T10:06:00Z",
+    "request_ref": "validation-request/layer2/2026-04-10T10:00:00Z",
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",

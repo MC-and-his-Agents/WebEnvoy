@@ -65,3 +65,4 @@
 - baseline replacement 的 active/superseded 判定来源无阻断争议。
 - `sample_ref` 指向的结构化 sample payload 与 execution mode 分区无阻断争议。
 - validation record 的完整作用域键与 `baseline_status` 的 closed enum 无阻断争议。
+- validation request 的稳定 identity / lifecycle 与 request-sample-record 的相关性无阻断争议。

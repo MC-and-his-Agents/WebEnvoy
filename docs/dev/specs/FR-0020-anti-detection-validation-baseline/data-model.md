@@ -10,6 +10,7 @@
 ## 1. `AntiDetectionValidationRequest`
 
 - `validation_scope`
+- `request_ref`
 - `target_fr_ref`
 - `profile_ref`
 - `browser_channel`
@@ -17,13 +18,22 @@
 - `sample_goal`
 - `requested_execution_mode`
 - `probe_bundle_ref`
+- `request_state`
+- `requested_at`
 
 `validation_scope=cross_layer_baseline` 是唯一 Layer 4 编码入口，仅用于跨 Layer 1-3 信号聚合后的基线评估。
 `requested_execution_mode` 的正式语义一律继承 `FR-0010/0011`。
 
+### 请求 identity 与生命周期
+
+- `request_ref` 是 validation request 的稳定标识；即使参数元组完全相同，不同请求也必须生成新的 `request_ref`。
+- `request_state` 只允许 `accepted -> sampling -> completed` 或 `accepted -> sampling -> aborted` 两类单向推进，不得回退。
+- request 的审计与相关性应以 `request_ref` 为主键，而不是依赖参数元组去重。
+
 ## 2. `AntiDetectionStructuredSample`
 
 - `sample_ref`
+- `request_ref`
 - `target_fr_ref`
 - `validation_scope`
 - `profile_ref`
@@ -55,6 +65,7 @@
 - `effective_execution_mode`
 - `signal_vector`
 - `captured_at`
+- `source_sample_refs`
 - `source_run_ids`
 
 ### 不可变规则
@@ -62,6 +73,7 @@
 - `baseline_ref` 是不可变的快照标识，不允许复写或复用。
 - baseline snapshot 只承载采样事实，不负责声明自己是否仍为 active baseline。
 - `effective_execution_mode` 是 baseline 的正式分区维度；不得把 `dry_run`、`recon` 与 live 证据混成同一条 baseline。
+- `source_sample_refs` 必须记录形成该 baseline 的结构化样本集合，以保证基线可以回溯到正式样本载体。
 
 ## 4. `AntiDetectionBaselineRegistryEntry`
 
@@ -93,6 +105,7 @@
 ## 5. `AntiDetectionValidationRecord`
 
 - `record_ref`
+- `request_ref`
 - `target_fr_ref`
 - `validation_scope`
 - `profile_ref`
@@ -123,13 +136,14 @@
 
 ### `sample_ref` 与 `probe_bundle_ref` 规则
 
-- `sample_ref` 必须指向 `AntiDetectionStructuredSample.sample_ref`；`result_state=captured` 时必填。
+- `sample_ref` 必须指向 `AntiDetectionStructuredSample.sample_ref`；`result_state=captured/verified/broken/stale` 时都必填。
 - `probe_bundle_ref` 必须在 baseline snapshot 与 validation record 中同时保留，以保证落库后仍可追溯探针身份。
 
 ### 完整作用域键
 
 - `AntiDetectionValidationRecord` 必须显式携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键。
 - 当 `baseline_ref` 为空或 `sample_ref` 缺失时，仍必须能够只依赖记录自身字段被确定性归入正确的共享视图与 baseline scope。
+- `request_ref` 必须把 record 与其来源 request 关联起来，不能只依赖时间或参数推断。
 
 ## 6. `AntiDetectionValidationView`
 

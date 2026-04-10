@@ -48,6 +48,7 @@ Canonical Issue: #239
 ### 2. 最小验证请求对象
 
 - 必须冻结 `anti_detection_validation_request`，至少包含：
+  - `request_ref`
   - `validation_scope`
   - `target_fr_ref`
   - `profile_ref`
@@ -56,22 +57,32 @@ Canonical Issue: #239
   - `sample_goal`
   - `requested_execution_mode`
   - `probe_bundle_ref`
+  - `request_state`
+  - `requested_at`
 - `validation_scope` 至少支持：
   - `layer1_consistency`
   - `layer2_interaction`
   - `layer3_session_rhythm`
   - `cross_layer_baseline`（Layer 4 平台行为基线的唯一编码，跨 Layer 1-3 统一聚合信号）
 - 必须明确：
+  - `request_ref` 是 validation request 的稳定标识；即使参数元组完全相同，不同请求也必须使用不同 `request_ref`
   - 当前 formal baseline 下，`target_fr_ref` 只允许命中 `FR-0012`、`FR-0013`、`FR-0014` 或后续 Layer 4 FR
   - `execution_surface` 只描述样本采集执行面，不等于 `FR-0016` 的 merge gate verdict
   - `sample_goal` 只描述本次验证目标，不承载产品功能请求
   - `requested_execution_mode` 继承 `FR-0010/0011` 已冻结的 execution mode 语义；本 FR 不并行发明私有模式
   - `probe_bundle_ref` 必须指向稳定、可复用的最小探针集合，而不是一次性手工步骤
+  - `request_state` 至少支持：
+    - `accepted`
+    - `sampling`
+    - `completed`
+    - `aborted`
+  - `request_state` 只允许单向推进，不得从终态回退
 
 ### 3. 基线快照、基线权威索引与验证记录
 
 - 必须冻结 `anti_detection_structured_sample`，至少包含：
   - `sample_ref`
+  - `request_ref`
   - `target_fr_ref`
   - `validation_scope`
   - `profile_ref`
@@ -94,6 +105,7 @@ Canonical Issue: #239
   - `effective_execution_mode`
   - `signal_vector`
   - `captured_at`
+  - `source_sample_refs`
   - `source_run_ids`
 - 必须冻结 `anti_detection_baseline_registry_entry`，至少包含：
   - `target_fr_ref`
@@ -108,6 +120,7 @@ Canonical Issue: #239
   - `updated_at`
 - 必须冻结 `anti_detection_validation_record`，至少包含：
   - `record_ref`
+  - `request_ref`
   - `target_fr_ref`
   - `validation_scope`
   - `profile_ref`
@@ -134,12 +147,14 @@ Canonical Issue: #239
 - 必须明确：
   - `anti_detection_structured_sample` 是 `sample_ref` 的唯一正式归属对象；下游 FR 不得把它各自解释成私有日志、截图集合或自由文本摘要
   - `structured_payload` 必须是可重放、可比对、可诊断的最小结构化样本；`artifact_refs` 只作为原始证据引用，不替代结构化 payload 本身
+  - `anti_detection_structured_sample.request_ref` 与 `anti_detection_validation_record.request_ref` 必须回链到同一条 `anti_detection_validation_request`
   - baseline snapshot 与 validation record 是两类对象，不得混写成同一条 run 日志
   - `anti_detection_baseline_registry_entry` 是 baseline replacement 的唯一正式真相源；baseline snapshot 本身不得自带“当前生效”或 `superseded` 的可写状态
   - `effective_execution_mode` 继承 `FR-0010/0011` 的正式语义，并作为 baseline/sample/record/view 的共享分区维度；不得把 `dry_run`、`recon` 与任意 live 模式落入同一 baseline scope
   - `anti_detection_validation_record` 必须携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键；不得把正确归属只留给 `sample_ref` 或 `baseline_ref` 间接推断
   - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
-  - `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时不得只剩自由文本结论
+  - `sample_ref` 必须指向已持久化的结构化样本载体，并在 `captured|verified|broken|stale` 全部终态中保留；不得在完成态丢失 replay / compare / diagnose 所需的样本引用
+  - `source_sample_refs` 必须记录形成 baseline snapshot 所消费的结构化样本集合，`source_run_ids` 只作为补充审计引用
   - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
   - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空
