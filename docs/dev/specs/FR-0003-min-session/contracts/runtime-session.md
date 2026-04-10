@@ -129,8 +129,8 @@ disconnected -> starting
 - 打开或保持可见浏览器
 - 将 Profile 置入 `logging_in`
 - 若 Profile 尚未初始化，则先创建最小目录与最小元数据
-- 首次调用返回 `confirmationRequired`，由调用方在用户完成手动登录后显式发起 `runtime.login --confirm`
-- `runtime.login --confirm` 确认成功后回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
+- 首次调用返回 `confirmationRequired`，由调用方在用户完成手动登录后再次调用 `runtime.login` 并传入 `params.confirm=true`
+- 二次确认调用在 `params.confirm=true` 时回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
 - 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话
 
 首次调用成功结果至少包含：
@@ -204,7 +204,7 @@ disconnected -> starting
 - FR-0003 只冻结上述六个最小错误码；实现不得在 formal 收口前把其他 Profile / session 错误码当作默认稳定契约。
 - 这些错误码属于 FR-0001 CLI 错误响应壳内部的 `error.code` 值扩展，不改写 FR-0001 的 `status/error/timestamp/run_id` 外层结构。
 - FR-0002 的 `ERR_TRANSPORT_*` 属于通信层错误码，不纳入本白名单。
-- 若后续 FR 需要新增会话相关错误码，必须以加性方式进入对应 formal contract，且不得改写上述七个基线错误的语义。
+- 若后续 FR 需要新增会话相关错误码，必须以加性方式进入对应 formal contract，且不得改写上述六个基线错误的语义。
 
 语义要求：
 
@@ -218,7 +218,7 @@ disconnected -> starting
 登录确认补充约束：
 
 - `runtime.login` 采用显式二次确认模型：首次调用只进入 `logging_in` 并返回 `confirmationRequired`，不会在单次命令内等待用户登录确认直到超时。
-- `runtime.login --confirm` 当前只承接显式确认收口；若确认时登录浏览器已断开、锁持有状态失效或当前状态不再兼容，统一返回 `ERR_PROFILE_STATE_CONFLICT`。
+- `runtime.login` 在二次调用且 `params.confirm=true` 时承接显式确认收口；若确认时登录浏览器已断开、锁持有状态失效或当前状态不再兼容，统一返回 `ERR_PROFILE_STATE_CONFLICT`。
 - 如需引入登录确认 deadline / timeout 语义，必须在后续 formal 变更中新增对应状态机、错误码与测试；在该变更落地前，不得把 `ERR_PROFILE_LOGIN_TIMEOUT` 视为稳定契约。
 
 ## 持久化边界
