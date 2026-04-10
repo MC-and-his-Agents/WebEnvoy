@@ -150,6 +150,8 @@ WebEnvoy 当前主线专注于：
 - `#435`：official Chrome runtime migration implementation-prep 的当前 canonical FR issue
 - `FR-0020 / #239`：后续验证与基线评估归属
 
+GitHub issue 层当前以 `#435` 作为 `FR-0015` 的 canonical FR issue；在对应 formal suite cleanup PR 合入前，repo formal suite 的 implementation-prep 叙述仍可能保留 `#281/#361` 作为历史引用，但它们不再充当当前结构父级。
+
 ---
 
 ## Phase 1.x：风险门禁与最小反风控前置冲刺（Sprint 2 / Sprint 3）
@@ -189,7 +191,7 @@ WebEnvoy 当前主线专注于：
 - Sprint 2 的门禁能力已可执行，不再是文档口径。
 - Sprint 3 的最小反风控执行能力已落地，能约束后续 live 扩展。
 - `#208` 的恢复条件已从口头说明转为可验证前置。
-- 完整反风控体系在 GitHub issue 层已进入当前单一主树，不再只停留在 Sprint 2/3 的最小前置描述中；`Phase 2 / #427` 直接承接 `#265`、`#267`、`#266`、`#239`，`Phase 4 / #423` 当前挂接 `#238`。
+- 完整反风控体系在 GitHub issue 层已进入当前单一主树，不再只停留在 Sprint 2/3 的最小前置描述中；`Phase 2 / #427` 直接承接 `#265`、`#267`、`#266`、`#239`，`Phase 4 / #423` 当前挂接 `#238`。在对应 formal suite cleanup PR 合入前，repo formal suites 中仍可能保留 `#233/#368` 等历史 anchor 作为过渡引用，但它们不再充当当前父级结构。
 
 ---
 
@@ -211,6 +213,8 @@ WebEnvoy 当前主线专注于：
 - `FR-0019 / #419` -> `#157`
 - `FR-0020 / #239`
 - `FR-0021 / #153`
+
+在对应 formal suite cleanup PR 合入前，部分 repo formal suites 仍可能保留 `#233/#368` 等历史 anchor 作为过渡引用；这些历史 issue 不再承担当前主树职责，只用于描述仍待收口的 formal suite 文案。
 
 ### 本阶段建设
 
