@@ -317,7 +317,7 @@ GitHub 单一结构补充约束：
   - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
 - 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head fresh rerun、证据来自 stub/fake host、只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号，或缺少必需的 `gate_applicability` / `live_evidence_record` 元数据时，reviewer 必须直接阻断，不按“建议补充”处理
 - 若 PR 自报 `governance_landing_pr`，但未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过，reviewer 必须直接阻断，不得按普通 PR 放行
-- 若同一 PR 同时触碰 FR-0016 正式契约文件或 `TODO.md` handoff 文件，以及任一治理落库目标文件，reviewer 必须按 `mixed_spec_and_governance_scope` 直接阻断
+- 若同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件，reviewer 必须按 `mixed_spec_and_governance_scope` 直接阻断
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责

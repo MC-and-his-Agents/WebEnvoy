@@ -71,7 +71,7 @@
 - [ ] 如有对应 Issue，已在 PR 描述中显式写出正确的关闭语义（`Fixes #...` 或 `Refs #...`）
 - [ ] 如本 PR 改动 `docs/dev/specs/**/spec.md`，已确认 `.github/spec-issue-sync-map.yml` 存在对应 `spec_path -> canonical_issue_number` 映射
 - [ ] 若本 PR 属于 formal spec review PR、live evidence 治理落库 PR 或落入真实 live evidence 专项门禁，已补齐 `gate_applicability`
-- [ ] 若本 PR 属于 `governance_landing_pr`，已确认当前 PR 显式引用 `#310`，且实际变更精确等于五个冻结治理落库目标文件，未混入 FR-0016 formal spec / `TODO.md` handoff 范围
+- [ ] 若本 PR 属于 `governance_landing_pr`，已确认当前 PR 显式引用 `#310`，且实际变更精确等于五个冻结治理落库目标文件，未混入 FR-0016 formal spec / `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md` 范围
 - [ ] 若本 PR 落入真实 live evidence 专项门禁，已补齐 latest head 的有效 `live_evidence_record`，且未把 stub/fake host、`runtime.ping` 或 `runtime.bootstrap` 误写为真实闭环证据
 - [ ] 如涉及 FR / 架构 / 高风险目录，已补充必要上下文与影响说明
 - [ ] 如涉及正式 spec / 架构规约，已先完成 spec review，且未与实现代码混在同一 PR
