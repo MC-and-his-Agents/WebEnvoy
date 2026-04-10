@@ -150,8 +150,9 @@ Canonical Issue: #238
   - `evidence_refs`
   - `assessed_at`
   - `model_version`
-- 当门禁链路已消费 assessment 并产出正式决策/审计对象时，还必须回填条件字段：
+- 当 assessment 实际比较了 active baseline 时，还必须回填条件字段：
   - `baseline_ref`
+- 当门禁链路已消费 assessment 并产出正式决策/审计对象时，还必须回填条件字段：
   - `decision_id`
   - `audit_record_ref`
 - `decision_hint` 最小枚举：
