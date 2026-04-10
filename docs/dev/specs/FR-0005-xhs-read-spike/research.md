@@ -558,7 +558,7 @@
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
 - 修复 latest head 的 XHS read 执行 bundle 缺陷（当前 fresh rerun 失败原文：`executeXhsSearchImpl is not defined`）
-- 在 identity preflight 解除阻断后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
+- 在修复 latest head 的执行 bundle 缺陷后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
 - 对 `search/detail/user_home` 分别完成“required_headers 最小必要集”实验矩阵
