@@ -151,6 +151,16 @@ Canonical Issue: #239
   - `no_drift`
   - `drift_detected`
   - `insufficient_baseline`
+- `failure_class` 至少支持：
+  - `source_unavailable`
+  - `auth_or_session_required`
+  - `write_blocked`
+  - `runtime_error`
+- `replacement_reason` 至少支持：
+  - `initial_seed`
+  - `reseed_after_drift`
+  - `probe_bundle_change`
+  - `manual_reseed`
 - 必须明确：
   - `anti_detection_structured_sample` 是 `sample_ref` 的唯一正式归属对象；下游 FR 不得把它各自解释成私有日志、截图集合或自由文本摘要
   - `structured_payload` 必须是可重放、可比对、可诊断的最小结构化样本；`artifact_refs` 只作为原始证据引用，不替代结构化 payload 本身
@@ -163,9 +173,11 @@ Canonical Issue: #239
   - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
   - `sample_ref` 必须指向已持久化的结构化样本载体，并在 `captured|verified|broken|stale` 全部终态中保留；不得在完成态丢失 replay / compare / diagnose 所需的样本引用
   - `source_sample_refs` 必须记录形成 baseline snapshot 所消费的结构化样本集合，`source_run_ids` 只作为补充审计引用
+  - baseline snapshot 只有在被同作用域 `anti_detection_baseline_registry_entry.active_baseline_ref` 采用后，才算“已形成 baseline”；未被采用前只属于 candidate snapshot，不得被共享视图或正式 record 当作 active baseline 消费
   - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
-  - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空
+  - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空，且取值必须来自已冻结枚举
+  - `replacement_reason` 是 closed enum；新增 reason 必须重新进入 spec review
   - `browser_channel`、`execution_surface`、`profile_ref` 必须使用唯一 canonical encoding；当前 formal baseline 下分别由 `FR-0015`（browser identity binding）、`FR-0016`（execution_surface 枚举）与稳定 profile namespace 负责归一化
 
 ### 4. 最小共享视图

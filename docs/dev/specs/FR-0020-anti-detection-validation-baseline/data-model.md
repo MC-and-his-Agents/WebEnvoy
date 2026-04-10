@@ -75,6 +75,12 @@
 - `effective_execution_mode` 是 baseline 的正式分区维度；不得把 `dry_run`、`recon` 与 live 证据混成同一条 baseline。
 - `source_sample_refs` 必须记录形成该 baseline 的结构化样本集合，以保证基线可以回溯到正式样本载体。
 
+### baseline admission
+
+- snapshot 创建完成后，默认只属于 candidate snapshot，不自动成为正式 baseline。
+- 只有当同作用域 `AntiDetectionBaselineRegistryEntry.active_baseline_ref` 指向该 `baseline_ref` 时，它才进入 active baseline 语义。
+- 未被任何 registry entry 激活的 candidate snapshot 只可作为审计/分析输入保留，不得被共享视图或正式 validation record 当作 active baseline 消费。
+
 ## 4. `AntiDetectionBaselineRegistryEntry`
 
 - `target_fr_ref`
@@ -95,6 +101,7 @@
 - `active_baseline_ref` 是该作用域下唯一正式生效的 baseline。
 - `superseded_baseline_refs` 记录此前被该 entry 替换掉的 baseline；允许为空数组，但不得为 `null`。
 - `replacement_reason` 记录当前 active baseline 成为正式基线的原因。
+- `replacement_reason` 是 closed enum，只允许 `initial_seed`、`reseed_after_drift`、`probe_bundle_change`、`manual_reseed`。
 
 ### baseline replacement 真相源
 
@@ -135,6 +142,10 @@
 - 当记录引用了可用 baseline 并完成对比时，`baseline_ref` 必填且一经写入不得改写。
 - 当 `drift_state=insufficient_baseline` 且当前不存在可用 baseline 时，`baseline_ref` 允许为空。
 - 当记录因原基线已 `superseded` 而进入 `stale` 语义时，必须保留原 `baseline_ref`，不得清空。
+
+### `failure_class`
+
+- `failure_class` 是 closed enum，只允许 `source_unavailable`、`auth_or_session_required`、`write_blocked`、`runtime_error`。
 
 ### `sample_ref` 与 `probe_bundle_ref` 规则
 

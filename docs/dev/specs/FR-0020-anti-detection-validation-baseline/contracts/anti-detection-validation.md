@@ -180,6 +180,20 @@
 
 - 仅在 `result_state=broken` 时允许出现且必须填写。
 - 在 `result_state=captured/verified/stale` 时必须为空。
+- `failure_class` 是 closed enum，只允许：
+  - `source_unavailable`
+  - `auth_or_session_required`
+  - `write_blocked`
+  - `runtime_error`
+
+### `replacement_reason`
+
+- `replacement_reason` 是 closed enum，只允许：
+  - `initial_seed`
+  - `reseed_after_drift`
+  - `probe_bundle_change`
+  - `manual_reseed`
+- 新增或改义 `replacement_reason` 必须重新进入 spec review。
 
 ## 最小兼容 payload 示例
 
