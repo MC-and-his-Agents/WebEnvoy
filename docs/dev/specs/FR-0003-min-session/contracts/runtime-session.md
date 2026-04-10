@@ -142,7 +142,11 @@ disconnected -> starting
 - `profileState`
 - `browserState`
 - `confirmationRequired`
-- `confirmPath`
+
+说明：
+
+- 实现可以额外返回帮助调用方继续确认流程的提示字段，例如 `confirmPath`。
+- 这类提示字段在 FR-0003 中不作为冻结的正式契约字段；调用方不能依赖其独立表达完整的 follow-up 调用。
 
 确认调用成功结果至少包含：
 
