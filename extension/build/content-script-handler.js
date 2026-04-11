@@ -455,6 +455,9 @@ export class ContentScriptHandler {
                         ? { requested_execution_mode: requestedExecutionMode }
                         : {}),
                     ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+                    ...(options.limited_read_rollout_ready_true === true
+                        ? { limited_read_rollout_ready_true: true }
+                        : {}),
                     ...(typeof options.validation_action === "string"
                         ? { validation_action: options.validation_action }
                         : {}),
@@ -468,6 +471,9 @@ export class ContentScriptHandler {
                         : {}),
                     ...(asRecord(options.approval_record)
                         ? { approval_record: asRecord(options.approval_record) ?? {} }
+                        : {}),
+                    ...(asRecord(options.audit_record)
+                        ? { audit_record: asRecord(options.audit_record) ?? {} }
                         : {}),
                     ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
                 },

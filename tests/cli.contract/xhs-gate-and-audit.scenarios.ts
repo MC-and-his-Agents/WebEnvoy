@@ -102,6 +102,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   it("returns capability_result for xhs.search fixture success path", () => {
     const result = runCli([
       "xhs.search",
+      "--run-id",
+      "run-20260323-live-read-limited-001",
       "--profile",
       "xhs_account_001",
       "--params",
@@ -141,6 +143,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   it("returns invalid args when xhs.search gate options are missing", () => {
     const result = runCli([
       "xhs.search",
+      "--run-id",
+      "run-20260323-live-read-limited-002",
       "--profile",
       "xhs_account_001",
       "--params",
@@ -1746,6 +1750,8 @@ process.stdin.on("data", (chunk) => {
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
     const result = runCli([
       "xhs.search",
+      "--run-id",
+      "run-20260323-live-read-limited-001",
       "--profile",
       "xhs_account_001",
       "--params",
@@ -1778,6 +1784,8 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "gate_evt_issue209_live_limited_001",
+            decision_id: "gate_decision_run-20260323-live-read-limited-001",
+            approval_id: "gate_appr_gate_decision_run-20260323-live-read-limited-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,
@@ -1896,6 +1904,8 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "gate_evt_issue209_live_limited_002",
+            decision_id: "gate_decision_run-20260323-live-read-limited-002",
+            approval_id: "gate_appr_gate_decision_run-20260323-live-read-limited-002",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,

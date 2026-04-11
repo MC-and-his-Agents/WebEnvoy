@@ -190,4 +190,61 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record.approval_id).toBeNull();
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
   });
+
+  it("blocks live_read_limited when audit_record linkage does not match the approved decision", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "limited",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 36,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 36,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_limited",
+        limited_read_rollout_ready_true: true,
+        approval_record: {
+          approval_id: "gate_appr_issue209_linked_req-5",
+          decision_id: "gate_decision_issue209_linked_req-5",
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        },
+        audit_record: {
+          event_id: "gate_evt_issue209_stale_req-5",
+          decision_id: "gate_decision_issue209_stale_req-5",
+          approval_id: "gate_appr_issue209_stale_req-5",
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 36,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z"
+        }
+      },
+      {
+        runId: "run-extension-005",
+        requestId: "req-5",
+        sessionId: "session-extension-005",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("recon");
+    expect(gate.gate_outcome.gate_reasons).toContain("AUDIT_RECORD_MISSING");
+  });
+
 });

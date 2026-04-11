@@ -321,6 +321,18 @@ const createApprovedReadAuditRecord = (overrides?: Record<string, unknown>) => (
   ...overrides
 });
 
+const createApprovedReadAuditRecordForRequest = (input: {
+  runId: string;
+  requestId?: string;
+  overrides?: Record<string, unknown>;
+}) =>
+  createApprovedReadAuditRecord({
+    event_id: `gate_evt_${input.requestId ?? input.runId}`,
+    decision_id: `gate_decision_${input.runId}_${input.requestId ?? input.runId}`,
+    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId ?? input.runId}`,
+    ...(input.overrides ?? {})
+  });
+
 const createFingerprintRuntimeContext = (executionOverrides?: Record<string, unknown>) => ({
   profile: "profile-a",
   source: "profile_meta",
@@ -427,6 +439,7 @@ Object.assign(globalThis as Record<string, unknown>, {
     createXhsEditorInputCommandParams,
     createApprovedReadApprovalRecord,
     createApprovedReadAuditRecord,
+    createApprovedReadAuditRecordForRequest,
     createFingerprintRuntimeContext,
     asRecord,
     resolveWriteInteractionTier

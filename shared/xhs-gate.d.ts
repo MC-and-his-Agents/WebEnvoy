@@ -18,6 +18,20 @@ export interface XhsApprovalRecord {
   checks: Record<string, boolean>;
 }
 
+export interface XhsAuditRecord {
+  event_id: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
+  issue_scope: string | null;
+  target_domain: string | null;
+  target_tab_id: number | null;
+  target_page: string | null;
+  action_type: string | null;
+  requested_execution_mode: string | null;
+  gate_decision: string | null;
+  recorded_at: string | null;
+}
+
 export interface XhsReadExecutionPolicy {
   default_mode: "dry_run";
   allowed_modes: Array<"dry_run" | "recon" | "live_read_limited" | "live_read_high_risk">;
@@ -96,6 +110,7 @@ export declare const resolveXhsExecutionMode: (value: unknown) => ExecutionMode 
 export declare const resolveXhsRiskState: (value: unknown) => RiskState;
 export declare const resolveXhsIssueScope: (value: unknown) => IssueScope;
 export declare const normalizeXhsApprovalRecord: (value: unknown) => XhsApprovalRecord;
+export declare const normalizeXhsAuditRecord: (value: unknown) => XhsAuditRecord;
 export declare const resolveXhsIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState
@@ -107,6 +122,16 @@ export declare const resolveXhsWriteMatrixDecision: (
 export declare const resolveXhsApprovalRequirementGaps: (
   requirements: string[],
   approvalRecord: XhsApprovalRecord
+) => string[];
+export declare const resolveXhsAuditRequirementGaps: (
+  auditRecord: XhsAuditRecord,
+  approvalRecord: XhsApprovalRecord,
+  state: ReturnType<typeof buildXhsGatePolicyState>,
+  target: {
+    targetDomain?: unknown;
+    targetTabId?: unknown;
+    targetPage?: unknown;
+  }
 ) => string[];
 export declare const resolveXhsFallbackMode: (
   requestedExecutionMode: ExecutionMode | null,
@@ -158,6 +183,8 @@ export declare const collectXhsMatrixGateReasons: (input: {
   gateReasons: string[];
   state: ReturnType<typeof buildXhsGatePolicyState>;
   decisionId?: string | null;
+  expectedApprovalId?: string | null;
+  runId?: string | null;
   approvalRecord: unknown;
   auditRecord?: unknown;
   targetDomain?: unknown;

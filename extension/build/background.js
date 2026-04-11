@@ -2719,6 +2719,12 @@ class ChromeBackgroundBridge {
         let writeGateOnlyApprovalDecision = null;
         let writeGateOnlyEligible = false;
         const requestRunId = String(request.params.run_id ?? request.id);
+        const gateDecisionId = `gate_decision_${requestRunId}_${request.id}`;
+        const expectedApprovalId = resolveGatePayloadApprovalId({
+            approvalActive: requestedLiveMode,
+            approvalRecord,
+            decisionId: gateDecisionId
+        });
         const pushReason = (reason) => {
             if (!gateReasons.includes(reason)) {
                 gateReasons.push(reason);
@@ -2758,7 +2764,9 @@ class ChromeBackgroundBridge {
         const matrixResolution = collectXhsMatrixGateReasons({
             gateReasons,
             state: gateState,
-            decisionId: `gate_decision_${requestRunId}_${request.id}`,
+            decisionId: gateDecisionId,
+            expectedApprovalId,
+            runId: requestRunId,
             approvalRecord,
             auditRecord,
             targetDomain,

@@ -1310,6 +1310,7 @@ const normalizeXhsAuditRecord = (value) => {
   const record = asRecord(value);
   return {
     event_id: asString(record?.event_id),
+    decision_id: asString(record?.decision_id),
     approval_id: asString(record?.approval_id),
     issue_scope: asString(record?.issue_scope),
     target_domain: asString(record?.target_domain),
@@ -1322,9 +1323,32 @@ const normalizeXhsAuditRecord = (value) => {
   };
 };
 
-const resolveXhsAuditRequirementGaps = (auditRecord, state, target) => {
+const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
+  const runScopedDecisionPrefix =
+    typeof expectedLinkage.runId === "string" && expectedLinkage.runId.length > 0
+      ? `gate_decision_${expectedLinkage.runId}`
+      : null;
+  const runScopedApprovalPrefix =
+    typeof expectedLinkage.runId === "string" && expectedLinkage.runId.length > 0
+      ? `gate_appr_gate_decision_${expectedLinkage.runId}`
+      : null;
+  const matchesExactLinkage =
+    !!expectedLinkage.decisionId &&
+    !!expectedLinkage.approvalId &&
+    auditRecord.decision_id === expectedLinkage.decisionId &&
+    auditRecord.approval_id === expectedLinkage.approvalId;
+  const matchesRunScopedLinkage =
+    !!runScopedDecisionPrefix &&
+    !!runScopedApprovalPrefix &&
+    typeof auditRecord.decision_id === "string" &&
+    typeof auditRecord.approval_id === "string" &&
+    auditRecord.decision_id.startsWith(runScopedDecisionPrefix) &&
+    auditRecord.approval_id.startsWith(runScopedApprovalPrefix);
   if (
     !auditRecord.event_id ||
+    !auditRecord.decision_id ||
+    !auditRecord.approval_id ||
+    (!matchesExactLinkage && !matchesRunScopedLinkage) ||
     !auditRecord.recorded_at ||
     auditRecord.issue_scope !== state.issueScope ||
     auditRecord.target_domain !== target.targetDomain ||
@@ -1864,11 +1888,20 @@ const collectXhsMatrixGateReasons = (input) => {
         approvalRecord
       );
       const auditRequirementGaps = liveRequirements.includes("audit_record_present")
-        ? resolveXhsAuditRequirementGaps(auditRecord, state, {
+        ? resolveXhsAuditRequirementGaps(
+            auditRecord,
+            {
+              decisionId: input.decisionId ?? null,
+              approvalId: input.expectedApprovalId ?? null,
+              runId: input.runId ?? null
+            },
+            state,
+            {
             targetDomain: input.targetDomain,
             targetTabId: input.targetTabId,
             targetPage: input.targetPage
-          })
+            }
+          )
         : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
@@ -1906,6 +1939,7 @@ const evaluateXhsGate = (input) => {
   const gateReasons = Array.isArray(input.additionalGateReasons)
     ? input.additionalGateReasons.filter((reason) => typeof reason === "string")
     : [];
+  const expectedApprovalId = deriveApprovalId(input, decisionId);
   collectXhsCommandGateReasons({
     gateReasons,
     actionType: input.actionType,
@@ -1929,6 +1963,8 @@ const evaluateXhsGate = (input) => {
     gateReasons,
     state,
     decisionId,
+    expectedApprovalId,
+    runId: input.runId,
     approvalRecord: input.approvalRecord,
     auditRecord: input.auditRecord,
     targetDomain: input.targetDomain,
@@ -1937,7 +1973,7 @@ const evaluateXhsGate = (input) => {
     issue208EditorInputValidation: input.issue208EditorInputValidation === true,
     includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
   });
-  const approvalId = deriveApprovalId(input, decisionId);
+  const approvalId = expectedApprovalId;
   approvalRecord.approval_id = approvalId;
   approvalRecord.decision_id = decisionId;
   const outcome = finalizeXhsGateOutcome({
@@ -5168,6 +5204,9 @@ class ContentScriptHandler {
                         ? { requested_execution_mode: requestedExecutionMode }
                         : {}),
                     ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+                    ...(options.limited_read_rollout_ready_true === true
+                        ? { limited_read_rollout_ready_true: true }
+                        : {}),
                     ...(typeof options.validation_action === "string"
                         ? { validation_action: options.validation_action }
                         : {}),
@@ -5181,6 +5220,9 @@ class ContentScriptHandler {
                         : {}),
                     ...(asRecord(options.approval_record)
                         ? { approval_record: asRecord(options.approval_record) ?? {} }
+                        : {}),
+                    ...(asRecord(options.audit_record)
+                        ? { audit_record: asRecord(options.audit_record) ?? {} }
                         : {}),
                     ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
                 },

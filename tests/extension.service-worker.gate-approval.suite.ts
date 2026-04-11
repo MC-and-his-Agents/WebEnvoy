@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / gate and approval", () => {
   it("forwards fingerprint_context into background bridge", async () => {
@@ -1721,6 +1721,10 @@ describe("extension service worker / gate and approval", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-blocked-by-fingerprint-002",
+            requestId: "run-xhs-live-blocked-by-fingerprint-002"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"

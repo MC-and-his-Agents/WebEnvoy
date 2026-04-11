@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / recovery and relay prerequisites", () => {
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
@@ -33,6 +33,10 @@ describe("extension service worker / recovery and relay prerequisites", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-top-level-patch-missing-001",
+            requestId: "run-xhs-live-top-level-patch-missing-001"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -787,7 +791,11 @@ describe("extension service worker / recovery and relay prerequisites", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-limited-approved-001",
+            requestId: "run-xhs-live-limited-approved-001"
+          })
         }),
         cwd: "/workspace/WebEnvoy"
       },

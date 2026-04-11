@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / bootstrap and trust", () => {
   it("rejects mismatched protocol on bridge.open and does not enter ready", async () => {
@@ -3349,6 +3349,10 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-blocked-by-fingerprint-002",
+            requestId: "run-xhs-live-blocked-by-fingerprint-002"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -4275,6 +4279,10 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-top-level-patch-missing-001",
+            requestId: "run-xhs-live-top-level-patch-missing-001"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -5029,7 +5037,11 @@ describe("extension service worker / bootstrap and trust", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-limited-approved-001",
+            requestId: "run-xhs-live-limited-approved-001"
+          })
         }),
         cwd: "/workspace/WebEnvoy"
       },

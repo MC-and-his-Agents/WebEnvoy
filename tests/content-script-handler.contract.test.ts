@@ -103,6 +103,20 @@ const createApprovedReadApprovalRecord = () => ({
   }
 });
 
+const createApprovedReadAuditRecord = (linkage: { runId: string; requestId: string }) => ({
+  event_id: `gate_evt_${linkage.requestId}`,
+  decision_id: `gate_decision_${linkage.runId}_${linkage.requestId}`,
+  approval_id: `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
+  issue_scope: "issue_209",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 1,
+  target_page: "search_result_tab",
+  action_type: "read",
+  requested_execution_mode: "live_read_limited",
+  gate_decision: "allowed",
+  recorded_at: "2026-03-23T10:00:30Z"
+});
+
 const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
 
 const withMockMainWorld = async (
@@ -1036,7 +1050,12 @@ describe("content-script handler contract", () => {
               target_page: "search_result_tab",
               action_type: "read",
               risk_state: "limited",
-              approval_record: createApprovedReadApprovalRecord()
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId: "run-xhs-sign-forged-001",
+                requestId: "run-xhs-sign-forged-001"
+              })
             }
           },
           fingerprintContext: createFingerprintContext()
@@ -1158,7 +1177,12 @@ describe("content-script handler contract", () => {
               target_page: "search_result_tab",
               action_type: "read",
               risk_state: "limited",
-              approval_record: createApprovedReadApprovalRecord()
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId: `run-xhs-simulated-${simulateResult}-001`,
+                requestId: `run-xhs-simulated-${simulateResult}-001`
+              })
             }
           },
           fingerprintContext: createFingerprintContext()

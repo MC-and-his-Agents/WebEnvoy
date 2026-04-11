@@ -1,7 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, approvedLimitedLiveOptions, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / gate and approval", () => {
+  const approvedLimitedLiveOptions = {
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_limited",
+    risk_state: "limited",
+    approval: {
+      approved: true,
+      approver: "reviewer-a",
+      approved_at: "2026-03-23T08:00:00Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    },
+    limited_read_rollout_ready_true: true,
+    audit_record: {
+      event_id: "gate_evt_forward-xhs-live-limited-allowed-001",
+      decision_id:
+        "gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
+      approval_id:
+        "gate_appr_gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_limited",
+      gate_decision: "allowed",
+      recorded_at: "2026-03-23T08:00:30Z"
+    }
+  };
+
   it("blocks xhs.search when execution mode is omitted", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
@@ -110,6 +147,42 @@ describe("extension background relay contract / gate and approval", () => {
       }
     });
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+    const approvedLimitedLiveOptions = {
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_limited",
+      risk_state: "limited",
+      approval: {
+        approved: true,
+        approver: "reviewer-a",
+        approved_at: "2026-03-23T08:00:00Z",
+        checks: {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        }
+      },
+      limited_read_rollout_ready_true: true,
+      audit_record: {
+        event_id: "gate_evt_forward-xhs-live-limited-allowed-001",
+        decision_id:
+          "gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
+        approval_id:
+          "gate_appr_gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        gate_decision: "allowed",
+        recorded_at: "2026-03-23T08:00:30Z"
+      }
+    };
 
     const responsePromise = waitForResponse(relay);
     relay.onNativeRequest({
