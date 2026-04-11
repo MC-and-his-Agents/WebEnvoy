@@ -435,14 +435,24 @@ const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
     const ability = asRecord(commandParams.ability) ?? {};
     const input = asRecord(commandParams.input) ?? {};
     const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
+    const command = typeof request.params.command === "string" ? request.params.command : null;
+    const dataRef = command === "xhs.detail"
+        ? {
+            note_id: String(input.note_id ?? "")
+        }
+        : command === "xhs.user_home"
+            ? {
+                user_id: String(input.user_id ?? "")
+            }
+            : {
+                query: String(input.query ?? "")
+            };
     const capabilityResult = {
         ability_id: String(ability.id ?? "xhs.note.search.v1"),
         layer: String(ability.layer ?? "L3"),
         action: String(consumerGateResult.action_type ?? "read"),
         outcome: "partial",
-        data_ref: {
-            query: String(input.query ?? "")
-        },
+        data_ref: dataRef,
         metrics: {
             count: 0
         }
