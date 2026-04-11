@@ -83,18 +83,43 @@ const XHS_PLUGIN_GATE_OWNERSHIP = {
     main_world_gate: ["signed_call_scope_check"],
     cli_role: "request_and_result_shell_only"
 };
-const scoreXhsTab = (tab) => {
+const resolvePreferredXhsReadPage = (command, targetPage) => {
+    if (targetPage === "search_result_tab" || targetPage === "explore_detail_tab" || targetPage === "profile_tab") {
+        return targetPage;
+    }
+    if (command === "xhs.detail") {
+        return "explore_detail_tab";
+    }
+    if (command === "xhs.user_home") {
+        return "profile_tab";
+    }
+    if (command === "xhs.search") {
+        return "search_result_tab";
+    }
+    return null;
+};
+const scoreXhsTab = (tab, preferredPage) => {
     const url = typeof tab.url === "string" ? tab.url : "";
-    if (url.includes("/search_result")) {
+    const page = url.includes("/search_result")
+        ? "search_result_tab"
+        : url.includes("/explore/")
+            ? "explore_detail_tab"
+            : url.includes("/user/profile/")
+                ? "profile_tab"
+                : "other";
+    if (preferredPage && page === preferredPage) {
         return 0;
     }
-    if (url.includes("/explore/")) {
+    if (page === "search_result_tab") {
         return 1;
     }
-    if (url.includes("/user/profile/")) {
+    if (page === "explore_detail_tab") {
         return 2;
     }
-    return 3;
+    if (page === "profile_tab") {
+        return 3;
+    }
+    return 4;
 };
 const scoreXhsRuntimeSurfaceTab = (tab) => {
     const url = typeof tab.url === "string" ? tab.url : "";
@@ -3038,6 +3063,10 @@ class ChromeBackgroundBridge {
             return typeof candidate?.id === "number" ? candidate.id : null;
         }
         if (XHS_GATE_COMMANDS.has(command)) {
+            const rawCommandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
+                ? request.params.command_params
+                : {};
+            const preferredPage = resolvePreferredXhsReadPage(command, resolveXhsGateCommandInput(rawCommandParams).targetPage);
             const xhsUrlPatterns = [
                 "*://www.xiaohongshu.com/*",
                 "*://edith.xiaohongshu.com/*",
@@ -3055,7 +3084,7 @@ class ChromeBackgroundBridge {
             const ranked = xhsTabs
                 .filter((tab) => typeof tab.id === "number")
                 .sort((left, right) => {
-                const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
+                const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
                 if (scoreDiff !== 0) {
                     return scoreDiff;
                 }

@@ -206,6 +206,108 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("pins xhs.detail to detail tab when target_tab_id is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { active?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 44, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+          { id: 52, url: "https://www.xiaohongshu.com/explore/abc", active: false },
+          { id: 61, url: "https://www.xiaohongshu.com/user/profile/user-001", active: false }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-detail-tab-pin-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-tab-pin-001",
+        command: "xhs.detail",
+        command_params: {
+          ability: { id: "xhs.note.detail.v1", layer: "L3", action: "read" },
+          input: { note_id: "abc" },
+          options: createXhsCommandParams({
+            target_tab_id: undefined,
+            target_page: "explore_detail_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      52,
+      expect.objectContaining({
+        id: "run-xhs-detail-tab-pin-001",
+        command: "xhs.detail"
+      })
+    );
+  });
+
+  it("pins xhs.user_home to profile tab when target_tab_id is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { active?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 44, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+          { id: 52, url: "https://www.xiaohongshu.com/explore/abc", active: false },
+          { id: 61, url: "https://www.xiaohongshu.com/user/profile/user-001", active: false }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-user-home-tab-pin-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-user-home-tab-pin-001",
+        command: "xhs.user_home",
+        command_params: {
+          ability: { id: "xhs.user.home.v1", layer: "L3", action: "read" },
+          input: { user_id: "user-001" },
+          options: createXhsCommandParams({
+            target_tab_id: undefined,
+            target_page: "profile_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      61,
+      expect.objectContaining({
+        id: "run-xhs-user-home-tab-pin-001",
+        command: "xhs.user_home"
+      })
+    );
+  });
+
   it("accepts real xhs.search payload shape and reads target gate fields from options", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
