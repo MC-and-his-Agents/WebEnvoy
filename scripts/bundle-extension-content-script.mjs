@@ -227,6 +227,7 @@ const buildContentScriptBundle = async () => {
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
       "MAIN_WORLD_EVENT_BOOTSTRAP",
+      "readPageStateViaMainWorld",
       "resetMainWorldEventChannelForContract",
       "resolveMainWorldEventNamesForSecret",
       "verifyFingerprintRuntimeViaMainWorld"

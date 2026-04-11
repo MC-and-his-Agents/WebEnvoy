@@ -126,6 +126,7 @@ describe("extension build contract", () => {
     expect(contentScriptBuild).toContain("bootstrapContentScript");
     expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
     expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
+    expect(contentScriptBuild).toContain("readPageStateViaMainWorld");
     expect(xhsEditorInputBuild).toContain("performEditorInputValidation");
     expect(xhsEditorInputBuild).toContain("新的创作");
     expect(xhsEditorInputBuild).toContain("enter_editable_mode");
