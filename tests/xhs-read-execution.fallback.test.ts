@@ -40,6 +40,7 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
   getReadyState: () => "complete",
   getCookie: () => "a1=cookie-token",
   getPageStateRoot: () => null,
+  readPageStateRoot: async () => null,
   callSignature: async () => ({ "X-s": "sig", "X-t": "1710000000" }),
   fetchJson: async () => ({ status: 200, body: { code: 0 } }),
   ...overrides
@@ -67,7 +68,8 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
-        getPageStateRoot: () => ({
+        getPageStateRoot: () => null,
+        readPageStateRoot: async () => ({
           note: {
             noteDetailMap: {
               "note-001": {
@@ -143,7 +145,8 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
-        getPageStateRoot: () => ({
+        getPageStateRoot: () => null,
+        readPageStateRoot: async () => ({
           user: {
             userId: "user-001"
           },
@@ -243,7 +246,8 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
-        getPageStateRoot: () => ({
+        getPageStateRoot: () => null,
+        readPageStateRoot: async () => ({
           user: {
             userId: "user-999"
           },

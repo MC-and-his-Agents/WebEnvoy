@@ -560,6 +560,14 @@ const executeXhsRead = async (
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
   const payload = spec.buildPayload(input.params, env);
+  const resolvePageStateRoot = async (): Promise<JsonRecord | null> => {
+    const mainWorldState = await env.readPageStateRoot?.().catch(() => null);
+    const mainWorldRecord = asRecord(mainWorldState);
+    if (mainWorldRecord) {
+      return mainWorldRecord;
+    }
+    return asRecord(env.getPageStateRoot?.());
+  };
 
   if (gate.consumer_gate_result.gate_decision === "blocked") {
     return createFailure(
@@ -726,7 +734,7 @@ const executeXhsRead = async (
     });
   } catch (error) {
     const failure = inferReadRequestException(spec, error);
-    const pageStateRoot = asRecord(env.getPageStateRoot?.());
+    const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
       return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
         reason: failure.reason,
@@ -763,7 +771,7 @@ const executeXhsRead = async (
   const businessCode = responseRecord?.code;
   if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
     const failure = inferReadFailure(spec, response.status, response.body);
-    const pageStateRoot = asRecord(env.getPageStateRoot?.());
+    const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
       return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
         reason: failure.reason,

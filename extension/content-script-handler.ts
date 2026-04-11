@@ -20,6 +20,7 @@ import {
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } from "./content-script-main-world.js";
@@ -29,6 +30,7 @@ export {
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 };
@@ -193,6 +195,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
+  readPageStateRoot: async () => await readPageStateViaMainWorld(),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
