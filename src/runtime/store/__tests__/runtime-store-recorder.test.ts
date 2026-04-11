@@ -179,6 +179,38 @@ describe("runtime-store-recorder", () => {
     );
   });
 
+  it("preserves truncation markers from already-shaped diagnoses", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "forwarded runtime failure", {
+        diagnosis: {
+          category: "request_failed",
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "/api/feed",
+            summary: "already clipped upstream",
+            summary_truncated: true
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "request_failed",
+        summary: "already clipped upstream",
+        summaryTruncated: true
+      })
+    );
+  });
+
   it("marks failure summaries as truncated when projection exceeds store budget", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);
