@@ -8,7 +8,7 @@
 - [ ] 若继续修订 FR-0016 formal 文档，先确认本 FR 只承接 `#310` 的治理输入冻结，不把 TODO 扩写为治理落库执行清单。
 - [ ] 若需要调整专项门禁触发条件，先同时核对 `spec.md`、`contracts/live-evidence-gate.md` 与 `risks.md`，避免再次出现文档间口径漂移。
 - [ ] 若需要修订 `N/A`、`Fixes` / `Refs` 或 `merge-ready` 语义，先确认 reviewer / guardian / PR 模板三者是否仍引用同一套前提。
-- [ ] 若 `#455` 这类 follow-up 需要修复 docs-only governance maintenance / closeout 阻断，先在 formal contract 中明确 `governance_landing_pr` 与普通治理维护 PR 的边界，再进入五文件治理回写。
+- [ ] 若 `#455` 这类 follow-up 需要修复 docs-only governance maintenance / closeout 阻断，先在 formal contract 中明确 `governance_landing_pr`、`governance_maintenance_pr` 与 `governance_context_issue_ref` 的边界，再进入五文件治理回写。
 - [ ] 若 `#455` 这类 follow-up 需要处理 latest-head 自指阻断，先冻结“PR 级 `live_evidence_record` 承载当前 gate evidence，仓库 formal 文档可保留固定样本”的分层，不在治理落库 PR 中临时口头解释。
 
 ## 进入治理落库前条件
@@ -18,7 +18,7 @@
 - [ ] 当前 `#311` 已根据 formal 结论做出后续动作：关闭、转 Draft，或拆成新的治理落库 PR；不得继续以“缺 formal 输入”的状态申报可合并。
 - [ ] 后续治理落库 PR 已明确只承接 `.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`code_review.md`、`docs/dev/AGENTS.md`、`docs/dev/review/guardian-review-addendum.md` 五处同类回写，不混入其他治理事项。
 - [ ] 后续治理落库 PR 的 closing semantics 已按实际闭环程度选择：未完整满足 `#310` 关闭条件时使用 `Refs #310`；若已完整落库五处治理文案并满足关闭条件，则使用 `Fixes #310`。
-- [ ] 若是 `#455` 这类后续治理维护，不再把精确命中五文件视为自动等价于 `#310` 的 `governance_landing_pr`；是否进入该 lane，必须再看 `#310` issue 上下文与 closing 语义。
+- [ ] 若是 `#455` 这类后续治理维护，精确命中五文件时必须显式提供 `governance_context_issue_ref`，并由 reviewer / guardian 机器化判定进入 `governance_maintenance_pr`；不得继续依赖口头说明。
 
 ## 实现停点
 

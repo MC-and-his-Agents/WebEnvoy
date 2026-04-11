@@ -39,7 +39,7 @@
   - #322 最新 guardian 继续指出：mixed-scope blocker 不能直接覆盖整个 spec 套件目录；FR-0016 `TODO.md` 需要与正式契约文件分开建模
   - #322 最新 guardian 继续指出：formal spec lane 也需要排除纯 `TODO.md` 命中；governance landing lane 还必须要求完整五文件集合，不能被部分落库 PR 提前占用
   - #322 最新 guardian 继续指出：仍需把 `gate_applicability` 缺失显式建模为 blocker；治理落库线还要要求精确五文件范围，不能夹带其他实质性改动
-  - #322 最新 guardian 继续指出：即使精确命中五个治理落库目标文件，若漏掉 `#310` 引用，也必须有结构化 blocker，不能退回普通 PR
+  - #322 最新 guardian 继续指出：精确命中五个治理落库目标文件时，必须有结构化 issue 引用与 blocker，不能退回普通 PR
   - #322 最新 guardian 继续指出：`governance_landing_pr` 即使是 `not_applicable` 也不能允许 `n_a` closing semantics，必须保留 `Refs/Fixes #310`
   - #322 最新 guardian 继续指出：若带 `#310` 上下文的治理落库 PR 只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked，不能退回 `general_pr`
   - #322 最新 guardian 继续指出：formal spec PR 只要触碰任一治理落库目标文件，也必须立刻 mixed-scope blocked，不能等到完整 landing 形态才阻断
@@ -123,7 +123,7 @@
 | U4 | formal spec review PR 与治理落库 PR 必须拆开 | `docs/dev/AGENTS.md` + `spec_review.md` + `#311` 最新 guardian/review blocker | 高风险事项规则对照 | M3 | 99% | 对 `#310 / FR-0016` 已冻结为必须拆分，不再保留 reviewer 例外口径 |
 | U5 | `spec_review_not_completed` 只能通过 contract 内部结构化 lane 对治理落库 PR 触发，不能依赖外部 heuristics | `#322` guardian review | review blocker 对照 | M3 | 95% | 若不冻结 lane，未来 reviewer / guardian 会各自用标题、路径或人工上下文猜测治理落库身份 |
 | U6 | `gate_applicability` 必须作为 PR 侧结构化元数据显式承载，即使 `live_evidence_record` 为 `N/A` 也不能省略 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只冻结 `live_evidence_record`，治理落库 PR 仍无法机器化表达 `review_lane/in_scope` |
-| U7 | `gate_applicability` 的显式承载范围必须限制在专项门禁 PR、formal spec review PR 与 governance landing PR，不能扩成 repo-wide PR 元数据 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若要求所有 reviewed PR 都携带该对象，就违背“专项门禁而非全仓统一门禁”的非目标 |
+| U7 | `gate_applicability` 的显式承载范围必须限制在专项门禁 PR、formal spec review PR、governance landing PR 与 governance maintenance PR，不能扩成 repo-wide PR 元数据 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若要求所有 reviewed PR 都携带该对象，就违背“专项门禁而非全仓统一门禁”的非目标 |
 | U8 | `governance_landing_pr` 必须通过 `governance_scope_targets` 与实际变更目标文件共同校验，不能只靠作者自报 `review_lane` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若没有结构化目标文件集合，治理落库 lane 仍可被自报 `general_pr` 绕过 |
 | U9 | formal spec review PR 与治理落库文件重新混线时必须有结构化 blocker，且 formal spec lane 即使 `ready` 也不得使用 `Fixes` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少 `mixed_spec_and_governance_scope` 与 lane-specific closing semantics，split 规则仍会被实现层绕过 |
 | U10 | lane 判定必须先消费独立的 `classification_scope`，且 formal spec lane 必须强制 `Refs` 而不是 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若仍要先相信作者自报 `review_lane`，或允许 formal spec lane 走 `n_a`，就会继续和仓库 merge 元数据基线冲突 |
@@ -131,7 +131,7 @@
 | U12 | `mixed_spec_and_governance_scope` 不能直接覆盖整个 spec 套件目录；FR-0016 `TODO.md` 必须作为独立 handoff 文件建模，而不是隐式治理例外 | `#322` guardian review | review blocker 对照 | M3 | 90% | 若把整个 spec 目录都算进 mixed-scope blocker，或继续让 `TODO.md` 以启发式方式同行，后续治理落库 PR 仍会在误伤与绕过之间摇摆 |
 | U13 | `formal_spec_review_pr` 也必须只由 `spec_contract_targets` 触发，且 `governance_landing_pr` 必须要求完整五文件集合并排除 FR-0016 `TODO.md` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 formal spec lane 仍吃进纯 `TODO.md`，或治理落库 lane 继续容忍 `TODO.md` / 部分文件子集同行，后续合规 PR 仍会被误判或提前关闭 `#310` |
 | U14 | 缺失必需 `gate_applicability` 元数据必须显式 blocked，且治理落库线必须是精确五文件范围 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少结构化 blocker 与精确范围约束，reviewer/guardian 仍可靠启发式放行缺失元数据或夹带改动的 PR |
-| U15 | 自报 `governance_landing_pr` 却缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，伪装成治理落库的 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
+| U15 | 精确命中五个治理落库目标文件时，必须提供结构化治理 issue 引用；缺失时必须有 blocker | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，治理落库或治理维护 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U16 | `governance_landing_pr` 即使 `not_applicable`，closing semantics 也必须保留 `Refs/Fixes #310`，不得使用 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若允许 `n_a`，治理落库 PR 仍可绕开仓库要求的 issue closing metadata |
 | U17 | 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只对“精确五文件”建模，子集/超集治理改动仍可绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U18 | formal spec PR 只要触碰任一治理落库目标文件，就必须立即触发 `mixed_spec_and_governance_scope` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 mixed-scope 只在完整 landing 形态才触发，spec PR 仍可顺手塞入单个治理文件改动而绕开 split 规则 |
