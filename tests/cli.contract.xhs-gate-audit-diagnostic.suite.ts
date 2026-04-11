@@ -1584,6 +1584,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
+          limited_read_rollout_ready_true: true,
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1595,6 +1596,17 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
+          },
+          audit_record: {
+            event_id: "audit-live-read-limited-001",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
           }
         }
       })
@@ -1632,6 +1644,8 @@ process.stdin.on("data", (chunk) => {
             {
               action: "live_read_limited",
               requires: [
+                "audit_record_present",
+                "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",
                 "approval_record_approved_at_present",

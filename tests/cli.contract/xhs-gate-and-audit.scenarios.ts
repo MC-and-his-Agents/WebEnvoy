@@ -1763,6 +1763,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
+          limited_read_rollout_ready_true: true,
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1774,6 +1775,17 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
+          },
+          audit_record: {
+            event_id: "gate_evt_issue209_live_limited_001",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:05:00Z"
           }
         }
       })
@@ -1811,6 +1823,8 @@ process.stdin.on("data", (chunk) => {
             {
               action: "live_read_limited",
               requires: [
+                "audit_record_present",
+                "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",
                 "approval_record_approved_at_present",
@@ -1842,6 +1856,75 @@ process.stdin.on("data", (chunk) => {
             "risk_state_checked",
             "audit_record_present"
           ]
+        }
+      }
+    });
+  });
+
+  it("blocks live_read_limited when limited rollout readiness is not recorded", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: false,
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_issue209_live_limited_002",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:05:00Z"
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_limited",
+            effective_execution_mode: "recon",
+            gate_decision: "blocked",
+            gate_reasons: expect.arrayContaining(["LIMITED_READ_ROLLOUT_NOT_READY"])
+          }
         }
       }
     });

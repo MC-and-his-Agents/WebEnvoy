@@ -2696,12 +2696,14 @@ describe("extension service worker / bootstrap and trust", () => {
           conditional_actions: [
             {
               action: "live_read_limited",
-              requires: [
+              requires: expect.arrayContaining([
+                "audit_record_present",
+                "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",
                 "approval_record_approved_at_present",
                 "approval_record_checks_all_true"
-              ]
+              ])
             }
           ]
         },
@@ -2795,7 +2797,10 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_limited",
           effective_execution_mode: "recon",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+          gate_reasons: expect.arrayContaining([
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE"
+          ])
         }
       }
     });

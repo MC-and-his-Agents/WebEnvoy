@@ -47,6 +47,8 @@ export interface XhsGateCoreInput {
   runId?: unknown;
   abilityAction?: unknown;
   approvalRecord: unknown;
+  auditRecord?: unknown;
+  limitedReadRolloutReadyTrue?: boolean;
   decisionId?: unknown;
   approvalId?: unknown;
   issue208EditorInputValidation?: boolean;
@@ -74,6 +76,7 @@ export interface XhsGateCoreResult {
   isLiveReadMode: boolean;
   isBlockedByStateMatrix: boolean;
   liveModeCanEnter: boolean;
+  limitedReadRolloutReadyTrue: boolean;
   fallbackMode: ExecutionMode;
   writeGateOnlyEligible: boolean;
   writeGateOnlyDecision: Record<string, unknown> | null;
@@ -115,6 +118,7 @@ export declare const buildXhsGatePolicyState: (input: {
   riskState: unknown;
   actionType: unknown;
   requestedExecutionMode: unknown;
+  limitedReadRolloutReadyTrue?: boolean;
 }) => {
   issueScope: IssueScope;
   riskState: RiskState;
@@ -128,6 +132,7 @@ export declare const buildXhsGatePolicyState: (input: {
   isLiveReadMode: boolean;
   isBlockedByStateMatrix: boolean;
   liveModeCanEnter: boolean;
+  limitedReadRolloutReadyTrue: boolean;
   fallbackMode: ExecutionMode;
 };
 export declare const collectXhsCommandGateReasons: (input: {
@@ -154,6 +159,10 @@ export declare const collectXhsMatrixGateReasons: (input: {
   state: ReturnType<typeof buildXhsGatePolicyState>;
   decisionId?: string | null;
   approvalRecord: unknown;
+  auditRecord?: unknown;
+  targetDomain?: unknown;
+  targetTabId?: unknown;
+  targetPage?: unknown;
   issue208EditorInputValidation?: boolean;
   includeWriteInteractionTierReason?: boolean;
   allowIssue208EligibleExecution?: boolean;

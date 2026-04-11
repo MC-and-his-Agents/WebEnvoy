@@ -268,6 +268,8 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   action_type: "read",
   risk_state: "paused",
   requested_execution_mode: "dry_run",
+  limited_read_rollout_ready_true: true,
+  audit_record: createApprovedReadAuditRecord(),
   ...overrides
 });
 
@@ -304,6 +306,19 @@ const createApprovedReadApprovalRecord = () => ({
     risk_state_checked: true,
     action_type_confirmed: true
   }
+});
+
+const createApprovedReadAuditRecord = (overrides?: Record<string, unknown>) => ({
+  event_id: "gate_evt_issue209_read_001",
+  issue_scope: "issue_209",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  action_type: "read",
+  requested_execution_mode: "live_read_limited",
+  gate_decision: "allowed",
+  recorded_at: "2026-03-23T10:05:00Z",
+  ...overrides
 });
 
 const createFingerprintRuntimeContext = (executionOverrides?: Record<string, unknown>) => ({
@@ -411,6 +426,7 @@ Object.assign(globalThis as Record<string, unknown>, {
     createXhsCommandParams,
     createXhsEditorInputCommandParams,
     createApprovedReadApprovalRecord,
+    createApprovedReadAuditRecord,
     createFingerprintRuntimeContext,
     asRecord,
     resolveWriteInteractionTier

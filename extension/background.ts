@@ -303,6 +303,7 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
+    "audit_record_present",
     "risk_state_checked",
     "target_domain_confirmed",
     "target_tab_confirmed",
@@ -624,6 +625,8 @@ const xhsGateReasonMessage = (reason: string): string => {
     RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
     MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
     APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
+    AUDIT_RECORD_MISSING: "audit record is required for live mode",
+    LIMITED_READ_ROLLOUT_NOT_READY: "limited read rollout readiness is not satisfied",
     FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
     FINGERPRINT_CONTEXT_UNTRUSTED:
       "fingerprint context is not trusted for current run/profile",
@@ -750,7 +753,9 @@ const XHS_FORWARD_OPTION_KEYS = [
   "validation_text",
   "editor_focus_attestation",
   "approval_record",
+  "audit_record",
   "approval",
+  "limited_read_rollout_ready_true",
   "timeout_ms",
   "simulate_result",
   "x_s_common"
@@ -798,6 +803,8 @@ type ResolvedXhsGateCommandInput = {
   abilityActionType: XhsActionType | null;
   requestedExecutionMode: XhsExecutionMode | null;
   approvalRecord: XhsApprovalRecord;
+  auditRecord: Record<string, unknown> | null;
+  limitedReadRolloutReadyTrue: boolean;
   validationAction: string | null;
   requestedFingerprintContext: FingerprintRuntimeContext | null;
 };
@@ -828,6 +835,8 @@ const resolveXhsGateCommandInput = (
     approvalRecord: normalizeXhsApprovalRecord(
       readGateParam("approval_record") ?? readGateParam("approval")
     ) as XhsApprovalRecord,
+    auditRecord: asRecord(readGateParam("audit_record")),
+    limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
   };
@@ -3455,6 +3464,8 @@ class ChromeBackgroundBridge {
       abilityActionType,
       requestedExecutionMode,
       approvalRecord,
+      auditRecord,
+      limitedReadRolloutReadyTrue,
       validationAction,
       requestedFingerprintContext
     } = resolveXhsGateCommandInput(asRecord(request.params.command_params) ?? {});
@@ -3498,7 +3509,8 @@ class ChromeBackgroundBridge {
       issueScope,
       riskState,
       actionType,
-      requestedExecutionMode
+      requestedExecutionMode,
+      limitedReadRolloutReadyTrue
     });
     collectXhsCommandGateReasons({
       gateReasons,
@@ -3520,6 +3532,10 @@ class ChromeBackgroundBridge {
       state: gateState,
       decisionId: `gate_decision_${requestRunId}_${request.id}`,
       approvalRecord,
+      auditRecord,
+      targetDomain,
+      targetTabId,
+      targetPage,
       issue208EditorInputValidation
     });
     writeGateOnlyEligible = matrixResolution.writeGateOnlyEligible;

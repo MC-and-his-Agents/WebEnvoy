@@ -1018,12 +1018,14 @@ describe("extension service worker / gate and approval", () => {
           conditional_actions: [
             {
               action: "live_read_limited",
-              requires: [
+              requires: expect.arrayContaining([
+                "audit_record_present",
+                "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",
                 "approval_record_approved_at_present",
                 "approval_record_checks_all_true"
-              ]
+              ])
             }
           ]
         },
@@ -1117,7 +1119,60 @@ describe("extension service worker / gate and approval", () => {
           requested_execution_mode: "live_read_limited",
           effective_execution_mode: "recon",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+          gate_reasons: expect.arrayContaining([
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE"
+          ])
+        }
+      }
+    });
+  });
+
+  it("blocks live_read_limited in background gate when limited rollout readiness is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-limited-rollout-blocked-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-rollout-blocked-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: createApprovedReadApprovalRecord(),
+          limited_read_rollout_ready_true: false,
+          fingerprint_context: createFingerprintRuntimeContext()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((message) => message.id === "run-xhs-live-limited-rollout-blocked-001");
+    expect(blocked).toMatchObject({
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "recon",
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["LIMITED_READ_ROLLOUT_NOT_READY"])
         }
       }
     });

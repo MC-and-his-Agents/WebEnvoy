@@ -32,6 +32,8 @@ export interface XhsSearchOptions {
   risk_state?: string;
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
+  audit_record?: Record<string, unknown>;
+  limited_read_rollout_ready_true?: boolean;
   validation_action?: string;
   validation_text?: string;
   editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;

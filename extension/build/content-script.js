@@ -110,6 +110,8 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
+          "audit_record_present",
+          "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
           "approval_record_approved_at_present",
@@ -132,6 +134,8 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
+          "audit_record_present",
+          "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
           "approval_record_approved_at_present",
@@ -1145,6 +1149,7 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
+    "audit_record_present",
     "risk_state_checked",
     "target_domain_confirmed",
     "target_tab_confirmed",
@@ -1299,6 +1304,39 @@ const resolveXhsApprovalRequirementGaps = (requirements, approvalRecord) => {
     gaps.push(requirement);
   }
   return gaps;
+};
+
+const normalizeXhsAuditRecord = (value) => {
+  const record = asRecord(value);
+  return {
+    event_id: asString(record?.event_id),
+    approval_id: asString(record?.approval_id),
+    issue_scope: asString(record?.issue_scope),
+    target_domain: asString(record?.target_domain),
+    target_tab_id: asInteger(record?.target_tab_id),
+    target_page: asString(record?.target_page),
+    action_type: asString(record?.action_type),
+    requested_execution_mode: asString(record?.requested_execution_mode),
+    gate_decision: asString(record?.gate_decision),
+    recorded_at: asString(record?.recorded_at)
+  };
+};
+
+const resolveXhsAuditRequirementGaps = (auditRecord, state, target) => {
+  if (
+    !auditRecord.event_id ||
+    !auditRecord.recorded_at ||
+    auditRecord.issue_scope !== state.issueScope ||
+    auditRecord.target_domain !== target.targetDomain ||
+    auditRecord.target_tab_id !== target.targetTabId ||
+    auditRecord.target_page !== target.targetPage ||
+    auditRecord.action_type !== state.actionType ||
+    auditRecord.requested_execution_mode !== state.requestedExecutionMode ||
+    auditRecord.gate_decision !== "allowed"
+  ) {
+    return ["audit_record_present"];
+  }
+  return [];
 };
 
 const hasApprovalRecordConflictingLinkage = (approvalRecord, decisionId) => {
@@ -1637,6 +1675,7 @@ const buildXhsGatePolicyState = (input) => {
     requestedExecutionMode !== null &&
     issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
     isLiveReadMode;
+  const limitedReadRolloutReadyTrue = input.limitedReadRolloutReadyTrue === true;
 
   return {
     issueScope,
@@ -1651,6 +1690,7 @@ const buildXhsGatePolicyState = (input) => {
     isLiveReadMode,
     isBlockedByStateMatrix,
     liveModeCanEnter,
+    limitedReadRolloutReadyTrue,
     fallbackMode: resolveXhsFallbackMode(requestedExecutionMode, riskState)
   };
 };
@@ -1723,6 +1763,7 @@ const collectXhsMatrixGateReasons = (input) => {
   const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
   const state = input.state;
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
   const approvalRecordHasConflictingLinkage = hasApprovalRecordConflictingLinkage(
     approvalRecord,
     input.decisionId
@@ -1811,16 +1852,40 @@ const collectXhsMatrixGateReasons = (input) => {
       pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
       pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
     } else if (state.liveModeCanEnter) {
-      if (
-        approvalRecordHasConflictingLinkage ||
-        !approvalRecord.approved ||
-        !approvalRecord.approver ||
-        !approvalRecord.approved_at
-      ) {
+      const conditionalRequirement =
+        state.requestedExecutionMode === null
+          ? null
+          : state.issueActionMatrix.conditional_actions.find(
+              (entry) => entry.action === state.requestedExecutionMode
+            ) ?? null;
+      const liveRequirements = conditionalRequirement?.requires ?? [];
+      const approvalRequirementGaps = resolveXhsApprovalRequirementGaps(
+        liveRequirements.filter((requirement) => requirement.startsWith("approval_record_")),
+        approvalRecord
+      );
+      const auditRequirementGaps = liveRequirements.includes("audit_record_present")
+        ? resolveXhsAuditRequirementGaps(auditRecord, state, {
+            targetDomain: input.targetDomain,
+            targetTabId: input.targetTabId,
+            targetPage: input.targetPage
+          })
+        : [];
+      const rolloutRequirementGaps =
+        liveRequirements.includes("limited_read_rollout_ready_true") &&
+        state.limitedReadRolloutReadyTrue !== true
+          ? ["limited_read_rollout_ready_true"]
+          : [];
+      if (approvalRecordHasConflictingLinkage || approvalRequirementGaps.length > 0) {
         pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
       }
-      if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+      if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
         pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+      }
+      if (auditRequirementGaps.length > 0) {
+        pushReason(gateReasons, "AUDIT_RECORD_MISSING");
+      }
+      if (rolloutRequirementGaps.length > 0) {
+        pushReason(gateReasons, "LIMITED_READ_ROLLOUT_NOT_READY");
       }
     }
   }
@@ -1828,6 +1893,7 @@ const collectXhsMatrixGateReasons = (input) => {
   return {
     gateReasons,
     approvalRecord,
+    auditRecord,
     writeGateOnlyEligible,
     writeGateOnlyDecision,
     writeGateOnlyApprovalDecision: writeGateOnlyDecision
@@ -1864,6 +1930,10 @@ const evaluateXhsGate = (input) => {
     state,
     decisionId,
     approvalRecord: input.approvalRecord,
+    auditRecord: input.auditRecord,
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
     issue208EditorInputValidation: input.issue208EditorInputValidation === true,
     includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
   });
@@ -2369,6 +2439,8 @@ const resolveGate = (options, context) => {
         abilityAction: options.ability_action,
         requestedExecutionMode: options.requested_execution_mode,
         approvalRecord: providedApprovalRecord,
+        auditRecord: options.audit_record,
+        limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
         decisionId,
         approvalId,
         issue208EditorInputValidation: isIssue208EditorInputValidation(options),

@@ -106,6 +106,8 @@ export const resolveGate = (
     abilityAction: options.ability_action,
     requestedExecutionMode: options.requested_execution_mode,
     approvalRecord: providedApprovalRecord,
+    auditRecord: options.audit_record,
+    limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
     decisionId,
     approvalId,
     issue208EditorInputValidation: isIssue208EditorInputValidation(options),
