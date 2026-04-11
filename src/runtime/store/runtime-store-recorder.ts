@@ -1,5 +1,6 @@
 import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
+import { buildDiagnosis } from "../diagnostics.js";
 import {
   APPROVAL_CHECK_KEYS,
   getWriteActionMatrixDecisions
@@ -11,7 +12,8 @@ import {
   type AppendGateAuditRecordInput,
   type UpsertGateApprovalInput,
   type UpsertRunInput,
-  resolveRuntimeStorePath
+  resolveRuntimeStorePath,
+  sanitizeRuntimeEventSummary
 } from "./sqlite-runtime-store.js";
 
 const resolveSessionId = (summary: JsonObject): string | null => {
@@ -81,6 +83,36 @@ const buildEvent = (
   eventTime: new Date().toISOString(),
   ...input
 });
+
+const buildSummaryProjection = (summary: string | null): Pick<
+  AppendRunEventInput,
+  "summary" | "summaryTruncated"
+> => sanitizeRuntimeEventSummary(summary);
+
+const buildFailureEventProjection = (
+  context: RuntimeContext,
+  error: CliError
+): Omit<AppendRunEventInput, "runId" | "eventTime"> => {
+  const diagnosis = error.diagnosis ? buildDiagnosis(error.diagnosis) : null;
+  const failureSite = diagnosis?.failure_site ?? null;
+  const evidenceSummary =
+    diagnosis?.evidence.find((item) => typeof item === "string" && item.trim().length > 0) ?? null;
+  const summaryText =
+    (failureSite?.summary && failureSite.summary !== "diagnosis unavailable"
+      ? failureSite.summary
+      : null) ??
+    evidenceSummary ??
+    `${error.code}: ${error.message}`;
+
+  return {
+    stage: failureSite?.stage ?? "command",
+    component: failureSite?.component ?? "runtime",
+    eventType: "failed",
+    diagnosisCategory: diagnosis?.category ?? "unknown",
+    failurePoint: failureSite?.target ?? context.command,
+    ...buildSummaryProjection(summaryText)
+  };
+};
 
 interface RuntimeStoreWriter {
   upsertRun(input: UpsertRunInput): Promise<unknown>;
@@ -360,7 +392,7 @@ export class RuntimeStoreRecorder {
         eventType: "started",
         diagnosisCategory: null,
         failurePoint: null,
-        summary: "command started"
+        ...buildSummaryProjection("command started")
       })
     );
   }
@@ -384,7 +416,7 @@ export class RuntimeStoreRecorder {
           eventType: "succeeded",
           diagnosisCategory: null,
           failurePoint: null,
-          summary: toSummaryText(summary)
+          ...buildSummaryProjection(toSummaryText(summary))
         })
       );
       await this.#recordGateArtifacts(summary);
@@ -406,14 +438,7 @@ export class RuntimeStoreRecorder {
         errorCode: error.code
       });
       await this.#store.appendRunEvent(
-        buildEvent(context, {
-          stage: "command",
-          component: "runtime",
-          eventType: "failed",
-          diagnosisCategory: "execution_error",
-          failurePoint: context.command,
-          summary: `${error.code}: ${error.message}`
-        })
+        buildEvent(context, buildFailureEventProjection(context, error))
       );
       if (error.details) {
         await this.#recordGateArtifacts(error.details);

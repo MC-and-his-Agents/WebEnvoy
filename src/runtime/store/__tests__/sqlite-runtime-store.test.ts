@@ -159,7 +159,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
         eventType: "failed",
         diagnosisCategory: "runtime_unavailable",
         failurePoint: "bridge.open",
-        summary: "connection failed"
+        summary: "connection failed",
+        summaryTruncated: false
       })
     ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
       code: "ERR_RUNTIME_STORE_RUN_NOT_FOUND"
@@ -190,7 +191,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "failed",
       diagnosisCategory: "runtime_unavailable",
       failurePoint: "bridge.open",
-      summary: oversized
+      summary: oversized,
+      summaryTruncated: false
     });
 
     const trace = await store.getRunTrace("run-redact-001");
@@ -202,6 +204,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(summary).not.toContain("abc123");
     expect(summary).toContain("[REDACTED]");
     expect(summary).toContain("[TRUNCATED]");
+    expect(trace.events[0]?.summary_truncated).toBe(true);
   });
 
   it("returns events ordered by event_time", async () => {
@@ -226,7 +229,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "succeeded",
       diagnosisCategory: null,
       failurePoint: null,
-      summary: "done"
+      summary: "done",
+      summaryTruncated: false
     });
     await store.appendRunEvent({
       runId: "run-order-001",
@@ -236,7 +240,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "started",
       diagnosisCategory: null,
       failurePoint: null,
-      summary: "start"
+      summary: "start",
+      summaryTruncated: false
     });
 
     const trace = await store.getRunTrace("run-order-001");
@@ -246,6 +251,39 @@ describeWithSqlite("sqlite-runtime-store", () => {
       "2026-03-19T10:00:01.000Z",
       "2026-03-19T10:00:03.000Z"
     ]);
+    expect(trace.events.map((event) => event.summary_truncated)).toEqual([false, false]);
+  });
+
+  it("rejects append event when summary_truncated is not boolean", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-invalid-truncation-001",
+      sessionId: null,
+      profileName: "default",
+      command: "runtime.ping",
+      status: "running",
+      startedAt: "2026-03-19T10:00:00.000Z",
+      endedAt: null,
+      errorCode: null
+    });
+
+    await expect(
+      store.appendRunEvent({
+        runId: "run-invalid-truncation-001",
+        eventTime: "2026-03-19T10:00:01.000Z",
+        stage: "command",
+        component: "runtime",
+        eventType: "failed",
+        diagnosisCategory: "unknown",
+        failurePoint: "runtime.ping",
+        summary: "bad flag",
+        summaryTruncated: "false" as unknown as boolean
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
   });
 
   it("persists approval_record and audit_record and queries by run_id", async () => {
