@@ -741,6 +741,60 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("uses detail page-state fallback when signature entry is unavailable but note state is still present", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-signature-fallback-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab"
+        }),
+        executionContext: {
+          runId: "run-detail-signature-fallback-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-signature-fallback-001",
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-signature-fallback-001": {
+                noteId: "note-signature-fallback-001"
+              }
+            }
+          }
+        }),
+        callSignature: async () => {
+          throw new Error("window._webmsxyw is not a function");
+        }
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected signature fallback failure envelope");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "页面签名入口不可用"
+    });
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "/api/sns/web/v1/feed"
+      }
+    });
+  });
+
   it("keeps detail execution failed when api fails and no fallback page state exists", async () => {
     const result = await executeXhsDetail(
       {

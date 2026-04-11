@@ -857,6 +857,14 @@ const executeXhsRead = async (
   try {
     signature = await env.callSignature(spec.buildSignatureUri(input.params), payload);
   } catch (error) {
+    const pageStateRoot = await resolvePageStateRoot();
+    if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+        reason: "SIGNATURE_ENTRY_MISSING",
+        message: "页面签名入口不可用",
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
     return createFailure(
       "ERR_EXECUTION_FAILED",
       "页面签名入口不可用",
