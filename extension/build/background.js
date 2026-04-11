@@ -39,6 +39,7 @@ const XHS_LIVE_EXECUTION_MODES = new Set([
     "live_read_high_risk",
     "live_write"
 ]);
+const XHS_GATE_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
     "approval_record_approved_true",
@@ -212,7 +213,7 @@ const xhsGateReasonMessage = (reason) => {
         TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
         TARGET_PAGE_NOT_EXPLICIT: "target page is not explicit",
         ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
-        EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs.search",
+        EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs read commands",
         EDITOR_INPUT_VALIDATION_REQUIRED: "issue_208 live_write requires editor_input validation scope",
         TARGET_PAGE_ARTICLE_REQUIRED: "issue_208 editor_input only supports article publish target",
         WRITE_EXECUTION_GATE_ONLY: "write gate approved but execution remains gate-only",
@@ -373,13 +374,29 @@ const resolveGateOnlyPageState = (gateInput, scopeContext) => {
         return null;
     }
     return {
-        page_kind: targetPage === "creator_publish_tab" ? "compose" : targetPage,
+        page_kind: targetPage === "creator_publish_tab"
+            ? "compose"
+            : targetPage === "explore_detail_tab"
+                ? "detail"
+                : targetPage === "profile_tab"
+                    ? "user_home"
+                    : targetPage,
         url: targetPage === "creator_publish_tab"
             ? `https://${targetDomain}/publish/publish`
             : targetPage === "search_result_tab"
                 ? `https://${targetDomain}/search_result`
-                : `https://${targetDomain}/`,
-        title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
+                : targetPage === "explore_detail_tab"
+                    ? `https://${targetDomain}/explore/note-id`
+                    : targetPage === "profile_tab"
+                        ? `https://${targetDomain}/user/profile/user-id`
+                        : `https://${targetDomain}/`,
+        title: targetPage === "creator_publish_tab"
+            ? "Creator Publish"
+            : targetPage === "explore_detail_tab"
+                ? "Detail"
+                : targetPage === "profile_tab"
+                    ? "User Home"
+                    : "Search Result",
         ready_state: "complete"
     };
 };
@@ -1943,7 +1960,7 @@ class ChromeBackgroundBridge {
         const rawCommandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
             ? request.params.command_params
             : {};
-        let commandParams = command === "xhs.search"
+        let commandParams = XHS_GATE_COMMANDS.has(command)
             ? normalizeXhsSearchCommandParams(rawCommandParams)
             : rawCommandParams;
         const optionParams = asRecord(commandParams.options);
@@ -1956,17 +1973,17 @@ class ChromeBackgroundBridge {
         const requestedExecutionMode = parseRequestedExecutionMode(Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
             ? commandParams.requested_execution_mode
             : optionParams?.requested_execution_mode);
-        const issue208EditorInputValidation = command === "xhs.search" &&
+        const issue208EditorInputValidation = XHS_GATE_COMMANDS.has(command) &&
             issueScope === "issue_208" &&
             requestedExecutionMode === "live_write" &&
             validationAction === "editor_input";
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         const requestedFingerprintContext = resolveFingerprintContext(commandParams);
-        let forwardFingerprintContext = command === "xhs.search" ? requestedFingerprintContext : requestedFingerprintContext;
+        let forwardFingerprintContext = XHS_GATE_COMMANDS.has(command) ? requestedFingerprintContext : requestedFingerprintContext;
         let tabId;
         let consumerGateResult;
         let gatePayload;
-        if (command === "xhs.search") {
+        if (XHS_GATE_COMMANDS.has(command)) {
             const gateResult = await this.#evaluateXhsTargetGate({
                 ...request,
                 params: {
@@ -1998,7 +2015,7 @@ class ChromeBackgroundBridge {
                     summary: {
                         session_id: String(request.params.session_id ?? "nm-session-001"),
                         run_id: String(request.params.run_id ?? request.id),
-                        command: "xhs.search",
+                        command,
                         profile: typeof request.profile === "string" ? request.profile : null,
                         cwd: String(request.params.cwd ?? ""),
                         tab_id: null,
@@ -3010,7 +3027,7 @@ class ChromeBackgroundBridge {
             const candidate = ranked[0];
             return typeof candidate?.id === "number" ? candidate.id : null;
         }
-        if (command === "xhs.search") {
+        if (XHS_GATE_COMMANDS.has(command)) {
             const xhsUrlPatterns = [
                 "*://www.xiaohongshu.com/*",
                 "*://edith.xiaohongshu.com/*",

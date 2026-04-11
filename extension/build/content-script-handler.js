@@ -1,4 +1,6 @@
 import { executeXhsSearch } from "./xhs-search.js";
+import { executeXhsDetail } from "./xhs-detail.js";
+import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
@@ -9,6 +11,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveRequestedExecutionMode = (message) => {
@@ -130,6 +133,12 @@ const resolveTargetPageFromHref = (href) => {
         if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
             return "search_result_tab";
         }
+        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
+            return "explore_detail_tab";
+        }
+        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/user/profile/")) {
+            return "profile_tab";
+        }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
             return "creator_publish_tab";
         }
@@ -168,8 +177,8 @@ export class ContentScriptHandler {
             void this.#handleRuntimeBootstrap(message);
             return true;
         }
-        if (message.command === "xhs.search") {
-            void this.#handleXhsSearch(message);
+        if (XHS_READ_COMMANDS.has(message.command)) {
+            void this.#handleXhsReadCommand(message);
             return true;
         }
         const result = this.#handleForward(message);
@@ -329,7 +338,7 @@ export class ContentScriptHandler {
             return fallback;
         }
     }
-    async #handleXhsSearch(message) {
+    async #handleXhsReadCommand(message) {
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -375,7 +384,7 @@ export class ContentScriptHandler {
                 ok: false,
                 error: {
                     code: "ERR_EXECUTION_FAILED",
-                    message: "xhs.search payload missing ability or input"
+                    message: `${message.command} payload missing ability or input`
                 },
                 payload: {
                     details: {
@@ -388,20 +397,10 @@ export class ContentScriptHandler {
             return;
         }
         try {
-            const result = await executeXhsSearch({
+            const commonInput = {
                 abilityId: String(ability.id ?? "unknown"),
                 abilityLayer: String(ability.layer ?? "L3"),
                 abilityAction: String(ability.action ?? "read"),
-                params: {
-                    query: String(input.query ?? ""),
-                    ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-                    ...(typeof input.page === "number" ? { page: input.page } : {}),
-                    ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-                    ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-                    ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-                        ? { note_type: input.note_type }
-                        : {})
-                },
                 options: {
                     ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
                     ...(typeof options.simulate_result === "string"
@@ -453,7 +452,34 @@ export class ContentScriptHandler {
                     profile: message.profile ?? "unknown",
                     requestId: message.id
                 }
-            }, this.#xhsEnv);
+            };
+            const result = message.command === "xhs.search"
+                ? await executeXhsSearch({
+                    ...commonInput,
+                    params: {
+                        query: String(input.query ?? ""),
+                        ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
+                        ...(typeof input.page === "number" ? { page: input.page } : {}),
+                        ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
+                        ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
+                        ...(typeof input.note_type === "string" || typeof input.note_type === "number"
+                            ? { note_type: input.note_type }
+                            : {})
+                    }
+                }, this.#xhsEnv)
+                : message.command === "xhs.detail"
+                    ? await executeXhsDetail({
+                        ...commonInput,
+                        params: {
+                            note_id: String(input.note_id ?? "")
+                        }
+                    }, this.#xhsEnv)
+                    : await executeXhsUserHome({
+                        ...commonInput,
+                        params: {
+                            user_id: String(input.user_id ?? "")
+                        }
+                    }, this.#xhsEnv);
             this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {

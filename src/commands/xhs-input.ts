@@ -22,6 +22,23 @@ export interface AbilityEnvelope {
   options: JsonObject;
 }
 
+export interface XhsSearchInputContract extends JsonObject {
+  query: string;
+  limit?: number;
+  page?: number;
+  search_id?: string;
+  sort?: string;
+  note_type?: string | number;
+}
+
+export interface XhsDetailInputContract extends JsonObject {
+  note_id: string;
+}
+
+export interface XhsUserHomeInputContract extends JsonObject {
+  user_id: string;
+}
+
 const ABILITY_LAYERS = new Set<AbilityLayer>(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set<AbilityAction>(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
@@ -96,7 +113,7 @@ export const parseSearchInputForContract = (
   abilityId: string,
   options: JsonObject,
   abilityAction: AbilityAction
-): JsonObject => {
+): XhsSearchInputContract | JsonObject => {
   const issue208EditorInputValidation =
     abilityAction === "write" &&
     options.issue_scope === "issue_208" &&
@@ -113,7 +130,7 @@ export const parseSearchInputForContract = (
     throw invalidAbilityInput("QUERY_MISSING", abilityId);
   }
 
-  const normalized: JsonObject = {
+  const normalized: XhsSearchInputContract = {
     query
   };
 
@@ -137,6 +154,36 @@ export const parseSearchInputForContract = (
   }
 
   return normalized;
+};
+
+export const parseDetailInputForContract = (
+  input: JsonObject,
+  abilityId: string
+): XhsDetailInputContract => {
+  const noteId =
+    typeof input.note_id === "string" && input.note_id.trim().length > 0 ? input.note_id.trim() : null;
+  if (!noteId) {
+    throw invalidAbilityInput("NOTE_ID_MISSING", abilityId);
+  }
+
+  return {
+    note_id: noteId
+  };
+};
+
+export const parseUserHomeInputForContract = (
+  input: JsonObject,
+  abilityId: string
+): XhsUserHomeInputContract => {
+  const userId =
+    typeof input.user_id === "string" && input.user_id.trim().length > 0 ? input.user_id.trim() : null;
+  if (!userId) {
+    throw invalidAbilityInput("USER_ID_MISSING", abilityId);
+  }
+
+  return {
+    user_id: userId
+  };
 };
 
 export const normalizeGateOptionsForContract = (

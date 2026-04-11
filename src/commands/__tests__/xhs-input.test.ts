@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
-  parseSearchInputForContract
+  parseDetailInputForContract,
+  parseSearchInputForContract,
+  parseUserHomeInputForContract
 } from "../xhs-input.js";
 
 describe("xhs-input", () => {
@@ -62,5 +64,31 @@ describe("xhs-input", () => {
     });
 
     expect(parseSearchInputForContract(envelope.input, envelope.ability.id, envelope.options, envelope.ability.action)).toEqual({});
+  });
+
+  it("parses xhs.detail input and trims note_id", () => {
+    expect(
+      parseDetailInputForContract(
+        {
+          note_id: "  note-001  "
+        },
+        "xhs.note.detail.v1"
+      )
+    ).toEqual({
+      note_id: "note-001"
+    });
+  });
+
+  it("parses xhs.user_home input and trims user_id", () => {
+    expect(
+      parseUserHomeInputForContract(
+        {
+          user_id: "  user-001  "
+        },
+        "xhs.user.home.v1"
+      )
+    ).toEqual({
+      user_id: "user-001"
+    });
   });
 });

@@ -6,6 +6,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 export class InMemoryContentScriptRuntime {
     port;
     static BOOTSTRAP_ATTEST_DELAY_MS = 10;
@@ -132,7 +133,7 @@ export class InMemoryContentScriptRuntime {
                 }
             };
         }
-        if (message.command === "xhs.search") {
+        if (XHS_READ_COMMANDS.has(message.command)) {
             const simulated = typeof message.commandParams.options === "object" &&
                 message.commandParams.options !== null &&
                 typeof message.commandParams.options.simulate_result === "string"
@@ -168,11 +169,48 @@ export class InMemoryContentScriptRuntime {
                 gate,
                 auditRecord
             });
+            const commandName = message.command;
+            const commandSpec = commandName === "xhs.detail"
+                ? {
+                    defaultAbilityId: "xhs.note.detail.v1",
+                    page_kind: "detail",
+                    url: "https://www.xiaohongshu.com/explore/note-id",
+                    title: "Detail",
+                    request_method: "POST",
+                    request_url: "/api/sns/web/v1/feed",
+                    successDataRef: {
+                        note_id: String(input.note_id ?? "")
+                    }
+                }
+                : commandName === "xhs.user_home"
+                    ? {
+                        defaultAbilityId: "xhs.user.home.v1",
+                        page_kind: "user_home",
+                        url: "https://www.xiaohongshu.com/user/profile/user-id",
+                        title: "User Home",
+                        request_method: "GET",
+                        request_url: "/api/sns/web/v1/user/otherinfo",
+                        successDataRef: {
+                            user_id: String(input.user_id ?? "")
+                        }
+                    }
+                    : {
+                        defaultAbilityId: "xhs.note.search.v1",
+                        page_kind: "search",
+                        url: "https://www.xiaohongshu.com/search_result",
+                        title: "Search Result",
+                        request_method: "POST",
+                        request_url: "/api/sns/web/v1/search/notes",
+                        successDataRef: {
+                            query: String(input.query ?? ""),
+                            search_id: "loopback-search-id"
+                        }
+                    };
             const successObservability = {
                 page_state: {
-                    page_kind: "search",
-                    url: "https://www.xiaohongshu.com/search_result",
-                    title: "Search Result",
+                    page_kind: commandSpec.page_kind,
+                    url: commandSpec.url,
+                    title: commandSpec.title,
                     ready_state: "complete",
                     observation_status: "complete"
                 },
@@ -205,11 +243,11 @@ export class InMemoryContentScriptRuntime {
                     ok: false,
                     error: {
                         code: "ERR_EXECUTION_FAILED",
-                        message: "执行模式门禁阻断了当前 xhs.search 请求"
+                        message: `执行模式门禁阻断了当前 ${commandName} 请求`
                     },
                     payload: {
                         details: {
-                            ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                            ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                             stage: "execution",
                             reason: "EXECUTION_MODE_GATE_BLOCKED"
                         },
@@ -220,13 +258,11 @@ export class InMemoryContentScriptRuntime {
             if (consumerGateResult.effective_execution_mode === "dry_run" ||
                 consumerGateResult.effective_execution_mode === "recon") {
                 return buildSuccessfulResult({
-                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                    ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                     layer: String(ability.layer ?? "L3"),
                     action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
                     outcome: "partial",
-                    data_ref: {
-                        query: String(input.query ?? "")
-                    },
+                    data_ref: commandSpec.successDataRef,
                     metrics: {
                         count: 0
                     }
@@ -296,14 +332,14 @@ export class InMemoryContentScriptRuntime {
             }
             if (simulated === "capability_result_missing_layer") {
                 return buildSuccessfulResult({
-                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                    ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                     action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
                     outcome: "success"
                 });
             }
             if (simulated === "capability_result_invalid_outcome") {
                 return buildSuccessfulResult({
-                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                    ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                     layer: String(ability.layer ?? "L3"),
                     action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
                     outcome: "blocked"
@@ -311,16 +347,13 @@ export class InMemoryContentScriptRuntime {
             }
             if (simulated === "success") {
                 return buildSuccessfulResult({
-                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                    ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                     layer: String(ability.layer ?? "L3"),
                     action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
                     outcome: "success",
-                    data_ref: {
-                        query: String(input.query ?? ""),
-                        search_id: "loopback-search-id"
-                    },
+                    data_ref: commandSpec.successDataRef,
                     metrics: {
-                        count: 2,
+                        count: 1,
                         duration_ms: 12
                     }
                 }, {
@@ -328,8 +361,8 @@ export class InMemoryContentScriptRuntime {
                         {
                             request_id: "req-loopback-001",
                             stage: "request",
-                            method: "POST",
-                            url: "/api/sns/web/v1/search/notes",
+                            method: commandSpec.request_method,
+                            url: commandSpec.request_url,
                             outcome: "completed",
                             status_code: 200
                         }
@@ -343,7 +376,7 @@ export class InMemoryContentScriptRuntime {
                 error: {
                     code: "ERR_EXECUTION_FAILED",
                     message: simulated === "login_required"
-                        ? "登录态缺失，无法执行 xhs.search"
+                        ? `登录态缺失，无法执行 ${commandName}`
                         : simulated === "account_abnormal"
                             ? "账号异常，平台拒绝当前请求"
                             : simulated === "browser_env_abnormal"
@@ -352,11 +385,11 @@ export class InMemoryContentScriptRuntime {
                                     ? "平台要求额外人机验证，无法继续执行"
                                     : simulated === "signature_entry_missing"
                                         ? "页面签名入口不可用"
-                                        : "网关调用失败，当前上下文不足以完成搜索请求"
+                                        : `网关调用失败，当前上下文不足以完成 ${commandName} 请求`
                 },
                 payload: {
                     details: {
-                        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                        ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                         stage: "execution",
                         reason: simulated === "login_required"
                             ? "SESSION_EXPIRED"
@@ -373,11 +406,9 @@ export class InMemoryContentScriptRuntime {
                     ...gateBundle,
                     observability: {
                         page_state: {
-                            page_kind: simulated === "login_required" ? "login" : "search",
-                            url: simulated === "login_required"
-                                ? "https://www.xiaohongshu.com/login"
-                                : "https://www.xiaohongshu.com/search_result",
-                            title: "Search Result",
+                            page_kind: simulated === "login_required" ? "login" : commandSpec.page_kind,
+                            url: simulated === "login_required" ? "https://www.xiaohongshu.com/login" : commandSpec.url,
+                            title: commandSpec.title,
                             ready_state: "complete",
                             observation_status: "complete"
                         },
@@ -387,8 +418,8 @@ export class InMemoryContentScriptRuntime {
                                 {
                                     request_id: "req-loopback-001",
                                     stage: "request",
-                                    method: "POST",
-                                    url: "/api/sns/web/v1/search/notes",
+                                    method: commandSpec.request_method,
+                                    url: commandSpec.request_url,
                                     outcome: "failed",
                                     status_code: simulated === "account_abnormal"
                                         ? 461
@@ -407,7 +438,7 @@ export class InMemoryContentScriptRuntime {
                             component: simulated === "signature_entry_missing" ? "page" : "network",
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
-                                : "/api/sns/web/v1/search/notes",
+                                : commandSpec.request_url,
                             summary: simulated
                         }
                     },
@@ -420,7 +451,7 @@ export class InMemoryContentScriptRuntime {
                             component: simulated === "signature_entry_missing" ? "page" : "network",
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
-                                : "/api/sns/web/v1/search/notes",
+                                : commandSpec.request_url,
                             summary: simulated
                         },
                         evidence: [simulated]

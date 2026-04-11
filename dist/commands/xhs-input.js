@@ -89,6 +89,24 @@ export const parseSearchInputForContract = (input, abilityId, options, abilityAc
     }
     return normalized;
 };
+export const parseDetailInputForContract = (input, abilityId) => {
+    const noteId = typeof input.note_id === "string" && input.note_id.trim().length > 0 ? input.note_id.trim() : null;
+    if (!noteId) {
+        throw invalidAbilityInput("NOTE_ID_MISSING", abilityId);
+    }
+    return {
+        note_id: noteId
+    };
+};
+export const parseUserHomeInputForContract = (input, abilityId) => {
+    const userId = typeof input.user_id === "string" && input.user_id.trim().length > 0 ? input.user_id.trim() : null;
+    if (!userId) {
+        throw invalidAbilityInput("USER_ID_MISSING", abilityId);
+    }
+    return {
+        user_id: userId
+    };
+};
 export const normalizeGateOptionsForContract = (options, abilityId) => {
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()
