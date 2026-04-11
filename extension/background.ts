@@ -3510,7 +3510,11 @@ class ChromeBackgroundBridge {
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
     let writeGateOnlyEligible = false;
     const requestRunId = String(request.params.run_id ?? request.id);
-    const gateDecisionId = `gate_decision_${requestRunId}_${request.id}`;
+    const gateDecisionId = resolveGateDecisionId({
+      runId: requestRunId,
+      requestId: request.id,
+      commandRequestId: commandParams.request_id
+    });
     const expectedApprovalId = resolveGatePayloadApprovalId({
       approvalActive: requestedLiveMode,
       approvalRecord,
