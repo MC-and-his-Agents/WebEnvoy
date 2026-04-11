@@ -39,6 +39,12 @@ export interface XhsUserHomeInputContract extends JsonObject {
   user_id: string;
 }
 
+export type XhsCommandInputContract =
+  | XhsSearchInputContract
+  | XhsDetailInputContract
+  | XhsUserHomeInputContract
+  | JsonObject;
+
 const ABILITY_LAYERS = new Set<AbilityLayer>(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set<AbilityAction>(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
@@ -184,6 +190,30 @@ export const parseUserHomeInputForContract = (
   return {
     user_id: userId
   };
+};
+
+export const parseXhsCommandInputForContract = (input: {
+  command: string;
+  abilityId: string;
+  abilityAction: AbilityAction;
+  payload: JsonObject;
+  options: JsonObject;
+}): XhsCommandInputContract => {
+  if (input.command === "xhs.search") {
+    return parseSearchInputForContract(
+      input.payload,
+      input.abilityId,
+      input.options,
+      input.abilityAction
+    );
+  }
+  if (input.command === "xhs.detail") {
+    return parseDetailInputForContract(input.payload, input.abilityId);
+  }
+  if (input.command === "xhs.user_home") {
+    return parseUserHomeInputForContract(input.payload, input.abilityId);
+  }
+  throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
 };
 
 export const normalizeGateOptionsForContract = (

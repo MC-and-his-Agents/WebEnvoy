@@ -40,6 +40,11 @@ import {
   resolveXhsExecutionMode,
   normalizeXhsApprovalRecord
 } from "../shared/xhs-gate.js";
+import {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension,
+  type ExtensionAbilityAction
+} from "./xhs-command-contract.js";
 import type { EditorInputFocusAttestation } from "./xhs-editor-input.js";
 
 type BridgeRequest = {
@@ -375,6 +380,27 @@ const isAllowedTargetPageForXhsReadCommand = (command: string, targetPage: strin
   return true;
 };
 
+const validateXhsCommandInputContract = (
+  command: string,
+  commandParams: Record<string, unknown>
+): void => {
+  const ability = asRecord(commandParams.ability);
+  const input = asRecord(commandParams.input);
+  const options = asRecord(commandParams.options) ?? {};
+  if (!ability || !input) {
+    return;
+  }
+
+  validateXhsCommandInputForExtension({
+    command,
+    abilityId: asNonEmptyString(ability.id) ?? "unknown",
+    abilityAction:
+      ((asNonEmptyString(ability.action) as ExtensionAbilityAction | null) ?? "read"),
+    payload: input,
+    options
+  });
+};
+
 const tabMatchesRequestedXhsResource = (
   tab: ExtensionTab,
   preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>,
@@ -510,6 +536,25 @@ const asInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null;
 
 const asBoolean = (value: unknown): boolean => value === true;
+
+const emitCliInvalidArgs = (
+  emit: (message: BridgeResponse) => void,
+  request: BridgeRequest,
+  error: ExtensionContractError
+): void => {
+  emit({
+    id: request.id,
+    status: "error",
+    summary: {
+      relay_path: "host>background"
+    },
+    payload: error.details ? { details: error.details } : undefined,
+    error: {
+      code: error.code,
+      message: error.message
+    }
+  });
+};
 
 const parseUrl = (value: string): URL | null => {
   try {
@@ -884,17 +929,32 @@ const createBridgeXhsGateOnlyPayload = (
   const input = asRecord(commandParams.input) ?? {};
   const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
   const command = typeof request.params.command === "string" ? request.params.command : null;
+  let normalizedInput: Record<string, unknown> = input;
+  if (command && XHS_GATE_COMMANDS.has(command)) {
+    try {
+      normalizedInput = validateXhsCommandInputForExtension({
+        command,
+        abilityId: asNonEmptyString(ability.id) ?? "unknown",
+        abilityAction:
+          ((asNonEmptyString(ability.action) as ExtensionAbilityAction | null) ?? "read"),
+        payload: input,
+        options: asRecord(commandParams.options) ?? {}
+      }) as Record<string, unknown>;
+    } catch {
+      normalizedInput = input;
+    }
+  }
   const dataRef =
     command === "xhs.detail"
       ? {
-          note_id: String(input.note_id ?? "")
+          note_id: String(normalizedInput.note_id ?? "")
         }
       : command === "xhs.user_home"
         ? {
-            user_id: String(input.user_id ?? "")
+            user_id: String(normalizedInput.user_id ?? "")
           }
         : {
-            query: String(input.query ?? "")
+            query: String(normalizedInput.query ?? "")
           };
   const capabilityResult = {
     ability_id: String(ability.id ?? "xhs.note.search.v1"),
@@ -2685,6 +2745,17 @@ class ChromeBackgroundBridge {
     let commandParams = XHS_GATE_COMMANDS.has(command)
       ? normalizeXhsSearchCommandParams(rawCommandParams)
       : rawCommandParams;
+    if (XHS_GATE_COMMANDS.has(command)) {
+      try {
+        validateXhsCommandInputContract(command, commandParams);
+      } catch (error) {
+        if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+          emitCliInvalidArgs(this.#emit.bind(this), request, error);
+          return;
+        }
+        throw error;
+      }
+    }
     const optionParams = asRecord(commandParams.options);
     const validationAction = asNonEmptyString(
       Object.prototype.hasOwnProperty.call(commandParams, "validation_action")

@@ -6,6 +6,7 @@ import { NativeBridgeRecoveryState } from "./native-bridge-recovery-state.js";
 import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, isApprovalRecordComplete, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, collectXhsCommandGateReasons, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
+import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
@@ -120,6 +121,21 @@ const isAllowedTargetPageForXhsReadCommand = (command, targetPage) => {
     }
     return true;
 };
+const validateXhsCommandInputContract = (command, commandParams) => {
+    const ability = asRecord(commandParams.ability);
+    const input = asRecord(commandParams.input);
+    const options = asRecord(commandParams.options) ?? {};
+    if (!ability || !input) {
+        return;
+    }
+    validateXhsCommandInputForExtension({
+        command,
+        abilityId: asNonEmptyString(ability.id) ?? "unknown",
+        abilityAction: (asNonEmptyString(ability.action) ?? "read"),
+        payload: input,
+        options
+    });
+};
 const tabMatchesRequestedXhsResource = (tab, preferredPage, resourceId) => {
     if (!preferredPage || !resourceId) {
         return false;
@@ -223,6 +239,20 @@ const hasSuccessfulExecutionAttestation = (payload) => {
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
+const emitCliInvalidArgs = (emit, request, error) => {
+    emit({
+        id: request.id,
+        status: "error",
+        summary: {
+            relay_path: "host>background"
+        },
+        payload: error.details ? { details: error.details } : undefined,
+        error: {
+            code: error.code,
+            message: error.message
+        }
+    });
+};
 const parseUrl = (value) => {
     try {
         return new URL(value);
@@ -501,16 +531,31 @@ const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
     const input = asRecord(commandParams.input) ?? {};
     const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
     const command = typeof request.params.command === "string" ? request.params.command : null;
+    let normalizedInput = input;
+    if (command && XHS_GATE_COMMANDS.has(command)) {
+        try {
+            normalizedInput = validateXhsCommandInputForExtension({
+                command,
+                abilityId: asNonEmptyString(ability.id) ?? "unknown",
+                abilityAction: (asNonEmptyString(ability.action) ?? "read"),
+                payload: input,
+                options: asRecord(commandParams.options) ?? {}
+            });
+        }
+        catch {
+            normalizedInput = input;
+        }
+    }
     const dataRef = command === "xhs.detail"
         ? {
-            note_id: String(input.note_id ?? "")
+            note_id: String(normalizedInput.note_id ?? "")
         }
         : command === "xhs.user_home"
             ? {
-                user_id: String(input.user_id ?? "")
+                user_id: String(normalizedInput.user_id ?? "")
             }
             : {
-                query: String(input.query ?? "")
+                query: String(normalizedInput.query ?? "")
             };
     const capabilityResult = {
         ability_id: String(ability.id ?? "xhs.note.search.v1"),
@@ -2038,6 +2083,18 @@ class ChromeBackgroundBridge {
         let commandParams = XHS_GATE_COMMANDS.has(command)
             ? normalizeXhsSearchCommandParams(rawCommandParams)
             : rawCommandParams;
+        if (XHS_GATE_COMMANDS.has(command)) {
+            try {
+                validateXhsCommandInputContract(command, commandParams);
+            }
+            catch (error) {
+                if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+                    emitCliInvalidArgs(this.#emit.bind(this), request, error);
+                    return;
+                }
+                throw error;
+            }
+        }
         const optionParams = asRecord(commandParams.options);
         const validationAction = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
             ? commandParams.validation_action

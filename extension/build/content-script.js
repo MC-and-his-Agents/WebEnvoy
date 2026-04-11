@@ -4115,6 +4115,79 @@ const performEditorInputValidation = async (input) => {
 };
 return { performEditorInputValidation };
 })();
+const __webenvoy_module_xhs_command_contract = (() => {
+class ExtensionContractError extends Error {
+    code;
+    details;
+    constructor(code, message, details) {
+        super(message);
+        this.name = "ExtensionContractError";
+        this.code = code;
+        this.details = details;
+    }
+}
+const invalidAbilityInput = (reason, abilityId = "unknown") => new ExtensionContractError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
+    ability_id: abilityId,
+    stage: "input_validation",
+    reason
+});
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const parseSearchInput = (payload, abilityId, options, abilityAction) => {
+    const issue208EditorInputValidation = abilityAction === "write" &&
+        options.issue_scope === "issue_208" &&
+        options.action_type === "write" &&
+        options.requested_execution_mode === "live_write" &&
+        options.validation_action === "editor_input";
+    if (issue208EditorInputValidation) {
+        return {};
+    }
+    const query = asNonEmptyString(payload.query);
+    if (!query) {
+        throw invalidAbilityInput("QUERY_MISSING", abilityId);
+    }
+    const normalized = {
+        query
+    };
+    if (typeof payload.limit === "number" && Number.isFinite(payload.limit)) {
+        normalized.limit = Math.max(1, Math.floor(payload.limit));
+    }
+    if (typeof payload.page === "number" && Number.isFinite(payload.page)) {
+        normalized.page = Math.max(1, Math.floor(payload.page));
+    }
+    if (asNonEmptyString(payload.search_id)) {
+        normalized.search_id = asNonEmptyString(payload.search_id);
+    }
+    if (asNonEmptyString(payload.sort)) {
+        normalized.sort = asNonEmptyString(payload.sort);
+    }
+    if ((typeof payload.note_type === "string" && payload.note_type.trim().length > 0) ||
+        typeof payload.note_type === "number") {
+        normalized.note_type = payload.note_type;
+    }
+    return normalized;
+};
+const validateXhsCommandInputForExtension = (input) => {
+    if (input.command === "xhs.search") {
+        return parseSearchInput(input.payload, input.abilityId, input.options, input.abilityAction);
+    }
+    if (input.command === "xhs.detail") {
+        const noteId = asNonEmptyString(input.payload.note_id);
+        if (!noteId) {
+            throw invalidAbilityInput("NOTE_ID_MISSING", input.abilityId);
+        }
+        return { note_id: noteId };
+    }
+    if (input.command === "xhs.user_home") {
+        const userId = asNonEmptyString(input.payload.user_id);
+        if (!userId) {
+            throw invalidAbilityInput("USER_ID_MISSING", input.abilityId);
+        }
+        return { user_id: userId };
+    }
+    throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
+};
+return { ExtensionContractError, validateXhsCommandInputForExtension };
+})();
 const __webenvoy_module_content_script_main_world = (() => {
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
@@ -4564,10 +4637,15 @@ const {
   summarizeFingerprintRuntimeContext
 } = __webenvoy_module_content_script_fingerprint;
 const {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension
+} = __webenvoy_module_xhs_command_contract;
+const {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } = __webenvoy_module_content_script_main_world;
@@ -4578,6 +4656,19 @@ const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk"
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const toCliInvalidArgsResult = (input) => ({
+    kind: "result",
+    id: input.id,
+    ok: false,
+    error: {
+        code: input.error.code,
+        message: input.error.message
+    },
+    payload: {
+        ...(input.error.details ? { details: input.error.details } : {}),
+        ...(input.fingerprintRuntime ? { fingerprint_runtime: input.fingerprintRuntime } : {})
+    }
+});
 const resolveRequestedExecutionMode = (message) => {
     const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
     if (topLevelMode) {
@@ -4965,6 +5056,13 @@ class ContentScriptHandler {
             return;
         }
         try {
+            const normalizedInput = validateXhsCommandInputForExtension({
+                command: message.command,
+                abilityId: String(ability.id ?? "unknown"),
+                abilityAction: typeof ability.action === "string" ? ability.action : "read",
+                payload: input,
+                options
+            });
             const commonInput = {
                 abilityId: String(ability.id ?? "unknown"),
                 abilityLayer: String(ability.layer ?? "L3"),
@@ -5021,36 +5119,53 @@ class ContentScriptHandler {
                     requestId: message.id
                 }
             };
-            const result = message.command === "xhs.search"
-                ? await executeXhsSearch({
+            let result;
+            if (message.command === "xhs.search") {
+                const searchInput = normalizedInput;
+                result = await executeXhsSearch({
                     ...commonInput,
                     params: {
-                        query: String(input.query ?? ""),
-                        ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-                        ...(typeof input.page === "number" ? { page: input.page } : {}),
-                        ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-                        ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-                        ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-                            ? { note_type: input.note_type }
+                        query: searchInput.query,
+                        ...(typeof searchInput.limit === "number" ? { limit: searchInput.limit } : {}),
+                        ...(typeof searchInput.page === "number" ? { page: searchInput.page } : {}),
+                        ...(typeof searchInput.search_id === "string"
+                            ? { search_id: searchInput.search_id }
+                            : {}),
+                        ...(typeof searchInput.sort === "string" ? { sort: searchInput.sort } : {}),
+                        ...(typeof searchInput.note_type === "string" ||
+                            typeof searchInput.note_type === "number"
+                            ? { note_type: searchInput.note_type }
                             : {})
                     }
-                }, this.#xhsEnv)
-                : message.command === "xhs.detail"
-                    ? await executeXhsDetail({
-                        ...commonInput,
-                        params: {
-                            note_id: String(input.note_id ?? "")
-                        }
-                    }, this.#xhsEnv)
-                    : await executeXhsUserHome({
-                        ...commonInput,
-                        params: {
-                            user_id: String(input.user_id ?? "")
-                        }
-                    }, this.#xhsEnv);
+                }, this.#xhsEnv);
+            }
+            else if (message.command === "xhs.detail") {
+                result = await executeXhsDetail({
+                    ...commonInput,
+                    params: {
+                        note_id: normalizedInput.note_id
+                    }
+                }, this.#xhsEnv);
+            }
+            else {
+                result = await executeXhsUserHome({
+                    ...commonInput,
+                    params: {
+                        user_id: normalizedInput.user_id
+                    }
+                }, this.#xhsEnv);
+            }
             this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {
+            if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+                this.#emit(toCliInvalidArgsResult({
+                    id: message.id,
+                    error,
+                    fingerprintRuntime
+                }));
+                return;
+            }
             this.#emit({
                 kind: "result",
                 id: message.id,
@@ -5092,7 +5207,7 @@ class ContentScriptHandler {
         }
     }
 }
-return { ContentScriptHandler, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, resolveFingerprintContextForContract, resolveMainWorldEventNamesForSecret };
+return { ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
 })();
 const __webenvoy_module_content_script = (() => {
 const {

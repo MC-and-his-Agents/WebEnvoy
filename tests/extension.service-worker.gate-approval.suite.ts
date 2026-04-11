@@ -419,6 +419,108 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("rejects xhs.detail before bridge forwarding when note_id is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-detail-note-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-note-missing-001",
+        command: "xhs.detail",
+        command_params: {
+          ability: { id: "xhs.note.detail.v1", layer: "L3", action: "read" },
+          input: {},
+          options: createXhsCommandParams({
+            target_page: "explore_detail_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const failure = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((entry) => entry.id === "run-xhs-detail-note-missing-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(failure).toMatchObject({
+      status: "error",
+      payload: {
+        details: {
+          reason: "NOTE_ID_MISSING"
+        }
+      },
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects xhs.user_home before bridge forwarding when user_id is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-user-home-user-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-user-home-user-missing-001",
+        command: "xhs.user_home",
+        command_params: {
+          ability: { id: "xhs.user.home.v1", layer: "L3", action: "read" },
+          input: {},
+          options: createXhsCommandParams({
+            target_page: "profile_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const failure = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((entry) => entry.id === "run-xhs-user-home-user-missing-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(failure).toMatchObject({
+      status: "error",
+      payload: {
+        details: {
+          reason: "USER_ID_MISSING"
+        }
+      },
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("accepts real xhs.search payload shape and reads target gate fields from options", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

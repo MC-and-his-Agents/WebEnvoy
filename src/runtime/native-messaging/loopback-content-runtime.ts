@@ -3,6 +3,8 @@ import { buildLoopbackGate } from "./loopback-gate.js";
 import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import { InMemoryPort } from "./loopback-port.js";
+import { CliError } from "../../core/errors.js";
+import { parseXhsCommandInputForContract } from "../../commands/xhs-input.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -206,6 +208,35 @@ export class InMemoryContentScriptRuntime {
         auditRecord
       });
       const commandName = message.command;
+      let normalizedInput: Record<string, unknown> = input;
+      try {
+        normalizedInput = parseXhsCommandInputForContract({
+          command: commandName,
+          abilityId: asString(ability.id) ?? "unknown",
+          abilityAction:
+            asString(ability.action) === "write" || asString(ability.action) === "download"
+              ? (asString(ability.action) as "write" | "download")
+              : "read",
+          payload: input,
+          options
+        }) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof CliError && error.code === "ERR_CLI_INVALID_ARGS") {
+          return {
+            kind: "result",
+            id: message.id,
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            },
+            payload: {
+              details: error.details
+            }
+          };
+        }
+        throw error;
+      }
       const commandSpec =
         commandName === "xhs.detail"
           ? {
@@ -216,7 +247,7 @@ export class InMemoryContentScriptRuntime {
               request_method: "POST",
               request_url: "/api/sns/web/v1/feed",
               successDataRef: {
-                note_id: String(input.note_id ?? "")
+                note_id: String(normalizedInput.note_id ?? "")
               }
             }
           : commandName === "xhs.user_home"
@@ -228,7 +259,7 @@ export class InMemoryContentScriptRuntime {
                 request_method: "GET",
                 request_url: "/api/sns/web/v1/user/otherinfo",
                 successDataRef: {
-                  user_id: String(input.user_id ?? "")
+                  user_id: String(normalizedInput.user_id ?? "")
                 }
               }
             : {
@@ -239,7 +270,7 @@ export class InMemoryContentScriptRuntime {
                 request_method: "POST",
                 request_url: "/api/sns/web/v1/search/notes",
                 successDataRef: {
-                  query: String(input.query ?? ""),
+                  query: String(normalizedInput.query ?? ""),
                   search_id: "loopback-search-id"
                 }
               };

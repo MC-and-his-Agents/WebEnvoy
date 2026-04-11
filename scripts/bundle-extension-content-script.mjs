@@ -48,6 +48,7 @@ const buildContentScriptBundle = async () => {
   const xhsDetailSource = await readSource(join(buildRoot, "xhs-detail.js"));
   const xhsUserHomeSource = await readSource(join(buildRoot, "xhs-user-home.js"));
   const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
+  const xhsCommandContractSource = await readSource(join(buildRoot, "xhs-command-contract.js"));
   const contentScriptMainWorldSource = await readSource(
     join(buildRoot, "content-script-main-world.js")
   );
@@ -219,6 +220,12 @@ const buildContentScriptBundle = async () => {
     exports: ["performEditorInputValidation"]
   });
 
+  const xhsCommandContractModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_command_contract",
+    sourceBody: xhsCommandContractSource,
+    exports: ["ExtensionContractError", "validateXhsCommandInputForExtension"]
+  });
+
   const contentScriptMainWorldModule = renderClassicModule({
     moduleVar: "__webenvoy_module_content_script_main_world",
     sourceBody: contentScriptMainWorldSource,
@@ -273,10 +280,15 @@ const buildContentScriptBundle = async () => {
       "  summarizeFingerprintRuntimeContext",
       "} = __webenvoy_module_content_script_fingerprint;",
       "const {",
+      "  ExtensionContractError,",
+      "  validateXhsCommandInputForExtension",
+      "} = __webenvoy_module_xhs_command_contract;",
+      "const {",
       "  encodeMainWorldPayload,",
       "  installFingerprintRuntimeViaMainWorld,",
       "  installMainWorldEventChannelSecret,",
       "  MAIN_WORLD_EVENT_BOOTSTRAP,",
+      "  readPageStateViaMainWorld,",
       "  resetMainWorldEventChannelForContract,",
       "  resolveMainWorldEventNamesForSecret",
       "} = __webenvoy_module_content_script_main_world;"
@@ -284,10 +296,13 @@ const buildContentScriptBundle = async () => {
     sourceBody: handlerSource,
     exports: [
       "ContentScriptHandler",
+      "ExtensionContractError",
       "encodeMainWorldPayload",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
+      "readPageStateViaMainWorld",
       "resolveFingerprintContextForContract",
+      "validateXhsCommandInputForExtension",
       "resolveMainWorldEventNamesForSecret"
     ]
   });
@@ -321,6 +336,7 @@ const buildContentScriptBundle = async () => {
     xhsDetailModule,
     xhsUserHomeModule,
     xhsEditorInputModule,
+    xhsCommandContractModule,
     contentScriptMainWorldModule,
     contentScriptFingerprintModule,
     handlerModule,

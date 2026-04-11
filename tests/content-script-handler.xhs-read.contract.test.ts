@@ -141,4 +141,56 @@ describe("content-script handler xhs read commands", () => {
         .capability_result as Record<string, unknown>).ability_id
     ).toBe("xhs.user.home.v1");
   });
+
+  it("rejects xhs.detail when note_id is missing on the extension path", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      targetPage: "explore_detail_tab",
+      href: "https://www.xiaohongshu.com/explore/abc123",
+      payload: {}
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
+      },
+      payload: {
+        details: {
+          reason: "NOTE_ID_MISSING"
+        }
+      }
+    });
+  });
+
+  it("rejects xhs.user_home when user_id is missing on the extension path", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.user_home",
+      abilityId: "xhs.user.home.v1",
+      targetPage: "profile_tab",
+      href: "https://www.xiaohongshu.com/user/profile/user-001",
+      payload: {}
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
+      },
+      payload: {
+        details: {
+          reason: "USER_ID_MISSING"
+        }
+      }
+    });
+  });
 });

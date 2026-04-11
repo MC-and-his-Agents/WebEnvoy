@@ -107,6 +107,18 @@ export const parseUserHomeInputForContract = (input, abilityId) => {
         user_id: userId
     };
 };
+export const parseXhsCommandInputForContract = (input) => {
+    if (input.command === "xhs.search") {
+        return parseSearchInputForContract(input.payload, input.abilityId, input.options, input.abilityAction);
+    }
+    if (input.command === "xhs.detail") {
+        return parseDetailInputForContract(input.payload, input.abilityId);
+    }
+    if (input.command === "xhs.user_home") {
+        return parseUserHomeInputForContract(input.payload, input.abilityId);
+    }
+    throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
+};
 export const normalizeGateOptionsForContract = (options, abilityId) => {
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()

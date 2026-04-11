@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
+  parseXhsCommandInputForContract,
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract
@@ -89,6 +90,22 @@ describe("xhs-input", () => {
       )
     ).toEqual({
       user_id: "user-001"
+    });
+  });
+
+  it("dispatches xhs.detail command input through the shared contract parser", () => {
+    expect(
+      parseXhsCommandInputForContract({
+        command: "xhs.detail",
+        abilityId: "xhs.note.detail.v1",
+        abilityAction: "read",
+        payload: {
+          note_id: "  note-001  "
+        },
+        options: {}
+      })
+    ).toEqual({
+      note_id: "note-001"
     });
   });
 });

@@ -24,6 +24,10 @@ import {
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } from "./content-script-main-world.js";
+import {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension
+} from "./xhs-command-contract.js";
 
 export {
   encodeMainWorldPayload,
@@ -85,6 +89,24 @@ const asString = (value: unknown): string | null =>
 
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const toCliInvalidArgsResult = (input: {
+  id: string;
+  error: ExtensionContractError;
+  fingerprintRuntime: Record<string, unknown> | null;
+}): ContentToBackgroundMessage => ({
+  kind: "result",
+  id: input.id,
+  ok: false,
+  error: {
+    code: input.error.code,
+    message: input.error.message
+  },
+  payload: {
+    ...(input.error.details ? { details: input.error.details } : {}),
+    ...(input.fingerprintRuntime ? { fingerprint_runtime: input.fingerprintRuntime } : {})
+  }
+});
 
 const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): string | null => {
   const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
@@ -545,6 +567,13 @@ export class ContentScriptHandler {
     }
 
     try {
+      const normalizedInput = validateXhsCommandInputForExtension({
+        command: message.command,
+        abilityId: String(ability.id ?? "unknown"),
+        abilityAction: typeof ability.action === "string" ? (ability.action as "read" | "write" | "download") : "read",
+        payload: input,
+        options
+      });
       const commonInput = {
         abilityId: String(ability.id ?? "unknown"),
         abilityLayer: String(ability.layer ?? "L3"),
@@ -602,45 +631,68 @@ export class ContentScriptHandler {
           requestId: message.id
         }
       };
-      const result =
-        message.command === "xhs.search"
-          ? await executeXhsSearch(
-              {
-                ...commonInput,
-                params: {
-                  query: String(input.query ?? ""),
-                  ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-                  ...(typeof input.page === "number" ? { page: input.page } : {}),
-                  ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-                  ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-                  ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-                    ? { note_type: input.note_type }
-                    : {})
-                }
-              },
-              this.#xhsEnv
-            )
-          : message.command === "xhs.detail"
-            ? await executeXhsDetail(
-                {
-                  ...commonInput,
-                  params: {
-                    note_id: String(input.note_id ?? "")
-                  }
-                },
-                this.#xhsEnv
-              )
-            : await executeXhsUserHome(
-                {
-                  ...commonInput,
-                  params: {
-                    user_id: String(input.user_id ?? "")
-                  }
-                },
-                this.#xhsEnv
-              );
+      let result: SearchExecutionResult;
+      if (message.command === "xhs.search") {
+        const searchInput = normalizedInput as {
+          query: string;
+          limit?: number;
+          page?: number;
+          search_id?: string;
+          sort?: string;
+          note_type?: string | number;
+        };
+        result = await executeXhsSearch(
+          {
+            ...commonInput,
+            params: {
+              query: searchInput.query,
+              ...(typeof searchInput.limit === "number" ? { limit: searchInput.limit } : {}),
+              ...(typeof searchInput.page === "number" ? { page: searchInput.page } : {}),
+              ...(typeof searchInput.search_id === "string"
+                ? { search_id: searchInput.search_id }
+                : {}),
+              ...(typeof searchInput.sort === "string" ? { sort: searchInput.sort } : {}),
+              ...(typeof searchInput.note_type === "string" ||
+              typeof searchInput.note_type === "number"
+                ? { note_type: searchInput.note_type }
+                : {})
+            }
+          },
+          this.#xhsEnv
+        );
+      } else if (message.command === "xhs.detail") {
+        result = await executeXhsDetail(
+          {
+            ...commonInput,
+            params: {
+              note_id: (normalizedInput as { note_id: string }).note_id
+            }
+          },
+          this.#xhsEnv
+        );
+      } else {
+        result = await executeXhsUserHome(
+          {
+            ...commonInput,
+            params: {
+              user_id: (normalizedInput as { user_id: string }).user_id
+            }
+          },
+          this.#xhsEnv
+        );
+      }
       this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
     } catch (error) {
+      if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+        this.#emit(
+          toCliInvalidArgsResult({
+            id: message.id,
+            error,
+            fingerprintRuntime
+          })
+        );
+        return;
+      }
       this.#emit({
         kind: "result",
         id: message.id,
