@@ -127,16 +127,18 @@ const resolveTargetDomainFromHref = (href) => {
         return null;
     }
 };
-const resolveTargetPageFromHref = (href) => {
+const resolveTargetPageFromHref = (href, command) => {
     try {
         const url = new URL(href);
         if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
             return "search_result_tab";
         }
-        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
+        if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
             return "explore_detail_tab";
         }
-        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/user/profile/")) {
+        if (command === "xhs.user_home" &&
+            url.hostname === "www.xiaohongshu.com" &&
+            url.pathname.startsWith("/user/profile/")) {
             return "profile_tab";
         }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
@@ -376,7 +378,7 @@ export class ContentScriptHandler {
         const options = asRecord(message.commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-        const actualTargetPage = resolveTargetPageFromHref(locationHref);
+        const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
         if (!ability || !input) {
             this.#emit({
                 kind: "result",
