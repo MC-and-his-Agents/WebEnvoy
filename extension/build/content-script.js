@@ -3029,6 +3029,21 @@ const collectCandidateRecords = (value) => {
     }
     return [];
 };
+const collectNestedRecordCandidates = (value, nestedKeys, seen = new Set()) => {
+    const directCandidates = collectCandidateRecords(value);
+    const nestedCandidates = [];
+    for (const candidate of directCandidates) {
+        if (seen.has(candidate)) {
+            continue;
+        }
+        seen.add(candidate);
+        nestedCandidates.push(candidate);
+        for (const key of nestedKeys) {
+            nestedCandidates.push(...collectNestedRecordCandidates(candidate[key], nestedKeys, seen));
+        }
+    }
+    return nestedCandidates;
+};
 const hasDetailDataShape = (record) => [
     "title",
     "desc",
@@ -3058,12 +3073,18 @@ const getDetailResponseCandidates = (body) => {
         return [];
     }
     return [
-        ...collectCandidateRecords(dataRecord.note),
-        ...collectCandidateRecords(dataRecord.note_card),
-        ...collectCandidateRecords(dataRecord.current_note),
-        ...collectCandidateRecords(dataRecord.item),
-        ...collectCandidateRecords(dataRecord.items),
-        ...collectCandidateRecords(dataRecord.notes),
+        ...collectNestedRecordCandidates(dataRecord.note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.note_card, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.note_card_list, [
+            "note",
+            "note_card",
+            "current_note",
+            "item"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.current_note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.item, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.items, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.notes, ["note", "note_card", "current_note", "item"]),
         ...(hasDetailDataShape(dataRecord) ? [dataRecord] : [])
     ];
 };
@@ -3075,10 +3096,20 @@ const getUserHomeResponseCandidates = (body) => {
         return [];
     }
     return [
-        ...collectCandidateRecords(dataRecord.user),
-        ...collectCandidateRecords(dataRecord.basic_info),
-        ...collectCandidateRecords(dataRecord.basicInfo),
-        ...collectCandidateRecords(dataRecord.profile),
+        ...collectNestedRecordCandidates(dataRecord.user, ["basic_info", "basicInfo", "profile", "user"]),
+        ...collectNestedRecordCandidates(dataRecord.basic_info, [
+            "basic_info",
+            "basicInfo",
+            "profile",
+            "user"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.basicInfo, [
+            "basic_info",
+            "basicInfo",
+            "profile",
+            "user"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.profile, ["basic_info", "basicInfo", "profile", "user"]),
         ...(hasUserDataShape(dataRecord) ? [dataRecord] : [])
     ];
 };

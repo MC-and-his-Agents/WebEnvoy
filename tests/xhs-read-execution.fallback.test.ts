@@ -186,6 +186,112 @@ describe("xhs read execution fallback", () => {
     );
   });
 
+  it("accepts wrapped detail payloads when the requested note is nested under note_card", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-wrapped-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab"
+        }),
+        executionContext: {
+          runId: "run-detail-wrapped-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-wrapped-001",
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: [
+                {
+                  note_card: {
+                    noteId: "note-wrapped-001",
+                    title: "wrapped note"
+                  }
+                }
+              ]
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected wrapped detail success");
+    }
+    expect(result.payload.summary).toMatchObject({
+      capability_result: {
+        outcome: "success",
+        data_ref: {
+          note_id: "note-wrapped-001"
+        }
+      }
+    });
+  });
+
+  it("accepts nested user_home payloads when the requested user id is inside user.basicInfo", async () => {
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-nested-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "profile_tab",
+          actual_target_page: "profile_tab"
+        }),
+        executionContext: {
+          runId: "run-user-nested-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-nested-001",
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              user: {
+                basicInfo: {
+                  userId: "user-nested-001"
+                },
+                nickname: "nested user"
+              }
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected nested user_home success");
+    }
+    expect(result.payload.summary).toMatchObject({
+      capability_result: {
+        outcome: "success",
+        data_ref: {
+          user_id: "user-nested-001"
+        }
+      }
+    });
+  });
+
   it("keeps detail execution failed when api success payload does not contain requested note", async () => {
     const result = await executeXhsDetail(
       {
