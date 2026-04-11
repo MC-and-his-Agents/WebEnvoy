@@ -90,7 +90,6 @@ export interface XhsGateCoreResult {
   isLiveReadMode: boolean;
   isBlockedByStateMatrix: boolean;
   liveModeCanEnter: boolean;
-  limitedReadRolloutReadyTrue: boolean;
   fallbackMode: ExecutionMode;
   writeGateOnlyEligible: boolean;
   writeGateOnlyDecision: Record<string, unknown> | null;
@@ -110,7 +109,6 @@ export declare const resolveXhsExecutionMode: (value: unknown) => ExecutionMode 
 export declare const resolveXhsRiskState: (value: unknown) => RiskState;
 export declare const resolveXhsIssueScope: (value: unknown) => IssueScope;
 export declare const normalizeXhsApprovalRecord: (value: unknown) => XhsApprovalRecord;
-export declare const normalizeXhsAuditRecord: (value: unknown) => XhsAuditRecord;
 export declare const resolveXhsIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState
@@ -123,21 +121,13 @@ export declare const resolveXhsApprovalRequirementGaps: (
   requirements: string[],
   approvalRecord: XhsApprovalRecord
 ) => string[];
-export declare const resolveXhsAuditRequirementGaps: (
-  auditRecord: XhsAuditRecord,
-  approvalRecord: XhsApprovalRecord,
-  state: ReturnType<typeof buildXhsGatePolicyState>,
-  target: {
-    targetDomain?: unknown;
-    targetTabId?: unknown;
-    targetPage?: unknown;
-  }
-) => string[];
 export declare const resolveXhsFallbackMode: (
   requestedExecutionMode: ExecutionMode | null,
   riskState: RiskState
 ) => ExecutionMode;
-export declare const evaluateXhsGateCore: (input: XhsGateCoreInput) => XhsGateCoreResult;
+export declare const evaluateXhsGateCore: (
+  input: Omit<XhsGateCoreInput, "auditRecord" | "limitedReadRolloutReadyTrue">
+) => XhsGateCoreResult;
 export declare const buildXhsGatePolicyState: (input: {
   issueScope: unknown;
   riskState: unknown;
