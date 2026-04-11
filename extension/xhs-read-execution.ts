@@ -65,7 +65,7 @@ const XHS_DETAIL_SPEC: XhsReadCommandSpec = {
   buildPayload: (params) => ({
     source_note_id: (params as XhsDetailParams).note_id
   }),
-  buildUrl: () => "https://edith.xiaohongshu.com/api/sns/web/v1/feed",
+  buildUrl: () => "/api/sns/web/v1/feed",
   buildSignatureUri: () => "/api/sns/web/v1/feed",
   buildDataRef: (params) => ({
     note_id: (params as XhsDetailParams).note_id
@@ -80,7 +80,7 @@ const XHS_USER_HOME_SPEC: XhsReadCommandSpec = {
   requestClass: "xhs.user_home",
   buildPayload: () => ({}),
   buildUrl: (params) =>
-    `https://edith.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent((params as XhsUserHomeParams).user_id)}`,
+    `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent((params as XhsUserHomeParams).user_id)}`,
   buildSignatureUri: (params) =>
     `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent((params as XhsUserHomeParams).user_id)}`,
   buildDataRef: (params) => ({
@@ -980,6 +980,15 @@ const executeXhsRead = async (
   }
 
   if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
+    const pageStateRoot = await resolvePageStateRoot();
+    if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+        reason: "TARGET_DATA_NOT_FOUND",
+        message: `${spec.command} 接口返回成功但未包含目标数据`,
+        detail: `${spec.command} response target missing`,
+        statusCode: response.status
+      });
+    }
     return createFailure(
       "ERR_EXECUTION_FAILED",
       `${spec.command} 接口返回成功但未包含目标数据`,

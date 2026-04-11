@@ -111,7 +111,7 @@ describe("xhs read execution fallback", () => {
     });
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://edith.xiaohongshu.com/api/sns/web/v1/feed"
+        url: "/api/sns/web/v1/feed"
       })
     );
   });
@@ -181,7 +181,7 @@ describe("xhs read execution fallback", () => {
     );
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://edith.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-success-001"
+        url: "/api/sns/web/v1/user/otherinfo?user_id=user-success-001"
       })
     );
   });
@@ -442,6 +442,68 @@ describe("xhs read execution fallback", () => {
     expect(result.error.message).toBe("xhs.detail 接口返回成功但未包含目标数据");
   });
 
+  it("uses detail page-state fallback when a 200 payload omits the requested note", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-fallback-target-missing-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab"
+        }),
+        executionContext: {
+          runId: "run-detail-fallback-target-missing-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-fallback-target-missing-001",
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-fallback-target-missing-001": {
+                noteId: "note-fallback-target-missing-001"
+              }
+            }
+          }
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: [
+                {
+                  note_card: {
+                    noteId: "different-note"
+                  }
+                }
+              ]
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail fallback failure envelope");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "/api/sns/web/v1/feed"
+      }
+    });
+  });
+
   it("does not treat metadata user id as user_home success evidence", async () => {
     const result = await executeXhsUserHome(
       {
@@ -486,6 +548,62 @@ describe("xhs read execution fallback", () => {
       throw new Error("expected user_home metadata-only failure");
     }
     expect(result.error.message).toBe("xhs.user_home 接口返回成功但未包含目标数据");
+  });
+
+  it("uses user_home page-state fallback when a 200 payload omits the requested user", async () => {
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-target-missing-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "profile_tab",
+          actual_target_page: "profile_tab"
+        }),
+        executionContext: {
+          runId: "run-user-fallback-target-missing-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-target-missing-001",
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-fallback-target-missing-001"
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              user: {
+                userId: "different-user"
+              }
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home fallback failure envelope");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "/api/sns/web/v1/user/otherinfo"
+      }
+    });
   });
 
   it("uses detail page-state fallback when feed api is blocked but note state is still present", async () => {
