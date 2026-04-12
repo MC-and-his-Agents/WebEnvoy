@@ -31,6 +31,7 @@
 5. `risk_state_machine`
 6. `issue_action_matrix`
 7. `risk_transition_audit`
+8. `audit_admission_evidence`
 
 同时必须继续复用 `FR-0010` 的以下门禁结果对象作为实现落点：
 1. `gate_outcome`
@@ -65,7 +66,7 @@
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
       "gate_input_risk_state_limited_or_allowed",
-      "audit_record_present",
+      "audit_admission_evidence_present",
       "risk_state_checked",
       "target_domain_confirmed",
       "target_tab_confirmed",
@@ -86,17 +87,41 @@
 - `live_entry_requirements` 仅定义 live 读模式共享必备前置；其满足仅表示进入 live 判定所需必要条件，不表示在当前 `risk_state` 自动放行全部 live 读模式。
 - `limited_read_rollout_ready_true` 不属于所有 live 读模式共享前置；它作为 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件载体，只允许在 `issue_action_matrix` 中被 `live_read_limited` 的条件放行显式消费。
 - `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
-- `audit_record_present` 表示 live read 请求侧必须携带与当前 `decision_id` / `approval_id` 精确匹配、且字段完整的 `audit_record` 准入证据；不得只凭同 scope/target 的历史记录近似满足。
+- `audit_admission_evidence_present` 表示 live read 请求侧必须携带与当前 `decision_id` / `approval_id` 精确匹配、且字段完整的 `audit_admission_evidence` 准入证据；不得只凭同 scope/target 的历史记录近似满足。
 - `approval_record_approved_true` 表示 `FR-0010.approval_record.approved=true`；`approval_record_approver_present` / `approval_record_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_record_checks_all_true` 表示 `FR-0010.approval_record.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
 - `manual_confirmation_recorded` 不再作为独立机器条件名存在；人工确认的正式机器承载统一落在 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 上。
-- `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
-- `FR-0010.audit_record` 在本 FR 中同时承担两阶段职责：
-  1. 对 `issue_209` live read，请求进入 gate 前必须提供 caller-supplied admission audit evidence，作为 `audit_record_present` 的正式机器承载；
-  2. 对所有门禁判定，gate 完成后仍必须写出 persisted audit trail，作为正式审计留痕。
-- 上述两阶段都复用同一 `audit_record` contract family；实现不得再引入平行的私有 audit 输入对象。
+- `live_entry_requirements` 必须与 `FR-0010.approval_record`、本 FR 冻结的 `audit_admission_evidence`、以及 `FR-0010.audit_record` 的审计留痕语义保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
+- `audit_admission_evidence` 负责 `issue_209` live read 的 pre-gate 审计准入证明；`FR-0010.audit_record` 继续只承担 gate 判定后的 persisted audit trail。
 - 具体 `(issue_scope, state, execution_mode)` 是否允许，必须再受 `issue_action_matrix` 的显式边界约束；若与 `live_entry_requirements` 出现冲突，以 `issue_action_matrix` 为准。
 - 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
+
+## audit_admission_evidence
+
+```json
+{
+  "audit_admission_evidence": {
+    "evidence_ref": "gate_evt_001",
+    "decision_id": "gate_decision_001",
+    "approval_id": "approval_run_001",
+    "issue_scope": "issue_209",
+    "target_domain": "www.xiaohongshu.com",
+    "target_tab_id": 924,
+    "target_page": "search_result_tab",
+    "action_type": "read",
+    "requested_execution_mode": "live_read_limited",
+    "recorded_at": "2026-03-22T08:00:00Z"
+  }
+}
+```
+
+约束：
+- `audit_admission_evidence` 是 `issue_209` live read 在进入 gate 前必须提供的正式审计证据对象。
+- `evidence_ref` 必须稳定、可检索、不可歧义，并可回链到既有正式审计记录。
+- `decision_id` 与 `approval_id` 必须与本次 live read 请求命中的正式准入 linkage 精确匹配。
+- `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史证据近似满足。
+- `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons`、`risk_state`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- gate 完成后，运行时仍必须按 `FR-0010.audit_record` 输出 persisted audit trail，不得用 admission evidence 替代 post-gate 留痕。
 
 ## write_interaction_tier
 
@@ -224,7 +249,7 @@
           {
             "action": "live_read_limited",
             "requires": [
-              "audit_record_present",
+              "audit_admission_evidence_present",
               "limited_read_rollout_ready_true",
               "approval_record_approved_true",
               "approval_record_approver_present",
@@ -251,7 +276,7 @@
           {
             "action": "live_read_limited",
             "requires": [
-              "audit_record_present",
+              "audit_admission_evidence_present",
               "limited_read_rollout_ready_true",
               "approval_record_approved_true",
               "approval_record_approver_present",
@@ -262,7 +287,7 @@
           {
             "action": "live_read_high_risk",
             "requires": [
-              "audit_record_present",
+              "audit_admission_evidence_present",
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
@@ -291,7 +316,7 @@
 - `conditional_actions` 在所有 entry 中都必须显式出现；无条件动作场景下使用空数组，不得靠字段缺失表达“无条件动作”。
 - `allowed_actions` 仅表示无需额外审批前置即可执行的动作；`conditional_actions` 表示命中当前 `(issue_scope, state)` 后仍需满足 `requires` 中附加审批/审计条件的动作。
 - live 读模式不得以裸字符串形式出现在 `allowed_actions` 中；若需审批证据，必须落入 `conditional_actions` 并显式列出 `requires`。
-- `issue_209` 的 `live_read_limited` 与 `live_read_high_risk` 都必须把 `audit_record_present` 明确写入 `conditional_actions.requires`；不得只在 prose 要求 audit 而在机器矩阵中遗漏。
+- `issue_209` 的 `live_read_limited` 与 `live_read_high_risk` 都必须把 `audit_admission_evidence_present` 明确写入 `conditional_actions.requires`；不得只在 prose 要求 audit 而在机器矩阵中遗漏。
 - `limited_read_rollout_ready_true` 是 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件名，只允许出现在 `live_read_limited` 的 `conditional_actions.requires` 中；`live_read_high_risk` 不得隐式继承该 staged rollout 前置。
 - `issue_209` 在 `limited` 下仅可通过 `conditional_actions` 放行 `live_read_limited`，不得放行 `live_read_high_risk`。
 - `upload_submit_publish_chain` 表示所有超出 `editor_input` 单动作验证边界的写链路集合；该集合在 `issue_208` 当前 formal contract freeze 中必须持续阻断。
@@ -385,8 +410,8 @@
 ## 公开模式与阻断语义补充
 
 1. `live_read_limited` 作为 Sprint 3 的正式公开模式，只适用于受控读 live，不得外溢为写路径或不可逆动作的隐式降级口径。
-2. `issue_209` 的 live read 请求在进入 gate 前，必须复用 `FR-0010.approval_record` 与 `FR-0010.audit_record` 作为 caller-supplied admission evidence；其中 `audit_record` 必须与当前 `decision_id` / `approval_id` 精确匹配。
-3. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，必须保留完整审批证据，并继续写出 post-gate `audit_record` 留痕；其中 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
+2. `issue_209` 的 live read 请求在进入 gate 前，必须复用 `FR-0010.approval_record` 与本 FR 冻结的 `audit_admission_evidence` 作为 caller-supplied admission evidence；其中 `audit_admission_evidence` 必须与当前 `decision_id` / `approval_id` 精确匹配。
+3. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，必须保留完整审批证据，并继续写出 post-gate `FR-0010.audit_record` 留痕；其中 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
 4. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级结果（当前为 `dry_run` 或 `recon`）；不得返回未实际执行的 `live_read_limited`。
 5. `consumer_gate_result` 在 Sprint 3 中继续沿用 `FR-0010` 冻结字段；`issue_209` 的受控 live 继续使用 `live_read_limited`，`issue_208` 的 `editor_input` 真实验证继续使用 `action_type=write` 与 `requested_execution_mode|effective_execution_mode=live_write` 的既有字段组合；`#208/#209` 与后续实现事项不得自行定义私有 mode、私有审批证据字段或平行 gate result 绕过 `approval_record` / `audit_record`。
 6. `#208` 的 `editor_input` 单动作真实验证不新增新的 `requested_execution_mode` / `effective_execution_mode` 枚举；它在门禁字段上复用 `live_write`，在 issue 级边界上受 `issue_action_matrix` 的 `reversible_interaction_with_approval` 条件约束。

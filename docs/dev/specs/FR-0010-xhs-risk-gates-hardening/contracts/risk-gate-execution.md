@@ -133,8 +133,7 @@
 4. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须满足 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
 5. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 6. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审批记录可回链到唯一门禁结论。
-7. 若下游 FR 将 `audit_record` 作为 live entry requirement 的正式机器承载，`approval_id` 与 `decision_id` 仍必须保持公开、稳定且可由请求方按正式 contract 构造，不得退回内部 bridge 私有标识。
-8. 若下游 FR 需要在 gate evaluation 前消费 `approval_id` 作为 admission evidence linkage，则该标识必须能够与 `decision_id` 一起按公开 contract 稳定预导出，并在 gate 判定后被 `approval_record` 原样复用。
+7. 若下游 FR 需要在 gate evaluation 前消费 `approval_id` 作为 admission evidence linkage，则该标识必须能够与 `decision_id` 一起按公开 contract 稳定预导出，并在 gate 判定后被 `approval_record` 原样复用。
 
 ## audit_record
 
@@ -178,8 +177,6 @@
 8. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
 10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值。
-11. 下游 FR 若把 `audit_record` 作为 live entry requirement 的正式机器承载，必须继续复用本对象族，不得定义平行私有 audit 输入字段；同时 gate 完成后仍必须按本契约写出 persisted audit trail。
-12. 命中 live read 的 caller-supplied `audit_record` 若被用作准入证据，其 `decision_id` 与 `approval_id` 必须与本次 gate 决策精确匹配，不得仅以 scope/target/mode 粗略近似匹配历史记录。
 
 ## consumer_gate_result
 
