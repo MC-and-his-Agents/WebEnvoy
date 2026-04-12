@@ -2898,9 +2898,7 @@ class ChromeBackgroundBridge {
             });
             const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
             if (!targetTab) {
-                if (!trustedTargetBound) {
-                    pushReason("TARGET_TAB_NOT_FOUND");
-                }
+                pushReason("TARGET_TAB_NOT_FOUND");
             }
             else {
                 const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
