@@ -162,18 +162,18 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-custom-approval-001",
+          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
           gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
         }),
         approval_record: expect.objectContaining({
           approval_id: null,
-          decision_id: "gate_decision_run-loopback-custom-approval-001"
+          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003"
         }),
         audit_record: expect.objectContaining({
           approval_id: null,
-          decision_id: "gate_decision_run-loopback-custom-approval-001"
+          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003"
         })
       })
     );
@@ -223,13 +223,13 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001"
+          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
         }),
         approval_record: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001"
+          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
         }),
         audit_record: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001"
+          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
         })
       })
     );

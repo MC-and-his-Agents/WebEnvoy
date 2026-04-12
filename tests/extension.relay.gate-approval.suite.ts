@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / gate and approval", () => {
+  const limitedRunId = "run-xhs-live-limited-allowed-001";
+  const limitedRequestId = "issue209-relay-live-limited-allowed-001";
   const approvedLimitedLiveOptions = {
     target_domain: "www.xiaohongshu.com",
     target_tab_id: 32,
@@ -23,15 +25,16 @@ describe("extension background relay contract / gate and approval", () => {
     },
     limited_read_rollout_ready_true: true,
     admission_context: createApprovedReadAdmissionContext({
-      run_id: "run-xhs-live-limited-allowed-001",
+      run_id: limitedRunId,
+      request_id: limitedRequestId,
       session_id: "nm-session-001",
       requested_execution_mode: "live_read_limited",
       risk_state: "limited"
     }),
     audit_record: {
       event_id: "gate_evt_forward-xhs-live-limited-allowed-001",
-      decision_id: "gate_decision_run-xhs-live-limited-allowed-001",
-      approval_id: "gate_appr_gate_decision_run-xhs-live-limited-allowed-001",
+      decision_id: `gate_decision_${limitedRunId}_${limitedRequestId}`,
+      approval_id: `gate_appr_gate_decision_${limitedRunId}_${limitedRequestId}`,
       issue_scope: "issue_209",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,
@@ -377,9 +380,10 @@ describe("extension background relay contract / gate and approval", () => {
       method: "bridge.forward",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-live-limited-allowed-001",
+        run_id: limitedRunId,
         command: "xhs.search",
         command_params: {
+          request_id: limitedRequestId,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",

@@ -3,19 +3,32 @@ import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNative
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
   const createAllowedHighRiskAuditRecord = (
-    overrides: Record<string, unknown> = {}
-  ): Record<string, unknown> => ({
-    event_id: "audit-live-read-high-risk-001",
-    issue_scope: "issue_209",
-    target_domain: "www.xiaohongshu.com",
-    target_tab_id: 32,
-    target_page: "search_result_tab",
-    action_type: "read",
-    requested_execution_mode: "live_read_high_risk",
-    gate_decision: "allowed",
-    recorded_at: "2026-03-23T10:00:30Z",
-    ...overrides
-  });
+    overrides: Record<string, unknown> & { runId?: string; requestId?: string } = {}
+  ): Record<string, unknown> => {
+    const runId =
+      typeof overrides.runId === "string" && overrides.runId.length > 0 ? overrides.runId : null;
+    const requestId =
+      typeof overrides.requestId === "string" && overrides.requestId.length > 0
+        ? overrides.requestId
+        : null;
+    const decisionId = runId && requestId ? `gate_decision_${runId}_${requestId}` : null;
+    const approvalId = decisionId ? `gate_appr_${decisionId}` : null;
+
+    return {
+      event_id: "audit-live-read-high-risk-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      gate_decision: "allowed",
+      recorded_at: "2026-03-23T10:00:30Z",
+      ...(decisionId ? { decision_id: decisionId } : {}),
+      ...(approvalId ? { approval_id: approvalId } : {}),
+      ...overrides
+    };
+  };
 
   const createLoopbackFingerprintContext = (
     executionOverrides: Record<string, unknown> = {}
@@ -203,6 +216,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-audit-query-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -237,6 +251,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-audit-query-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -289,6 +304,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       "xhs_official_not_ready_profile",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-audit-query-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -331,6 +347,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-audit-query-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1311,6 +1328,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       runId,
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1337,9 +1355,13 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord(),
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId: "issue209-live-high-risk-001"
+          }),
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId: "issue209-live-high-risk-001",
             requestedExecutionMode: "live_read_high_risk",
             riskState: "allowed"
           })
@@ -1885,6 +1907,7 @@ process.stdin.on("data", (chunk) => {
   itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-allowed-001";
+    const requestId = "issue209-live-high-risk-audit-query-001";
 
     const executeResult = runCli([
       "xhs.search",
@@ -1894,6 +1917,7 @@ process.stdin.on("data", (chunk) => {
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: requestId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1920,9 +1944,13 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord(),
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId
+          }),
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId,
             requestedExecutionMode: "live_read_high_risk",
             riskState: "allowed"
           })
@@ -2521,10 +2549,11 @@ process.stdin.on("data", (chunk) => {
         "xhs.search",
         "--profile",
         "xhs_account_001",
-        "--run-id",
-        runId,
-        "--params",
-        JSON.stringify({
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        request_id: `issue209-live-high-risk-${simulateResult}-001`,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -2551,9 +2580,13 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord(),
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId: `issue209-live-high-risk-${simulateResult}-001`
+          }),
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId: `issue209-live-high-risk-${simulateResult}-001`,
             requestedExecutionMode: "live_read_high_risk",
             riskState: "allowed"
           })
@@ -2597,12 +2630,16 @@ process.stdin.on("data", (chunk) => {
   );
 
   it("returns structured output mapping details for xhs.search bad output path", () => {
+    const runId = "run-output-bad-output-001";
     const result = runCli([
       "xhs.search",
       "--profile",
       "xhs_account_001",
+      "--run-id",
+      runId,
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-bad-output-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -2628,7 +2665,16 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId: "issue209-live-high-risk-bad-output-001"
+          }),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId: "issue209-live-high-risk-bad-output-001",
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
     ]);
@@ -2658,6 +2704,7 @@ process.stdin.on("data", (chunk) => {
       runId,
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -2684,9 +2731,13 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord(),
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId: "issue209-live-high-risk-001"
+          }),
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId: "issue209-live-high-risk-001",
             requestedExecutionMode: "live_read_high_risk",
             riskState: "allowed"
           })
@@ -2723,6 +2774,7 @@ process.stdin.on("data", (chunk) => {
       runId,
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-high-risk-invalid-capability-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -2749,9 +2801,13 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord(),
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId: "issue209-live-high-risk-invalid-capability-001"
+          }),
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId: "issue209-live-high-risk-invalid-capability-001",
             requestedExecutionMode: "live_read_high_risk",
             riskState: "allowed"
           })

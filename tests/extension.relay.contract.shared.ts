@@ -127,6 +127,37 @@ const createApprovedReadAdmissionContext = (input?: {
 });
 };
 
+const createApprovedReadAuditRecord = (input?: {
+  run_id?: string;
+  request_id?: string;
+  decision_id?: string;
+  approval_id?: string;
+  target_tab_id?: number;
+  target_page?: string;
+  requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
+  risk_state?: "limited" | "allowed";
+}) => {
+  const runId = input?.run_id ?? "run-relay-contract-001";
+  const requestId = input?.request_id;
+  const decisionId =
+    input?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
+  const approvalId = input?.approval_id ?? `gate_appr_${decisionId}`;
+  return {
+    event_id: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 32,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T08:00:30Z",
+    risk_state: input?.risk_state ?? "allowed"
+  };
+};
+
 const createAttestedEditorInputValidationResult = (text: string) => ({
   ok: true,
   mode: "controlled_editor_input_validation" as const,
@@ -206,9 +237,11 @@ Object.assign(globalThis as Record<string, unknown>, {
     resolveWriteInteractionTier,
     approvedLiveOptions,
     approvedLimitedLiveOptions,
-    approvedHighRiskLimitedOptions,
-    completeIssue208ApprovalRecord,
-    createAttestedEditorInputValidationResult
+  approvedHighRiskLimitedOptions,
+  completeIssue208ApprovalRecord,
+  createAttestedEditorInputValidationResult,
+  createApprovedReadAdmissionContext,
+  createApprovedReadAuditRecord
   }
 });
 

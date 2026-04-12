@@ -120,7 +120,7 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
-  it("keeps decision linkage anchored to run_id when command request_id is absent", () => {
+  it("uses transport request_id when command request_id is absent", () => {
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -139,7 +139,7 @@ describe("xhs-search gate helpers", () => {
         }),
         audit_record: {
           event_id: "audit-extension-req-1",
-          decision_id: "gate_decision_run-extension-001",
+          decision_id: "gate_decision_run-extension-001_req-1",
           approval_id: "gate_appr_custom_extension_req-1",
           issue_scope: "issue_209",
           target_domain: "www.xiaohongshu.com",
@@ -152,7 +152,7 @@ describe("xhs-search gate helpers", () => {
         },
         approval_record: {
           approval_id: "gate_appr_custom_extension_req-1",
-          decision_id: "gate_decision_run-extension-001",
+          decision_id: "gate_decision_run-extension-001_req-1",
           approved: true,
           approver: "qa-reviewer",
           approved_at: "2026-03-23T10:00:00.000Z",
@@ -173,8 +173,8 @@ describe("xhs-search gate helpers", () => {
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-001");
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-001");
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-001_req-1");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-001_req-1");
   });
 
   it("uses caller-provided command request_id for live gate linkage", () => {
@@ -370,9 +370,9 @@ describe("xhs-search gate helpers", () => {
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-002");
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-002_req-2");
     expect(gate.approval_record.approval_id).toBeNull();
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-002");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-002_req-2");
   });
 
   it("blocks live approval when a reused approval_record belongs to an older decision", () => {
@@ -430,12 +430,12 @@ describe("xhs-search gate helpers", () => {
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-003");
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-003_req-3");
     expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
     expect(gate.approval_record.approval_id).toBeNull();
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003_req-3");
   });
 
   it("blocks live approval when a legacy approval_record omits decision_id", () => {
@@ -474,12 +474,12 @@ describe("xhs-search gate helpers", () => {
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-004");
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-004_req-4");
     expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
     expect(gate.approval_record.approval_id).toBeNull();
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
   });
 
   it("blocks live_read_limited when audit_record linkage does not match the approved decision", () => {

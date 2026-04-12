@@ -67,11 +67,13 @@ const resolveXhsGateDecisionId = (input) => {
   if (runId && commandRequestId) {
     return `gate_decision_${runId}_${commandRequestId}`;
   }
+  const requestId = asString(input?.requestId);
+  if (runId && requestId) {
+    return `gate_decision_${runId}_${requestId}`;
+  }
   if (runId) {
     return `gate_decision_${runId}`;
   }
-
-  const requestId = asString(input?.requestId);
   if (requestId) {
     return `gate_decision_${requestId}`;
   }
