@@ -117,7 +117,7 @@
 
 约束：
 - `audit_admission_evidence` 是 `issue_209` live read 在进入 gate 前必须提供的正式审计证据对象。
-- `evidence_ref` 必须稳定、可检索、不可歧义，并可回链到既有正式审计记录。
+- `evidence_ref` 必须稳定、可检索、不可歧义，并指向本次 live read admission evidence 自身的正式证据条目；不得要求它在 gate 前先引用 `FR-0010.audit_record` 一类 gate 后才产生的持久化留痕对象。
 - `decision_id` 与 `approval_id` 必须与本次 live read 请求命中的正式准入 linkage 精确匹配。
 - `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史证据近似满足。
 - `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons`、`risk_state`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
