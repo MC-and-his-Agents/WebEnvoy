@@ -110,6 +110,7 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
+          "audit_record_present",
           "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
@@ -133,6 +134,7 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
+          "audit_record_present",
           "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
@@ -1147,6 +1149,7 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
+    "audit_record_present",
     "risk_state_checked",
     "target_domain_confirmed",
     "target_tab_confirmed",
@@ -1204,16 +1207,14 @@ const deriveApprovalId = (input, decisionId) => {
     return null;
   }
 
-  const approvalRecordMatchesDecision = approvalRecord.decision_id === decisionId;
-
   const explicitApprovalId = asString(input.approvalId);
-  if (explicitApprovalId && approvalRecordMatchesDecision) {
+  if (explicitApprovalId && !approvalRecordHasConflictingLinkage) {
     return explicitApprovalId;
   }
 
   const record = asRecord(input.approvalRecord);
   const recordApprovalId = asString(record?.approval_id);
-  if (recordApprovalId && approvalRecordMatchesDecision) {
+  if (recordApprovalId && approvalRecord.decision_id === decisionId) {
     return recordApprovalId;
   }
 
@@ -1318,6 +1319,31 @@ const normalizeXhsAuditRecord = (value) => {
     gate_decision: asString(record?.gate_decision),
     recorded_at: asString(record?.recorded_at)
   };
+};
+
+const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
+  const matchesExactLinkage =
+    !!expectedLinkage.decisionId &&
+    !!expectedLinkage.approvalId &&
+    auditRecord.decision_id === expectedLinkage.decisionId &&
+    auditRecord.approval_id === expectedLinkage.approvalId;
+  if (
+    !auditRecord.event_id ||
+    !auditRecord.decision_id ||
+    !auditRecord.approval_id ||
+    !matchesExactLinkage ||
+    !auditRecord.recorded_at ||
+    auditRecord.issue_scope !== state.issueScope ||
+    auditRecord.target_domain !== target.targetDomain ||
+    auditRecord.target_tab_id !== target.targetTabId ||
+    auditRecord.target_page !== target.targetPage ||
+    auditRecord.action_type !== state.actionType ||
+    auditRecord.requested_execution_mode !== state.requestedExecutionMode ||
+    auditRecord.gate_decision !== "allowed"
+  ) {
+    return ["audit_record_present"];
+  }
+  return [];
 };
 
 const hasApprovalRecordConflictingLinkage = (approvalRecord, decisionId) => {
@@ -1844,6 +1870,22 @@ const collectXhsMatrixGateReasons = (input) => {
         liveRequirements.filter((requirement) => requirement.startsWith("approval_record_")),
         approvalRecord
       );
+      const auditRequirementGaps = liveRequirements.includes("audit_record_present")
+        ? resolveXhsAuditRequirementGaps(
+            auditRecord,
+            {
+              decisionId: input.decisionId ?? null,
+              approvalId: input.expectedApprovalId ?? null,
+              runId: input.runId ?? null
+            },
+            state,
+            {
+              targetDomain: input.targetDomain,
+              targetTabId: input.targetTabId,
+              targetPage: input.targetPage
+            }
+          )
+        : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
         state.limitedReadRolloutReadyTrue !== true
@@ -1854,6 +1896,9 @@ const collectXhsMatrixGateReasons = (input) => {
       }
       if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
         pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+      }
+      if (auditRequirementGaps.length > 0) {
+        pushReason(gateReasons, "AUDIT_RECORD_MISSING");
       }
       if (rolloutRequirementGaps.length > 0) {
         pushReason(gateReasons, "LIMITED_READ_ROLLOUT_NOT_READY");
@@ -2369,10 +2414,12 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.validation_action === "editor_input";
 const buildGateDecisionId = (context) => {
     const commandRequestId = asNonEmptyString(context.commandRequestId);
-    const baseDecisionId = context.requestId
+    if (commandRequestId) {
+        return `gate_decision_${context.runId}_${commandRequestId}`;
+    }
+    return context.requestId
         ? `gate_decision_${context.runId}_${context.requestId}`
         : `gate_decision_${context.runId}`;
-    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 const resolveActualTargetGateReasons = (options) => {

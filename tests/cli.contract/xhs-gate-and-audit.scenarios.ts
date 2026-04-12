@@ -1773,10 +1773,13 @@ process.stdin.on("data", (chunk) => {
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
+    const runId = "run-issue209-live-limited-001";
     const result = runCli([
       "xhs.search",
       "--profile",
       "xhs_account_001",
+      "--run-id",
+      runId,
       "--params",
       JSON.stringify({
         request_id: "issue209-live-limited-001",
@@ -1808,8 +1811,8 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "audit-live-read-limited-001",
-            decision_id: "gate_decision_issue209-live-limited-001",
-            approval_id: "gate_appr_gate_decision_issue209-live-limited-001",
+            decision_id: `${"gate_decision_"}${runId}_issue209-live-limited-001`,
+            approval_id: `${"gate_appr_gate_decision_"}${runId}_issue209-live-limited-001`,
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,
@@ -1855,6 +1858,7 @@ process.stdin.on("data", (chunk) => {
             {
               action: "live_read_limited",
               requires: [
+                "audit_record_present",
                 "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",

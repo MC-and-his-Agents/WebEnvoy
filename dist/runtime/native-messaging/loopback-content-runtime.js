@@ -53,8 +53,10 @@ const buildLoopbackGateSeedOptions = (input) => {
 };
 const resolveGateDecisionId = (input) => {
     const commandRequestId = asString(input.commandRequestId);
-    const baseDecisionId = `gate_decision_${input.runId}_${input.requestId}`;
-    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
+    if (commandRequestId) {
+        return `gate_decision_${input.runId}_${commandRequestId}`;
+    }
+    return `gate_decision_${input.runId}_${input.requestId}`;
 };
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 export class InMemoryContentScriptRuntime {

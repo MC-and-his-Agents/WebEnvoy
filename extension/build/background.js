@@ -54,6 +54,7 @@ const XHS_READ_EXECUTION_POLICY = {
     blocked_actions: ["expand_new_live_surface_without_gate"],
     live_entry_requirements: [
         "gate_input_risk_state_limited_or_allowed",
+        "audit_record_present",
         "risk_state_checked",
         "target_domain_confirmed",
         "target_tab_confirmed",
@@ -239,8 +240,10 @@ const hasSuccessfulExecutionAttestation = (payload) => {
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const resolveGateDecisionId = (input) => {
     const commandRequestId = asNonEmptyString(input.commandRequestId);
-    const baseDecisionId = `gate_decision_${input.runId}_${input.requestId}`;
-    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
+    if (commandRequestId) {
+        return `gate_decision_${input.runId}_${commandRequestId}`;
+    }
+    return `gate_decision_${input.runId}_${input.requestId}`;
 };
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;

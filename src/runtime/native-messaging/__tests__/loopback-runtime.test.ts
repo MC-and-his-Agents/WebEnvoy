@@ -236,9 +236,9 @@ describe("native messaging legacy loopback runtime", () => {
           },
           audit_record: {
             event_id: "audit-live-read-limited-loopback-001",
-            decision_id: "gate_decision_run-loopback-live-limited-001_run-0003_issue209-live-limited-001",
+            decision_id: "gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
             approval_id:
-              "gate_appr_gate_decision_run-loopback-live-limited-001_run-0003_issue209-live-limited-001",
+              "gate_appr_gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 33,
@@ -258,15 +258,15 @@ describe("native messaging legacy loopback runtime", () => {
         summary: expect.objectContaining({
           approval_record: expect.objectContaining({
             approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-live-limited-001_.+_issue209-live-limited-001$/
+              /^gate_appr_gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
             ),
             decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_.+_issue209-live-limited-001$/
+              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
             )
           }),
           audit_record: expect.objectContaining({
             decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_.+_issue209-live-limited-001$/
+              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
             ),
             gate_decision: "allowed",
             requested_execution_mode: "live_read_limited",
@@ -274,7 +274,7 @@ describe("native messaging legacy loopback runtime", () => {
           }),
           gate_outcome: expect.objectContaining({
             decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_.+_issue209-live-limited-001$/
+              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
             ),
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
@@ -296,7 +296,7 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
-  it("overrides stale caller audit linkage with the current gate audit in loopback bundles", async () => {
+  it("blocks stale caller audit linkage in loopback bundles", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -355,26 +355,26 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.payload).toEqual(
       expect.objectContaining({
-        summary: expect.objectContaining({
-          gate_outcome: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-stale-001_.+_issue209-live-limited-current-001$/
-            ),
-            effective_execution_mode: "live_read_limited",
-            gate_decision: "allowed",
-            gate_reasons: ["LIVE_MODE_APPROVED"]
-          }),
-          audit_record: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-stale-001_.+_issue209-live-limited-current-001$/
-            ),
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-live-limited-stale-001_.+_issue209-live-limited-current-001$/
-            )
-          })
+        gate_outcome: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
+          ),
+          effective_execution_mode: "recon",
+          gate_decision: "blocked",
+          gate_reasons: ["AUDIT_RECORD_MISSING"]
+        }),
+        audit_record: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
+          ),
+          gate_decision: "blocked",
+          issue_scope: "issue_209"
+        }),
+        approval_record: expect.objectContaining({
+          approval_id: null
         })
       })
     );

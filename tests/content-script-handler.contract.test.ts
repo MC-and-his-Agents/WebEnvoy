@@ -109,7 +109,7 @@ const createApprovedReadAuditRecord = (linkage: {
   commandRequestId?: string;
 }) => {
   const decisionId = linkage.commandRequestId
-    ? `gate_decision_${linkage.runId}_${linkage.requestId}_${linkage.commandRequestId}`
+    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
     : `gate_decision_${linkage.runId}_${linkage.requestId}`;
   return {
   event_id: `gate_evt_${decisionId}`,

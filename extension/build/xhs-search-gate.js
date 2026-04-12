@@ -15,10 +15,12 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.validation_action === "editor_input";
 const buildGateDecisionId = (context) => {
     const commandRequestId = asNonEmptyString(context.commandRequestId);
-    const baseDecisionId = context.requestId
+    if (commandRequestId) {
+        return `gate_decision_${context.runId}_${commandRequestId}`;
+    }
+    return context.requestId
         ? `gate_decision_${context.runId}_${context.requestId}`
         : `gate_decision_${context.runId}`;
-    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {

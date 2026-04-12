@@ -12,6 +12,7 @@ export const buildLoopbackAuditRecord = (input) => {
         run_id: input.runId,
         session_id: input.sessionId,
         profile: input.profile,
+        issue_scope: input.gate.gateInput.issue_scope,
         risk_state: String(input.gate.gateInput.risk_state ?? "paused"),
         target_domain: input.gate.consumerGateResult.target_domain,
         target_tab_id: input.gate.consumerGateResult.target_tab_id,
