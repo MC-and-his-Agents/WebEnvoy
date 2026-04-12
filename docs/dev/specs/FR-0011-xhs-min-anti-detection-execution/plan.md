@@ -35,9 +35,10 @@
 3. 不把高阶 Layer 4 行为模型扩张到本 Sprint 的最小实现范围。
 4. 不把完整写闭环纳入本 FR。
 5. `live_read_limited` 一旦被定义为正式公开模式，其 staged rollout 条件载体、审批前置、审计字段与阻断语义必须先在本 FR 冻结，再进入任何实现 PR。
-6. `editor_input` 在本 FR 中是 `#208` 唯一正式验证动作，但不得被升级为已冻结的正式命令接口。
-7. 后续若需要 `xhs.editor_input` 或 `xhs.interact` 稳定机器接口，必须走独立 command contract，不得在当前实现 PR 里隐式扩口。
-8. `#208` 的真实验证路径必须继续映射回 `FR-0010` 已冻结字段，不得为该单动作验证新增私有 execution mode 或私有门禁字段。
+6. `issue_209` 的 pre-gate admission evidence 必须被明确分类为 request-side input，不得与 `FR-0010` 的 gate 后 `approval_record` / `audit_record` 混写为同一对象族。
+7. `editor_input` 在本 FR 中是 `#208` 唯一正式验证动作，但不得被升级为已冻结的正式命令接口。
+8. 后续若需要 `xhs.editor_input` 或 `xhs.interact` 稳定机器接口，必须走独立 command contract，不得在当前实现 PR 里隐式扩口。
+9. `#208` 的真实验证路径必须继续映射回 `FR-0010` 已冻结字段，不得为该单动作验证新增私有 execution mode 或私有门禁字段。
 
 ## 测试与验证策略
 
@@ -48,11 +49,12 @@
 - 审查验证：
   - `spec_review.md` 口径对齐
   - GWT 场景可被 reviewer 直接判定
-  - `#208/#209` 是否可直接消费统一状态机前置
-  - “统一阻断策略”是否已被对象化而非口头描述
-  - `#208` gate-only success / blocked 的最小 `page_state` 语义是否可被 reviewer 直接判定
-  - `#208` 的 `editor_input` 真实验证是否已和 `FR-0010` 冻结字段形成单一映射
-  - 是否已明确区分“治理动作类别”和“正式命令接口”
+    - `#208/#209` 是否可直接消费统一状态机前置
+    - “统一阻断策略”是否已被对象化而非口头描述
+    - `#208` gate-only success / blocked 的最小 `page_state` 语义是否可被 reviewer 直接判定
+    - `#208` 的 `editor_input` 真实验证是否已和 `FR-0010` 冻结字段形成单一映射
+    - 是否已明确区分“治理动作类别”和“正式命令接口”
+    - `issue_209` 的 admission evidence 是否已被整套 formal 文档一致地定义为 request-side input，而非 gate 后输出对象
 
 ## TDD 范围
 
@@ -78,12 +80,12 @@
 ## 进入实现前条件
 
 1. FR-0011 规约 PR 完成 spec review 且无阻断项。
-2. `contracts/anti-detection-execution.md` 七对象语义稳定无歧义。
+2. `contracts/anti-detection-execution.md` 九对象语义稳定无歧义。
 3. `research.md` 中证据矩阵和差距项已明确标注成熟度。
 4. `risks.md` 中 stop-ship 与回滚路径可执行。
 5. `#208/#209` 的前置关系已在 issue/PR 描述中明确引用本 FR。
 6. `#208/#209` 三态差异化阻断矩阵与状态变更审计字段已冻结。
-7. `live_read_limited` 的公开模式语义、条件载体 `limited_read_rollout_ready_true`、审批证据要求与 `blocked` 时的 `effective_execution_mode` 语义已冻结，可作为后续实现事项的正式准入前置。
+7. `live_read_limited` 的公开模式语义、条件载体 `limited_read_rollout_ready_true`、request-side admission evidence 要求与 `blocked` 时的 `effective_execution_mode` 语义已冻结，可作为后续实现事项的正式准入前置。
 8. `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 语义已冻结。
 9. `#208` 的 `editor_input` 单动作真实验证边界、成功/失败信号、最小 replay 与证据要求已冻结。
 10. `#208` 的真实验证路径已明确回落到 `FR-0010` 冻结门禁字段，不依赖私有 mode、私有审批字段或平行 gate result。
