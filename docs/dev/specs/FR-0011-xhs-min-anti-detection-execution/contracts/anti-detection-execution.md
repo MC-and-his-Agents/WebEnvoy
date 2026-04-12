@@ -91,6 +91,8 @@
 - `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
 - `audit_admission_evidence_present` 表示 live read 请求侧必须携带字段完整、且与本次请求 scope/target/mode 精确匹配的 `audit_admission_evidence` 准入证据；不得只凭同 scope/target 的历史记录近似满足。
 - `audit_admission_checks_all_true` 表示 `audit_admission_evidence.audited_checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
+- `approval_record_approved_true` 表示 `FR-0010.approval_record.approved=true`；`approval_record_approver_present` / `approval_record_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
+- `approval_record_checks_all_true` 表示 `FR-0010.approval_record.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
 - `approval_admission_evidence_approved_true` 表示 `approval_admission_evidence.approved=true`；`approval_admission_evidence_approver_present` / `approval_admission_evidence_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_admission_evidence_checks_all_true` 表示 `approval_admission_evidence.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
 - `manual_confirmation_recorded` 不再作为独立机器条件名存在；人工确认的正式机器承载统一落在 pre-gate `approval_admission_evidence` 的 `approved=true`、`approver`、`approved_at` 与完整 `checks` 上。
@@ -151,7 +153,7 @@
     "target_page": "search_result_tab",
     "action_type": "read",
     "requested_execution_mode": "live_read_limited",
-    "risk_state": "limited",
+    "risk_state": "paused",
     "audited_checks": {
       "target_domain_confirmed": true,
       "target_tab_confirmed": true,
@@ -169,7 +171,7 @@
 - `audit_admission_ref` 必须稳定、可检索、不可歧义，并只指向本次 pre-gate audit admission evidence 自身；不得复用 `FR-0010.audit_record` 或 `FR-0009.audit_record_ref` 一类 gate 后记录引用。
 - `run_id` 与 `session_id` 必须分别与当前 `FR-0010.gate_input.run_id`、`session_id` 精确匹配；不得用历史 audit blob 复用到新的 gate request。
 - `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史证据近似满足。
-- `risk_state` 必须记录本次 admission audit 实际审到的请求入口风险状态，并与 `FR-0010.gate_input.risk_state` 保持一致。
+- `risk_state` 必须记录本次 admission audit 实际审到的请求入口风险状态，并与 `FR-0010.gate_input.risk_state` 保持一致；允许值为 `paused | limited | allowed`。
 - `audited_checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 必须全部显式给出；缺任一项即不得满足 `audit_admission_evidence_present`。
 - `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
 - gate 完成后，运行时仍必须按 `FR-0010.audit_record` 输出 persisted audit trail，不得用 admission evidence 替代 post-gate 留痕。

@@ -71,7 +71,7 @@
 - `target_page` TEXT NOT NULL
 - `action_type` ENUM NOT NULL（当前固定为 `read`）
 - `requested_execution_mode` ENUM NOT NULL（`live_read_limited` | `live_read_high_risk`）
-- `risk_state` ENUM NOT NULL（`limited` | `allowed`）
+- `risk_state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
 - `audited_checks.target_domain_confirmed` BOOLEAN NOT NULL
 - `audited_checks.target_tab_confirmed` BOOLEAN NOT NULL
 - `audited_checks.target_page_confirmed` BOOLEAN NOT NULL
