@@ -421,6 +421,7 @@ const evaluateXhsGateCore = (input) => {
   const actualTargetPage = asString(input.actualTargetPage);
   const abilityAction = asString(input.abilityAction ?? input.abilityActionType);
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const admissionContext = normalizeXhsAdmissionContext(input.admissionContext);
   const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
   const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
     issueScope,

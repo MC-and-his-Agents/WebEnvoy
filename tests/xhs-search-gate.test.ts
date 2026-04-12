@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { evaluateXhsGateCore } from "../shared/xhs-gate.js";
 import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-search-gate.js";
 
 const createAdmissionContext = (input?: {
@@ -469,6 +470,40 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.effective_execution_mode).toBe("recon");
     expect(gate.gate_outcome.gate_reasons).toContain("AUDIT_RECORD_MISSING");
+  });
+
+  it("returns gate core state without throwing when admission_context is provided", () => {
+    expect(() =>
+      evaluateXhsGateCore({
+        issueScope: "issue_209",
+        riskState: "allowed",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 12,
+        targetPage: "search_result_tab",
+        actualTargetDomain: "www.xiaohongshu.com",
+        actualTargetTabId: 12,
+        actualTargetPage: "search_result_tab",
+        actionType: "read",
+        abilityAction: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        admissionContext: createAdmissionContext({
+          run_id: "run-core-001",
+          session_id: "session-core-001"
+        }),
+        approvalRecord: {
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        }
+      })
+    ).not.toThrow();
   });
 
 });
