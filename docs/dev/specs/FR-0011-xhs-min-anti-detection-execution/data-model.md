@@ -3,7 +3,8 @@
 ## 范围说明
 
 本模型描述 FR-0011 规约阶段需要稳定交付的共享对象，不新增持久化 schema，仅定义实现阶段必须遵循的数据结构语义。
-凡涉及门禁输入/结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateInput`、`GateDecision`、`ApprovalRecord`、`AuditRecord` 与 `ConsumerGateResult` 作为承载对象，FR-0011 只补充 Sprint 3 的增量约束。
+凡涉及门禁输入/结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateInput`、`GateDecision`、`ApprovalRecord`、`AuditRecord` 与 `ConsumerGateResult` 作为 gate 后持久化承载对象，FR-0011 只补充 Sprint 3 的增量约束。
+对 `issue_209` live read，pre-gate admission evidence 必须作为 `FR-0010.GateInput.admission_context` 的请求侧输入对象单独表达，不得与 `FR-0010` 的 gate 后记录对象混写。
 
 ## 实体 1：PluginGateOwnership
 
@@ -27,10 +28,67 @@
 - `default_mode` 在 FR-0011 生效阶段只能是 `dry_run` 或 `recon`，不得为任何 `live_*`。
 - `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
-- `live_entry_requirements` 必须显式覆盖 `FR-0010.GateInput.risk_state` 的 live 准入边界、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、以及完整审批证据；审计要求继续作为门禁判定后的必写留痕，不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord` 的正式边界。
+- `live_entry_requirements` 必须显式覆盖 `FR-0010.GateInput.risk_state` 的 live 准入边界、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、以及完整的 request-side admission evidence；其中 audit admission 必须至少包含 `audit_admission_evidence_present` 与 `audit_admission_checks_all_true` 两类条件名；gate 后审批/审计留痕不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord` 的正式边界。
 - `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件载体不在本实体的共享 `live_entry_requirements` 中统一展开；它只允许在 `IssueActionMatrix.conditional_actions.requires` 中以 `limited_read_rollout_ready_true` 的条件名被 `live_read_limited` 显式消费。
 
-## 实体 3：WriteInteractionTier
+## 实体 3：ApprovalAdmissionEvidence
+
+- `approval_admission_ref` TEXT NOT NULL
+- `run_id` TEXT NOT NULL
+- `session_id` TEXT NOT NULL
+- `issue_scope` ENUM NOT NULL（当前固定为 `issue_209`）
+- `target_domain` TEXT NOT NULL
+- `target_tab_id` INTEGER NOT NULL
+- `target_page` TEXT NOT NULL
+- `action_type` ENUM NOT NULL（当前固定为 `read`）
+- `requested_execution_mode` ENUM NOT NULL（`live_read_limited` | `live_read_high_risk`）
+- `approved` BOOLEAN NOT NULL
+- `approver` TEXT NULL
+- `approved_at` TEXT NULL
+- `checks.target_domain_confirmed` BOOLEAN NOT NULL
+- `checks.target_tab_confirmed` BOOLEAN NOT NULL
+- `checks.target_page_confirmed` BOOLEAN NOT NULL
+- `checks.risk_state_checked` BOOLEAN NOT NULL
+- `checks.action_type_confirmed` BOOLEAN NOT NULL
+- `recorded_at` TEXT NOT NULL
+
+约束：
+- 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
+- `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
+- `run_id` 与 `session_id` 必须分别与当前 `FR-0010.GateInput.run_id`、`session_id` 一致。
+- `approved=true` 时，`approver` 与 `approved_at` 必填。
+- `checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
+- 本实体不得包含 `decision_id`、`effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
+
+## 实体 4：AuditAdmissionEvidence
+
+- `audit_admission_ref` TEXT NOT NULL
+- `run_id` TEXT NOT NULL
+- `session_id` TEXT NOT NULL
+- `issue_scope` ENUM NOT NULL（当前固定为 `issue_209`）
+- `target_domain` TEXT NOT NULL
+- `target_tab_id` INTEGER NOT NULL
+- `target_page` TEXT NOT NULL
+- `action_type` ENUM NOT NULL（当前固定为 `read`）
+- `requested_execution_mode` ENUM NOT NULL（`live_read_limited` | `live_read_high_risk`）
+- `risk_state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
+- `audited_checks.target_domain_confirmed` BOOLEAN NOT NULL
+- `audited_checks.target_tab_confirmed` BOOLEAN NOT NULL
+- `audited_checks.target_page_confirmed` BOOLEAN NOT NULL
+- `audited_checks.risk_state_checked` BOOLEAN NOT NULL
+- `audited_checks.action_type_confirmed` BOOLEAN NOT NULL
+- `recorded_at` TEXT NOT NULL
+
+约束：
+- 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
+- `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
+- `audit_admission_ref` 只能指向 pre-gate admission evidence 自身，不得复用 `FR-0010.AuditRecord` 或其他 gate 后持久化记录 id。
+- `run_id` 与 `session_id` 必须分别与当前 `FR-0010.GateInput.run_id`、`session_id` 一致。
+- `risk_state` 必须与 `FR-0010.GateInput.risk_state` 一致。
+- `audited_checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
+- 本实体不得包含 `effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
+
+## 实体 5：WriteInteractionTier
 
 - `tiers` ARRAY NOT NULL
 - `synthetic_event_default` ENUM NOT NULL（`blocked` | `limited` | `allowed`）
@@ -39,7 +97,7 @@
 约束：
 - 必须存在 `irreversible_write` tier，且默认不可直接 live 放行。
 
-## 实体 4：SessionRhythmPolicy
+## 实体 6：SessionRhythmPolicy
 
 - `min_action_interval_ms` INTEGER NOT NULL
 - `min_experiment_interval_ms` INTEGER NOT NULL
@@ -52,7 +110,7 @@
 - 所有间隔字段必须 > 0。
 - `cooldown_strategy` 当前只允许 `exponential_backoff`，不得回退为固定冷却。
 
-## 实体 5：RiskStateMachine
+## 实体 7：RiskStateMachine
 
 - `states` ARRAY NOT NULL（必须包含 `paused`、`limited`、`allowed`）
 - `transitions` ARRAY NOT NULL
@@ -63,7 +121,7 @@
 - `hard_block_when_paused` 不能为空。
 - `hard_block_when_paused` 必须显式包含所有 live 读写模式，至少覆盖 `live_read_limited`、`live_read_high_risk` 与 `live_write`。
 
-## 实体 6：IssueActionMatrix
+## 实体 8：IssueActionMatrix
 
 - `issue_scope` ENUM NOT NULL（`issue_208` | `issue_209`）
 - `state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
@@ -75,19 +133,21 @@
 - `issue_208` 与 `issue_209` 必须覆盖相同的 `state` 枚举集合。
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
 - `conditional_actions` 的每个元素必须至少包含 `action` 与 `requires` 两个字段。
-- `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- `conditional_actions.requires` 若对应 `issue_209` live read，只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- `issue_208` 的 `conditional_actions.requires` 允许继续直接引用 `FR-0010` 冻结的 `approval_record_approved_true`、`approval_record_approver_present`、`approval_record_approved_at_present`、`approval_record_checks_all_true`，以保持其写验证路径与既有审批字段口径一致。
 - `conditional_actions.requires` 允许额外引用 `limited_read_rollout_ready_true`；该条件名是 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式载体，且只允许与 `action=live_read_limited` 绑定。
 - 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
 - `issue_208` 在 `limited` 下当前只允许 `dry_run|recon` 与 gate-only 观测结果，不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`。
 - `issue_208` 在 `allowed` 下只允许通过 `conditional_actions` 放行 `reversible_interaction_with_approval`，且其范围固定为 `editor_input` 单动作真实验证。
 - `issue_208` 在 `allowed` 下的上述条件放行，必须继续复用 `FR-0010` 冻结字段表达为：`action_type=write`、`requested_execution_mode=live_write`、`effective_execution_mode=live_write`、`gate_decision=allowed`；不得为该路径新增私有 execution mode。
+- `issue_209` 的 `conditional_actions.requires` 若消费 admission evidence，只允许引用 request-side `ApprovalAdmissionEvidence` / `AuditAdmissionEvidence` 冻结的条件名，不得回退去复用 gate 后 `FR-0010` 记录对象。
 - `issue_208` 的 `blocked_actions` 必须显式覆盖 `irreversible_write`、`upload_submit_publish_chain` 与一切 live 读扩面动作；`live_write` 在 `FR-0010` 中仅作为门禁承载字段，不得被解释为“完整写链路默认开放”。
 - `blocked_actions` 不得为空，必须与 `allowed_actions`、`conditional_actions` 一起定义完整边界。
 - live 读模式若需要审批证据，不得直接出现在 `allowed_actions` 中，必须落入 `conditional_actions`。
 - `issue_209` 在 `limited` 下只允许把 `live_read_limited` 放入 `conditional_actions`，不得把 `live_read_high_risk` 视为可放行动作。
 
-## 实体 7：Issue208GateOnlyObservability
+## 实体 9：Issue208GateOnlyObservability
 
 - `page_state.page_kind` ENUM NOT NULL（沿用 `FR-0004`：`compose` | `login` | `unknown` 等既有语义）
 - `page_state.url` TEXT NOT NULL
@@ -101,7 +161,7 @@
 - gate blocked 时，`failure_site` 必须继续继承 `FR-0004.observability.failure_site` 的最小字段集合：`stage`、`component`、`target`、`summary`；其中 `component` 必须为 `gate`。
 - 两类 gate-only 场景都不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
 
-## 实体 8：Issue208ValidationResultSupplement
+## 实体 10：Issue208ValidationResultSupplement
 
 - `interaction_result.validation_action` ENUM NOT NULL（当前固定为 `editor_input`）
 - `interaction_result.target_page` TEXT NOT NULL（当前固定为 `creator.xiaohongshu.com/publish`）
@@ -119,7 +179,7 @@
 - `minimum_replay` 只承载最小复现实验步骤，不得被外推为完整上传、提交或发布链路。
 - `out_of_scope_actions` 必须显式覆盖 `upload_submit_publish_chain` 所代表的上传、提交、发布确认等超范围动作。
 
-## 实体 9：RiskTransitionAuditRecord
+## 实体 11：RiskTransitionAuditRecord
 
 - `run_id` TEXT NOT NULL
 - `session_id` TEXT NOT NULL
@@ -144,7 +204,7 @@
   - `live_read_limited` 作为正式公开的受控 live 模式存在，但只允许用于读动作。
   - `FR-0009.resume_requirements.limited_read_rollout_ready` 在本 FR 中以 `IssueActionMatrix.conditional_actions.requires += limited_read_rollout_ready_true` 作为正式条件载体，只约束 `live_read_limited` 的 staged rollout。
   - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式。
-  - `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，审批证据必须继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
+  - `issue_209` 的 live read admission evidence 必须先以 `FR-0010.GateInput.admission_context` 下的 request-side `ApprovalAdmissionEvidence` / `AuditAdmissionEvidence` 进入 gate；`gate_decision=allowed` 后，审批/审计持久化留痕继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
   - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。
   - `#208` gate-only 观测结果继续继承 `FR-0004` 的 `page_state` 与 `failure_site` 最小字段集合；FR-0011 只补充 gate-only success / blocked 的使用边界，不创建平行 observability 形状。
   - `#208` 的 `editor_input` 真实验证仍复用 `FR-0010` 的冻结门禁字段表达为 `action_type=write` + `requested_execution_mode=live_write` + `effective_execution_mode=live_write` + `gate_decision=allowed`；`IssueActionMatrix.issue_scope` 只负责补充 issue 级边界，不替代 `FR-0010` 核心字段。

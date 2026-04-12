@@ -28,6 +28,7 @@
 - `action_type` ENUM NOT NULL (`read` | `write` | `irreversible_write`)
 - `requested_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`)
 - `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
+- `admission_context` OBJECT NULL
 - `created_at` datetime NOT NULL
 
 约束：
@@ -37,6 +38,8 @@
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前只能得到 `blocked` 结果，不得被视为 Sprint 2 已拥有的公开 live 模式。
 5. `risk_state` 作为统一风险状态机的正式输入字段，由 `GateInput` 提供并参与后续门禁判定。
+6. `admission_context` 是 gate request 的 request-side admission input 容器；没有额外准入证据时可为 `null`。
+7. 下游 FR 若定义 request-side admission evidence，只允许把它作为 `GateInput.admission_context` 的子对象冻结，不得新增并行顶层 gate request 对象。
 
 ## 实体 3：GateDecision
 

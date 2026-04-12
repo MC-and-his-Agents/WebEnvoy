@@ -52,6 +52,7 @@
 ### 3. 执行模式门禁（承载 #219）
 
 - 请求方模式必须写入 `requested_execution_mode`。
+- 如下游 FR 需要 request-side admission evidence，必须把该输入锚定到 `gate_input.admission_context`，由 `gate_input` 继续充当单一 canonical gate request contract。
 - 门禁生效模式必须写入 `effective_execution_mode`。
 - 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
@@ -101,6 +102,7 @@
   - 请求输入真相源：`gate_input.risk_state`
   - 审计真相源：`audit_record.risk_state`
 - `#208` 与 `#209` 在直接消费门禁结论时，必须以 `consumer_gate_result` 的冻结字段作为共同消费者边界；如需引用 `gate_input`、`approval_record`、`audit_record` 中的正式真相源，只能按对应对象的正式归属读取，不得把这些对象改写成并行的共同消费基线，也不得回退到 issue 私有解释。
+- `#209` 如需在 gate 前携带 live-read admission evidence，必须通过 `FR-0010.gate_input.admission_context` 进入门禁；`FR-0011` 只能冻结其中 `approval_admission_evidence` / `audit_admission_evidence` 的形状，不得绕开 `gate_input` 另立请求边界。
 
 ### 7. #223 统一状态机与阻断策略归属锚点（规约层）
 
