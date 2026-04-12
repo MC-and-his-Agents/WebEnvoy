@@ -34,6 +34,8 @@
 ## 实体 3：ApprovalAdmissionEvidence
 
 - `approval_admission_ref` TEXT NOT NULL
+- `run_id` TEXT NOT NULL
+- `session_id` TEXT NOT NULL
 - `issue_scope` ENUM NOT NULL（当前固定为 `issue_209`）
 - `target_domain` TEXT NOT NULL
 - `target_tab_id` INTEGER NOT NULL
@@ -53,13 +55,16 @@
 约束：
 - 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
 - `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
+- `run_id` 与 `session_id` 必须分别与当前 `FR-0010.GateInput.run_id`、`session_id` 一致。
 - `approved=true` 时，`approver` 与 `approved_at` 必填。
 - `checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
-- 本实体不得包含 `decision_id`、`effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- 本实体不得包含 `decision_id`、`effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
 
 ## 实体 4：AuditAdmissionEvidence
 
 - `audit_admission_ref` TEXT NOT NULL
+- `run_id` TEXT NOT NULL
+- `session_id` TEXT NOT NULL
 - `issue_scope` ENUM NOT NULL（当前固定为 `issue_209`）
 - `target_domain` TEXT NOT NULL
 - `target_tab_id` INTEGER NOT NULL
@@ -78,9 +83,10 @@
 - 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
 - `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
 - `audit_admission_ref` 只能指向 pre-gate admission evidence 自身，不得复用 `FR-0010.AuditRecord` 或其他 gate 后持久化记录 id。
+- `run_id` 与 `session_id` 必须分别与当前 `FR-0010.GateInput.run_id`、`session_id` 一致。
 - `risk_state` 必须与 `FR-0010.GateInput.risk_state` 一致。
 - `audited_checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
-- 本实体不得包含 `effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- 本实体不得包含 `effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
 
 ## 实体 5：WriteInteractionTier
 
