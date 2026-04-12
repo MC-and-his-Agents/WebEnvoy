@@ -55,7 +55,8 @@
     "target_page": "search_result_tab",
     "action_type": "read",
     "requested_execution_mode": "live_read_high_risk",
-    "risk_state": "paused"
+    "risk_state": "paused",
+    "admission_context": null
   }
 }
 ```
@@ -73,6 +74,9 @@
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前必须返回阻断结果，不得被解释为 Sprint 2 已放行的正式 live 模式。
 5. `gate_input.risk_state` 是统一风险状态机在请求入口侧的正式输入字段。
+6. `admission_context` 是 gate request 的正式 request-side admission input 容器；没有额外准入证据时可为 `null`。
+7. 下游 FR 若要求 request-side admission evidence，必须锚定到 `gate_input.admission_context`，不得漂浮为并行顶层对象，也不得改写 `approval_record` / `audit_record` 的 gate 后语义。
+8. `issue_209` 的 live read 在 `FR-0011` 适用时，`gate_input.admission_context` 必须携带 `approval_admission_evidence` 与 `audit_admission_evidence`；其内部形状由 `FR-0011` 正式冻结。
 
 ## gate_outcome
 

@@ -4,7 +4,7 @@
 
 本模型描述 FR-0011 规约阶段需要稳定交付的共享对象，不新增持久化 schema，仅定义实现阶段必须遵循的数据结构语义。
 凡涉及门禁输入/结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateInput`、`GateDecision`、`ApprovalRecord`、`AuditRecord` 与 `ConsumerGateResult` 作为 gate 后持久化承载对象，FR-0011 只补充 Sprint 3 的增量约束。
-对 `issue_209` live read，pre-gate admission evidence 必须作为请求侧输入对象单独表达，不得与 `FR-0010` 的 gate 后记录对象混写。
+对 `issue_209` live read，pre-gate admission evidence 必须作为 `FR-0010.GateInput.admission_context` 的请求侧输入对象单独表达，不得与 `FR-0010` 的 gate 后记录对象混写。
 
 ## 实体 1：PluginGateOwnership
 
@@ -51,7 +51,7 @@
 - `recorded_at` TEXT NOT NULL
 
 约束：
-- 本实体是 request-side admission input，不是 gate 输出对象。
+- 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
 - `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
 - `approved=true` 时，`approver` 与 `approved_at` 必填。
 - `checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
@@ -69,7 +69,7 @@
 - `recorded_at` TEXT NOT NULL
 
 约束：
-- 本实体是 request-side admission input，不是 gate 输出对象。
+- 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
 - `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
 - `audit_admission_ref` 只能指向 pre-gate admission evidence 自身，不得复用 `FR-0010.AuditRecord` 或其他 gate 后持久化记录 id。
 - 本实体不得包含 `effective_execution_mode`、`gate_reasons`、`risk_state`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
@@ -189,7 +189,7 @@
   - `live_read_limited` 作为正式公开的受控 live 模式存在，但只允许用于读动作。
   - `FR-0009.resume_requirements.limited_read_rollout_ready` 在本 FR 中以 `IssueActionMatrix.conditional_actions.requires += limited_read_rollout_ready_true` 作为正式条件载体，只约束 `live_read_limited` 的 staged rollout。
   - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式。
-  - `issue_209` 的 live read admission evidence 必须先以 request-side `ApprovalAdmissionEvidence` / `AuditAdmissionEvidence` 进入 gate；`gate_decision=allowed` 后，审批/审计持久化留痕继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
+  - `issue_209` 的 live read admission evidence 必须先以 `FR-0010.GateInput.admission_context` 下的 request-side `ApprovalAdmissionEvidence` / `AuditAdmissionEvidence` 进入 gate；`gate_decision=allowed` 后，审批/审计持久化留痕继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
   - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。
   - `#208` gate-only 观测结果继续继承 `FR-0004` 的 `page_state` 与 `failure_site` 最小字段集合；FR-0011 只补充 gate-only success / blocked 的使用边界，不创建平行 observability 形状。
   - `#208` 的 `editor_input` 真实验证仍复用 `FR-0010` 的冻结门禁字段表达为 `action_type=write` + `requested_execution_mode=live_write` + `effective_execution_mode=live_write` + `gate_decision=allowed`；`IssueActionMatrix.issue_scope` 只负责补充 issue 级边界，不替代 `FR-0010` 核心字段。
