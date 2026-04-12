@@ -53,12 +53,10 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
 
 const buildGateDecisionId = (context: XhsExecutionContext): string => {
   const commandRequestId = asNonEmptyString(context.commandRequestId);
-  if (commandRequestId) {
-    return `gate_decision_${context.runId}_${commandRequestId}`;
-  }
-  return context.requestId
+  const baseDecisionId = context.requestId
     ? `gate_decision_${context.runId}_${context.requestId}`
     : `gate_decision_${context.runId}`;
+  return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;

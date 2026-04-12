@@ -78,8 +78,10 @@ describe("xhs-search gate helpers", () => {
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
         approval_record: {
-          approval_id: "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1",
-          decision_id: "gate_decision_run-extension-command-request-001_issue209-live-req-1",
+          approval_id:
+            "gate_appr_gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-1",
+          decision_id:
+            "gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-1",
           approved: true,
           approver: "qa-reviewer",
           approved_at: "2026-03-23T10:00:00.000Z",
@@ -102,13 +104,13 @@ describe("xhs-search gate helpers", () => {
     );
 
     expect(gate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-1"
+      "gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-1"
     );
     expect(gate.approval_record.approval_id).toBe(
-      "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1"
+      "gate_appr_gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-1"
     );
     expect(gate.approval_record.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-1"
+      "gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-1"
     );
   });
 
@@ -127,8 +129,10 @@ describe("xhs-search gate helpers", () => {
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
         approval_record: {
-          approval_id: "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-reused",
-          decision_id: "gate_decision_run-extension-command-request-001_issue209-live-req-reused",
+          approval_id:
+            "gate_appr_gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-reused",
+          decision_id:
+            "gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-reused",
           approved: true,
           approver: "qa-reviewer",
           approved_at: "2026-03-23T10:00:00.000Z",
@@ -163,8 +167,10 @@ describe("xhs-search gate helpers", () => {
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
         approval_record: {
-          approval_id: "gate_appr_gate_decision_run-extension-command-request-002_issue209-live-req-reused",
-          decision_id: "gate_decision_run-extension-command-request-002_issue209-live-req-reused",
+          approval_id:
+            "gate_appr_gate_decision_run-extension-command-request-002_transport-req-2_issue209-live-req-reused",
+          decision_id:
+            "gate_decision_run-extension-command-request-002_transport-req-2_issue209-live-req-reused",
           approved: true,
           approver: "qa-reviewer",
           approved_at: "2026-03-23T10:00:00.000Z",
@@ -187,10 +193,10 @@ describe("xhs-search gate helpers", () => {
     );
 
     expect(firstGate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-reused"
+      "gate_decision_run-extension-command-request-001_transport-req-1_issue209-live-req-reused"
     );
     expect(secondGate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-002_issue209-live-req-reused"
+      "gate_decision_run-extension-command-request-002_transport-req-2_issue209-live-req-reused"
     );
     expect(firstGate.gate_outcome.decision_id).not.toBe(secondGate.gate_outcome.decision_id);
   });

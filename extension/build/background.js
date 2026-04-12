@@ -241,9 +241,8 @@ const hasSuccessfulExecutionAttestation = (payload) => {
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const resolveGateDecisionId = (input) => {
     const commandRequestId = asNonEmptyString(input.commandRequestId);
-    return commandRequestId
-        ? `gate_decision_${input.runId}_${commandRequestId}`
-        : `gate_decision_${input.runId}_${input.requestId}`;
+    const baseDecisionId = `gate_decision_${input.runId}_${input.requestId}`;
+    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;

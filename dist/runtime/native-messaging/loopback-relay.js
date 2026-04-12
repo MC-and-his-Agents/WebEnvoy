@@ -71,9 +71,8 @@ const buildLoopbackGateSeedOptions = (input) => {
 };
 const resolveGateDecisionId = (input) => {
     const commandRequestId = asString(input.commandRequestId);
-    return commandRequestId
-        ? `gate_decision_${input.runId}_${commandRequestId}`
-        : `gate_decision_${input.runId}_${input.requestId}`;
+    const baseDecisionId = `gate_decision_${input.runId}_${input.requestId}`;
+    return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     if (!gatePayload) {

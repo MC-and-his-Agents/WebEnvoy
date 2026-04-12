@@ -540,9 +540,8 @@ const resolveGateDecisionId = (input: {
   commandRequestId?: unknown;
 }): string => {
   const commandRequestId = asNonEmptyString(input.commandRequestId);
-  return commandRequestId
-    ? `gate_decision_${input.runId}_${commandRequestId}`
-    : `gate_decision_${input.runId}_${input.requestId}`;
+  const baseDecisionId = `gate_decision_${input.runId}_${input.requestId}`;
+  return commandRequestId ? `${baseDecisionId}_${commandRequestId}` : baseDecisionId;
 };
 
 const asInteger = (value: unknown): number | null =>

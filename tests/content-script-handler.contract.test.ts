@@ -107,14 +107,14 @@ const createApprovedReadAuditRecord = (linkage: {
   runId: string;
   requestId: string;
   commandRequestId?: string;
-}) => ({
-  event_id: `gate_evt_${linkage.commandRequestId ?? linkage.requestId}`,
-  decision_id: linkage.commandRequestId
-    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-    : `gate_decision_${linkage.runId}_${linkage.requestId}`,
-  approval_id: linkage.commandRequestId
-    ? `gate_appr_gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-    : `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
+}) => {
+  const decisionId = linkage.commandRequestId
+    ? `gate_decision_${linkage.runId}_${linkage.requestId}_${linkage.commandRequestId}`
+    : `gate_decision_${linkage.runId}_${linkage.requestId}`;
+  return {
+  event_id: `gate_evt_${decisionId}`,
+  decision_id: decisionId,
+  approval_id: `gate_appr_${decisionId}`,
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 1,
@@ -123,7 +123,8 @@ const createApprovedReadAuditRecord = (linkage: {
   requested_execution_mode: "live_read_limited",
   gate_decision: "allowed",
   recorded_at: "2026-03-23T10:00:30Z"
-});
+  };
+};
 
 const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
 
