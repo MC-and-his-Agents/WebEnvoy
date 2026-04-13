@@ -1734,6 +1734,11 @@ process.stdin.on("data", (chunk) => {
           ...scopedReadGateOptions,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          }),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1785,6 +1790,7 @@ process.stdin.on("data", (chunk) => {
         },
         options: {
           ...scopedReadGateOptions,
+          issue_scope: "issue_209",
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
@@ -1920,6 +1926,7 @@ process.stdin.on("data", (chunk) => {
         },
         options: {
           ...scopedReadGateOptions,
+          issue_scope: "issue_209",
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
@@ -2007,8 +2014,6 @@ process.stdin.on("data", (chunk) => {
   it("ignores stale caller audit_record when admission_context already matches the current request", () => {
     const runId = "run-issue209-live-limited-stale-audit-001";
     const requestId = "issue209-live-stale-audit-001";
-    const decisionId = `gate_decision_${runId}_${requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -2028,6 +2033,7 @@ process.stdin.on("data", (chunk) => {
         },
         options: {
           ...scopedReadGateOptions,
+          issue_scope: "issue_209",
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
@@ -2072,7 +2078,10 @@ process.stdin.on("data", (chunk) => {
 
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
-    expect(String(body.summary.gate_outcome.decision_id)).toBe(decisionId);
+    const decisionId = String(body.summary.gate_outcome.decision_id);
+    const approvalId = String(body.summary.approval_record.approval_id);
+    expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
+    expect(approvalId).toBe(`gate_appr_${decisionId}`);
     expect(body.summary.gate_outcome).toMatchObject({
       effective_execution_mode: "live_read_limited",
       gate_decision: "allowed",
@@ -2089,11 +2098,9 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("relinks live gate linkage by recovered request_id when admission_context omits invocation identity", () => {
+  it("allows formal admission_context without internal linkage and derives current linkage from gate_invocation_id", () => {
     const runId = "run-issue209-live-limited-existing-admission-001";
     const requestId = "issue209-live-existing-admission-001";
-    const decisionId = `gate_decision_${runId}_${requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
     const admissionContext = createApprovedReadAdmissionContext({
       runId,
       requestId,
@@ -2118,6 +2125,7 @@ process.stdin.on("data", (chunk) => {
         },
         options: {
           ...scopedReadGateOptions,
+          issue_scope: "issue_209",
           simulate_result: "success",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
@@ -2144,7 +2152,10 @@ process.stdin.on("data", (chunk) => {
 
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
-    expect(String(body.summary.gate_outcome.decision_id)).toBe(decisionId);
+    const decisionId = String(body.summary.gate_outcome.decision_id);
+    const approvalId = String(body.summary.approval_record.approval_id);
+    expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
+    expect(approvalId).toBe(`gate_appr_${decisionId}`);
     expect(body.summary.approval_record).toMatchObject({
       decision_id: decisionId,
       approval_id: approvalId

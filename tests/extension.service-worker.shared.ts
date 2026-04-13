@@ -279,6 +279,17 @@ export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
     audit_record: createApprovedReadAuditRecord(),
     ...overrides
   };
+  const issue209LiveReadRequested =
+    merged.issue_scope === "issue_209" &&
+    (merged.requested_execution_mode === "live_read_limited" ||
+      merged.requested_execution_mode === "live_read_high_risk");
+  if (
+    issue209LiveReadRequested &&
+    !(typeof merged.gate_invocation_id === "string" && merged.gate_invocation_id.length > 0)
+  ) {
+    issue209GateInvocationCounter += 1;
+    merged.gate_invocation_id = `issue209-gate-${requestRunId}-sw-${issue209GateInvocationCounter}`;
+  }
 
   if (merged.admission_context === undefined) {
     merged.admission_context = createApprovedReadAdmissionContext({
@@ -300,6 +311,8 @@ export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
 
   return merged;
 };
+
+let issue209GateInvocationCounter = 0;
 
 export const createRequestBoundXhsCommandParams = (
   input: {

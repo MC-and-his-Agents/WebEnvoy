@@ -67,6 +67,13 @@ const createApprovedReadAdmissionContext = (input: {
   }
 });
 
+const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
+  const gateInvocationId = `issue209-gate-${runId}-${suffix}`;
+  const decisionId = `gate_decision_${gateInvocationId}`;
+  const approvalId = `gate_appr_${decisionId}`;
+  return { gateInvocationId, decisionId, approvalId };
+};
+
 describe("native messaging legacy loopback runtime", () => {
   it("keeps xhs.search observability page_state aligned with the shared contract", async () => {
     const bridge = new NativeMessagingBridge({
@@ -122,6 +129,10 @@ describe("native messaging legacy loopback runtime", () => {
   });
 
   it("blocks stale approval linkage in live loopback bundles", async () => {
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      "run-loopback-custom-approval-001",
+      "custom-approval-001"
+    );
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -132,6 +143,7 @@ describe("native messaging legacy loopback runtime", () => {
       cwd: "/tmp",
       command: "xhs.search",
       params: {
+        gate_invocation_id: gateInvocationId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -171,24 +183,28 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003",
+          decision_id: decisionId,
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
           gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
         }),
         approval_record: expect.objectContaining({
           approval_id: null,
-          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003"
+          decision_id: decisionId
         }),
         audit_record: expect.objectContaining({
           approval_id: null,
-          decision_id: "gate_decision_run-loopback-custom-approval-001_run-0003"
+          decision_id: decisionId
         })
       })
     );
   });
 
   it("keeps approval_id null in blocked loopback gate bundles without approval", async () => {
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      "run-loopback-no-approval-001",
+      "no-approval-001"
+    );
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -199,6 +215,7 @@ describe("native messaging legacy loopback runtime", () => {
       cwd: "/tmp",
       command: "xhs.search",
       params: {
+        gate_invocation_id: gateInvocationId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -232,13 +249,13 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
+          decision_id: decisionId
         }),
         approval_record: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
+          decision_id: decisionId
         }),
         audit_record: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-no-approval-001_run-0003"
+          decision_id: decisionId
         })
       })
     );
@@ -247,6 +264,10 @@ describe("native messaging legacy loopback runtime", () => {
   it("keeps live_read_limited approved when caller provides matching audit linkage", async () => {
     const runId = "run-loopback-live-limited-001";
     const requestId = "issue209-live-limited-001";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "live-limited-001"
+    );
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -258,6 +279,7 @@ describe("native messaging legacy loopback runtime", () => {
       command: "xhs.search",
       params: {
         request_id: requestId,
+        gate_invocation_id: gateInvocationId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -297,9 +319,8 @@ describe("native messaging legacy loopback runtime", () => {
           }),
           audit_record: {
             event_id: "audit-live-read-limited-loopback-001",
-            decision_id: "gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
-            approval_id:
-              "gate_appr_gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
+            decision_id: decisionId,
+            approval_id: approvalId,
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 33,
@@ -318,25 +339,17 @@ describe("native messaging legacy loopback runtime", () => {
       expect.objectContaining({
         summary: expect.objectContaining({
           approval_record: expect.objectContaining({
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
-            ),
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
-            )
+            approval_id: approvalId,
+            decision_id: decisionId
           }),
           audit_record: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
-            ),
+            decision_id: decisionId,
             gate_decision: "allowed",
             requested_execution_mode: "live_read_limited",
             effective_execution_mode: "live_read_limited"
           }),
           gate_outcome: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_issue209-live-limited-001$/
-            ),
+            decision_id: decisionId,
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
@@ -480,6 +493,10 @@ describe("native messaging legacy loopback runtime", () => {
       const runId = `run-${command.replace(".", "-")}-live-limited-001`;
       const requestId = `${command.replace(".", "-")}-live-limited-001`;
       const targetTabId = 36;
+      const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+        runId,
+        `${command.replace(".", "-")}-live-limited-001`
+      );
       const bridge = new NativeMessagingBridge({
         transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
       });
@@ -491,6 +508,7 @@ describe("native messaging legacy loopback runtime", () => {
         command,
         params: {
           request_id: requestId,
+          gate_invocation_id: gateInvocationId,
           ability: {
             id: abilityId,
             layer: "L3",
@@ -529,8 +547,8 @@ describe("native messaging legacy loopback runtime", () => {
             }),
             audit_record: {
               event_id: `audit-${requestId}`,
-              decision_id: `gate_decision_${runId}_${requestId}`,
-              approval_id: `gate_appr_gate_decision_${runId}_${requestId}`,
+              decision_id: decisionId,
+              approval_id: `gate_appr_${decisionId}`,
               issue_scope: "issue_209",
               target_domain: "www.xiaohongshu.com",
               target_tab_id: targetTabId,
@@ -553,13 +571,13 @@ describe("native messaging legacy loopback runtime", () => {
               requested_execution_mode: "live_read_limited"
             }),
             gate_outcome: expect.objectContaining({
-              decision_id: `gate_decision_${runId}_${requestId}`,
+              decision_id: decisionId,
               effective_execution_mode: "live_read_limited",
               gate_decision: "allowed",
               gate_reasons: ["LIVE_MODE_APPROVED"]
             }),
             audit_record: expect.objectContaining({
-              decision_id: `gate_decision_${runId}_${requestId}`,
+              decision_id: decisionId,
               requested_execution_mode: "live_read_limited",
               effective_execution_mode: "live_read_limited"
             })
@@ -572,6 +590,10 @@ describe("native messaging legacy loopback runtime", () => {
   it("ignores stale caller audit linkage in loopback bundles when admission evidence matches", async () => {
     const runId = "run-loopback-live-limited-stale-001";
     const requestId = "issue209-live-limited-current-001";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "live-limited-stale-001"
+    );
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -583,6 +605,7 @@ describe("native messaging legacy loopback runtime", () => {
       command: "xhs.search",
       params: {
         request_id: requestId,
+        gate_invocation_id: gateInvocationId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -642,24 +665,18 @@ describe("native messaging legacy loopback runtime", () => {
       expect.objectContaining({
         summary: expect.objectContaining({
           gate_outcome: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
-            ),
+            decision_id: decisionId,
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
           }),
           audit_record: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
-            ),
+            decision_id: decisionId,
             gate_decision: "allowed",
             issue_scope: "issue_209"
           }),
           approval_record: expect.objectContaining({
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
-            )
+            approval_id: approvalId
           })
         })
       })
@@ -669,8 +686,10 @@ describe("native messaging legacy loopback runtime", () => {
   it("blocks stale admission evidence in loopback bundles even when caller records match current decision", async () => {
     const runId = "run-loopback-live-admission-stale-001";
     const requestId = "issue209-live-admission-current-001";
-    const decisionId = `gate_decision_${runId}_${requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "live-admission-stale-001"
+    );
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -682,6 +701,7 @@ describe("native messaging legacy loopback runtime", () => {
       command: "xhs.search",
       params: {
         request_id: requestId,
+        gate_invocation_id: gateInvocationId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",

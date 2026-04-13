@@ -103,14 +103,28 @@ const createApprovedReadApprovalRecord = () => ({
   }
 });
 
+const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
+  const gateInvocationId = `issue209-gate-${runId}-${suffix}`;
+  const decisionId = `gate_decision_${gateInvocationId}`;
+  return {
+    gateInvocationId,
+    decisionId,
+    approvalId: `gate_appr_${decisionId}`
+  };
+};
+
 const createApprovedReadAuditRecord = (linkage: {
   runId: string;
   requestId: string;
   commandRequestId?: string;
+  gateInvocationId?: string;
 }) => {
-  const decisionId = linkage.commandRequestId
-    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-    : `gate_decision_${linkage.runId}`;
+  const decisionId =
+    linkage.gateInvocationId
+      ? `gate_decision_${linkage.gateInvocationId}`
+      : linkage.commandRequestId
+        ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
+        : `gate_decision_${linkage.runId}`;
   return {
   event_id: `gate_evt_${decisionId}`,
   decision_id: decisionId,
@@ -130,12 +144,25 @@ const createApprovedReadAdmissionContext = (linkage: {
   runId: string;
   requestId: string;
   commandRequestId?: string;
+  gateInvocationId?: string;
 }) => {
   const requestId = linkage.commandRequestId ?? linkage.requestId;
   const refSuffix = requestId ? `${linkage.runId}_${requestId}` : linkage.runId;
+  const internalLinkage = linkage.gateInvocationId
+    ? {
+        decisionId: `gate_decision_${linkage.gateInvocationId}`,
+        approvalId: `gate_appr_gate_decision_${linkage.gateInvocationId}`
+      }
+    : null;
   return ({
   approval_admission_evidence: {
     approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(internalLinkage
+      ? {
+          decision_id: internalLinkage.decisionId,
+          approval_id: internalLinkage.approvalId
+        }
+      : {}),
     ...(requestId ? { request_id: requestId } : {}),
     run_id: linkage.runId,
     session_id: "nm-session-001",
@@ -159,6 +186,12 @@ const createApprovedReadAdmissionContext = (linkage: {
   },
   audit_admission_evidence: {
     audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(internalLinkage
+      ? {
+          decision_id: internalLinkage.decisionId,
+          approval_id: internalLinkage.approvalId
+        }
+      : {}),
     ...(requestId ? { request_id: requestId } : {}),
     run_id: linkage.runId,
     session_id: "nm-session-001",
@@ -1085,6 +1118,10 @@ describe("content-script handler contract", () => {
       });
 
       try {
+        const issue209Linkage = createIssue209InvocationLinkage(
+          "run-xhs-sign-forged-001",
+          "sign-forged-001"
+        );
         handler.onBackgroundMessage({
           kind: "forward",
           id: "run-xhs-sign-forged-001",
@@ -1099,6 +1136,7 @@ describe("content-script handler contract", () => {
           },
           commandParams: {
             request_id: "issue209-sign-forged-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
             requested_execution_mode: "live_read_limited",
             ability: {
               id: "xhs.search",
@@ -1120,12 +1158,14 @@ describe("content-script handler contract", () => {
               audit_record: createApprovedReadAuditRecord({
                 runId: "run-xhs-sign-forged-001",
                 requestId: "run-xhs-sign-forged-001",
-                commandRequestId: "issue209-sign-forged-001"
+                commandRequestId: "issue209-sign-forged-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
               }),
               admission_context: createApprovedReadAdmissionContext({
                 runId: "run-xhs-sign-forged-001",
                 requestId: "run-xhs-sign-forged-001",
-                commandRequestId: "issue209-sign-forged-001"
+                commandRequestId: "issue209-sign-forged-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
               })
             }
           },
@@ -1218,6 +1258,10 @@ describe("content-script handler contract", () => {
           results.push(message as unknown as Record<string, unknown>);
         });
 
+        const issue209Linkage = createIssue209InvocationLinkage(
+          `run-xhs-simulated-${simulateResult}-001`,
+          simulateResult
+        );
         handler.onBackgroundMessage({
           kind: "forward",
           id: `run-xhs-simulated-${simulateResult}-001`,
@@ -1232,6 +1276,7 @@ describe("content-script handler contract", () => {
           },
           commandParams: {
             request_id: `issue209-simulated-${simulateResult}-001`,
+            gate_invocation_id: issue209Linkage.gateInvocationId,
             requested_execution_mode: "live_read_limited",
             ability: {
               id: "xhs.search",
@@ -1254,12 +1299,14 @@ describe("content-script handler contract", () => {
               audit_record: createApprovedReadAuditRecord({
                 runId: `run-xhs-simulated-${simulateResult}-001`,
                 requestId: `run-xhs-simulated-${simulateResult}-001`,
-                commandRequestId: `issue209-simulated-${simulateResult}-001`
+                commandRequestId: `issue209-simulated-${simulateResult}-001`,
+                gateInvocationId: issue209Linkage.gateInvocationId
               }),
               admission_context: createApprovedReadAdmissionContext({
                 runId: `run-xhs-simulated-${simulateResult}-001`,
                 requestId: `run-xhs-simulated-${simulateResult}-001`,
-                commandRequestId: `issue209-simulated-${simulateResult}-001`
+                commandRequestId: `issue209-simulated-${simulateResult}-001`,
+                gateInvocationId: issue209Linkage.gateInvocationId
               })
             }
           },

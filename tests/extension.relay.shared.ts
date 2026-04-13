@@ -130,6 +130,9 @@ export const createApprovedReadAdmissionContext = (input?: {
 } as const);
 };
 
+export const createIssue209GateInvocationId = (runId: string, suffix = "default") =>
+  `issue209-gate-${runId}-${suffix}`;
+
 export const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,

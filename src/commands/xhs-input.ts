@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
-import { resolveIssueScope as resolveSharedIssueScope } from "../../shared/risk-state.js";
 
 export type AbilityLayer = "L3" | "L2" | "L1";
 export type AbilityAction = "read" | "write" | "download";
@@ -325,54 +324,54 @@ const cloneAdmissionContextForContract = (value: unknown): JsonObject | null => 
   return cloneJsonObject(object);
 };
 
-const resolveIssue209RequestIdFromAdmissionContext = (
-  options: JsonObject,
-  runId?: string | null
-): string | null => {
-  const admissionContext = asObject(options.admission_context);
-  if (!admissionContext) {
-    return null;
-  }
-
-  const approvalAdmissionEvidence = asObject(admissionContext.approval_admission_evidence);
-  const auditAdmissionEvidence = asObject(admissionContext.audit_admission_evidence);
-  const approvalRequestId = asString(approvalAdmissionEvidence?.request_id);
-  const auditRequestId = asString(auditAdmissionEvidence?.request_id);
-  const approvalDecisionId = asString(approvalAdmissionEvidence?.decision_id);
-  const auditDecisionId = asString(auditAdmissionEvidence?.decision_id);
-
-  if (approvalRequestId && auditRequestId && approvalRequestId !== auditRequestId) {
-    return null;
-  }
-  if (approvalRequestId ?? auditRequestId) {
-    return approvalRequestId ?? auditRequestId;
-  }
-
-  if (approvalDecisionId && auditDecisionId && approvalDecisionId !== auditDecisionId) {
-    return null;
-  }
-
-  const decisionId = approvalDecisionId ?? auditDecisionId;
-  const resolvedRunId = asString(runId);
-  if (!decisionId || !resolvedRunId) {
-    return null;
-  }
-
-  const prefix = `gate_decision_${resolvedRunId}_`;
-  if (!decisionId.startsWith(prefix) || decisionId.length <= prefix.length) {
-    return null;
-  }
-
-  return decisionId.slice(prefix.length);
-};
-
 const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
 } =>
-  resolveSharedIssueScope(options.issue_scope) === "issue_209" &&
+  options.issue_scope === "issue_209" &&
   typeof options.requested_execution_mode === "string" &&
   XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode);
+
+export const prepareIssue209LiveReadContract = (input: {
+  options: JsonObject;
+  runId: string;
+  requestId?: string | null;
+  gateInvocationId?: string | null;
+  sessionId?: string | null;
+}): {
+  commandRequestId: string | null;
+  gateInvocationId: string | null;
+  options: JsonObject;
+} => {
+  const nextOptions = cloneJsonObject(input.options);
+  const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
+
+  if (admissionContext) {
+    nextOptions.admission_context = admissionContext;
+  } else {
+    delete nextOptions.admission_context;
+  }
+
+  if (!isIssue209LiveReadRequest(nextOptions)) {
+    return {
+      commandRequestId: asString(input.requestId),
+      gateInvocationId: asString(input.gateInvocationId),
+      options: nextOptions
+    };
+  }
+
+  const commandRequestId = asString(input.requestId) ?? `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
+  const gateInvocationId =
+    asString(input.gateInvocationId) ??
+    `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
+  void input.sessionId;
+
+  return {
+    commandRequestId,
+    gateInvocationId,
+    options: nextOptions
+  };
+};
 
 export const resolveIssue209CommandRequestIdForContract = (input: {
   options: JsonObject;
@@ -387,18 +386,7 @@ export const resolveIssue209CommandRequestIdForContract = (input: {
   if (!isIssue209LiveReadRequest(input.options)) {
     return null;
   }
-
-  const requestIdFromAdmissionContext = resolveIssue209RequestIdFromAdmissionContext(
-    input.options,
-    input.runId
-  );
-  if (requestIdFromAdmissionContext) {
-    return requestIdFromAdmissionContext;
-  }
-
-  if (asObject(input.options.admission_context)) {
-    return null;
-  }
+  void input.runId;
 
   return `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
 };
@@ -417,10 +405,6 @@ export const resolveIssue209GateInvocationIdForContract = (input: {
     return null;
   }
 
-  if (asObject(input.options.admission_context)) {
-    return null;
-  }
-
   return `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
 };
 
@@ -431,17 +415,13 @@ export const ensureIssue209AdmissionContextForContract = (input: {
   sessionId?: string | null;
   gateInvocationId?: string | null;
 }): JsonObject => {
-  const nextOptions = cloneJsonObject(input.options);
-  void input.runId;
-  void input.requestId;
-  void input.sessionId;
-  void input.gateInvocationId;
-  const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
-  if (admissionContext) {
-    nextOptions.admission_context = admissionContext;
-  }
-
-  return nextOptions;
+  return prepareIssue209LiveReadContract({
+    options: input.options,
+    runId: input.runId,
+    requestId: input.requestId,
+    sessionId: input.sessionId,
+    gateInvocationId: input.gateInvocationId
+  }).options;
 };
 
 export const buildCapabilityResult = (

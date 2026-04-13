@@ -1,5 +1,5 @@
 import type { JsonObject } from "../../core/types.js";
-import { ensureIssue209AdmissionContextForContract } from "../../commands/xhs-input.js";
+import { prepareIssue209LiveReadContract } from "../../commands/xhs-input.js";
 import {
   BRIDGE_PROTOCOL,
   DEFAULT_TRANSPORT_TIMEOUT_MS,
@@ -125,13 +125,20 @@ const resolveForwardCommandParams = (
     return nextParams;
   }
 
-  nextParams.options = ensureIssue209AdmissionContextForContract({
+  const preparedIssue209LiveRead = prepareIssue209LiveReadContract({
     options: optionParams,
     runId,
     requestId: asString(nextParams.request_id),
     sessionId,
     gateInvocationId: asString(nextParams.gate_invocation_id)
   });
+  nextParams.options = preparedIssue209LiveRead.options;
+  if (preparedIssue209LiveRead.commandRequestId) {
+    nextParams.request_id = preparedIssue209LiveRead.commandRequestId;
+  }
+  if (preparedIssue209LiveRead.gateInvocationId) {
+    nextParams.gate_invocation_id = preparedIssue209LiveRead.gateInvocationId;
+  }
   return nextParams;
 };
 

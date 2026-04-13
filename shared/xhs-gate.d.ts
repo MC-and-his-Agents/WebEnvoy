@@ -170,6 +170,7 @@ export declare const resolveXhsGateDecisionId: (input: {
   commandRequestId?: unknown;
   gateInvocationId?: unknown;
   issueScope?: unknown;
+  requestedExecutionMode?: unknown;
   targetPage?: unknown;
   targetTabId?: unknown;
 }) => string;
@@ -180,6 +181,7 @@ export declare const resolveXhsGateApprovalId: (input: {
   commandRequestId?: unknown;
   gateInvocationId?: unknown;
   issueScope?: unknown;
+  requestedExecutionMode?: unknown;
   targetPage?: unknown;
   targetTabId?: unknown;
   approvalRecord?: unknown;

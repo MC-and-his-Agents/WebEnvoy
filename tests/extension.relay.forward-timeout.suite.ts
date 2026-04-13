@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createIssue209GateInvocationId, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / forward and timeout", () => {
   const createApprovedLiveOptions = (input: {
@@ -2401,6 +2401,10 @@ describe("extension background relay contract / forward and timeout", () => {
         run_id: "run-xhs-issue209-write-limited-blocked-001",
         command: "xhs.search",
         command_params: {
+          gate_invocation_id: createIssue209GateInvocationId(
+            "run-xhs-issue209-write-limited-blocked-001",
+            "write-live-read-limited"
+          ),
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -2496,6 +2500,10 @@ describe("extension background relay contract / forward and timeout", () => {
         run_id: "run-xhs-issue209-write-live-blocked-001",
         command: "xhs.search",
         command_params: {
+          gate_invocation_id: createIssue209GateInvocationId(
+            "run-xhs-issue209-write-live-blocked-001",
+            "write-live-read-high-risk"
+          ),
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",

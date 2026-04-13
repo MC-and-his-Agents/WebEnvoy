@@ -56,12 +56,17 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.requested_execution_mode === "live_write" &&
   options.validation_action === "editor_input";
 
-const buildGateDecisionId = (context: XhsExecutionContext): string =>
+const buildGateDecisionId = (
+  context: XhsExecutionContext,
+  options: Pick<XhsSearchOptions, "issue_scope" | "requested_execution_mode">
+): string =>
   resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
     commandRequestId: context.commandRequestId,
-    gateInvocationId: context.gateInvocationId
+    gateInvocationId: context.gateInvocationId,
+    issueScope: options.issue_scope,
+    requestedExecutionMode: options.requested_execution_mode
   });
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
@@ -97,7 +102,7 @@ export const resolveGate = (
 ): XhsSearchGate => {
   const providedApprovalRecord = (options.approval_record ?? options.approval) as unknown;
   const approvalRecord = asRecord(providedApprovalRecord);
-  const decisionId = buildGateDecisionId(context);
+  const decisionId = buildGateDecisionId(context, options);
   const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
 
   return evaluateXhsGate({

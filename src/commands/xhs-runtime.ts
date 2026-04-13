@@ -22,8 +22,7 @@ import {
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
-  resolveIssue209CommandRequestIdForContract,
-  resolveIssue209GateInvocationIdForContract,
+  prepareIssue209LiveReadContract,
   XhsExecutionMode
 } from "./xhs-input.js";
 
@@ -254,13 +253,9 @@ const xhsReadCommand = async (
   });
 
   try {
-    const commandRequestId = resolveIssue209CommandRequestIdForContract({
+    const preparedIssue209LiveRead = prepareIssue209LiveReadContract({
       options: gate.options,
       requestId: envelope.requestId,
-      runId: context.run_id
-    });
-    const gateInvocationId = resolveIssue209GateInvocationIdForContract({
-      options: gate.options,
       runId: context.run_id
     });
     await ensureOfficialChromeRuntimeReady(
@@ -276,15 +271,19 @@ const xhsReadCommand = async (
     });
     const commandParams = appendFingerprintContext(
       {
-        ...(commandRequestId ? { request_id: commandRequestId } : {}),
-        ...(gateInvocationId ? { gate_invocation_id: gateInvocationId } : {}),
+        ...(preparedIssue209LiveRead.commandRequestId
+          ? { request_id: preparedIssue209LiveRead.commandRequestId }
+          : {}),
+        ...(preparedIssue209LiveRead.gateInvocationId
+          ? { gate_invocation_id: preparedIssue209LiveRead.gateInvocationId }
+          : {}),
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parsedInput,
-        options: gate.options,
+        options: preparedIssue209LiveRead.options,
         session_id: bridgeSessionId
       },
       fingerprintContext

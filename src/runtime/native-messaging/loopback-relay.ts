@@ -211,7 +211,9 @@ export class InMemoryBackgroundRelay {
           runId,
           requestId: request.id,
           commandRequestId: commandParams.request_id,
-          gateInvocationId: asString(commandParams.gate_invocation_id)
+          gateInvocationId: asString(commandParams.gate_invocation_id),
+          issueScope: options.issue_scope,
+          requestedExecutionMode: options.requested_execution_mode
         });
         const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
         const gate = buildLoopbackGate(

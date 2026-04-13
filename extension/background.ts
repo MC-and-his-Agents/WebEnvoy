@@ -918,11 +918,20 @@ const resolveXhsGateCommandInput = (
 const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
   const runId = String(request.params.run_id ?? request.id);
   const commandParams = asRecord(request.params.command_params);
+  const optionParams = asRecord(commandParams?.options);
+  const readGateParam = (key: string): unknown => {
+    if (commandParams && Object.prototype.hasOwnProperty.call(commandParams, key)) {
+      return commandParams[key];
+    }
+    return optionParams?.[key];
+  };
   return resolveXhsGateDecisionId({
     runId,
     requestId: request.id,
     commandRequestId: commandParams?.request_id,
-    gateInvocationId: asNonEmptyString(commandParams?.gate_invocation_id)
+    gateInvocationId: asNonEmptyString(commandParams?.gate_invocation_id),
+    issueScope: readGateParam("issue_scope"),
+    requestedExecutionMode: readGateParam("requested_execution_mode")
   });
 };
 
@@ -3595,7 +3604,9 @@ class ChromeBackgroundBridge {
       runId: requestRunId,
       requestId: request.id,
       commandRequestId: commandParams.request_id,
-      gateInvocationId
+      gateInvocationId,
+      issueScope,
+      requestedExecutionMode
     });
     const expectedApprovalId = resolveGatePayloadApprovalId({
       approvalActive: requestedLiveMode,

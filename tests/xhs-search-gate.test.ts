@@ -105,6 +105,13 @@ const createAuditRecord = (input: {
   recorded_at: "2026-03-23T10:00:30.000Z"
 });
 
+const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
+  const gateInvocationId = `issue209-gate-${runId}-${suffix}`;
+  const decisionId = `gate_decision_${gateInvocationId}`;
+  const approvalId = `gate_appr_${decisionId}`;
+  return { gateInvocationId, decisionId, approvalId };
+};
+
 describe("xhs-search gate helpers", () => {
   it("flags mismatched actual target context", () => {
     expect(
@@ -125,65 +132,70 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
-  it("uses transport request_id when command request_id is absent", () => {
-    const gate = resolveGate(
-      {
-        issue_scope: "issue_209",
-        risk_state: "allowed",
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 12,
-        target_page: "search_result_tab",
-        actual_target_domain: "www.xiaohongshu.com",
-        actual_target_tab_id: 12,
-        actual_target_page: "search_result_tab",
-        action_type: "read",
-        ability_action: "read",
-        requested_execution_mode: "live_read_high_risk",
-        admission_context: createAdmissionContext({
-          decision_id: "gate_decision_run-extension-001_req-1",
-          approval_id: "gate_appr_custom_extension_req-1"
-        }),
-        audit_record: {
-          event_id: "audit-extension-req-1",
-          decision_id: "gate_decision_run-extension-001_req-1",
-          approval_id: "gate_appr_custom_extension_req-1",
+  it("requires gate_invocation_id for issue_209 live-read gate linkage", () => {
+    expect(() =>
+      resolveGate(
+        {
           issue_scope: "issue_209",
+          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 12,
           target_page: "search_result_tab",
+          actual_target_domain: "www.xiaohongshu.com",
+          actual_target_tab_id: 12,
+          actual_target_page: "search_result_tab",
           action_type: "read",
+          ability_action: "read",
           requested_execution_mode: "live_read_high_risk",
-          gate_decision: "allowed",
-          recorded_at: "2026-03-23T10:00:30.000Z"
+          admission_context: createAdmissionContext()
         },
-        approval_record: {
-          approval_id: "gate_appr_custom_extension_req-1",
-          decision_id: "gate_decision_run-extension-001_req-1",
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00.000Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
+        {
+          runId: "run-extension-001",
+          requestId: "req-1",
+          sessionId: "session-extension-001",
+          profile: "profile-a"
         }
-      },
-      {
-        runId: "run-extension-001",
-        requestId: "req-1",
-        sessionId: "session-extension-001",
-        profile: "profile-a"
-      }
-    );
-
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-001_req-1");
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-001_req-1");
+      )
+    ).toThrow("issue_209 live-read requires gate_invocation_id");
   });
 
-  it("uses caller-provided command request_id for live gate linkage", () => {
+  it("does not derive issue_209 live gate linkage from caller request ids", () => {
+    expect(() =>
+      resolveGate(
+        {
+          issue_scope: "issue_209",
+          risk_state: "allowed",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          actual_target_domain: "www.xiaohongshu.com",
+          actual_target_tab_id: 12,
+          actual_target_page: "search_result_tab",
+          action_type: "read",
+          ability_action: "read",
+          requested_execution_mode: "live_read_high_risk",
+          admission_context: createAdmissionContext({
+            run_id: "run-extension-command-request-001",
+            request_id: "issue209-live-req-1",
+            session_id: "session-extension-command-request-001"
+          })
+        },
+        {
+          runId: "run-extension-command-request-001",
+          requestId: "transport-req-1",
+          commandRequestId: "issue209-live-req-1",
+          sessionId: "session-extension-command-request-001",
+          profile: "profile-a"
+        }
+      )
+    ).toThrow("issue_209 live-read requires gate_invocation_id");
+  });
+
+  it("prefers gate_invocation_id over caller request ids for live gate linkage", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-command-request-001",
+      "gate-invocation-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -200,120 +212,35 @@ describe("xhs-search gate helpers", () => {
         admission_context: createAdmissionContext({
           run_id: "run-extension-command-request-001",
           request_id: "issue209-live-req-1",
-          session_id: "session-extension-command-request-001"
+          session_id: "session-extension-gate-invocation-001"
         }),
-        audit_record: {
-          event_id: "audit-extension-command-req-1",
-          decision_id:
-            "gate_decision_run-extension-command-request-001_issue209-live-req-1",
-          approval_id:
-            "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1",
-          issue_scope: "issue_209",
-          target_domain: "www.xiaohongshu.com",
-          target_tab_id: 12,
-          target_page: "search_result_tab",
-          action_type: "read",
-          requested_execution_mode: "live_read_high_risk",
-          gate_decision: "allowed",
-          recorded_at: "2026-03-23T10:00:30.000Z"
-        },
-        approval_record: {
-          approval_id:
-            "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1",
-          decision_id:
-            "gate_decision_run-extension-command-request-001_issue209-live-req-1",
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00.000Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
-        }
+        audit_record: createAuditRecord({
+          decisionId: "gate_decision_previous_issue209_request_linkage",
+          approvalId: "gate_appr_gate_decision_previous_issue209_request_linkage",
+          targetTabId: 12,
+          targetPage: "search_result_tab",
+          requestedExecutionMode: "live_read_high_risk"
+        }),
+        approval_record: createApprovalRecord(decisionId, approvalId)
       },
       {
         runId: "run-extension-command-request-001",
-        requestId: "transport-req-1",
-        commandRequestId: "issue209-live-req-1",
-        sessionId: "session-extension-command-request-001",
-        profile: "profile-a"
-      }
-    );
-
-    expect(gate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-1"
-    );
-    expect(gate.approval_record.approval_id).toBe(
-      "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1"
-    );
-    expect(gate.approval_record.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-1"
-    );
-  });
-
-  it("prefers gate_invocation_id over caller request ids for live gate linkage", () => {
-    const gate = resolveGate(
-      {
-        issue_scope: "issue_209",
-        risk_state: "allowed",
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 12,
-        target_page: "search_result_tab",
-        actual_target_domain: "www.xiaohongshu.com",
-        actual_target_tab_id: 12,
-        actual_target_page: "search_result_tab",
-        action_type: "read",
-        ability_action: "read",
-        requested_execution_mode: "live_read_high_risk",
-        admission_context: createAdmissionContext({
-          run_id: "run-extension-gate-invocation-001",
-          request_id: "issue209-live-req-shared-001",
-          decision_id: "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
-          approval_id:
-            "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
-          session_id: "session-extension-gate-invocation-001"
-        }),
-        audit_record: {
-          event_id: "audit-extension-gate-invocation-001",
-          decision_id: "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
-          approval_id:
-            "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
-          issue_scope: "issue_209",
-          target_domain: "www.xiaohongshu.com",
-          target_tab_id: 12,
-          target_page: "search_result_tab",
-          action_type: "read",
-          requested_execution_mode: "live_read_high_risk",
-          gate_decision: "allowed",
-          recorded_at: "2026-03-23T10:00:30.000Z"
-        },
-        approval_record: createApprovalRecord(
-          "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
-          "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
-        )
-      },
-      {
-        runId: "run-extension-gate-invocation-001",
-        requestId: "transport-req-shared-001",
-        commandRequestId: "issue209-live-req-shared-001",
-        gateInvocationId: "issue209-gate-run-extension-gate-invocation-001-001",
+        gateInvocationId,
         sessionId: "session-extension-gate-invocation-001",
         profile: "profile-a"
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe(
-      "gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
-    );
-    expect(gate.approval_record.approval_id).toBe(
-      "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
-    );
+    expect(gate.gate_outcome.decision_id).toBe(decisionId);
+    expect(gate.approval_record.approval_id).toBe(approvalId);
+    expect(gate.approval_record.decision_id).toBe(decisionId);
   });
 
   it("does not require admission evidence to pre-match internal gate ids", () => {
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      "run-extension-plain-admission-001",
+      "plain-admission-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -400,13 +327,14 @@ describe("xhs-search gate helpers", () => {
       {
         runId: "run-extension-plain-admission-001",
         requestId: "req-plain-1",
+        gateInvocationId,
         sessionId: "session-extension-plain-001",
         profile: "profile-a"
       }
     );
 
     expect(gate.gate_outcome).toMatchObject({
-      decision_id: "gate_decision_run-extension-plain-admission-001_req-plain-1",
+      decision_id: decisionId,
       gate_decision: "allowed",
       effective_execution_mode: "live_read_high_risk",
       gate_reasons: ["LIVE_MODE_APPROVED"]
@@ -414,6 +342,10 @@ describe("xhs-search gate helpers", () => {
   });
 
   it("blocks admission evidence from an older native-messaging session", () => {
+    const { gateInvocationId } = createIssue209InvocationLinkage(
+      "run-extension-session-rebind-001",
+      "session-rebind-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -447,6 +379,7 @@ describe("xhs-search gate helpers", () => {
       {
         runId: "run-extension-session-rebind-001",
         requestId: "req-session-rebind-1",
+        gateInvocationId,
         sessionId: "session-extension-current-001",
         profile: "profile-a"
       }
@@ -591,6 +524,10 @@ describe("xhs-search gate helpers", () => {
   });
 
   it("blocks live approval when a reused approval_record belongs to an older decision", () => {
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      "run-extension-003",
+      "reused-approval-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -640,20 +577,25 @@ describe("xhs-search gate helpers", () => {
       {
         runId: "run-extension-003",
         requestId: "req-3",
+        gateInvocationId,
         sessionId: "session-extension-003",
         profile: "profile-a"
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-003_req-3");
+    expect(gate.gate_outcome.decision_id).toBe(decisionId);
     expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
     expect(gate.approval_record.approval_id).toBeNull();
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003_req-3");
+    expect(gate.approval_record.decision_id).toBe(decisionId);
   });
 
   it("blocks live approval when a legacy approval_record omits decision_id", () => {
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      "run-extension-004",
+      "legacy-approval-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -684,20 +626,25 @@ describe("xhs-search gate helpers", () => {
       {
         runId: "run-extension-004",
         requestId: "req-4",
+        gateInvocationId,
         sessionId: "session-extension-004",
         profile: "profile-a"
       }
     );
 
-    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-004_req-4");
+    expect(gate.gate_outcome.decision_id).toBe(decisionId);
     expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
     expect(gate.approval_record.approval_id).toBeNull();
-    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
+    expect(gate.approval_record.decision_id).toBe(decisionId);
   });
 
   it("ignores stale caller audit_record when admission evidence already matches the current request", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-005",
+      "current-live-limited-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -720,20 +667,7 @@ describe("xhs-search gate helpers", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited"
         }),
-        approval_record: {
-          approval_id: "gate_appr_gate_decision_run-extension-005_req-5",
-          decision_id: "gate_decision_run-extension-005_req-5",
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00.000Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
-        },
+        approval_record: createApprovalRecord(decisionId, approvalId),
         audit_record: {
           event_id: "gate_evt_issue209_stale_req-5",
           decision_id: "gate_decision_issue209_stale_req-5",
@@ -751,6 +685,7 @@ describe("xhs-search gate helpers", () => {
       {
         runId: "run-extension-005",
         requestId: "req-5",
+        gateInvocationId,
         sessionId: "session-extension-005",
         profile: "profile-a"
       }
@@ -759,9 +694,15 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.gate_decision).toBe("allowed");
     expect(gate.gate_outcome.effective_execution_mode).toBe("live_read_limited");
     expect(gate.gate_outcome.gate_reasons).toEqual(["LIVE_MODE_APPROVED"]);
+    expect(gate.gate_outcome.decision_id).toBe(decisionId);
+    expect(gate.approval_record.approval_id).toBe(approvalId);
   });
 
   it("blocks admission evidence when it carries a stale internal decision linkage", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-linkage-mismatch-001",
+      "linkage-mismatch-001"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -782,14 +723,12 @@ describe("xhs-search gate helpers", () => {
           approval_id: "gate_appr_gate_decision_previous_req",
           target_tab_id: 40
         }),
-        approval_record: createApprovalRecord(
-          "gate_decision_run-extension-linkage-mismatch-001_req-linkage-001",
-          "gate_appr_gate_decision_run-extension-linkage-mismatch-001_req-linkage-001"
-        )
+        approval_record: createApprovalRecord(decisionId, approvalId)
       },
       {
         runId: "run-extension-linkage-mismatch-001",
         requestId: "req-linkage-001",
+        gateInvocationId,
         sessionId: "session-extension-001",
         profile: "profile-a"
       }
@@ -803,6 +742,10 @@ describe("xhs-search gate helpers", () => {
   });
 
   it("blocks admission evidence when only one internal linkage field is present", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-linkage-mismatch-002",
+      "linkage-mismatch-002"
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -819,17 +762,15 @@ describe("xhs-search gate helpers", () => {
         admission_context: createAdmissionContext({
           run_id: "run-extension-linkage-mismatch-002",
           request_id: "req-linkage-002",
-          approval_id: "gate_appr_gate_decision_run-extension-linkage-mismatch-002_req-linkage-002",
+          approval_id: approvalId,
           target_tab_id: 44
         }),
-        approval_record: createApprovalRecord(
-          "gate_decision_run-extension-linkage-mismatch-002_req-linkage-002",
-          "gate_appr_gate_decision_run-extension-linkage-mismatch-002_req-linkage-002"
-        )
+        approval_record: createApprovalRecord(decisionId, approvalId)
       },
       {
         runId: "run-extension-linkage-mismatch-002",
         requestId: "req-linkage-002",
+        gateInvocationId,
         sessionId: "session-extension-001",
         profile: "profile-a"
       }
@@ -917,8 +858,10 @@ describe("xhs-search gate helpers", () => {
       expectedReasons: ["AUDIT_RECORD_MISSING"]
     }
   ])("blocks live gate when admission evidence %s mismatches current request", (scenario) => {
-    const decisionId = `gate_decision_${scenario.runId}_${scenario.requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      scenario.runId,
+      `${scenario.label}-current`
+    );
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -946,6 +889,7 @@ describe("xhs-search gate helpers", () => {
       {
         runId: scenario.runId,
         requestId: scenario.requestId,
+        gateInvocationId,
         sessionId: "session-extension-001",
         profile: "profile-a"
       }
@@ -959,8 +903,10 @@ describe("xhs-search gate helpers", () => {
   it("blocks live gate when approval admission evidence omits stable approval_admission_ref", () => {
     const runId = "run-extension-admission-ref-missing-001";
     const requestId = "req-admission-ref-missing-001";
-    const decisionId = `gate_decision_${runId}_${requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "approval-ref-missing-001"
+    );
     const completeAdmissionContext = createAdmissionContext({
       run_id: runId,
       request_id: requestId
@@ -998,6 +944,7 @@ describe("xhs-search gate helpers", () => {
       {
         runId,
         requestId,
+        gateInvocationId,
         sessionId: "session-extension-001",
         profile: "profile-a"
       }
@@ -1013,8 +960,10 @@ describe("xhs-search gate helpers", () => {
   it("blocks live gate when audit admission evidence omits stable audit_admission_ref", () => {
     const runId = "run-extension-audit-ref-missing-001";
     const requestId = "req-audit-ref-missing-001";
-    const decisionId = `gate_decision_${runId}_${requestId}`;
-    const approvalId = `gate_appr_${decisionId}`;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "audit-ref-missing-001"
+    );
     const completeAdmissionContext = createAdmissionContext({
       run_id: runId,
       request_id: requestId
@@ -1052,6 +1001,7 @@ describe("xhs-search gate helpers", () => {
       {
         runId,
         requestId,
+        gateInvocationId,
         sessionId: "session-extension-001",
         profile: "profile-a"
       }

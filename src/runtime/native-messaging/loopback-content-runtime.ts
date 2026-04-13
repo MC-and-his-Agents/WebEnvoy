@@ -248,7 +248,9 @@ export class InMemoryContentScriptRuntime {
         runId: message.runId,
         requestId: message.id,
         commandRequestId: message.commandParams.request_id,
-        gateInvocationId: asString(message.commandParams.gate_invocation_id)
+        gateInvocationId: asString(message.commandParams.gate_invocation_id),
+        issueScope: options.issue_scope,
+        requestedExecutionMode: options.requested_execution_mode
       });
       const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
       const gate = buildLoopbackGate(

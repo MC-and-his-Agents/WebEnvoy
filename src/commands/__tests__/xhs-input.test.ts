@@ -7,6 +7,7 @@ import {
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
+  prepareIssue209LiveReadContract,
   resolveIssue209CommandRequestIdForContract,
   resolveIssue209GateInvocationIdForContract
 } from "../xhs-input.js";
@@ -226,99 +227,26 @@ describe("xhs-input", () => {
     expect(options).not.toHaveProperty("admission_context");
   });
 
-  it("treats omitted issue_scope as issue_209 for live read request_id synthesis only", () => {
+  it("does not treat omitted issue_scope as issue_209 for live read id synthesis", () => {
     const requestId = resolveIssue209CommandRequestIdForContract({
       options: {
         requested_execution_mode: "live_read_limited"
       },
       requestId: null
     });
-
-    expect(requestId).toEqual(expect.stringMatching(/^issue209-live-/));
-    const options = ensureIssue209AdmissionContextForContract({
-      options: {
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 32,
-        target_page: "search_result_tab",
-        action_type: "read",
-        requested_execution_mode: "live_read_limited",
-        risk_state: "limited"
-      },
-      runId: "run-cli-issue209-live-004",
-      requestId,
-      gateInvocationId: "issue209-gate-run-cli-issue209-live-004-001",
-      sessionId: "nm-session-001"
-    });
-
-    expect(options).not.toHaveProperty("admission_context");
-  });
-
-  it("reuses caller request_id from synthesized admission_context when request_id is omitted", () => {
-    const requestId = resolveIssue209CommandRequestIdForContract({
-      options: {
-        issue_scope: "issue_209",
-        requested_execution_mode: "live_read_limited",
-        admission_context: {
-          approval_admission_evidence: {
-            request_id: "issue209-live-existing-001",
-            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-005-existing-001"
-          },
-          audit_admission_evidence: {
-            request_id: "issue209-live-existing-001",
-            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-005-existing-001"
-          }
-        }
-      },
-      requestId: null,
-      runId: "run-cli-issue209-live-005"
-    });
-
-    expect(requestId).toBe("issue209-live-existing-001");
-  });
-
-  it("does not derive gate_invocation_id from caller admission_context", () => {
     const gateInvocationId = resolveIssue209GateInvocationIdForContract({
       options: {
-        issue_scope: "issue_209",
-        requested_execution_mode: "live_read_limited",
-        admission_context: {
-          approval_admission_evidence: {
-            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-007-existing-001"
-          },
-          audit_admission_evidence: {
-            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-007-existing-001"
-          }
-        }
+        requested_execution_mode: "live_read_limited"
       },
-      runId: "run-cli-issue209-live-007"
+      runId: "run-cli-issue209-live-004"
     });
 
+    expect(requestId).toBeNull();
     expect(gateInvocationId).toBeNull();
   });
 
-  it("keeps legacy request_id recovery for older admission decision ids", () => {
-    const requestId = resolveIssue209CommandRequestIdForContract({
-      options: {
-        issue_scope: "issue_209",
-        requested_execution_mode: "live_read_limited",
-        admission_context: {
-          approval_admission_evidence: {
-            decision_id: "gate_decision_run-cli-issue209-live-008_issue209-live-existing-legacy-001"
-          },
-          audit_admission_evidence: {
-            decision_id: "gate_decision_run-cli-issue209-live-008_issue209-live-existing-legacy-001"
-          }
-        }
-      },
-      requestId: null,
-      runId: "run-cli-issue209-live-008"
-    });
-
-    expect(requestId).toBe("issue209-live-existing-legacy-001");
-  });
-
-  it("does not synthesize a conflicting request_id when caller admission_context is not derivable", () => {
-    const requestId = resolveIssue209CommandRequestIdForContract({
+  it("always generates a new gate_invocation_id for issue_209 live reads", () => {
+    const gateInvocationId = resolveIssue209GateInvocationIdForContract({
       options: {
         issue_scope: "issue_209",
         requested_execution_mode: "live_read_limited",
@@ -328,11 +256,69 @@ describe("xhs-input", () => {
           }
         }
       },
-      requestId: null,
-      runId: "run-cli-issue209-live-006"
+      runId: "run-cli-issue209-live-007"
     });
 
-    expect(requestId).toBeNull();
+    expect(gateInvocationId).toEqual(
+      expect.stringMatching(/^issue209-gate-run-cli-issue209-live-007-/)
+    );
+  });
+
+  it("does not recover request_id from caller admission_context", () => {
+    const requestId = resolveIssue209CommandRequestIdForContract({
+      options: {
+        issue_scope: "issue_209",
+        requested_execution_mode: "live_read_limited",
+        admission_context: {
+          approval_admission_evidence: {
+            request_id: "issue209-live-existing-001",
+            decision_id: "gate_decision_external"
+          },
+          audit_admission_evidence: {
+            request_id: "issue209-live-existing-001",
+            decision_id: "gate_decision_external"
+          }
+        }
+      },
+      requestId: null,
+      runId: "run-cli-issue209-live-005"
+    });
+
+    expect(requestId).toEqual(expect.stringMatching(/^issue209-live-/));
+    expect(requestId).not.toBe("issue209-live-existing-001");
+  });
+
+  it("prepares a single issue_209 live-read contract bundle", () => {
+    const prepared = prepareIssue209LiveReadContract({
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        admission_context: {
+          approval_admission_evidence: {
+            approval_admission_ref: "approval_admission_existing"
+          }
+        }
+      },
+      runId: "run-cli-issue209-live-prepare-001",
+      requestId: null,
+      gateInvocationId: null,
+      sessionId: "nm-session-001"
+    });
+
+    expect(prepared.commandRequestId).toEqual(expect.stringMatching(/^issue209-live-/));
+    expect(prepared.gateInvocationId).toEqual(
+      expect.stringMatching(/^issue209-gate-run-cli-issue209-live-prepare-001-/)
+    );
+    expect(prepared.options.admission_context).toEqual({
+      approval_admission_evidence: {
+        approval_admission_ref: "approval_admission_existing"
+      }
+    });
   });
 
   it("keeps caller-provided admission_context unchanged", () => {

@@ -136,7 +136,9 @@ const buildLoopbackXhsReadGateBundle = (input) => {
         runId: input.runId,
         requestId: input.requestId,
         commandRequestId: input.commandRequestId,
-        gateInvocationId: asString(input.gateInvocationId)
+        gateInvocationId: asString(input.gateInvocationId),
+        issueScope: input.options.issue_scope,
+        requestedExecutionMode: input.options.requested_execution_mode
     });
     const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
     const gate = buildLoopbackGate(buildLoopbackGateSeedOptions({

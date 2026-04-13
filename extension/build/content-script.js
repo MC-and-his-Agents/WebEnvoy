@@ -1131,6 +1131,7 @@ const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODE_SET = new Set(EXECUTION_MODES);
+const XHS_LIVE_READ_EXECUTION_MODE_SET = new Set(["live_read_limited", "live_read_high_risk"]);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_REQUIRED_AUDIT_ADMISSION_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
@@ -1185,6 +1186,16 @@ const resolveXhsGateDecisionId = (input) => {
     return `gate_decision_${gateInvocationId}`;
   }
 
+  const issueScope = asString(input?.issueScope);
+  const requestedExecutionMode = asString(input?.requestedExecutionMode);
+  if (
+    issueScope === "issue_209" &&
+    requestedExecutionMode &&
+    XHS_LIVE_READ_EXECUTION_MODE_SET.has(requestedExecutionMode)
+  ) {
+    throw new Error("issue_209 live-read requires gate_invocation_id");
+  }
+
   const runId = asString(input?.runId);
   const commandRequestId = asString(input?.commandRequestId);
   if (runId && commandRequestId) {
@@ -1201,10 +1212,10 @@ const resolveXhsGateDecisionId = (input) => {
     return `gate_decision_${requestId}`;
   }
 
-  const issueScope = asString(input?.issueScope) ?? "unknown_scope";
-  const targetPage = asString(input?.targetPage) ?? "unknown_page";
-  const targetTabId = asInteger(input?.targetTabId);
-  return `gate_decision_${issueScope}_${targetPage}_${targetTabId ?? "unknown_tab"}`;
+  const fallbackIssueScope = asString(input?.issueScope) ?? "unknown_scope";
+  const fallbackTargetPage = asString(input?.targetPage) ?? "unknown_page";
+  const fallbackTargetTabId = asInteger(input?.targetTabId);
+  return `gate_decision_${fallbackIssueScope}_${fallbackTargetPage}_${fallbackTargetTabId ?? "unknown_tab"}`;
 };
 
 const deriveGateDecisionId = (input) => {
@@ -2652,11 +2663,13 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => resolveXhsGateDecisionId({
+const buildGateDecisionId = (context, options) => resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
     commandRequestId: context.commandRequestId,
-    gateInvocationId: context.gateInvocationId
+    gateInvocationId: context.gateInvocationId,
+    issueScope: options.issue_scope,
+    requestedExecutionMode: options.requested_execution_mode
 });
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 const resolveActualTargetGateReasons = (options) => {
@@ -2684,7 +2697,7 @@ const resolveActualTargetGateReasons = (options) => {
 const resolveGate = (options, context) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
-    const decisionId = buildGateDecisionId(context);
+    const decisionId = buildGateDecisionId(context, options);
     const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
     return evaluateXhsGate({
         issueScope: options.issue_scope,

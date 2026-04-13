@@ -137,6 +137,13 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
   ...overrides
 });
 
+const createFallbackExecutionContext = (runId: string) => ({
+  runId,
+  sessionId: "nm-session-001",
+  profile: "xhs_001",
+  gateInvocationId: `issue209-gate-${runId}-fallback-001`
+});
+
 describe("xhs read execution fallback", () => {
   it("returns detail success only when the api payload contains the requested note object", async () => {
     const callSignature = vi.fn(async () => ({
@@ -167,11 +174,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-success-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-success-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-success-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-success-001",
@@ -236,11 +239,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-success-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-success-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-success-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-success-001",
@@ -290,11 +289,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-wrapped-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-wrapped-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-wrapped-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-wrapped-001",
@@ -344,11 +339,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-nested-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-nested-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-nested-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-nested-001",
@@ -396,11 +387,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-target-missing-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-target-missing-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-target-missing-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-missing-001",
@@ -448,11 +435,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-target-missing-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-target-missing-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-target-missing-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-missing-001",
@@ -498,11 +481,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-metadata-only-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-metadata-only-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-metadata-only-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-metadata-only-001",
@@ -546,11 +525,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-fallback-target-missing-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-fallback-target-missing-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-fallback-target-missing-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-fallback-target-missing-001",
@@ -608,11 +583,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-metadata-only-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-metadata-only-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-metadata-only-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-metadata-only-001",
@@ -654,11 +625,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-fallback-target-missing-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-fallback-target-missing-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-fallback-target-missing-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-target-missing-001",
@@ -710,11 +677,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-fallback-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-fallback-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-fallback-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
@@ -787,11 +750,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-fallback-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-fallback-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-fallback-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
@@ -845,11 +804,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-signature-fallback-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-signature-fallback-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-signature-fallback-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-signature-fallback-001",
@@ -902,11 +857,7 @@ describe("xhs read execution fallback", () => {
             simulate_result: "signature_entry_missing"
           }
         }),
-        executionContext: {
-          runId: "run-detail-simulated-signature-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-simulated-signature-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-simulated-signature-001"
@@ -945,11 +896,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-no-fallback-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-no-fallback-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-no-fallback-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-404",
@@ -1005,11 +952,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-detail-sync-fallback-001",
           targetPage: "explore_detail_tab"
         }),
-        executionContext: {
-          runId: "run-detail-sync-fallback-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-detail-sync-fallback-001")
       },
       environment
     );
@@ -1038,11 +981,7 @@ describe("xhs read execution fallback", () => {
           runId: "run-user-mismatch-001",
           targetPage: "profile_tab"
         }),
-        executionContext: {
-          runId: "run-user-mismatch-001",
-          sessionId: "nm-session-001",
-          profile: "xhs_001"
-        }
+        executionContext: createFallbackExecutionContext("run-user-mismatch-001")
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
