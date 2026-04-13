@@ -1946,10 +1946,16 @@ process.stdin.on("data", (chunk) => {
     const auditAdmissionEvidence = body.summary.gate_input.admission_context.audit_admission_evidence;
     expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
     expect(approvalAdmissionEvidence).toMatchObject({
+      approval_admission_ref: expect.stringMatching(
+        new RegExp(`^approval_admission_${runId}_issue209-live-`)
+      ),
       run_id: runId,
       session_id: String(body.summary.gate_input.session_id)
     });
     expect(auditAdmissionEvidence).toMatchObject({
+      audit_admission_ref: expect.stringMatching(
+        new RegExp(`^audit_admission_${runId}_issue209-live-`)
+      ),
       run_id: runId,
       session_id: String(body.summary.gate_input.session_id),
       risk_state: "limited"

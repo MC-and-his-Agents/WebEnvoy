@@ -143,12 +143,15 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
+        approval_admission_ref:
+          "approval_admission_run-cli-issue209-live-001_issue209-live-limited-001",
         request_id: "issue209-live-limited-001",
         run_id: "run-cli-issue209-live-001",
         session_id: "nm-session-001",
         target_page: "search_result_tab"
       },
       audit_admission_evidence: {
+        audit_admission_ref: "audit_admission_run-cli-issue209-live-001_issue209-live-limited-001",
         request_id: "issue209-live-limited-001",
         run_id: "run-cli-issue209-live-001",
         session_id: "nm-session-001",
@@ -241,12 +244,14 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
+        approval_admission_ref: `approval_admission_run-cli-issue209-live-003_${requestId}`,
         request_id: requestId,
         run_id: "run-cli-issue209-live-003",
         session_id: "nm-session-001",
         target_page: "profile_tab"
       },
       audit_admission_evidence: {
+        audit_admission_ref: `audit_admission_run-cli-issue209-live-003_${requestId}`,
         request_id: requestId,
         run_id: "run-cli-issue209-live-003",
         session_id: "nm-session-001",
@@ -294,12 +299,14 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
+        approval_admission_ref: `approval_admission_run-cli-issue209-live-004_${requestId}`,
         issue_scope: "issue_209",
         request_id: requestId,
         run_id: "run-cli-issue209-live-004",
         session_id: "nm-session-001"
       },
       audit_admission_evidence: {
+        audit_admission_ref: `audit_admission_run-cli-issue209-live-004_${requestId}`,
         issue_scope: "issue_209",
         request_id: requestId,
         run_id: "run-cli-issue209-live-004",

@@ -281,6 +281,9 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
         requestId: input.requestId,
         runId: input.runId
     });
+    const admissionEvidenceRef = canonicalRequestId === null
+        ? input.runId
+        : `${input.runId}_${canonicalRequestId}`;
     const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
     const approvalComplete = approvalRecord.approved &&
         !!approvalRecord.approver &&
@@ -301,6 +304,7 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
     }
     nextOptions.admission_context = {
         approval_admission_evidence: {
+            approval_admission_ref: `approval_admission_${admissionEvidenceRef}`,
             ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
             run_id: input.runId,
             session_id: sessionId,
@@ -317,6 +321,7 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
             recorded_at: approvalRecord.approved_at
         },
         audit_admission_evidence: {
+            audit_admission_ref: `audit_admission_${admissionEvidenceRef}`,
             ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
             run_id: input.runId,
             session_id: sessionId,

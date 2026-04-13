@@ -765,6 +765,8 @@ describe("native messaging bridge", () => {
       requestSessionId: string;
       approvalSessionId: string | null;
       auditSessionId: string | null;
+      approvalAdmissionRef: string | null;
+      auditAdmissionRef: string | null;
     }> = [];
     const currentSessionId = (): string => (openCall >= 2 ? "nm-session-002" : "nm-session-001");
 
@@ -803,7 +805,15 @@ describe("native messaging bridge", () => {
           requestSessionId: String(request.params.session_id ?? ""),
           approvalSessionId:
             typeof approvalEvidence.session_id === "string" ? approvalEvidence.session_id : null,
-          auditSessionId: typeof auditEvidence.session_id === "string" ? auditEvidence.session_id : null
+          auditSessionId: typeof auditEvidence.session_id === "string" ? auditEvidence.session_id : null,
+          approvalAdmissionRef:
+            typeof approvalEvidence.approval_admission_ref === "string"
+              ? approvalEvidence.approval_admission_ref
+              : null,
+          auditAdmissionRef:
+            typeof auditEvidence.audit_admission_ref === "string"
+              ? auditEvidence.audit_admission_ref
+              : null
         });
 
         if (forwardCall === 1) {
@@ -876,12 +886,20 @@ describe("native messaging bridge", () => {
       {
         requestSessionId: "nm-session-001",
         approvalSessionId: "nm-session-001",
-        auditSessionId: "nm-session-001"
+        auditSessionId: "nm-session-001",
+        approvalAdmissionRef:
+          "approval_admission_run-recovery-admission-session-001_issue209-live-recovery-001",
+        auditAdmissionRef:
+          "audit_admission_run-recovery-admission-session-001_issue209-live-recovery-001"
       },
       {
         requestSessionId: "nm-session-002",
         approvalSessionId: "nm-session-002",
-        auditSessionId: "nm-session-002"
+        auditSessionId: "nm-session-002",
+        approvalAdmissionRef:
+          "approval_admission_run-recovery-admission-session-001_issue209-live-recovery-001",
+        auditAdmissionRef:
+          "audit_admission_run-recovery-admission-session-001_issue209-live-recovery-001"
       }
     ]);
   });
