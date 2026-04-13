@@ -230,6 +230,7 @@ const buildLoopbackXhsReadGateBundle = (input: {
     {
       runId: input.runId,
       sessionId: input.sessionId,
+      gateInvocationId: asString(input.gateInvocationId) ?? undefined,
       decisionId,
       approvalId: approvalId ?? undefined
     }

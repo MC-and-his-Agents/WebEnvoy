@@ -7,7 +7,8 @@ import {
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
-  resolveIssue209CommandRequestIdForContract
+  resolveIssue209CommandRequestIdForContract,
+  resolveIssue209GateInvocationIdForContract
 } from "../xhs-input.js";
 
 describe("xhs-input", () => {
@@ -142,10 +143,12 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
+        request_id: "issue209-live-limited-001",
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001"
       },
       audit_admission_evidence: {
+        request_id: "issue209-live-limited-001",
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001",
         risk_state: "limited"
@@ -232,11 +235,13 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
+        request_id: requestId,
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         target_page: "profile_tab"
       },
       audit_admission_evidence: {
+        request_id: requestId,
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         target_page: "profile_tab",
@@ -284,11 +289,13 @@ describe("xhs-input", () => {
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
         issue_scope: "issue_209",
+        request_id: requestId,
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001"
       },
       audit_admission_evidence: {
         issue_scope: "issue_209",
+        request_id: requestId,
         decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
         approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001",
         risk_state: "limited"
@@ -296,17 +303,19 @@ describe("xhs-input", () => {
     });
   });
 
-  it("reuses caller admission decision linkage when request_id is omitted", () => {
+  it("reuses caller request_id from synthesized admission_context when request_id is omitted", () => {
     const requestId = resolveIssue209CommandRequestIdForContract({
       options: {
         issue_scope: "issue_209",
         requested_execution_mode: "live_read_limited",
         admission_context: {
           approval_admission_evidence: {
-            decision_id: "gate_decision_run-cli-issue209-live-005_issue209-live-existing-001"
+            request_id: "issue209-live-existing-001",
+            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-005-existing-001"
           },
           audit_admission_evidence: {
-            decision_id: "gate_decision_run-cli-issue209-live-005_issue209-live-existing-001"
+            request_id: "issue209-live-existing-001",
+            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-005-existing-001"
           }
         }
       },
@@ -315,6 +324,47 @@ describe("xhs-input", () => {
     });
 
     expect(requestId).toBe("issue209-live-existing-001");
+  });
+
+  it("reuses synthesized gate_invocation_id from caller admission_context", () => {
+    const gateInvocationId = resolveIssue209GateInvocationIdForContract({
+      options: {
+        issue_scope: "issue_209",
+        requested_execution_mode: "live_read_limited",
+        admission_context: {
+          approval_admission_evidence: {
+            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-007-existing-001"
+          },
+          audit_admission_evidence: {
+            decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-007-existing-001"
+          }
+        }
+      },
+      runId: "run-cli-issue209-live-007"
+    });
+
+    expect(gateInvocationId).toBe("issue209-gate-run-cli-issue209-live-007-existing-001");
+  });
+
+  it("keeps legacy request_id recovery for older admission decision ids", () => {
+    const requestId = resolveIssue209CommandRequestIdForContract({
+      options: {
+        issue_scope: "issue_209",
+        requested_execution_mode: "live_read_limited",
+        admission_context: {
+          approval_admission_evidence: {
+            decision_id: "gate_decision_run-cli-issue209-live-008_issue209-live-existing-legacy-001"
+          },
+          audit_admission_evidence: {
+            decision_id: "gate_decision_run-cli-issue209-live-008_issue209-live-existing-legacy-001"
+          }
+        }
+      },
+      requestId: null,
+      runId: "run-cli-issue209-live-008"
+    });
+
+    expect(requestId).toBe("issue209-live-existing-legacy-001");
   });
 
   it("does not synthesize a conflicting request_id when caller admission_context is not derivable", () => {

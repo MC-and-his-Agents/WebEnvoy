@@ -99,6 +99,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       ...(approvalId ? { approval_admission_ref: approvalId } : {}),
       ...(decisionId ? { decision_id: decisionId } : {}),
       ...(approvalId ? { approval_id: approvalId } : {}),
+      ...(input.requestId ? { request_id: input.requestId } : {}),
       run_id: input.runId,
       session_id: sessionId,
       issue_scope: "issue_209",
@@ -123,6 +124,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       ...(decisionId ? { audit_admission_ref: `gate_evt_${decisionId}` } : {}),
       ...(decisionId ? { decision_id: decisionId } : {}),
       ...(approvalId ? { approval_id: approvalId } : {}),
+      ...(input.requestId ? { request_id: input.requestId } : {}),
       run_id: input.runId,
       session_id: sessionId,
       issue_scope: "issue_209",
@@ -1972,11 +1974,13 @@ process.stdin.on("data", (chunk) => {
   it("preserves caller admission linkage when request_id is omitted", () => {
     const runId = "run-issue209-live-limited-existing-admission-001";
     const requestId = "issue209-live-existing-admission-001";
+    const decisionId = "gate_decision_issue209-gate-run-issue209-live-limited-existing-admission-001-001";
+    const approvalId = `gate_appr_${decisionId}`;
     const admissionContext = createApprovedReadAdmissionContext({
       runId,
       requestId,
-      decisionId: `gate_decision_${runId}_${requestId}`,
-      approvalId: `gate_appr_gate_decision_${runId}_${requestId}`,
+      decisionId,
+      approvalId,
       requestedExecutionMode: "live_read_limited",
       riskState: "limited"
     });
@@ -2024,15 +2028,28 @@ process.stdin.on("data", (chunk) => {
 
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
-    expect(String(body.summary.gate_outcome.decision_id)).toMatch(
-      new RegExp(`^gate_decision_issue209-gate-${runId}-`)
-    );
+    expect(String(body.summary.gate_outcome.decision_id)).toBe(decisionId);
+    expect(body.summary.approval_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
+    expect(body.summary.audit_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
     expect(body.summary.gate_outcome).toMatchObject({
       effective_execution_mode: "live_read_limited",
       gate_decision: "allowed",
       gate_reasons: ["LIVE_MODE_APPROVED"]
     });
-    expect(body.summary.gate_input.admission_context).toMatchObject(admissionContext);
+    expect(body.summary.gate_input.admission_context).toMatchObject({
+      approval_admission_evidence: {
+        decision_id: decisionId
+      },
+      audit_admission_evidence: {
+        decision_id: decisionId
+      }
+    });
   });
 
   itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {

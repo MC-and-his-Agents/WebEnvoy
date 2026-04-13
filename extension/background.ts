@@ -863,6 +863,7 @@ const normalizeXhsSearchCommandParams = (
 
 type ResolvedXhsGateCommandInput = {
   commandParams: Record<string, unknown>;
+  gateInvocationId: string | null;
   targetDomain: string | null;
   targetTabId: number | null;
   targetPage: string | null;
@@ -894,6 +895,7 @@ const resolveXhsGateCommandInput = (
 
   return {
     commandParams,
+    gateInvocationId: asNonEmptyString(commandParams.gate_invocation_id),
     targetDomain: asNonEmptyString(readGateParam("target_domain")),
     targetTabId: asInteger(readGateParam("target_tab_id")),
     targetPage: asNonEmptyString(readGateParam("target_page")),
@@ -911,6 +913,17 @@ const resolveXhsGateCommandInput = (
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
   };
+};
+
+const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
+  const runId = String(request.params.run_id ?? request.id);
+  const commandParams = asRecord(request.params.command_params);
+  return resolveXhsGateDecisionId({
+    runId,
+    requestId: request.id,
+    commandRequestId: commandParams?.request_id,
+    gateInvocationId: asNonEmptyString(commandParams?.gate_invocation_id)
+  });
 };
 
 const resolveGateOnlyPageState = (
@@ -1090,12 +1103,7 @@ const createRelayXhsGatePayload = (input: {
   const runId = String(input.request.params.run_id ?? input.request.id);
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
-  const commandParams = asRecord(input.request.params.command_params);
-  const decisionId = resolveXhsGateDecisionId({
-    runId,
-    requestId: input.request.id,
-    commandRequestId: commandParams?.request_id
-  });
+  const decisionId = resolveBridgeRequestGateDecisionId(input.request);
   const approvalActive =
     input.gateDecision === "allowed" &&
     (input.effectiveExecutionMode === "live_read_limited" ||
@@ -1217,12 +1225,7 @@ const createBackgroundXhsGatePayload = (input: {
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
   const recordedAt = new Date().toISOString();
-  const commandParams = asRecord(input.request.params.command_params);
-  const decisionId = resolveXhsGateDecisionId({
-    runId,
-    requestId: input.request.id,
-    commandRequestId: commandParams?.request_id
-  });
+  const decisionId = resolveBridgeRequestGateDecisionId(input.request);
   const approvalActive =
     input.gateDecision === "allowed" &&
     (input.effectiveExecutionMode === "live_read_limited" ||
@@ -3563,6 +3566,7 @@ class ChromeBackgroundBridge {
       approvalRecord,
       auditRecord,
       admissionContext,
+      gateInvocationId,
       limitedReadRolloutReadyTrue,
       validationAction,
       requestedFingerprintContext
@@ -3590,7 +3594,8 @@ class ChromeBackgroundBridge {
     const gateDecisionId = resolveXhsGateDecisionId({
       runId: requestRunId,
       requestId: request.id,
-      commandRequestId: commandParams.request_id
+      commandRequestId: commandParams.request_id,
+      gateInvocationId
     });
     const expectedApprovalId = resolveGatePayloadApprovalId({
       approvalActive: requestedLiveMode,

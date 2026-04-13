@@ -36,6 +36,7 @@ export interface XhsApprovalAdmissionEvidence {
   approval_admission_ref: string | null;
   decision_id: string | null;
   approval_id: string | null;
+  request_id?: string | null;
   run_id: string | null;
   session_id: string | null;
   issue_scope: string | null;
@@ -55,6 +56,7 @@ export interface XhsAuditAdmissionEvidence {
   audit_admission_ref: string | null;
   decision_id: string | null;
   approval_id: string | null;
+  request_id?: string | null;
   run_id: string | null;
   session_id: string | null;
   issue_scope: string | null;

@@ -5,6 +5,8 @@ import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-se
 const createAdmissionContext = (input?: {
   run_id?: string;
   request_id?: string;
+  decision_id?: string;
+  approval_id?: string;
   session_id?: string;
   target_tab_id?: number;
   target_page?: string;
@@ -13,13 +15,16 @@ const createAdmissionContext = (input?: {
 }) => {
   const runId = input?.run_id ?? "run-extension-001";
   const requestId = input?.request_id;
-  const decisionId = requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`;
-  const approvalId = `gate_appr_${decisionId}`;
+  const decisionId =
+    input?.decision_id ??
+    (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
+  const approvalId = input?.approval_id ?? `gate_appr_${decisionId}`;
   return ({
   approval_admission_evidence: {
     approval_admission_ref: approvalId,
     decision_id: decisionId,
     approval_id: approvalId,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: input?.session_id ?? "session-extension-001",
     issue_scope: "issue_209",
@@ -44,6 +49,7 @@ const createAdmissionContext = (input?: {
     audit_admission_ref: `gate_evt_${decisionId}`,
     decision_id: decisionId,
     approval_id: approvalId,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: input?.session_id ?? "session-extension-001",
     issue_scope: "issue_209",
@@ -245,6 +251,65 @@ describe("xhs-search gate helpers", () => {
     );
     expect(gate.approval_record.decision_id).toBe(
       "gate_decision_run-extension-command-request-001_issue209-live-req-1"
+    );
+  });
+
+  it("prefers gate_invocation_id over caller request ids for live gate linkage", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-gate-invocation-001",
+          request_id: "issue209-live-req-shared-001",
+          decision_id: "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
+          approval_id:
+            "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
+          session_id: "session-extension-gate-invocation-001"
+        }),
+        audit_record: {
+          event_id: "audit-extension-gate-invocation-001",
+          decision_id: "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
+          approval_id:
+            "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z"
+        },
+        approval_record: createApprovalRecord(
+          "gate_decision_issue209-gate-run-extension-gate-invocation-001-001",
+          "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
+        )
+      },
+      {
+        runId: "run-extension-gate-invocation-001",
+        requestId: "transport-req-shared-001",
+        commandRequestId: "issue209-live-req-shared-001",
+        gateInvocationId: "issue209-gate-run-extension-gate-invocation-001-001",
+        sessionId: "session-extension-gate-invocation-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.decision_id).toBe(
+      "gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
+    );
+    expect(gate.approval_record.approval_id).toBe(
+      "gate_appr_gate_decision_issue209-gate-run-extension-gate-invocation-001-001"
     );
   });
 

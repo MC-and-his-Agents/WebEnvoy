@@ -209,8 +209,16 @@ const resolveIssue209RequestIdFromAdmissionContext = (options, runId) => {
     }
     const approvalAdmissionEvidence = asObject(admissionContext.approval_admission_evidence);
     const auditAdmissionEvidence = asObject(admissionContext.audit_admission_evidence);
+    const approvalRequestId = asString(approvalAdmissionEvidence?.request_id);
+    const auditRequestId = asString(auditAdmissionEvidence?.request_id);
     const approvalDecisionId = asString(approvalAdmissionEvidence?.decision_id);
     const auditDecisionId = asString(auditAdmissionEvidence?.decision_id);
+    if (approvalRequestId && auditRequestId && approvalRequestId !== auditRequestId) {
+        return null;
+    }
+    if (approvalRequestId ?? auditRequestId) {
+        return approvalRequestId ?? auditRequestId;
+    }
     if (approvalDecisionId && auditDecisionId && approvalDecisionId !== auditDecisionId) {
         return null;
     }
@@ -224,6 +232,25 @@ const resolveIssue209RequestIdFromAdmissionContext = (options, runId) => {
         return null;
     }
     return decisionId.slice(prefix.length);
+};
+const resolveIssue209GateInvocationIdFromAdmissionContext = (options) => {
+    const admissionContext = asObject(options.admission_context);
+    if (!admissionContext) {
+        return null;
+    }
+    const approvalAdmissionEvidence = asObject(admissionContext.approval_admission_evidence);
+    const auditAdmissionEvidence = asObject(admissionContext.audit_admission_evidence);
+    const approvalDecisionId = asString(approvalAdmissionEvidence?.decision_id);
+    const auditDecisionId = asString(auditAdmissionEvidence?.decision_id);
+    if (approvalDecisionId && auditDecisionId && approvalDecisionId !== auditDecisionId) {
+        return null;
+    }
+    const decisionId = approvalDecisionId ?? auditDecisionId;
+    const prefix = `gate_decision_${ISSUE209_GATE_INVOCATION_ID_PREFIX}-`;
+    if (!decisionId || !decisionId.startsWith(prefix) || decisionId.length <= "gate_decision_".length) {
+        return null;
+    }
+    return decisionId.slice("gate_decision_".length);
 };
 const isIssue209LiveReadRequest = (options) => resolveSharedIssueScope(options.issue_scope) === "issue_209" &&
     typeof options.requested_execution_mode === "string" &&
@@ -252,6 +279,10 @@ export const resolveIssue209GateInvocationIdForContract = (input) => {
     }
     if (!isIssue209LiveReadRequest(input.options)) {
         return null;
+    }
+    const admissionInvocationId = resolveIssue209GateInvocationIdFromAdmissionContext(input.options);
+    if (admissionInvocationId) {
+        return admissionInvocationId;
     }
     return `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
 };
@@ -310,6 +341,7 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
             approval_admission_ref: `gate_appr_${decisionId}`,
             decision_id: decisionId,
             approval_id: approvalId,
+            ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
             run_id: input.runId,
             session_id: sessionId,
             issue_scope: "issue_209",
@@ -328,6 +360,7 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
             audit_admission_ref: `gate_evt_${decisionId}`,
             decision_id: decisionId,
             approval_id: approvalId,
+            ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
             run_id: input.runId,
             session_id: sessionId,
             issue_scope: "issue_209",

@@ -1135,6 +1135,79 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("derives background gate linkage from gate_invocation_id instead of request ids", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-limited-invocation-linkage-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-invocation-linkage-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          request_id: "issue209-live-shared-request-001",
+          gate_invocation_id: "issue209-gate-run-xhs-live-limited-invocation-linkage-001-001",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          gate_outcome?: {
+            decision_id?: string;
+          };
+          approval_record?: {
+            decision_id?: string | null;
+          };
+          audit_record?: {
+            decision_id?: string | null;
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-limited-invocation-linkage-001");
+
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-limited-invocation-linkage-001",
+      status: "error",
+      payload: {
+        gate_outcome: {
+          decision_id:
+            "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
+        },
+        approval_record: {
+          decision_id:
+            "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
+        },
+        audit_record: {
+          decision_id:
+            "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
+        }
+      }
+    });
+  });
+
   it("blocks live_read_limited in background gate when limited rollout readiness is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

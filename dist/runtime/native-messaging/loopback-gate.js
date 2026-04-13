@@ -57,6 +57,7 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         auditRecord: options.audit_record,
         admissionContext: boundAdmissionContext,
         limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
+        gateInvocationId: linkage?.gateInvocationId,
         decisionId: linkage?.decisionId,
         approvalId: linkage?.approvalId,
         issue208EditorInputValidation,

@@ -10,11 +10,16 @@ const createApprovedReadAdmissionContext = (input: {
   targetPage?: string;
   requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
   riskState: "limited" | "allowed";
+  decisionId?: string;
+  approvalId?: string;
 }) => ({
   approval_admission_evidence: {
-    approval_admission_ref: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
-    decision_id: `gate_decision_${input.runId}_${input.requestId}`,
-    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    approval_admission_ref:
+      input.approvalId ?? `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    decision_id: input.decisionId ?? `gate_decision_${input.runId}_${input.requestId}`,
+    approval_id:
+      input.approvalId ?? `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    request_id: input.requestId,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -36,9 +41,12 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_gate_decision_${input.runId}_${input.requestId}`,
-    decision_id: `gate_decision_${input.runId}_${input.requestId}`,
-    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    audit_admission_ref:
+      `gate_evt_${input.decisionId ?? `gate_decision_${input.runId}_${input.requestId}`}`,
+    decision_id: input.decisionId ?? `gate_decision_${input.runId}_${input.requestId}`,
+    approval_id:
+      input.approvalId ?? `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    request_id: input.requestId,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -343,6 +351,110 @@ describe("native messaging legacy loopback runtime", () => {
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
+          })
+        })
+      })
+    );
+  });
+
+  it("preserves provided invocation linkage when caller retries without request_id", async () => {
+    const runId = "run-loopback-live-limited-retry-001";
+    const requestId = "issue209-live-limited-retry-001";
+    const decisionId = "gate_decision_issue209-gate-run-loopback-live-limited-retry-001-001";
+    const approvalId = `gate_appr_${decisionId}`;
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        gate_invocation_id: "issue209-gate-run-loopback-live-limited-retry-001-001",
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 34,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            targetTabId: 34,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited",
+            decisionId,
+            approvalId
+          }),
+          audit_record: {
+            event_id: "audit-live-read-limited-loopback-retry-001",
+            decision_id: decisionId,
+            approval_id: approvalId,
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 34,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          gate_outcome: expect.objectContaining({
+            decision_id: decisionId,
+            effective_execution_mode: "live_read_limited",
+            gate_decision: "allowed"
+          }),
+          approval_record: expect.objectContaining({
+            decision_id: decisionId,
+            approval_id: approvalId
+          }),
+          audit_record: expect.objectContaining({
+            decision_id: decisionId,
+            approval_id: approvalId
+          }),
+          gate_input: expect.objectContaining({
+            admission_context: expect.objectContaining({
+              approval_admission_evidence: expect.objectContaining({
+                decision_id: decisionId
+              }),
+              audit_admission_evidence: expect.objectContaining({
+                decision_id: decisionId
+              })
+            })
           })
         })
       })
