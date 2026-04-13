@@ -22,4 +22,4 @@
 - 只有来自 `real_browser` 执行面的最新 live evidence，且能证明真实页面交互或真实闭环结果时，才可作为放行依据；`runtime.ping`、`runtime.bootstrap`、stub/fake host、旧 head/旧 artifact 或 same-head 历史 artifact 默认无效。
 - 若 `integration_check.shared_contract_changed=yes`、`integration_check.external_dependency!=none`、`integration_check.joint_acceptance_needed=yes` 或事项本身要求 `merge_gate=integration_check_required`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态。
 - 若 `integration_check.integration_applicable=no`，`integration_ref` 必须写 `none`；若 `integration_check.integration_applicable=yes`，`integration_ref` 必须是具体 integration issue / item。
-- 若 `integration_check` 缺失、`integration_ref` 非法、`merge_gate` 仍为 `local_only`，或 integration gate / review 语义变更却未使用 `contract_surface=integration_governance`，必须直接阻断，不得继续批准。
+- 若 `integration_check` 缺失、`integration_ref` 非法、在 `integration_check.integration_applicable=yes` 或事项应按 integration-gated 处理时 `merge_gate` 仍为 `local_only`，或 integration gate / review 语义变更却未使用 `contract_surface=integration_governance`，必须直接阻断，不得继续批准。

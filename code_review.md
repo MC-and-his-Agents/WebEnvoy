@@ -136,7 +136,7 @@
   - 对当前 PR 改 integration gate / review 语义、联合验收口径或其他共享协作契约的场景，是否同样显式提供 `integration_check`，且 `contract_surface` 不为 `none`
   - 纯本地事项是否显式使用 `integration_applicable=no` 与 `integration_ref=none`；需要 integration 联动的事项是否提供具体 integration issue / item，而不是 project 根链接
   - 若 `shared_contract_changed=yes`、`external_dependency!=none`、`joint_acceptance_needed=yes` 或事项自身要求 `merge_gate=integration_check_required`，是否已明确记录提 PR 前与合并前的 integration 状态核对结果
-  - 若 `integration_check` 缺失、`integration_ref` 不是具体 integration issue / item、`merge_gate` 仍写 `local_only`，或 gate / review 语义变更却把 `contract_surface` 写成 `none`，是否已按 blocker 处理
+- 若 `integration_check` 缺失、`integration_ref` 不是具体 integration issue / item、在 `integration_applicable=yes` 或事项应按 integration-gated 处理时 `merge_gate` 仍写 `local_only`，或 gate / review 语义变更却把 `contract_surface` 写成 `none`，是否已按 blocker 处理
 
 说明：
 
