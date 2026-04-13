@@ -44,6 +44,44 @@ docs/dev/
 - `TODO.md`：实现停点、跨会话恢复入口、review blockers；不表达项目状态真相源
 - handoff：暂停原因、当前阻断、下一步动作；不替代 Issue / Project 状态
 
+## integration project 联动规则
+
+- 默认执行真相源仍是当前仓库内的 Issue / Project / PR 分层；只有当事项触及跨仓共享契约、跨仓依赖或联合验收时，才查看 owner 级 integration project。
+- 每个进入执行回合的 PR 都必须在 PR 描述的 `integration_check` 中补齐：
+  - `integration_applicable`
+  - `integration_touchpoint`
+  - `integration_ref`
+  - `shared_contract_changed`
+  - `external_dependency`
+  - `merge_gate`
+  - `contract_surface`
+  - `joint_acceptance_needed`
+  - `integration_status_checked_before_pr`
+  - `integration_status_checked_before_merge`
+- `integration_applicable=no` 时，`integration_ref` 必须写 `none`；`integration_applicable=yes` 时，`integration_ref` 必须指向具体 integration issue / project item。
+- `integration_ref` 必须指向可核查的具体 integration issue / project item；只写 owner 级 project 根链接不算合法绑定。
+- 满足以下任一条件时，`integration_touchpoint` 不得为 `none`，并且进入实现前必须先查看 `integration_ref` 对应状态：
+  - 改共享输入输出
+  - 改错误码或错误语义
+  - 改 `raw` / `normalized` / `diagnostics` / `observability`
+  - 改 `task_id` / `request_id` / `run_id`
+  - 改执行模式或 gate 口径
+  - 依赖另一仓库先做、同步做或共同验收
+  - 影响联合 PoC、联合回归或共享桥接能力
+- `merge_gate=integration_check_required` 时，提 PR 前和合并前都必须再次核对 `integration_ref` 对应的依赖和联合验收状态。
+- 只要事项需要联合验收，即使不改共享字段，仍必须按 integration-gated 事项处理；不得把 `joint_acceptance_needed=yes` 的 PR 申报为 `local_only`。
+- `contract_surface` 固定枚举：
+  - `none`
+  - `execution_provider`
+  - `ids_trace`
+  - `errors`
+  - `raw_normalized`
+  - `diagnostics_observability`
+  - `runtime_modes`
+  - `integration_governance`
+- 若当前 PR 只改 integration gate / review 语义或其他共享协作治理口径，`contract_surface` 统一写 `integration_governance`，不得回退为 `none` 或误标为业务运行时表面。
+- integration project 只承担跨仓协调真相；本地 issue / project / PR 仍承担本仓库研发真相。
+
 ## 研发漏斗
 
 WebEnvoy 采用单向漏斗，不做本地 Markdown 与 GitHub Issue 的双向同步。
