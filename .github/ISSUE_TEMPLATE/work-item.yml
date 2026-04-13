@@ -1,0 +1,99 @@
+name: Work Item
+description: 创建进入实现回合的本地事项。
+title: "工作项："
+body:
+  - type: input
+    id: parent_issue
+    attributes:
+      label: 上位 Issue / FR
+      description: 填当前 work item 绑定的上位 issue 或 FR issue。
+      placeholder: "#428"
+    validations:
+      required: true
+
+  - type: textarea
+    id: execution_goal
+    attributes:
+      label: 执行目标
+      description: 写清这轮实现的交付范围、验证方式与回滚方式。
+      placeholder: |
+        交付范围：
+        验证方式：
+        回滚方式：
+    validations:
+      required: true
+
+  - type: dropdown
+    id: maturity
+    attributes:
+      label: 当前成熟度
+      options:
+        - spike
+        - spec-ready
+        - implementation-ready
+        - merge-ready
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shared_contract_changed
+    attributes:
+      label: shared_contract_changed
+      options:
+        - "no"
+        - "yes"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: integration_touchpoint
+    attributes:
+      label: integration_touchpoint
+      options:
+        - none
+        - check_required
+        - active
+    validations:
+      required: true
+
+  - type: input
+    id: integration_ref
+    attributes:
+      label: integration_ref
+
+  - type: dropdown
+    id: external_dependency
+    attributes:
+      label: external_dependency
+      options:
+        - none
+        - syvert
+        - webenvoy
+        - both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contract_surface
+    attributes:
+      label: contract_surface
+      options:
+        - none
+        - execution_provider
+        - ids_trace
+        - errors
+        - raw_normalized
+        - diagnostics_observability
+        - runtime_modes
+    validations:
+      required: true
+
+  - type: dropdown
+    id: joint_acceptance_needed
+    attributes:
+      label: joint_acceptance_needed
+      options:
+        - "no"
+        - "yes"
+    validations:
+      required: true
