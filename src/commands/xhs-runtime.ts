@@ -17,7 +17,6 @@ import {
   AbilityAction,
   AbilityEnvelope,
   buildCapabilityResult,
-  ensureIssue209AdmissionContextForContract,
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
   parseDetailInputForContract,
@@ -275,13 +274,6 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
-    const normalizedOptions = ensureIssue209AdmissionContextForContract({
-      options: gate.options,
-      runId: context.run_id,
-      requestId: commandRequestId,
-      sessionId: bridgeSessionId,
-      gateInvocationId
-    });
     const commandParams = appendFingerprintContext(
       {
         ...(commandRequestId ? { request_id: commandRequestId } : {}),
@@ -292,7 +284,8 @@ const xhsReadCommand = async (
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parsedInput,
-        options: normalizedOptions
+        options: gate.options,
+        session_id: bridgeSessionId
       },
       fingerprintContext
     );

@@ -1,4 +1,5 @@
 import type { JsonObject } from "../../core/types.js";
+import { ensureIssue209AdmissionContextForContract } from "../../commands/xhs-input.js";
 import {
   BRIDGE_PROTOCOL,
   DEFAULT_TRANSPORT_TIMEOUT_MS,
@@ -109,6 +110,30 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const resolveForwardCommandParams = (
+  params: JsonObject,
+  runId: string,
+  sessionId: string
+): JsonObject => {
+  const nextParams: JsonObject = { ...params };
+  const optionParams = asObject(nextParams.options);
+  if (!optionParams) {
+    return nextParams;
+  }
+
+  nextParams.options = ensureIssue209AdmissionContextForContract({
+    options: optionParams,
+    runId,
+    requestId: asString(nextParams.request_id),
+    sessionId,
+    gateInvocationId: asString(nextParams.gate_invocation_id)
+  });
+  return nextParams;
+};
 
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
   if (
@@ -461,13 +486,14 @@ export class NativeMessagingBridge {
     await this.#pulseHeartbeat(budget);
 
     const forwardTimeoutMs = budget.remainingMs();
+    const sessionId = this.#session.sessionIdOrThrow();
     const request = createBridgeForwardRequest({
       id: this.#nextId("run"),
       profile: input.profile,
-      sessionId: this.#session.sessionIdOrThrow(),
+      sessionId,
       runId: input.runId,
       command: input.command,
-      commandParams: input.params,
+      commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId),
       cwd: input.cwd,
       timeoutMs: forwardTimeoutMs
     });
@@ -495,13 +521,14 @@ export class NativeMessagingBridge {
       await this.#pulseHeartbeat(budget);
 
       const retryTimeoutMs = budget.remainingMs();
+      const retrySessionId = this.#session.sessionIdOrThrow();
       const retryRequest = createBridgeForwardRequest({
         id: this.#nextId("run"),
         profile: input.profile,
-        sessionId: this.#session.sessionIdOrThrow(),
+        sessionId: retrySessionId,
         runId: input.runId,
         command: input.command,
-        commandParams: input.params,
+        commandParams: resolveForwardCommandParams(input.params, input.runId, retrySessionId),
         cwd: input.cwd,
         timeoutMs: retryTimeoutMs
       });

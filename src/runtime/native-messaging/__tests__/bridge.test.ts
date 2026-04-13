@@ -757,4 +757,132 @@ describe("native messaging bridge", () => {
     });
     expect(forwardCall).toBe(2);
   });
+
+  it("rebuilds synthesized issue_209 admission_context after session recovery", async () => {
+    let openCall = 0;
+    let forwardCall = 0;
+    const forwardedSessions: Array<{
+      requestSessionId: string;
+      approvalSessionId: string | null;
+      auditSessionId: string | null;
+    }> = [];
+    const currentSessionId = (): string => (openCall >= 2 ? "nm-session-002" : "nm-session-001");
+
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        openCall += 1;
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: currentSessionId(),
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: currentSessionId()
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        const commandParams = request.params.command_params as Record<string, unknown>;
+        const options = commandParams.options as Record<string, unknown>;
+        const admissionContext = options.admission_context as Record<string, unknown>;
+        const approvalEvidence = admissionContext.approval_admission_evidence as Record<string, unknown>;
+        const auditEvidence = admissionContext.audit_admission_evidence as Record<string, unknown>;
+        forwardedSessions.push({
+          requestSessionId: String(request.params.session_id ?? ""),
+          approvalSessionId:
+            typeof approvalEvidence.session_id === "string" ? approvalEvidence.session_id : null,
+          auditSessionId: typeof auditEvidence.session_id === "string" ? auditEvidence.session_id : null
+        });
+
+        if (forwardCall === 1) {
+          throw new NativeMessagingTransportError(
+            "ERR_TRANSPORT_DISCONNECTED",
+            "forward disconnected"
+          );
+        }
+
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            summary: {
+              capability_result: {
+                outcome: "success"
+              }
+            }
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport,
+      recoveryPollIntervalMs: 1
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-recovery-admission-session-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: "issue209-live-recovery-001",
+        requested_execution_mode: "live_read_limited",
+        gate_invocation_id: "issue209-gate-run-recovery-admission-session-001-001",
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true
+    });
+    expect(forwardedSessions).toEqual([
+      {
+        requestSessionId: "nm-session-001",
+        approvalSessionId: "nm-session-001",
+        auditSessionId: "nm-session-001"
+      },
+      {
+        requestSessionId: "nm-session-002",
+        approvalSessionId: "nm-session-002",
+        auditSessionId: "nm-session-002"
+      }
+    ]);
+  });
 });

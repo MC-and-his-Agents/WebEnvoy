@@ -7,7 +7,7 @@ import { appendFingerprintContext, buildFingerprintContextForMeta } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
-import { buildCapabilityResult, ensureIssue209AdmissionContextForContract, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, resolveIssue209CommandRequestIdForContract, resolveIssue209GateInvocationIdForContract } from "./xhs-input.js";
+import { buildCapabilityResult, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, resolveIssue209CommandRequestIdForContract, resolveIssue209GateInvocationIdForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -185,13 +185,6 @@ const xhsReadCommand = async (context, inputConfig) => {
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
         });
-        const normalizedOptions = ensureIssue209AdmissionContextForContract({
-            options: gate.options,
-            runId: context.run_id,
-            requestId: commandRequestId,
-            sessionId: bridgeSessionId,
-            gateInvocationId
-        });
         const commandParams = appendFingerprintContext({
             ...(commandRequestId ? { request_id: commandRequestId } : {}),
             ...(gateInvocationId ? { gate_invocation_id: gateInvocationId } : {}),
@@ -201,7 +194,8 @@ const xhsReadCommand = async (context, inputConfig) => {
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
             input: parsedInput,
-            options: normalizedOptions
+            options: gate.options,
+            session_id: bridgeSessionId
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({
             runId: context.run_id,
