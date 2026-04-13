@@ -62,6 +62,7 @@ const XHS_LIVE_READ_EXECUTION_MODES = new Set<XhsExecutionMode>([
 ]);
 const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 const ISSUE209_GATE_INVOCATION_ID_PREFIX = "issue209-gate";
+export const ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY = "__issue209_admission_draft";
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -324,6 +325,32 @@ const cloneAdmissionContextForContract = (value: unknown): JsonObject | null => 
   return cloneJsonObject(object);
 };
 
+const cloneAdmissionDraftForContract = (value: unknown): JsonObject | null => {
+  const object = asObject(value);
+  if (!object) {
+    return null;
+  }
+
+  const kind = asString(object.kind);
+  if (kind === "missing") {
+    return { kind };
+  }
+
+  if (kind !== "explicit_context" && kind !== "derived_draft") {
+    return null;
+  }
+
+  const admissionContext = cloneAdmissionContextForContract(object.admission_context);
+  if (!admissionContext) {
+    return null;
+  }
+
+  return {
+    kind,
+    admission_context: admissionContext
+  };
+};
+
 const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
@@ -331,6 +358,133 @@ const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject &
   options.issue_scope === "issue_209" &&
   typeof options.requested_execution_mode === "string" &&
   XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode);
+
+const resolveIssue209AdmissionDraftForContract = (input: {
+  options: JsonObject;
+  admissionDraft?: JsonObject | null;
+}): JsonObject | null => {
+  const callerAdmissionContext = cloneAdmissionContextForContract(input.options.admission_context);
+  if (callerAdmissionContext) {
+    return {
+      kind: "explicit_context",
+      admission_context: callerAdmissionContext
+    };
+  }
+
+  return cloneAdmissionDraftForContract(input.admissionDraft);
+};
+
+const bindDerivedIssue209AdmissionContextToSession = (
+  admissionContext: JsonObject,
+  sessionId: string
+): JsonObject => {
+  const nextAdmissionContext = cloneJsonObject(admissionContext);
+  const bindEvidence = (key: "approval_admission_evidence" | "audit_admission_evidence") => {
+    const evidence = asObject(nextAdmissionContext[key]);
+    if (!evidence) {
+      return;
+    }
+    nextAdmissionContext[key] = {
+      ...evidence,
+      session_id: sessionId
+    };
+  };
+  bindEvidence("approval_admission_evidence");
+  bindEvidence("audit_admission_evidence");
+  return nextAdmissionContext;
+};
+
+export const prepareIssue209LiveReadEnvelopeForContract = (input: {
+  options: JsonObject;
+  runId: string;
+  requestId?: string | null;
+  gateInvocationId?: string | null;
+  admissionDraft?: JsonObject | null;
+}): {
+  commandRequestId: string | null;
+  gateInvocationId: string | null;
+  options: JsonObject;
+  admissionDraft: JsonObject | null;
+} => {
+  const nextOptions = cloneJsonObject(input.options);
+  const admissionDraft = resolveIssue209AdmissionDraftForContract({
+    options: nextOptions,
+    admissionDraft: input.admissionDraft
+  });
+  delete nextOptions.admission_context;
+  delete nextOptions[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
+
+  if (!isIssue209LiveReadRequest(nextOptions)) {
+    return {
+      commandRequestId: asString(input.requestId),
+      gateInvocationId: asString(input.gateInvocationId),
+      options: nextOptions,
+      admissionDraft
+    };
+  }
+
+  const commandRequestId = asString(input.requestId) ?? `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
+  const gateInvocationId =
+    asString(input.gateInvocationId) ??
+    `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
+
+  return {
+    commandRequestId,
+    gateInvocationId,
+    options: nextOptions,
+    admissionDraft: admissionDraft ?? { kind: "missing" }
+  };
+};
+
+export const bindIssue209LiveReadEnvelopeToSessionForContract = (input: {
+  params: JsonObject;
+  runId: string;
+  sessionId: string;
+}): JsonObject => {
+  const nextParams = cloneJsonObject(input.params);
+  const optionParams = asObject(nextParams.options);
+  if (!optionParams) {
+    return nextParams;
+  }
+
+  const prepared = prepareIssue209LiveReadEnvelopeForContract({
+    options: optionParams,
+    runId: input.runId,
+    requestId: asString(nextParams.request_id),
+    gateInvocationId: asString(nextParams.gate_invocation_id),
+    admissionDraft:
+      cloneAdmissionDraftForContract(nextParams[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY]) ??
+      cloneAdmissionDraftForContract(optionParams[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY])
+  });
+
+  const nextOptions = cloneJsonObject(prepared.options);
+  const draftKind = asString(prepared.admissionDraft?.kind);
+  if (draftKind === "explicit_context") {
+    const admissionContext = cloneAdmissionContextForContract(prepared.admissionDraft?.admission_context);
+    if (admissionContext) {
+      nextOptions.admission_context = admissionContext;
+    }
+  } else if (draftKind === "derived_draft") {
+    const admissionContext = cloneAdmissionContextForContract(prepared.admissionDraft?.admission_context);
+    if (admissionContext) {
+      nextOptions.admission_context = bindDerivedIssue209AdmissionContextToSession(
+        admissionContext,
+        input.sessionId
+      );
+    }
+  }
+
+  nextParams.options = nextOptions;
+  delete nextParams[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
+  if (prepared.commandRequestId) {
+    nextParams.request_id = prepared.commandRequestId;
+  }
+  if (prepared.gateInvocationId) {
+    nextParams.gate_invocation_id = prepared.gateInvocationId;
+  }
+
+  return nextParams;
+};
 
 export const prepareIssue209LiveReadContract = (input: {
   options: JsonObject;
@@ -343,33 +497,30 @@ export const prepareIssue209LiveReadContract = (input: {
   gateInvocationId: string | null;
   options: JsonObject;
 } => {
-  const nextOptions = cloneJsonObject(input.options);
-  const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
-
-  if (admissionContext) {
-    nextOptions.admission_context = admissionContext;
-  } else {
-    delete nextOptions.admission_context;
-  }
-
-  if (!isIssue209LiveReadRequest(nextOptions)) {
-    return {
-      commandRequestId: asString(input.requestId),
-      gateInvocationId: asString(input.gateInvocationId),
-      options: nextOptions
-    };
-  }
-
-  const commandRequestId = asString(input.requestId) ?? `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
-  const gateInvocationId =
-    asString(input.gateInvocationId) ??
-    `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
-  void input.sessionId;
+  const prepared = prepareIssue209LiveReadEnvelopeForContract({
+    options: input.options,
+    runId: input.runId,
+    requestId: input.requestId,
+    gateInvocationId: input.gateInvocationId
+  });
+  const bound =
+    input.sessionId && prepared.admissionDraft
+      ? bindIssue209LiveReadEnvelopeToSessionForContract({
+          params: {
+            request_id: prepared.commandRequestId,
+            gate_invocation_id: prepared.gateInvocationId,
+            options: prepared.options,
+            [ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY]: prepared.admissionDraft
+          },
+          runId: input.runId,
+          sessionId: input.sessionId
+        })
+      : { options: prepared.options };
 
   return {
-    commandRequestId,
-    gateInvocationId,
-    options: nextOptions
+    commandRequestId: prepared.commandRequestId,
+    gateInvocationId: prepared.gateInvocationId,
+    options: asObject(bound.options) ?? prepared.options
   };
 };
 

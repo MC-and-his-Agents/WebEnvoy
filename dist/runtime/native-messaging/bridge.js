@@ -1,4 +1,4 @@
-import { prepareIssue209LiveReadContract } from "../../commands/xhs-input.js";
+import { bindIssue209LiveReadEnvelopeToSessionForContract } from "../../commands/xhs-input.js";
 import { BRIDGE_PROTOCOL, DEFAULT_TRANSPORT_TIMEOUT_MS, createBridgeForwardRequest, createBridgeOpenRequest, createHeartbeatRequest, ensureBridgeRequestEnvelope, ensureBridgeSuccess } from "./protocol.js";
 import { NativeHostBridgeTransport } from "./host.js";
 import { MAX_PENDING_DURING_RECOVERY, NativeMessagingSession, RECOVERY_WINDOW_MS, classifyTransportFailure } from "./session.js";
@@ -60,26 +60,11 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const resolveForwardCommandParams = (params, runId, sessionId) => {
-    const nextParams = { ...params };
-    const optionParams = asObject(nextParams.options);
-    if (!optionParams) {
-        return nextParams;
-    }
-    const preparedIssue209LiveRead = prepareIssue209LiveReadContract({
-        options: optionParams,
+    return bindIssue209LiveReadEnvelopeToSessionForContract({
+        params,
         runId,
-        requestId: asString(nextParams.request_id),
-        sessionId,
-        gateInvocationId: asString(nextParams.gate_invocation_id)
+        sessionId
     });
-    nextParams.options = preparedIssue209LiveRead.options;
-    if (preparedIssue209LiveRead.commandRequestId) {
-        nextParams.request_id = preparedIssue209LiveRead.commandRequestId;
-    }
-    if (preparedIssue209LiveRead.gateInvocationId) {
-        nextParams.gate_invocation_id = preparedIssue209LiveRead.gateInvocationId;
-    }
-    return nextParams;
 };
 const isNonIdempotentForward = (input) => {
     if (input.command === "runtime.bootstrap" ||

@@ -1,5 +1,5 @@
 import { buildRiskTransitionAudit, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
-import { evaluateXhsGate, resolveXhsGateDecisionId } from "../shared/xhs-gate.js";
+import { buildIssue209PostGateArtifacts, evaluateXhsGate, resolveXhsGateDecisionId } from "../shared/xhs-gate.js";
 import { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 export { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -76,6 +76,17 @@ export const resolveGate = (options, context) => {
     });
 };
 export const createAuditRecord = (context, gate, env) => {
+    if (gate.gate_input.issue_scope === "issue_209" &&
+        (gate.consumer_gate_result.requested_execution_mode === "live_read_limited" ||
+            gate.consumer_gate_result.requested_execution_mode === "live_read_high_risk")) {
+        return buildIssue209PostGateArtifacts({
+            runId: context.runId,
+            sessionId: context.sessionId,
+            profile: context.profile,
+            gate: gate,
+            now: () => env.now()
+        }).audit_record;
+    }
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;
     const liveModeRequested = requestedMode === "live_read_limited" ||

@@ -10,6 +10,7 @@ import {
   resolveRiskState as resolveSharedRiskState
 } from "../shared/risk-state.js";
 import {
+  buildIssue209PostGateArtifacts,
   evaluateXhsGate,
   resolveXhsGateDecisionId,
   XHS_READ_DOMAIN,
@@ -137,6 +138,20 @@ export const createAuditRecord = (
   gate: XhsSearchGate,
   env: XhsSearchEnvironment
 ): XhsExecutionAuditRecord => {
+  if (
+    gate.gate_input.issue_scope === "issue_209" &&
+    (gate.consumer_gate_result.requested_execution_mode === "live_read_limited" ||
+      gate.consumer_gate_result.requested_execution_mode === "live_read_high_risk")
+  ) {
+    return buildIssue209PostGateArtifacts({
+      runId: context.runId,
+      sessionId: context.sessionId,
+      profile: context.profile,
+      gate: gate as unknown as Parameters<typeof buildIssue209PostGateArtifacts>[0]["gate"],
+      now: () => env.now()
+    }).audit_record as unknown as XhsExecutionAuditRecord;
+  }
+
   const recordedAt = new Date(env.now()).toISOString();
   const requestedMode = gate.consumer_gate_result.requested_execution_mode;
   const liveModeRequested =

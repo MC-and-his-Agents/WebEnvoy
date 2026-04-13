@@ -1,4 +1,22 @@
+import { buildIssue209PostGateArtifacts } from "../../../shared/xhs-gate.js";
 export const buildLoopbackAuditRecord = (input) => {
+    if (input.gate.gateInput.issue_scope === "issue_209" &&
+        (input.gate.consumerGateResult.requested_execution_mode === "live_read_limited" ||
+            input.gate.consumerGateResult.requested_execution_mode === "live_read_high_risk")) {
+        return buildIssue209PostGateArtifacts({
+            runId: input.runId,
+            sessionId: input.sessionId,
+            profile: input.profile,
+            gate: {
+                gate_input: input.gate.gateInput,
+                gate_outcome: input.gate.gateOutcome,
+                consumer_gate_result: input.gate.consumerGateResult,
+                approval_record: input.gate.approvalRecord,
+                write_action_matrix_decisions: input.gate.writeActionMatrixDecisions
+            },
+            now: () => new Date("2026-03-23T10:00:00.000Z").getTime()
+        }).audit_record;
+    }
     const clone = (value) => structuredClone(value);
     const decisionId = String(input.gate.gateOutcome.decision_id ?? `gate_decision_${input.runId}`);
     const approvalId = typeof input.gate.approvalRecord.approval_id === "string" &&

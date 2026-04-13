@@ -17,12 +17,13 @@ import {
   AbilityAction,
   AbilityEnvelope,
   buildCapabilityResult,
+  ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY,
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
-  prepareIssue209LiveReadContract,
+  prepareIssue209LiveReadEnvelopeForContract,
   XhsExecutionMode
 } from "./xhs-input.js";
 
@@ -253,7 +254,7 @@ const xhsReadCommand = async (
   });
 
   try {
-    const preparedIssue209LiveRead = prepareIssue209LiveReadContract({
+    const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
       options: gate.options,
       requestId: envelope.requestId,
       runId: context.run_id
@@ -276,6 +277,11 @@ const xhsReadCommand = async (
           : {}),
         ...(preparedIssue209LiveRead.gateInvocationId
           ? { gate_invocation_id: preparedIssue209LiveRead.gateInvocationId }
+          : {}),
+        ...(preparedIssue209LiveRead.admissionDraft
+          ? {
+              [ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY]: preparedIssue209LiveRead.admissionDraft
+            }
           : {}),
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,

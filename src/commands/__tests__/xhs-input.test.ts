@@ -339,7 +339,8 @@ describe("xhs-input", () => {
         }
       },
       runId: "run-cli-issue209-live-002",
-      requestId: "issue209-live-limited-002"
+      requestId: "issue209-live-limited-002",
+      sessionId: "nm-session-001"
     });
 
     expect(options.admission_context).toEqual({

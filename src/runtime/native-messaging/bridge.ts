@@ -1,5 +1,5 @@
 import type { JsonObject } from "../../core/types.js";
-import { prepareIssue209LiveReadContract } from "../../commands/xhs-input.js";
+import { bindIssue209LiveReadEnvelopeToSessionForContract } from "../../commands/xhs-input.js";
 import {
   BRIDGE_PROTOCOL,
   DEFAULT_TRANSPORT_TIMEOUT_MS,
@@ -119,27 +119,11 @@ const resolveForwardCommandParams = (
   runId: string,
   sessionId: string
 ): JsonObject => {
-  const nextParams: JsonObject = { ...params };
-  const optionParams = asObject(nextParams.options);
-  if (!optionParams) {
-    return nextParams;
-  }
-
-  const preparedIssue209LiveRead = prepareIssue209LiveReadContract({
-    options: optionParams,
+  return bindIssue209LiveReadEnvelopeToSessionForContract({
+    params,
     runId,
-    requestId: asString(nextParams.request_id),
-    sessionId,
-    gateInvocationId: asString(nextParams.gate_invocation_id)
+    sessionId
   });
-  nextParams.options = preparedIssue209LiveRead.options;
-  if (preparedIssue209LiveRead.commandRequestId) {
-    nextParams.request_id = preparedIssue209LiveRead.commandRequestId;
-  }
-  if (preparedIssue209LiveRead.gateInvocationId) {
-    nextParams.gate_invocation_id = preparedIssue209LiveRead.gateInvocationId;
-  }
-  return nextParams;
 };
 
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {

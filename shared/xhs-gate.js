@@ -7,6 +7,16 @@ import {
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState
 } from "./risk-state.js";
+import {
+  collectIssue209LiveReadMatrixGateReasons
+} from "./issue209-live-read/gate.js";
+import {
+  buildIssue209PostGateArtifacts
+} from "./issue209-live-read/postgate-audit.js";
+import {
+  isIssue209LiveReadGateRequest,
+  resolveIssue209LiveReadApprovalId
+} from "./issue209-live-read/identity.js";
 
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
@@ -105,6 +115,13 @@ const deriveGateDecisionId = (input) => {
 };
 
 const deriveApprovalId = (input, decisionId) => {
+  if (isIssue209LiveReadGateRequest(input)) {
+    return resolveIssue209LiveReadApprovalId({
+      decisionId,
+      gateInvocationId: input.gateInvocationId
+    });
+  }
+
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
   const hasRealApproval =
     approvalRecord.approved &&
@@ -853,6 +870,21 @@ const collectXhsCommandGateReasons = (input) => {
 const collectXhsMatrixGateReasons = (input) => {
   const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
   const state = input.state;
+  if (state.issueScope === "issue_209" && state.isLiveReadMode && state.actionType === "read") {
+    return collectIssue209LiveReadMatrixGateReasons({
+      gateReasons,
+      state,
+      decisionId: input.decisionId ?? null,
+      expectedApprovalId: input.expectedApprovalId ?? null,
+      runId: input.runId ?? null,
+      sessionId: input.sessionId ?? null,
+      admissionContext: input.admissionContext,
+      targetDomain: input.targetDomain,
+      targetTabId: input.targetTabId,
+      targetPage: input.targetPage
+    });
+  }
+
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
   const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
   const admissionContext = normalizeXhsAdmissionContext(input.admissionContext);
@@ -1183,5 +1215,6 @@ export {
   collectXhsMatrixGateReasons,
   finalizeXhsGateOutcome,
   evaluateXhsGate,
+  buildIssue209PostGateArtifacts,
   WRITE_INTERACTION_TIER
 };

@@ -361,3 +361,45 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
   };
   approval_record: XhsApprovalRecord;
 };
+export declare const buildIssue209PostGateArtifacts: (input: {
+  runId: string;
+  sessionId: string;
+  profile: string | null;
+  gate: {
+    gate_input: {
+      issue_scope: IssueScope;
+      target_domain: string | null;
+      target_tab_id: number | null;
+      target_page: string | null;
+      action_type: ActionType | null;
+      requested_execution_mode: ExecutionMode | null;
+      risk_state: RiskState;
+      admission_context: XhsAdmissionContext;
+    };
+    gate_outcome: {
+      decision_id: string;
+      effective_execution_mode: ExecutionMode | null;
+      gate_decision: "allowed" | "blocked";
+      gate_reasons: string[];
+      requires_manual_confirmation: boolean;
+    };
+    consumer_gate_result: {
+      issue_scope: IssueScope;
+      target_domain: string | null;
+      target_tab_id: number | null;
+      target_page: string | null;
+      action_type: ActionType | null;
+      requested_execution_mode: ExecutionMode | null;
+      effective_execution_mode: ExecutionMode | null;
+      gate_decision: "allowed" | "blocked";
+      gate_reasons: string[];
+      write_interaction_tier: string | null;
+    };
+    approval_record: XhsApprovalRecord;
+    write_action_matrix_decisions: WriteActionMatrixDecisionsOutput | null;
+  };
+  now?: () => number;
+}) => {
+  approval_record: XhsApprovalRecord;
+  audit_record: Record<string, unknown>;
+};

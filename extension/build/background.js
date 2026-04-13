@@ -596,6 +596,16 @@ const buildGateOnlyObservability = (gatePayload) => {
     };
 };
 const resolveGatePayloadApprovalId = (input) => {
+    if (input.issueScope === "issue_209" &&
+        (input.requestedExecutionMode === "live_read_limited" ||
+            input.requestedExecutionMode === "live_read_high_risk")) {
+        return resolveXhsGateApprovalId({
+            decisionId: input.decisionId,
+            gateInvocationId: input.gateInvocationId,
+            issueScope: input.issueScope,
+            requestedExecutionMode: input.requestedExecutionMode
+        });
+    }
     if (!input.approvalActive || !isApprovalRecordComplete(input.approvalRecord)) {
         return null;
     }
@@ -679,7 +689,10 @@ const createRelayXhsGatePayload = (input) => {
     const approvalId = resolveGatePayloadApprovalId({
         approvalActive,
         approvalRecord: input.approvalRecord,
-        decisionId
+        decisionId,
+        issueScope: input.issueScope,
+        requestedExecutionMode: input.requestedExecutionMode,
+        gateInvocationId: asNonEmptyString(asRecord(input.request.params.command_params)?.gate_invocation_id)
     });
     const approvalRecord = {
         ...input.approvalRecord,
@@ -774,7 +787,10 @@ const createBackgroundXhsGatePayload = (input) => {
     const approvalId = resolveGatePayloadApprovalId({
         approvalActive,
         approvalRecord: input.approvalRecord,
-        decisionId
+        decisionId,
+        issueScope: input.issueScope,
+        requestedExecutionMode: input.requestedExecutionMode,
+        gateInvocationId: asNonEmptyString(asRecord(input.request.params.command_params)?.gate_invocation_id)
     });
     const approvalRecord = {
         ...input.approvalRecord,
@@ -2817,7 +2833,10 @@ class ChromeBackgroundBridge {
         const expectedApprovalId = resolveGatePayloadApprovalId({
             approvalActive: requestedLiveMode,
             approvalRecord,
-            decisionId: gateDecisionId
+            decisionId: gateDecisionId,
+            issueScope,
+            requestedExecutionMode,
+            gateInvocationId
         });
         const pushReason = (reason) => {
             if (!gateReasons.includes(reason)) {
