@@ -169,10 +169,13 @@ spec review 的执行约束：
   - `integration_applicable`
   - `integration_touchpoint`
   - `integration_ref`
+  - `shared_contract_changed`
   - `external_dependency`
   - `merge_gate`
   - `contract_surface`
   - `joint_acceptance_needed`
+  - `integration_status_checked_before_pr`
+  - `integration_status_checked_before_merge`
 - `integration_applicable=no` 时，`integration_ref` 必须写 `none`；`integration_applicable=yes` 时，`integration_ref` 必须指向具体 integration issue / project item。
 - `integration_ref` 必须指向可核查的具体 integration issue / project item；只写 owner 级 project 根链接不算合法绑定。
 - 满足以下任一条件时，`integration_touchpoint` 不得为 `none`，并且在进入实现前必须先查看 `integration_ref` 对应的 integration issue / item：
