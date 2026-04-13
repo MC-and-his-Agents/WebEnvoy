@@ -1,0 +1,96 @@
+name: FR
+description: 创建或修订需要 formal spec 承接的核心事项。
+title: "[FR-XXXX] "
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 摘要
+      description: 写清目标、非目标、阶段位置与当前成熟度。
+      placeholder: |
+        目标：
+        非目标：
+        当前 Phase：
+        当前成熟度：
+    validations:
+      required: true
+
+  - type: textarea
+    id: formal_suite
+    attributes:
+      label: Formal Suite
+      description: 说明本 FR 需要承接的 formal spec 工件和预期 review 入口。
+      placeholder: |
+        spec.md:
+        plan.md:
+        TODO.md:
+        contracts/:
+        risks.md:
+        spec review 输入：
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shared_contract_changed
+    attributes:
+      label: shared_contract_changed
+      options:
+        - "no"
+        - "yes"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: integration_touchpoint
+    attributes:
+      label: integration_touchpoint
+      description: 纯本仓库事项选 `none`；触及跨仓共享契约时选 `check_required` 或 `active`。
+      options:
+        - none
+        - check_required
+        - active
+    validations:
+      required: true
+
+  - type: input
+    id: integration_ref
+    attributes:
+      label: integration_ref
+      description: 填 integration project canonical issue / item；纯本仓库事项留空。
+
+  - type: dropdown
+    id: external_dependency
+    attributes:
+      label: external_dependency
+      options:
+        - none
+        - syvert
+        - webenvoy
+        - both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contract_surface
+    attributes:
+      label: contract_surface
+      options:
+        - none
+        - execution_provider
+        - ids_trace
+        - errors
+        - raw_normalized
+        - diagnostics_observability
+        - runtime_modes
+    validations:
+      required: true
+
+  - type: dropdown
+    id: joint_acceptance_needed
+    attributes:
+      label: joint_acceptance_needed
+      options:
+        - "no"
+        - "yes"
+    validations:
+      required: true

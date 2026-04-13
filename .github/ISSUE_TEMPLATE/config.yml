@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: WebEnvoy 开发区规范
+    url: https://github.com/MC-and-his-Agents/WebEnvoy/blob/main/docs/dev/AGENTS.md
+    about: 先阅读研发漏斗与治理规则，再选择对应 issue form。
