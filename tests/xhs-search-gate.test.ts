@@ -329,6 +329,7 @@ describe("xhs-search gate helpers", () => {
         requested_execution_mode: "live_read_high_risk",
         admission_context: {
           approval_admission_evidence: {
+            approval_admission_ref: "approval_admission_plain-admission-001",
             run_id: "run-extension-plain-admission-001",
             session_id: "session-extension-plain-001",
             issue_scope: "issue_209",
@@ -350,6 +351,7 @@ describe("xhs-search gate helpers", () => {
             recorded_at: "2026-03-23T10:00:00.000Z"
           },
           audit_admission_evidence: {
+            audit_admission_ref: "audit_admission_plain-admission-001",
             run_id: "run-extension-plain-admission-001",
             session_id: "session-extension-plain-001",
             issue_scope: "issue_209",
@@ -863,6 +865,114 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.effective_execution_mode).toBe(scenario.expectedFallback);
     expect(gate.gate_outcome.gate_reasons).toEqual(expect.arrayContaining(scenario.expectedReasons));
+  });
+
+  it("blocks live gate when approval admission evidence omits stable approval_admission_ref", () => {
+    const runId = "run-extension-admission-ref-missing-001";
+    const requestId = "req-admission-ref-missing-001";
+    const decisionId = `gate_decision_${runId}_${requestId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const completeAdmissionContext = createAdmissionContext({
+      run_id: runId,
+      request_id: requestId
+    });
+    const { approval_admission_ref: _approvalAdmissionRef, ...approvalEvidence } =
+      completeAdmissionContext.approval_admission_evidence;
+    const admissionContext = {
+      ...completeAdmissionContext,
+      approval_admission_evidence: approvalEvidence
+    };
+
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 72,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 72,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: admissionContext,
+        approval_record: createApprovalRecord(decisionId, approvalId),
+        audit_record: createAuditRecord({
+          decisionId,
+          approvalId,
+          targetTabId: 72,
+          targetPage: "search_result_tab",
+          requestedExecutionMode: "live_read_high_risk"
+        })
+      },
+      {
+        runId,
+        requestId,
+        sessionId: "session-extension-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
+    expect(gate.gate_outcome.gate_reasons).toEqual(
+      expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
+    );
+  });
+
+  it("blocks live gate when audit admission evidence omits stable audit_admission_ref", () => {
+    const runId = "run-extension-audit-ref-missing-001";
+    const requestId = "req-audit-ref-missing-001";
+    const decisionId = `gate_decision_${runId}_${requestId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const completeAdmissionContext = createAdmissionContext({
+      run_id: runId,
+      request_id: requestId
+    });
+    const { audit_admission_ref: _auditAdmissionRef, ...auditEvidence } =
+      completeAdmissionContext.audit_admission_evidence;
+    const admissionContext = {
+      ...completeAdmissionContext,
+      audit_admission_evidence: auditEvidence
+    };
+
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 84,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 84,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: admissionContext,
+        approval_record: createApprovalRecord(decisionId, approvalId),
+        audit_record: createAuditRecord({
+          decisionId,
+          approvalId,
+          targetTabId: 84,
+          targetPage: "search_result_tab",
+          requestedExecutionMode: "live_read_high_risk"
+        })
+      },
+      {
+        runId,
+        requestId,
+        sessionId: "session-extension-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
+    expect(gate.gate_outcome.gate_reasons).toEqual(
+      expect.arrayContaining(["AUDIT_RECORD_MISSING"])
+    );
   });
 
   it("returns gate core state without throwing when admission_context is provided", () => {

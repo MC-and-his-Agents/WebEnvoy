@@ -1440,6 +1440,7 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   }
 
   if (
+    !approvalAdmissionEvidence.approval_admission_ref ||
     !approvalAdmissionEvidence.recorded_at ||
     approvalAdmissionEvidence.run_id !== expected.runId ||
     approvalAdmissionEvidence.session_id !== expected.sessionId ||
@@ -1481,7 +1482,8 @@ const resolveXhsAuditAdmissionRequirementGaps = (
   const gaps = [];
   if (
     requirements.includes("audit_admission_evidence_present") &&
-    (!auditAdmissionEvidence.recorded_at ||
+    (!auditAdmissionEvidence.audit_admission_ref ||
+      !auditAdmissionEvidence.recorded_at ||
       auditAdmissionEvidence.run_id !== expected.runId ||
       auditAdmissionEvidence.session_id !== expected.sessionId ||
       auditAdmissionEvidence.issue_scope !== expected.issueScope ||

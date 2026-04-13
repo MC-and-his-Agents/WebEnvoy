@@ -14,7 +14,8 @@ const createApprovedReadAdmissionContext = (input: {
   approvalId?: string;
 }) => ({
   approval_admission_evidence: {
-    ...(input.approvalId ? { approval_admission_ref: input.approvalId } : {}),
+    approval_admission_ref:
+      input.approvalId ?? `approval_admission_${input.runId}_${input.requestId}`,
     ...(input.decisionId ? { decision_id: input.decisionId } : {}),
     ...(input.approvalId ? { approval_id: input.approvalId } : {}),
     request_id: input.requestId,
@@ -39,7 +40,10 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    ...(input.decisionId ? { audit_admission_ref: `gate_evt_${input.decisionId}` } : {}),
+    audit_admission_ref:
+      input.decisionId
+        ? `gate_evt_${input.decisionId}`
+        : `audit_admission_${input.runId}_${input.requestId}`,
     ...(input.decisionId ? { decision_id: input.decisionId } : {}),
     ...(input.approvalId ? { approval_id: input.approvalId } : {}),
     request_id: input.requestId,

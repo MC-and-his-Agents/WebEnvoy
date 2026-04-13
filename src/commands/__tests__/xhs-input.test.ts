@@ -112,7 +112,7 @@ describe("xhs-input", () => {
     });
   });
 
-  it("builds issue_209 live admission_context from the current approval record", () => {
+  it("does not synthesize issue_209 live admission_context from the current approval record", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {
         issue_scope: "issue_209",
@@ -141,31 +141,10 @@ describe("xhs-input", () => {
       sessionId: "nm-session-001"
     });
 
-    expect(options.admission_context).toMatchObject({
-      approval_admission_evidence: {
-        approval_admission_ref:
-          "approval_admission_run-cli-issue209-live-001_issue209-live-limited-001",
-        request_id: "issue209-live-limited-001",
-        run_id: "run-cli-issue209-live-001",
-        session_id: "nm-session-001",
-        target_page: "search_result_tab"
-      },
-      audit_admission_evidence: {
-        audit_admission_ref: "audit_admission_run-cli-issue209-live-001_issue209-live-limited-001",
-        request_id: "issue209-live-limited-001",
-        run_id: "run-cli-issue209-live-001",
-        session_id: "nm-session-001",
-        target_page: "search_result_tab",
-        risk_state: "limited"
-      }
-    });
-    expect(options.admission_context.approval_admission_evidence).not.toHaveProperty("decision_id");
-    expect(options.admission_context.approval_admission_evidence).not.toHaveProperty("approval_id");
-    expect(options.admission_context.audit_admission_evidence).not.toHaveProperty("decision_id");
-    expect(options.admission_context.audit_admission_evidence).not.toHaveProperty("approval_id");
+    expect(options).not.toHaveProperty("admission_context");
   });
 
-  it("uses the actual bridge session id when synthesizing admission_context", () => {
+  it("keeps caller-provided admission_context unchanged instead of rebinding session", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {
         issue_scope: "issue_209",
@@ -175,6 +154,20 @@ describe("xhs-input", () => {
         action_type: "read",
         requested_execution_mode: "live_read_limited",
         risk_state: "limited",
+        admission_context: {
+          approval_admission_evidence: {
+            approval_admission_ref: "approval_admission_existing",
+            request_id: "issue209-live-session-001",
+            run_id: "run-cli-issue209-live-session-001",
+            session_id: "nm-session-stale-209"
+          },
+          audit_admission_evidence: {
+            audit_admission_ref: "audit_admission_existing",
+            request_id: "issue209-live-session-001",
+            run_id: "run-cli-issue209-live-session-001",
+            session_id: "nm-session-stale-209"
+          }
+        },
         approval_record: {
           approved: true,
           approver: "qa-reviewer",
@@ -196,10 +189,10 @@ describe("xhs-input", () => {
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
-        session_id: "nm-session-real-209"
+        session_id: "nm-session-stale-209"
       },
       audit_admission_evidence: {
-        session_id: "nm-session-real-209"
+        session_id: "nm-session-stale-209"
       }
     });
   });
@@ -222,19 +215,7 @@ describe("xhs-input", () => {
         target_page: "profile_tab",
         action_type: "read",
         requested_execution_mode: "live_read_limited",
-        risk_state: "limited",
-        approval_record: {
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
-        }
+        risk_state: "limited"
       },
       runId: "run-cli-issue209-live-003",
       requestId,
@@ -242,26 +223,10 @@ describe("xhs-input", () => {
       sessionId: "nm-session-001"
     });
 
-    expect(options.admission_context).toMatchObject({
-      approval_admission_evidence: {
-        approval_admission_ref: `approval_admission_run-cli-issue209-live-003_${requestId}`,
-        request_id: requestId,
-        run_id: "run-cli-issue209-live-003",
-        session_id: "nm-session-001",
-        target_page: "profile_tab"
-      },
-      audit_admission_evidence: {
-        audit_admission_ref: `audit_admission_run-cli-issue209-live-003_${requestId}`,
-        request_id: requestId,
-        run_id: "run-cli-issue209-live-003",
-        session_id: "nm-session-001",
-        target_page: "profile_tab",
-        risk_state: "limited"
-      }
-    });
+    expect(options).not.toHaveProperty("admission_context");
   });
 
-  it("treats omitted issue_scope as issue_209 for live read admission synthesis", () => {
+  it("treats omitted issue_scope as issue_209 for live read request_id synthesis only", () => {
     const requestId = resolveIssue209CommandRequestIdForContract({
       options: {
         requested_execution_mode: "live_read_limited"
@@ -277,19 +242,7 @@ describe("xhs-input", () => {
         target_page: "search_result_tab",
         action_type: "read",
         requested_execution_mode: "live_read_limited",
-        risk_state: "limited",
-        approval_record: {
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
-        }
+        risk_state: "limited"
       },
       runId: "run-cli-issue209-live-004",
       requestId,
@@ -297,23 +250,7 @@ describe("xhs-input", () => {
       sessionId: "nm-session-001"
     });
 
-    expect(options.admission_context).toMatchObject({
-      approval_admission_evidence: {
-        approval_admission_ref: `approval_admission_run-cli-issue209-live-004_${requestId}`,
-        issue_scope: "issue_209",
-        request_id: requestId,
-        run_id: "run-cli-issue209-live-004",
-        session_id: "nm-session-001"
-      },
-      audit_admission_evidence: {
-        audit_admission_ref: `audit_admission_run-cli-issue209-live-004_${requestId}`,
-        issue_scope: "issue_209",
-        request_id: requestId,
-        run_id: "run-cli-issue209-live-004",
-        session_id: "nm-session-001",
-        risk_state: "limited"
-      }
-    });
+    expect(options).not.toHaveProperty("admission_context");
   });
 
   it("reuses caller request_id from synthesized admission_context when request_id is omitted", () => {

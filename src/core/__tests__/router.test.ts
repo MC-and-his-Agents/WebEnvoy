@@ -30,6 +30,7 @@ describe("executeCommand", () => {
 
   const createApprovedReadAdmissionContext = (requestId: string) => ({
     approval_admission_evidence: {
+      approval_admission_ref: `approval_admission_${baseContext.run_id}_${requestId}`,
       run_id: baseContext.run_id,
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -51,6 +52,7 @@ describe("executeCommand", () => {
       recorded_at: "2026-03-23T10:00:00Z"
     },
     audit_admission_evidence: {
+      audit_admission_ref: `audit_admission_${baseContext.run_id}_${requestId}`,
       run_id: baseContext.run_id,
       session_id: "nm-session-001",
       issue_scope: "issue_209",

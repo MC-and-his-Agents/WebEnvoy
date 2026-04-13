@@ -96,7 +96,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     const sessionId = input.sessionId ?? "nm-session-001";
     return ({
     approval_admission_evidence: {
-      ...(approvalId ? { approval_admission_ref: approvalId } : {}),
+      approval_admission_ref:
+        approvalId ?? `approval_admission_${input.runId}_${input.requestId ?? "formal"}`,
       ...(decisionId ? { decision_id: decisionId } : {}),
       ...(approvalId ? { approval_id: approvalId } : {}),
       ...(input.requestId ? { request_id: input.requestId } : {}),
@@ -121,7 +122,10 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       recorded_at: "2026-03-23T10:00:00Z"
     },
     audit_admission_evidence: {
-      ...(decisionId ? { audit_admission_ref: `gate_evt_${decisionId}` } : {}),
+      audit_admission_ref:
+        decisionId
+          ? `gate_evt_${decisionId}`
+          : `audit_admission_${input.runId}_${input.requestId ?? "formal"}`,
       ...(decisionId ? { decision_id: decisionId } : {}),
       ...(approvalId ? { approval_id: approvalId } : {}),
       ...(input.requestId ? { request_id: input.requestId } : {}),
@@ -1896,7 +1900,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("synthesizes request linkage for live_read_limited when caller omits request_id", () => {
+  it("blocks live_read_limited when caller omits admission_context even if request_id is synthesized", () => {
     const runId = "run-issue209-live-limited-generated-request-001";
     const result = runCli([
       "xhs.search",
@@ -1939,45 +1943,64 @@ process.stdin.on("data", (chunk) => {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(6);
     const body = parseSingleJsonLine(result.stdout);
-    const decisionId = String(body.summary.gate_outcome.decision_id);
-    const approvalAdmissionEvidence = body.summary.gate_input.admission_context.approval_admission_evidence;
-    const auditAdmissionEvidence = body.summary.gate_input.admission_context.audit_admission_evidence;
+    const errorDetails = body.error.details as Record<string, unknown>;
+    const gateOutcome = errorDetails.gate_outcome as Record<string, unknown>;
+    const gateInput = errorDetails.gate_input as Record<string, unknown>;
+    const approvalRecord = errorDetails.approval_record as Record<string, unknown>;
+    const auditRecord = errorDetails.audit_record as Record<string, unknown>;
+    const decisionId = String(gateOutcome.decision_id);
     expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
-    expect(approvalAdmissionEvidence).toMatchObject({
-      approval_admission_ref: expect.stringMatching(
-        new RegExp(`^approval_admission_${runId}_issue209-live-`)
-      ),
-      run_id: runId,
-      session_id: String(body.summary.gate_input.session_id)
+    expect(gateInput).toMatchObject({
+      admission_context: {
+        approval_admission_evidence: {
+          approval_admission_ref: null,
+          decision_id: null,
+          approval_id: null,
+          run_id: null,
+          session_id: null
+        },
+        audit_admission_evidence: {
+          audit_admission_ref: null,
+          decision_id: null,
+          approval_id: null,
+          run_id: null,
+          session_id: null
+        }
+      }
     });
-    expect(auditAdmissionEvidence).toMatchObject({
-      audit_admission_ref: expect.stringMatching(
-        new RegExp(`^audit_admission_${runId}_issue209-live-`)
-      ),
-      run_id: runId,
-      session_id: String(body.summary.gate_input.session_id),
-      risk_state: "limited"
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "recon",
+          gate_decision: "blocked"
+        }
+      }
     });
-    expect(approvalAdmissionEvidence.decision_id).toBeNull();
-    expect(approvalAdmissionEvidence.approval_id).toBeNull();
-    expect(auditAdmissionEvidence.decision_id).toBeNull();
-    expect(auditAdmissionEvidence.approval_id).toBeNull();
-    expect(body.summary.gate_outcome).toMatchObject({
-      effective_execution_mode: "live_read_limited",
-      gate_decision: "allowed",
-      gate_reasons: ["LIVE_MODE_APPROVED"]
-    });
-    expect(body.summary.approval_record).toMatchObject({
+    expect(gateOutcome).toMatchObject({
       decision_id: decisionId,
-      approval_id: `gate_appr_${decisionId}`
+      effective_execution_mode: "recon",
+      gate_decision: "blocked",
+      gate_reasons: expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "AUDIT_RECORD_MISSING"
+      ])
     });
-    expect(body.summary.audit_record).toMatchObject({
+    expect(approvalRecord).toMatchObject({
       decision_id: decisionId,
-      approval_id: `gate_appr_${decisionId}`,
+      approval_id: null
+    });
+    expect(auditRecord).toMatchObject({
+      decision_id: decisionId,
+      approval_id: null,
       requested_execution_mode: "live_read_limited",
-      effective_execution_mode: "live_read_limited"
+      effective_execution_mode: "recon"
     });
   });
 

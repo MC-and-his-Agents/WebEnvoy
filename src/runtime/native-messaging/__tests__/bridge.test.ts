@@ -758,15 +758,12 @@ describe("native messaging bridge", () => {
     expect(forwardCall).toBe(2);
   });
 
-  it("rebuilds synthesized issue_209 admission_context after session recovery", async () => {
+  it("does not synthesize issue_209 admission_context after session recovery", async () => {
     let openCall = 0;
     let forwardCall = 0;
     const forwardedSessions: Array<{
       requestSessionId: string;
-      approvalSessionId: string | null;
-      auditSessionId: string | null;
-      approvalAdmissionRef: string | null;
-      auditAdmissionRef: string | null;
+      admissionContextPresent: boolean;
     }> = [];
     const currentSessionId = (): string => (openCall >= 2 ? "nm-session-002" : "nm-session-001");
 
@@ -798,22 +795,9 @@ describe("native messaging bridge", () => {
         forwardCall += 1;
         const commandParams = request.params.command_params as Record<string, unknown>;
         const options = commandParams.options as Record<string, unknown>;
-        const admissionContext = options.admission_context as Record<string, unknown>;
-        const approvalEvidence = admissionContext.approval_admission_evidence as Record<string, unknown>;
-        const auditEvidence = admissionContext.audit_admission_evidence as Record<string, unknown>;
         forwardedSessions.push({
           requestSessionId: String(request.params.session_id ?? ""),
-          approvalSessionId:
-            typeof approvalEvidence.session_id === "string" ? approvalEvidence.session_id : null,
-          auditSessionId: typeof auditEvidence.session_id === "string" ? auditEvidence.session_id : null,
-          approvalAdmissionRef:
-            typeof approvalEvidence.approval_admission_ref === "string"
-              ? approvalEvidence.approval_admission_ref
-              : null,
-          auditAdmissionRef:
-            typeof auditEvidence.audit_admission_ref === "string"
-              ? auditEvidence.audit_admission_ref
-              : null
+          admissionContextPresent: Object.hasOwn(options, "admission_context")
         });
 
         if (forwardCall === 1) {
@@ -885,21 +869,11 @@ describe("native messaging bridge", () => {
     expect(forwardedSessions).toEqual([
       {
         requestSessionId: "nm-session-001",
-        approvalSessionId: "nm-session-001",
-        auditSessionId: "nm-session-001",
-        approvalAdmissionRef:
-          "approval_admission_run-recovery-admission-session-001_issue209-live-recovery-001",
-        auditAdmissionRef:
-          "audit_admission_run-recovery-admission-session-001_issue209-live-recovery-001"
+        admissionContextPresent: false
       },
       {
         requestSessionId: "nm-session-002",
-        approvalSessionId: "nm-session-002",
-        auditSessionId: "nm-session-002",
-        approvalAdmissionRef:
-          "approval_admission_run-recovery-admission-session-001_issue209-live-recovery-001",
-        auditAdmissionRef:
-          "audit_admission_run-recovery-admission-session-001_issue209-live-recovery-001"
+        admissionContextPresent: false
       }
     ]);
   });

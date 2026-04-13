@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { resolveIssueScope as resolveSharedIssueScope } from "../../shared/risk-state.js";
-import { normalizeXhsApprovalRecord } from "../../shared/xhs-gate.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set([
@@ -268,74 +267,14 @@ export const resolveIssue209GateInvocationIdForContract = (input) => {
 };
 export const ensureIssue209AdmissionContextForContract = (input) => {
     const nextOptions = cloneJsonObject(input.options);
+    void input.runId;
+    void input.requestId;
+    void input.sessionId;
+    void input.gateInvocationId;
     const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
     if (admissionContext) {
         nextOptions.admission_context = admissionContext;
-        return nextOptions;
     }
-    if (!isIssue209LiveReadRequest(nextOptions)) {
-        return nextOptions;
-    }
-    const canonicalRequestId = resolveIssue209CommandRequestIdForContract({
-        options: nextOptions,
-        requestId: input.requestId,
-        runId: input.runId
-    });
-    const admissionEvidenceRef = canonicalRequestId === null
-        ? input.runId
-        : `${input.runId}_${canonicalRequestId}`;
-    const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
-    const approvalComplete = approvalRecord.approved &&
-        !!approvalRecord.approver &&
-        !!approvalRecord.approved_at;
-    if (!approvalComplete) {
-        return nextOptions;
-    }
-    const targetDomain = asString(nextOptions.target_domain);
-    const targetTabId = typeof nextOptions.target_tab_id === "number" && Number.isInteger(nextOptions.target_tab_id)
-        ? nextOptions.target_tab_id
-        : null;
-    const targetPage = asString(nextOptions.target_page);
-    const actionType = asString(nextOptions.action_type);
-    const riskState = asString(nextOptions.risk_state);
-    const sessionId = asString(input.sessionId);
-    if (!sessionId) {
-        return nextOptions;
-    }
-    nextOptions.admission_context = {
-        approval_admission_evidence: {
-            approval_admission_ref: `approval_admission_${admissionEvidenceRef}`,
-            ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
-            run_id: input.runId,
-            session_id: sessionId,
-            issue_scope: "issue_209",
-            target_domain: targetDomain,
-            target_tab_id: targetTabId,
-            target_page: targetPage,
-            action_type: actionType,
-            requested_execution_mode: nextOptions.requested_execution_mode,
-            approved: true,
-            approver: approvalRecord.approver,
-            approved_at: approvalRecord.approved_at,
-            checks: cloneJsonObject(approvalRecord.checks),
-            recorded_at: approvalRecord.approved_at
-        },
-        audit_admission_evidence: {
-            audit_admission_ref: `audit_admission_${admissionEvidenceRef}`,
-            ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
-            run_id: input.runId,
-            session_id: sessionId,
-            issue_scope: "issue_209",
-            target_domain: targetDomain,
-            target_tab_id: targetTabId,
-            target_page: targetPage,
-            action_type: actionType,
-            requested_execution_mode: nextOptions.requested_execution_mode,
-            risk_state: riskState,
-            audited_checks: cloneJsonObject(approvalRecord.checks),
-            recorded_at: approvalRecord.approved_at
-        }
-    };
     return nextOptions;
 };
 export const buildCapabilityResult = (ability, summary) => ({
