@@ -203,6 +203,8 @@ spec review 的执行约束：
   - `raw_normalized`
   - `diagnostics_observability`
   - `runtime_modes`
+  - `integration_governance`
+- 若当前 PR 只改 integration gate / review 语义或其他共享协作治理口径，`contract_surface` 统一写 `integration_governance`，不得回退为 `none` 或误标为业务运行时表面。
 - integration project 只承载跨仓协调真相；本地 Issue / Project / PR 仍是本仓库执行、关闭语义与 merge gate 的真相源。
 
 ## 轻量改动通道

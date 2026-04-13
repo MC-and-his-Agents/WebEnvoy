@@ -72,6 +72,8 @@ docs/dev/
   - `raw_normalized`
   - `diagnostics_observability`
   - `runtime_modes`
+  - `integration_governance`
+- 若当前 PR 只改 integration gate / review 语义或其他共享协作治理口径，`contract_surface` 统一写 `integration_governance`，不得回退为 `none` 或误标为业务运行时表面。
 - integration project 只承担跨仓协调真相；本地 issue / project / PR 仍承担本仓库研发真相。
 
 ## 研发漏斗
