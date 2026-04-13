@@ -103,6 +103,7 @@
   - 是否引入提示词注入、命令注入、越权执行、错误自动合并、敏感信息泄露或对不可信输入的错误信任
 - integration 联动一致性
   - 若事项触及跨仓共享契约、跨仓依赖或联合验收，是否已补齐 `integration_touchpoint`、`integration_ref`、`external_dependency`、`merge_gate` 与 `contract_surface`
+  - 若当前 PR 改 integration gate / review 语义、联合验收口径或其他共享协作契约，即使只改治理文档，也必须按 integration-gated 事项审查，不得退回为 `local_only`
   - `joint_acceptance_needed=yes` 或 `merge_gate=integration_check_required` 时，是否已在提 PR 前与合并前核对 integration 状态
 - 流程与元数据合规
   - 是否满足提交信息规范、PR 描述规范、`Fixes #...` / `refs #...` 使用时机、目标分支与仓库合并策略
@@ -132,7 +133,9 @@
   - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`interaction_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`
 - integration 元数据完整性
   - 对触及跨仓共享契约、跨仓依赖或联合验收的 PR，是否已显式提供 `integration_check`
+  - 对当前 PR 改 integration gate / review 语义、联合验收口径或其他共享协作契约的场景，是否同样显式提供 `integration_check`，且 `contract_surface` 不为 `none`
   - 若 `shared_contract_changed=yes`、`external_dependency!=none`、`joint_acceptance_needed=yes` 或事项自身要求 `merge_gate=integration_check_required`，是否已明确记录提 PR 前与合并前的 integration 状态核对结果
+  - 若 `integration_check` 缺失、`integration_ref` 不是具体 integration issue / item、`merge_gate` 仍写 `local_only`，或 gate / review 语义变更却把 `contract_surface` 写成 `none`，是否已按 blocker 处理
 
 说明：
 
@@ -225,6 +228,7 @@
 - formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
 - 治理落库/治理维护 PR 缺少 `governance_context_issue_ref`、未精确命中五处冻结治理目标文件，或 `governance_context_issue_ref` 与 `review_lane`/closing 语义不一致
 - 同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件
+- 触及跨仓共享契约、跨仓依赖、联合验收，或当前 PR 本身改 integration gate / review 语义，却缺少有效 `integration_check`，或其中字段与 gate 规则自相矛盾
 - 落入“真实 Live Evidence 专项门禁”的 PR 缺少 latest head 新鲜复验，或把 stub/fake host / `runtime.ping` / `runtime.bootstrap` 误写成真实闭环证据
 - 证据不足，无法支持放行
 
