@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { mapCapabilitySummaryForContract } from "../core/capability-output.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
@@ -181,7 +180,7 @@ const xhsReadCommand = async (context, inputConfig) => {
         const gateInvocationId = resolveIssue209GateInvocationIdForContract({
             options: gate.options,
             runId: context.run_id
-        }) ?? `xhs-gate-${context.run_id}-${randomUUID()}`;
+        });
         await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
@@ -195,7 +194,7 @@ const xhsReadCommand = async (context, inputConfig) => {
         });
         const commandParams = appendFingerprintContext({
             ...(commandRequestId ? { request_id: commandRequestId } : {}),
-            gate_invocation_id: gateInvocationId,
+            ...(gateInvocationId ? { gate_invocation_id: gateInvocationId } : {}),
             target_domain: gate.targetDomain,
             target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,

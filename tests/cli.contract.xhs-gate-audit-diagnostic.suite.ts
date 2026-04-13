@@ -1946,14 +1946,18 @@ process.stdin.on("data", (chunk) => {
     const auditAdmissionEvidence = body.summary.gate_input.admission_context.audit_admission_evidence;
     expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
     expect(approvalAdmissionEvidence).toMatchObject({
-      decision_id: decisionId,
-      approval_id: `gate_appr_${decisionId}`
+      run_id: runId,
+      session_id: String(body.summary.gate_input.session_id)
     });
     expect(auditAdmissionEvidence).toMatchObject({
-      decision_id: decisionId,
-      approval_id: `gate_appr_${decisionId}`,
+      run_id: runId,
+      session_id: String(body.summary.gate_input.session_id),
       risk_state: "limited"
     });
+    expect(approvalAdmissionEvidence.decision_id).toBeNull();
+    expect(approvalAdmissionEvidence.approval_id).toBeNull();
+    expect(auditAdmissionEvidence.decision_id).toBeNull();
+    expect(auditAdmissionEvidence.approval_id).toBeNull();
     expect(body.summary.gate_outcome).toMatchObject({
       effective_execution_mode: "live_read_limited",
       gate_decision: "allowed",
@@ -1971,16 +1975,18 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("preserves caller admission linkage when request_id is omitted", () => {
+  it("relinks live gate linkage by recovered request_id when admission_context omits invocation identity", () => {
     const runId = "run-issue209-live-limited-existing-admission-001";
     const requestId = "issue209-live-existing-admission-001";
-    const decisionId = "gate_decision_issue209-gate-run-issue209-live-limited-existing-admission-001-001";
+    const staleDecisionId = "gate_decision_issue209-gate-run-issue209-live-limited-existing-admission-001-001";
+    const staleApprovalId = `gate_appr_${staleDecisionId}`;
+    const decisionId = `gate_decision_${runId}_${requestId}`;
     const approvalId = `gate_appr_${decisionId}`;
     const admissionContext = createApprovedReadAdmissionContext({
       runId,
       requestId,
-      decisionId,
-      approvalId,
+      decisionId: staleDecisionId,
+      approvalId: staleApprovalId,
       requestedExecutionMode: "live_read_limited",
       riskState: "limited"
     });
@@ -2044,10 +2050,10 @@ process.stdin.on("data", (chunk) => {
     });
     expect(body.summary.gate_input.admission_context).toMatchObject({
       approval_admission_evidence: {
-        decision_id: decisionId
+        decision_id: staleDecisionId
       },
       audit_admission_evidence: {
-        decision_id: decisionId
+        decision_id: staleDecisionId
       }
     });
   });

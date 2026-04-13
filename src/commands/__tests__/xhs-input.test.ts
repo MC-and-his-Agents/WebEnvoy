@@ -144,16 +144,22 @@ describe("xhs-input", () => {
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
         request_id: "issue209-live-limited-001",
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001"
+        run_id: "run-cli-issue209-live-001",
+        session_id: "nm-session-001",
+        target_page: "search_result_tab"
       },
       audit_admission_evidence: {
         request_id: "issue209-live-limited-001",
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001",
+        run_id: "run-cli-issue209-live-001",
+        session_id: "nm-session-001",
+        target_page: "search_result_tab",
         risk_state: "limited"
       }
     });
+    expect(options.admission_context.approval_admission_evidence).not.toHaveProperty("decision_id");
+    expect(options.admission_context.approval_admission_evidence).not.toHaveProperty("approval_id");
+    expect(options.admission_context.audit_admission_evidence).not.toHaveProperty("decision_id");
+    expect(options.admission_context.audit_admission_evidence).not.toHaveProperty("approval_id");
   });
 
   it("uses the actual bridge session id when synthesizing admission_context", () => {
@@ -236,14 +242,14 @@ describe("xhs-input", () => {
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
         request_id: requestId,
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
+        run_id: "run-cli-issue209-live-003",
+        session_id: "nm-session-001",
         target_page: "profile_tab"
       },
       audit_admission_evidence: {
         request_id: requestId,
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
+        run_id: "run-cli-issue209-live-003",
+        session_id: "nm-session-001",
         target_page: "profile_tab",
         risk_state: "limited"
       }
@@ -290,14 +296,14 @@ describe("xhs-input", () => {
       approval_admission_evidence: {
         issue_scope: "issue_209",
         request_id: requestId,
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001"
+        run_id: "run-cli-issue209-live-004",
+        session_id: "nm-session-001"
       },
       audit_admission_evidence: {
         issue_scope: "issue_209",
         request_id: requestId,
-        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
-        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001",
+        run_id: "run-cli-issue209-live-004",
+        session_id: "nm-session-001",
         risk_state: "limited"
       }
     });
@@ -326,7 +332,7 @@ describe("xhs-input", () => {
     expect(requestId).toBe("issue209-live-existing-001");
   });
 
-  it("reuses synthesized gate_invocation_id from caller admission_context", () => {
+  it("does not derive gate_invocation_id from caller admission_context", () => {
     const gateInvocationId = resolveIssue209GateInvocationIdForContract({
       options: {
         issue_scope: "issue_209",
@@ -343,7 +349,7 @@ describe("xhs-input", () => {
       runId: "run-cli-issue209-live-007"
     });
 
-    expect(gateInvocationId).toBe("issue209-gate-run-cli-issue209-live-007-existing-001");
+    expect(gateInvocationId).toBeNull();
   });
 
   it("keeps legacy request_id recovery for older admission decision ids", () => {

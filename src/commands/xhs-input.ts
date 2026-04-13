@@ -2,11 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import { resolveIssueScope as resolveSharedIssueScope } from "../../shared/risk-state.js";
-import {
-  normalizeXhsApprovalRecord,
-  resolveXhsGateApprovalId,
-  resolveXhsGateDecisionId
-} from "../../shared/xhs-gate.js";
+import { normalizeXhsApprovalRecord } from "../../shared/xhs-gate.js";
 
 export type AbilityLayer = "L3" | "L2" | "L1";
 export type AbilityAction = "read" | "write" | "download";
@@ -371,30 +367,6 @@ const resolveIssue209RequestIdFromAdmissionContext = (
   return decisionId.slice(prefix.length);
 };
 
-const resolveIssue209GateInvocationIdFromAdmissionContext = (options: JsonObject): string | null => {
-  const admissionContext = asObject(options.admission_context);
-  if (!admissionContext) {
-    return null;
-  }
-
-  const approvalAdmissionEvidence = asObject(admissionContext.approval_admission_evidence);
-  const auditAdmissionEvidence = asObject(admissionContext.audit_admission_evidence);
-  const approvalDecisionId = asString(approvalAdmissionEvidence?.decision_id);
-  const auditDecisionId = asString(auditAdmissionEvidence?.decision_id);
-
-  if (approvalDecisionId && auditDecisionId && approvalDecisionId !== auditDecisionId) {
-    return null;
-  }
-
-  const decisionId = approvalDecisionId ?? auditDecisionId;
-  const prefix = `gate_decision_${ISSUE209_GATE_INVOCATION_ID_PREFIX}-`;
-  if (!decisionId || !decisionId.startsWith(prefix) || decisionId.length <= "gate_decision_".length) {
-    return null;
-  }
-
-  return decisionId.slice("gate_decision_".length);
-};
-
 const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
@@ -446,9 +418,8 @@ export const resolveIssue209GateInvocationIdForContract = (input: {
     return null;
   }
 
-  const admissionInvocationId = resolveIssue209GateInvocationIdFromAdmissionContext(input.options);
-  if (admissionInvocationId) {
-    return admissionInvocationId;
+  if (asObject(input.options.admission_context)) {
+    return null;
   }
 
   return `${ISSUE209_GATE_INVOCATION_ID_PREFIX}-${input.runId}-${randomUUID()}`;
@@ -477,28 +448,11 @@ export const ensureIssue209AdmissionContextForContract = (input: {
     requestId: input.requestId,
     runId: input.runId
   });
-  const gateInvocationId = resolveIssue209GateInvocationIdForContract({
-    options: nextOptions,
-    runId: input.runId,
-    gateInvocationId: input.gateInvocationId
-  });
   const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
-  const decisionId = resolveXhsGateDecisionId({
-    runId: input.runId,
-    requestId: canonicalRequestId,
-    gateInvocationId
-  });
-  const approvalId = resolveXhsGateApprovalId({
-    runId: input.runId,
-    requestId: canonicalRequestId,
-    gateInvocationId,
-    approvalRecord: nextOptions.approval_record ?? nextOptions.approval
-  });
   const approvalComplete =
     approvalRecord.approved &&
     !!approvalRecord.approver &&
-    !!approvalRecord.approved_at &&
-    approvalId !== null;
+    !!approvalRecord.approved_at;
   if (!approvalComplete) {
     return nextOptions;
   }
@@ -518,9 +472,6 @@ export const ensureIssue209AdmissionContextForContract = (input: {
 
   nextOptions.admission_context = {
     approval_admission_evidence: {
-      approval_admission_ref: `gate_appr_${decisionId}`,
-      decision_id: decisionId,
-      approval_id: approvalId,
       ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
       run_id: input.runId,
       session_id: sessionId,
@@ -537,9 +488,6 @@ export const ensureIssue209AdmissionContextForContract = (input: {
       recorded_at: approvalRecord.approved_at
     },
     audit_admission_evidence: {
-      audit_admission_ref: `gate_evt_${decisionId}`,
-      decision_id: decisionId,
-      approval_id: approvalId,
       ...(canonicalRequestId ? { request_id: canonicalRequestId } : {}),
       run_id: input.runId,
       session_id: sessionId,
