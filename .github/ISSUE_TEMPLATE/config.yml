@@ -1,4 +1,4 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
   - name: WebEnvoy 开发区规范
     url: https://github.com/MC-and-his-Agents/WebEnvoy/blob/main/docs/dev/AGENTS.md
