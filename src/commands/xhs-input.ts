@@ -1002,7 +1002,10 @@ export const normalizeGateOptionsForContract = (
   ) {
     throw invalidAbilityInput("ISSUE_SCOPE_CONFLICT", abilityId);
   }
-  const canonicalIssueScope = explicitIssueScope ?? inferredIssueScope;
+  const canonicalIssueScope =
+    !upstreamAuthorization && inferredIssueScope === "issue_209"
+      ? inferredIssueScope
+      : explicitIssueScope ?? inferredIssueScope;
 
   return {
     targetDomain,

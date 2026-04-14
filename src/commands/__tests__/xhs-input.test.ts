@@ -1585,6 +1585,27 @@ describe("xhs-input", () => {
     });
   });
 
+  it("overrides stale non-issue_209 issue_scope on legacy live-read request shapes", () => {
+    expect(
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_208",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited"
+        },
+        "xhs.note.search.v1"
+      )
+    ).toMatchObject({
+      options: {
+        issue_scope: "issue_209"
+      }
+    });
+  });
+
   it("always generates a new gate_invocation_id for issue_209 live reads", () => {
     const gateInvocationId = resolveIssue209GateInvocationIdForContract({
       options: {
