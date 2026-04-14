@@ -12,6 +12,57 @@ import {
   resolveIssue209GateInvocationIdForContract
 } from "../xhs-input.js";
 
+const buildUpstreamAuthorizationRequest = (overrides?: Record<string, unknown>) => {
+  const base = {
+    action_request: {
+      request_ref: "upstream_req_001",
+      action_name: "xhs.read_search_results",
+      action_category: "read",
+      intent: "fetch_search_results",
+      constraint_refs: ["grant_rule_search_read"],
+      requested_at: "2026-04-14T10:00:00Z"
+    },
+    resource_binding: {
+      binding_ref: "binding_001",
+      resource_kind: "profile_session",
+      profile_ref: "xhs_account_001",
+      subject_ref: "subject_xhs_reader_01",
+      account_ref: "account_xhs_reader_01"
+    },
+    authorization_grant: {
+      grant_ref: "grant_001",
+      allowed_actions: ["xhs.read_search_results"],
+      binding_scope: {
+        allowed_resource_kinds: ["profile_session"],
+        allowed_profile_refs: ["xhs_account_001"]
+      },
+      target_scope: {
+        allowed_domains: ["www.xiaohongshu.com"],
+        allowed_pages: ["search_result_tab"]
+      },
+      resource_state_snapshot: "active",
+      grant_constraints: {
+        manual_approval_required: true
+      },
+      approval_refs: ["approval_admission_001"],
+      audit_refs: ["audit_admission_001"],
+      granted_at: "2026-04-14T10:00:00Z"
+    },
+    runtime_target: {
+      target_ref: "target_001",
+      domain: "www.xiaohongshu.com",
+      page: "search_result_tab",
+      tab_id: 924,
+      url: "https://www.xiaohongshu.com/search_result?keyword=camping"
+    }
+  };
+
+  return structuredClone({
+    ...base,
+    ...(overrides ?? {})
+  }) as Record<string, unknown>;
+};
+
 describe("xhs-input", () => {
   it("parses ability envelope and normalizes xhs.search input", () => {
     const envelope = parseAbilityEnvelopeForContract({
@@ -111,6 +162,474 @@ describe("xhs-input", () => {
     ).toEqual({
       note_id: "note-001"
     });
+  });
+
+  it("normalizes FR-0023 upstream authorization objects into canonical and legacy gate fields", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(envelope.upstreamAuthorization).toMatchObject({
+      action_request: {
+        action_name: "xhs.read_search_results"
+      },
+      resource_binding: {
+        binding_ref: "binding_001",
+        resource_kind: "profile_session",
+        profile_ref: "xhs_account_001"
+      },
+      authorization_grant: {
+        resource_state_snapshot: "active"
+      },
+      runtime_target: {
+        domain: "www.xiaohongshu.com",
+        page: "search_result_tab",
+        tab_id: 924
+      }
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toMatchObject({
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 924,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "dry_run",
+      options: {
+        action_type: "read",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 924,
+        target_page: "search_result_tab",
+        upstream_authorization_request: {
+          resource_binding: {
+            binding_ref: "binding_001"
+          }
+        }
+      }
+    });
+  });
+
+  it("accepts matching legacy gate fields alongside FR-0023 upstream authorization objects", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        action_type: "read",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 924,
+        target_page: "search_result_tab",
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      }).options
+    ).toMatchObject({
+      action_type: "read",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 924,
+      target_page: "search_result_tab"
+    });
+  });
+
+  it("rejects incomplete FR-0023 upstream authorization object sets", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        action_request: buildUpstreamAuthorizationRequest().action_request
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "UPSTREAM_AUTHORIZATION_OBJECT_SET_INCOMPLETE"
+        })
+      })
+    );
+  });
+
+  it("rejects resource_binding without binding_ref", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        ...buildUpstreamAuthorizationRequest({
+          resource_binding: {
+            resource_kind: "profile_session",
+            profile_ref: "xhs_account_001"
+          }
+        })
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "BINDING_REF_INVALID"
+        })
+      })
+    );
+  });
+
+  it("rejects profile_session resource_binding without profile_ref", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        ...buildUpstreamAuthorizationRequest({
+          resource_binding: {
+            binding_ref: "binding_001",
+            resource_kind: "profile_session"
+          }
+        })
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "PROFILE_REF_REQUIRED"
+        })
+      })
+    );
+  });
+
+  it("rejects anonymous_context without strict anonymous binding constraints", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        ...buildUpstreamAuthorizationRequest({
+          resource_binding: {
+            binding_ref: "binding_001",
+            resource_kind: "anonymous_context",
+            binding_constraints: {
+              anonymous_required: true,
+              reuse_logged_in_context_forbidden: false
+            }
+          },
+          authorization_grant: {
+            grant_ref: "grant_001",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["anonymous_context"],
+              allowed_profile_refs: []
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            }
+          }
+        })
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ANONYMOUS_BINDING_CONSTRAINTS_INVALID"
+        })
+      })
+    );
+  });
+
+  it("rejects invalid resource_state_snapshot enum values", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        ...buildUpstreamAuthorizationRequest({
+          authorization_grant: {
+            grant_ref: "grant_001",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["profile_session"],
+              allowed_profile_refs: ["xhs_account_001"]
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            },
+            resource_state_snapshot: "unknown_state"
+          }
+        })
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "RESOURCE_STATE_SNAPSHOT_INVALID"
+        })
+      })
+    );
+  });
+
+  it("rejects upstream action_name that does not match the current command and ability", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        action_request: {
+          request_ref: "upstream_req_001",
+          action_name: "xhs.read_note_detail",
+          action_category: "read"
+        },
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_note_detail"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          }
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ACTION_NAME_COMMAND_MISMATCH"
+        })
+      })
+    );
+  });
+
+  it("rejects grants that do not allow the normalized action_name", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_note_detail"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          }
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ACTION_NOT_ALLOWED_BY_GRANT"
+        })
+      })
+    );
+  });
+
+  it("rejects grants whose profile scope does not cover the bound profile_ref", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_search_results"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_999"]
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          }
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "PROFILE_REF_OUT_OF_SCOPE"
+        })
+      })
+    );
+  });
+
+  it("rejects grants whose target page scope does not cover the runtime_target", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_search_results"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["explore_detail_tab"]
+          }
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "TARGET_PAGE_OUT_OF_SCOPE"
+        })
+      })
+    );
+  });
+
+  it("rejects legacy action_type values that conflict with FR-0023 normalization", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        action_type: "write",
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ACTION_TYPE_CONFLICT"
+        })
+      })
+    );
+  });
+
+  it("rejects legacy target_page values that conflict with FR-0023 normalization", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        target_page: "explore_detail_tab",
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "TARGET_PAGE_CONFLICT"
+        })
+      })
+    );
   });
 
   it("does not synthesize issue_209 live admission_context from an incomplete approval-only source", () => {

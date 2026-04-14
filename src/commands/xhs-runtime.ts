@@ -213,9 +213,13 @@ const xhsReadCommand = async (
       gate: ReturnType<typeof normalizeGateOptionsForContract>
     ) => JsonObject;
   }
-): Promise<CommandExecutionResult> => {
+  ): Promise<CommandExecutionResult> => {
   const envelope = parseAbilityEnvelopeForContract(context.params);
-  const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id);
+  const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+    command: context.command,
+    abilityAction: envelope.ability.action,
+    upstreamAuthorization: envelope.upstreamAuthorization
+  });
   const parsedInput = inputConfig.parseInput(envelope, gate);
 
   if (
