@@ -252,6 +252,25 @@ const parseOptionalStringFieldForContract = (
   return value;
 };
 
+const parseOptionalNullableStringFieldForContract = (
+  source: JsonObject,
+  key: string,
+  reason: string,
+  abilityId: string
+): string | null | undefined => {
+  if (!hasOwn(source, key)) {
+    return undefined;
+  }
+  if (source[key] === null) {
+    return null;
+  }
+  const value = asString(source[key]);
+  if (!value) {
+    throw invalidAbilityInput(reason, abilityId);
+  }
+  return value;
+};
+
 const parseActionRequestForContract = (
   source: JsonObject,
   abilityId: string
@@ -316,7 +335,7 @@ const parseResourceBindingForContract = (
   if (!resourceKind || !UPSTREAM_RESOURCE_KINDS.has(resourceKind as UpstreamResourceKind)) {
     throw invalidAbilityInput("RESOURCE_KIND_INVALID", abilityId);
   }
-  const profileRef = parseOptionalStringFieldForContract(
+  const profileRef = parseOptionalNullableStringFieldForContract(
     source,
     "profile_ref",
     resourceKind === "profile_session" ? "PROFILE_REF_REQUIRED" : "PROFILE_REF_FORBIDDEN",
@@ -326,7 +345,7 @@ const parseResourceBindingForContract = (
   if (resourceKind === "profile_session" && !profileRef) {
     throw invalidAbilityInput("PROFILE_REF_REQUIRED", abilityId);
   }
-  if (resourceKind === "anonymous_context" && profileRef) {
+  if (resourceKind === "anonymous_context" && typeof profileRef === "string") {
     throw invalidAbilityInput("PROFILE_REF_FORBIDDEN", abilityId);
   }
 
@@ -350,7 +369,7 @@ const parseResourceBindingForContract = (
   return {
     binding_ref: bindingRef,
     resource_kind: resourceKind as UpstreamResourceKind,
-    ...(profileRef ? { profile_ref: profileRef } : {}),
+    ...(profileRef !== undefined ? { profile_ref: profileRef } : {}),
     ...(parseOptionalStringFieldForContract(source, "subject_ref", "RESOURCE_BINDING_INVALID", abilityId)
       ? {
           subject_ref: parseOptionalStringFieldForContract(
