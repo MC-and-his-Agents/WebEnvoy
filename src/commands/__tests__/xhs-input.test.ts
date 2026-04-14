@@ -422,6 +422,57 @@ describe("xhs-input", () => {
     });
   });
 
+  it("rejects anonymous_context requests that try to reuse a named runtime profile", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        resource_binding: {
+          binding_ref: "binding_001",
+          resource_kind: "anonymous_context",
+          profile_ref: null,
+          binding_constraints: {
+            anonymous_required: true,
+            reuse_logged_in_context_forbidden: true
+          }
+        },
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_search_results"],
+          binding_scope: {
+            allowed_resource_kinds: ["anonymous_context"],
+            allowed_profile_refs: []
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          }
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ANONYMOUS_CONTEXT_PROFILE_CONFLICT"
+        })
+      })
+    );
+  });
+
   it("rejects invalid resource_state_snapshot enum values", () => {
     expect(() =>
       parseAbilityEnvelopeForContract({

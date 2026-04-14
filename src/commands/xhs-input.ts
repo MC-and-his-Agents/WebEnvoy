@@ -928,6 +928,12 @@ export const normalizeGateOptionsForContract = (
     ) {
       throw invalidAbilityInput("PROFILE_REF_CONTEXT_MISMATCH", abilityId);
     }
+    if (
+      upstreamAuthorization.resource_binding.resource_kind === "anonymous_context" &&
+      input?.runtimeProfile
+    ) {
+      throw invalidAbilityInput("ANONYMOUS_CONTEXT_PROFILE_CONFLICT", abilityId);
+    }
     if (!allowedDomains.includes(targetDomain)) {
       throw invalidAbilityInput("TARGET_DOMAIN_OUT_OF_SCOPE", abilityId);
     }
