@@ -100,8 +100,7 @@
     },
     "target_scope": {
       "allowed_domains": ["www.xiaohongshu.com"],
-      "allowed_pages": ["search_result_tab"],
-      "allowed_tab_ids": [924]
+      "allowed_pages": ["search_result_tab"]
     },
     "resource_state_snapshot": "paused",
     "grant_constraints": {
@@ -126,7 +125,6 @@
 4. `target_scope` 必须显式表达 grant 适用的现场范围，至少包括：
   - `allowed_domains`
   - `allowed_pages`
-  - `allowed_tab_ids`
 5. `resource_state_snapshot` 只允许作为上游输入事实，当前至少兼容：
   - `active`
   - `cool_down`
@@ -136,6 +134,7 @@
 8. `grant_constraints` 只表达上游限制，不直接表达 WebEnvoy 内部 execution mode。
 9. 若上游只传入 `account_ref` 而未同时给出合法 `resource_binding.resource_kind`，grant 不得生效。
 10. 当 `resource_binding` 或 `runtime_target` 超出 grant 的 `binding_scope` / `target_scope` 时，请求必须阻断，不得降级为“近似匹配”。
+11. `tab_id` 仍属于 `runtime_target` 的运行时校验字段，不得冻结进 `authorization_grant.target_scope`；否则授权会错误依赖本地临时 tab identity。
 
 ## runtime_target
 

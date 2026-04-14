@@ -54,6 +54,7 @@ Canonical Issue: #472
 - 上游正式协议以“动作 + 资源 + 授权 + 现场”为中心，而不是以 `live_read_limited`、`live_read_high_risk` 等 WebEnvoy 内部模式为中心。
 - `runtime_target` 是现场约束，不是长期权限主体。
 - WebEnvoy 必须先验证四个对象彼此一致，再进入 request-time admission。
+- grant 的目标适用范围可以约束域与页面语义，但不得把临时 tab identity 冻结进长期授权范围。
 
 ### 2. `action_request` 边界
 
@@ -90,6 +91,7 @@ Canonical Issue: #472
 - `active` / `cool_down` / `paused` 等资源策略状态归上游持有；WebEnvoy 不成为这类长期运营状态的真相源。
 - 第一版 grant 可以携带这些资源策略状态的快照或声明，但 WebEnvoy 只把它们当作输入事实，不负责其长期状态流转权威。
 - 若 grant 缺失必要授权范围或与 binding / target / action 不匹配，WebEnvoy 必须在 request-time admission 直接阻断。
+- `authorization_grant` 的目标适用范围只冻结稳定字段，如域与页面语义；`tab_id` 仍属于 `runtime_target` 的运行时校验字段，不得成为长期授权主体的一部分。
 
 ### 5. `runtime_target` 边界
 
@@ -129,7 +131,7 @@ Canonical Issue: #472
 
 - `request_admission_result`
   - 表达当前请求是否可进入执行
-  - 只返回请求级事实：允许 / 阻断 / 降级、原因、现场校验结果、资源与 grant 是否匹配、是否命中匿名约束或登录态污染
+  - 只返回请求级事实：允许 / 阻断 / 延后、原因、现场校验结果、资源与 grant 是否匹配、是否命中匿名约束或登录态污染
   - 不把上游资源运营状态重写成 WebEnvoy 权威状态机
 - `execution_audit`
   - 表达本次请求实际消费了什么上游输入、做了哪些判断、产生了哪些风险信号与执行证据

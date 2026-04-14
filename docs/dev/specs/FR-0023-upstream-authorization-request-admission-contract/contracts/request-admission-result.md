@@ -64,14 +64,15 @@
 1. `admission_decision` 至少允许：
   - `allowed`
   - `blocked`
-  - `degraded`
+  - `deferred`
 2. `reason_codes` 不得为空，必须独立解释为什么允许、阻断或降级。
 3. `normalized_action_type` 必须与 `FR-0010.gate_input.action_type` 兼容。
 4. `normalized_resource_kind` 必须与 `resource_binding.resource_kind` 一致。
-5. `runtime_target_match=false` 时，必须返回 `admission_decision=blocked`，不得降级，也不得静默继续执行。
+5. `runtime_target_match=false` 时，必须返回 `admission_decision=blocked`，不得 `deferred`，也不得静默继续执行。
 6. `anonymous_isolation_ok=false` 时，必须阻断匿名请求。
-7. `effective_runtime_mode` 只作为 WebEnvoy 内部 mode 的请求级结果投影，不是上游正式审批字段。
-8. `request_admission_result` 只能返回请求级事实，不得把 `active / cool_down / paused` 等上游资源状态写成 WebEnvoy 长期真相源。
+7. `deferred` 只允许用于与 `FR-0014.session_rhythm_decision.decision=deferred` 等待窗口、恢复探针或节律门禁未满足的场景对齐，不得替代现场不匹配或匿名污染这类确定性阻断。
+8. `effective_runtime_mode` 只作为 WebEnvoy 内部 mode 的请求级结果投影，不是上游正式审批字段。
+9. `request_admission_result` 只能返回请求级事实，不得把 `active / cool_down / paused` 等上游资源状态写成 WebEnvoy 长期真相源。
 
 ## execution_audit
 
