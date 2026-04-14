@@ -134,6 +134,7 @@ const UPSTREAM_AUTHORIZATION_KEYS = [
 ] as const;
 const XHS_COMMAND_ACTION_NAMES: Record<string, string> = {
   "xhs.search::xhs.note.search.v1": "xhs.read_search_results",
+  "xhs.search::xhs.editor.input.v1": "xhs.write_editor_input",
   "xhs.detail::xhs.note.detail.v1": "xhs.read_note_detail",
   "xhs.user_home::xhs.user.home.v1": "xhs.read_user_home"
 };
@@ -762,6 +763,7 @@ export const normalizeGateOptionsForContract = (
   input?: {
     command?: string;
     abilityAction?: AbilityAction;
+    runtimeProfile?: string | null;
     upstreamAuthorization?: UpstreamAuthorizationRequest | null;
   }
 ): {
@@ -917,6 +919,14 @@ export const normalizeGateOptionsForContract = (
       !allowedProfileRefs.includes(upstreamAuthorization.resource_binding.profile_ref)
     ) {
       throw invalidAbilityInput("PROFILE_REF_OUT_OF_SCOPE", abilityId);
+    }
+    if (
+      upstreamAuthorization.resource_binding.resource_kind === "profile_session" &&
+      input &&
+      "runtimeProfile" in input &&
+      input.runtimeProfile !== upstreamAuthorization.resource_binding.profile_ref
+    ) {
+      throw invalidAbilityInput("PROFILE_REF_CONTEXT_MISMATCH", abilityId);
     }
     if (!allowedDomains.includes(targetDomain)) {
       throw invalidAbilityInput("TARGET_DOMAIN_OUT_OF_SCOPE", abilityId);

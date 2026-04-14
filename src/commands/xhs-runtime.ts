@@ -218,6 +218,7 @@ const xhsReadCommand = async (
   const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
     command: context.command,
     abilityAction: envelope.ability.action,
+    runtimeProfile: context.profile ?? null,
     upstreamAuthorization: envelope.upstreamAuthorization
   });
   const parsedInput = inputConfig.parseInput(envelope, gate);
