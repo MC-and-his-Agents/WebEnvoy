@@ -1006,6 +1006,91 @@ describe("xhs-input", () => {
     );
   });
 
+  it("rejects stale requested_execution_mode values that conflict with FR-0023 read actions", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "live_write"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "REQUESTED_EXECUTION_MODE_CONFLICT"
+        })
+      })
+    );
+  });
+
+  it("rejects stale requested_execution_mode values that conflict with issue_208 write normalization", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
+      input: {},
+      options: {
+        requested_execution_mode: "dry_run",
+        validation_action: "editor_input"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        action_request: {
+          request_ref: "upstream_req_004",
+          action_name: "xhs.write_editor_input",
+          action_category: "write"
+        },
+        resource_binding: {
+          binding_ref: "binding_004",
+          resource_kind: "profile_session",
+          profile_ref: "xhs_account_001"
+        },
+        authorization_grant: {
+          grant_ref: "grant_004",
+          allowed_actions: ["xhs.write_editor_input"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["creator.xiaohongshu.com"],
+            allowed_pages: ["creator_publish_tab"]
+          }
+        },
+        runtime_target: {
+          target_ref: "target_004",
+          domain: "creator.xiaohongshu.com",
+          page: "creator_publish_tab",
+          tab_id: 11
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "REQUESTED_EXECUTION_MODE_CONFLICT"
+        })
+      })
+    );
+  });
+
   it("does not synthesize issue_209 live admission_context from an incomplete approval-only source", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {

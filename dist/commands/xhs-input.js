@@ -502,6 +502,14 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
     if (!requestedExecutionMode) {
         throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
     }
+    const inferredIssueScope = resolveInferredIssueScopeForContract({
+        ...options,
+        ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        target_page: targetPage,
+        requested_execution_mode: requestedExecutionMode
+    });
     const legacyActionType = hasOwn(options, "action_type") ? asString(options.action_type) : null;
     if (upstreamAuthorization && hasOwn(options, "action_type") && !legacyActionType) {
         throw invalidAbilityInput("ACTION_TYPE_INVALID", abilityId);
@@ -548,6 +556,20 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
         if (input?.abilityAction && input.abilityAction !== expectedAbilityAction) {
             throw invalidAbilityInput("ACTION_NAME_COMMAND_MISMATCH", abilityId);
         }
+        if (normalizedActionType === "read" && requestedExecutionMode === "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (normalizedActionType !== "read" &&
+            requestedExecutionMode !== "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (inferredIssueScope === "issue_209" &&
+            !XHS_LIVE_READ_EXECUTION_MODES.has(requestedExecutionMode)) {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (inferredIssueScope === "issue_208" && requestedExecutionMode !== "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
         const allowedResourceKinds = asStringArray(upstreamAuthorization.authorization_grant.binding_scope.allowed_resource_kinds);
         const allowedProfileRefs = asStringArray(upstreamAuthorization.authorization_grant.binding_scope.allowed_profile_refs);
         const allowedDomains = asStringArray(upstreamAuthorization.authorization_grant.target_scope.allowed_domains);
@@ -586,14 +608,6 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
             throw invalidAbilityInput("TARGET_PAGE_OUT_OF_SCOPE", abilityId);
         }
     }
-    const inferredIssueScope = resolveInferredIssueScopeForContract({
-        ...options,
-        ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
-        target_domain: targetDomain,
-        target_tab_id: targetTabId,
-        target_page: targetPage,
-        requested_execution_mode: requestedExecutionMode
-    });
     if (upstreamAuthorization &&
         hasOwn(options, "issue_scope") &&
         explicitIssueScope !== inferredIssueScope) {
