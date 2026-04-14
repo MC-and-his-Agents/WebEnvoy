@@ -686,7 +686,7 @@
 - `detail` 与 `user_home` 在该轮固定样本头上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
 - 因此 `search/detail/user_home` 三类场景依然没有同时达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
 - issue `#445` 的本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
-- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮固定样本头的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮固定样本头的直接阻断已更新为 `live_read_blocked_by_risk_state`，而 `detail/user_home formal command surface missing` 只保留为该固定样本头的 dated historical fact。
 
 #### 5.4.6 2026-04-11 PR gate refresh 参考样本与 latest-head 维护口径
 
@@ -725,7 +725,7 @@
   - `risk_state_output.current_state=paused`
 - 该组 PR gate refresh 参考样本结论：
   - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
-  - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+  - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口；该事实只对应当时的 `reference_gate_refresh_head_sha`，不再作为当前 implementation base 或后续 docs PR latest head 的默认阻断。
   - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
 
 ### 5.5 2026-04-14 implementation base surface 预检（issue #445 当前执行基线）
@@ -751,17 +751,133 @@
 当前只冻结到这里：
 
 - 旧的“无公开 CLI 入口”停点已经对 current base 失效。
-- 是否能在 current docs PR latest head 上把 `detail` / `user_home` 升级为合法 fresh rerun 证据，仍以本轮
+- 当前 implementation base 只证明 `xhs.detail` / `xhs.user_home` 已公开，不等于三场景已经满足
+  `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
+- 是否能在 current docs PR latest head 上把 `search/detail/user_home` 升级为合法 fresh rerun 证据，仍以本轮
   latest-head managed-profile rerun 为准。
 - repo formal docs 只保留 dated historical sample；最终 current gate evidence 仍只以 PR 描述中的
   `live_evidence_record` 为准。
 
+### 5.6 2026-04-14 docs-only PR latest-head exploratory rerun（issue #445 当前 closeout 样本）
+
+在 docs-only PR `#467` 的当时 latest head
+`760a720279a431dd9f86093933c22c83f7fe785a` 上，按 `search/detail/user_home` 三个独立执行单元重新做
+managed-profile fresh rerun。该组样本用于更新 formal closeout 的直接阻断面；若后续 docs 或 PR body 继续前移 head，
+current gate evidence 必须在新的 `pr_latest_head_sha` 上重跑，并只写入 PR `live_evidence_record`。
+
+统一前提：
+
+- `implementation_base_sha=a4a5cfce92bf9a0e9fae016543f007e738922083`
+- `pr_latest_head_sha_at_collection=760a720279a431dd9f86093933c22c83f7fe785a`
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `canonical_runtime_root=/Users/mc/dev/WebEnvoy`
+- `artifact_log_root=/tmp/webenvoy-445`
+
+`search`
+
+- readiness / target binding：
+  - `run_id=issue445-search2-start-001`
+  - `run_id=issue445-search2-ping-001`
+  - `run_id=issue445-search2-tabs-001`
+  - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+  - `target_tab_id=1230417494`
+  - `relay_path=host>background>content-script>background>host`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-search2-start-001.json,/tmp/webenvoy-445/issue445-search2-ping-001.json,/tmp/webenvoy-445/issue445-search2-tabs-001.json`
+- dry-run：
+  - `run_id=issue445-search2-dryrun-001`
+  - `evidence_collected_at=2026-04-14T04:59:55.270Z`
+  - `interaction_locator=search_result_tab + query=AI`
+  - 成功信号：`capability_result.outcome=partial`、`gate_decision=allowed`、`effective_execution_mode=dry_run`、`observability.page_state.page_kind=search`
+  - 失败/限制：`observability.request_evidence=none`、`key_requests=[]`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-search2-dryrun-001.json`
+- live request：
+  - `run_id=issue445-search2-live-001`
+  - `evidence_collected_at=2026-04-14T05:00:05.729Z`
+  - 失败原文：`risk state paused blocks live read`
+  - `gate_decision=blocked`
+  - `gate_reasons=["RISK_STATE_PAUSED","ISSUE_ACTION_MATRIX_BLOCKED"]`
+  - `effective_execution_mode=dry_run`
+  - `risk_state_output.current_state=paused`
+  - `failure_reason=live_read_blocked_by_risk_state`
+  - `blocker_level=formal_runtime_gate`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-search2-live-001.json`
+- 成熟度结论：
+  - 当前 latest-head rerun 已证明 `search` 的公开 command surface 与 real-browser target binding 合法可达。
+  - 但本轮只达到 `dry_run` 成功壳；live path 被 formal risk gate 阻断，未形成 `primary + api + success`，也没有 `reproduced_multi_round`。
+
+`detail`
+
+- readiness / target binding：
+  - `run_id=issue445-detail2-start-001`
+  - `run_id=issue445-detail2-ping-001`
+  - `run_id=issue445-detail2-tabs-001`
+  - `page_url=https://www.xiaohongshu.com/explore/68c8a52d000000001b01ffbf?xsec_token=ABI4NVp6t4Nl1-rHPhgZVc6L2hipFItTBXXmeUjsDb_50=&xsec_source=pc_search`
+  - `target_tab_id=1230417588`
+  - `relay_path=host>background>content-script>background>host`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-detail2-start-001.json,/tmp/webenvoy-445/issue445-detail2-ping-001.json,/tmp/webenvoy-445/issue445-detail2-tabs-001.json`
+- dry-run：
+  - `run_id=issue445-detail2-dryrun-001`
+  - `evidence_collected_at=2026-04-14T05:01:36.616Z`
+  - `interaction_locator=explore_detail_tab + note_id=68c8a52d000000001b01ffbf`
+  - 成功信号：`capability_result.outcome=partial`、`gate_decision=allowed`、`effective_execution_mode=dry_run`、`observability.page_state.page_kind=detail`
+  - 失败/限制：`observability.request_evidence=none`、`key_requests=[]`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-detail2-dryrun-001.json`
+- live request：
+  - `run_id=issue445-detail2-live-001`
+  - `evidence_collected_at=2026-04-14T05:01:48.711Z`
+  - 失败原文：`buildIssue209PostGateArtifacts is not defined`
+  - `failure_reason=repo_latest_head_execution_bundle_failure`
+  - `blocker_level=repo_latest_head_execution_bundle`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-detail2-live-001.json`
+- 成熟度结论：
+  - 当前 latest head 下，`xhs.detail` 已经具备合法公开 command surface，不再允许沿用“无公开 CLI 命令入口”作为阻断。
+  - 但 live path 在执行阶段直接命中 repo latest-head execution bundle failure，仍未形成 `primary + api + success`，也没有 `reproduced_multi_round`。
+
+`user_home`
+
+- readiness / target binding：
+  - `run_id=issue445-userhome2-start-001`
+  - `run_id=issue445-userhome2-ping-001`
+  - `run_id=issue445-userhome2-tabs-001`
+  - `page_url=https://www.xiaohongshu.com/user/profile/677fa40b0000000007001aa0`
+  - `target_tab_id=1230417684`
+  - `relay_path=host>background>content-script>background>host`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-userhome2-start-001.json,/tmp/webenvoy-445/issue445-userhome2-ping-001.json,/tmp/webenvoy-445/issue445-userhome2-tabs-001.json`
+- dry-run：
+  - `run_id=issue445-userhome2-dryrun-001`
+  - `evidence_collected_at=2026-04-14T05:02:51.623Z`
+  - `interaction_locator=profile_tab + user_id=677fa40b0000000007001aa0`
+  - 成功信号：`capability_result.outcome=partial`、`gate_decision=allowed`、`effective_execution_mode=dry_run`、`observability.page_state.page_kind=user_home`
+  - 失败/限制：`observability.request_evidence=none`、`key_requests=[]`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-userhome2-dryrun-001.json`
+- live request：
+  - `run_id=issue445-userhome2-live-001`
+  - `evidence_collected_at=2026-04-14T05:03:05.185Z`
+  - 失败原文：`buildIssue209PostGateArtifacts is not defined`
+  - `failure_reason=repo_latest_head_execution_bundle_failure`
+  - `blocker_level=repo_latest_head_execution_bundle`
+  - `artifact_log_ref=/tmp/webenvoy-445/issue445-userhome2-live-001.json`
+- 成熟度结论：
+  - 当前 latest head 下，`xhs.user_home` 已经具备合法公开 command surface，不再允许沿用“无公开 CLI 命令入口”作为阻断。
+  - 但 live path 在执行阶段直接命中与 `detail` 相同的 repo latest-head execution bundle failure，仍未形成 `primary + api + success`，也没有 `reproduced_multi_round`。
+
+#### 5.6.1 本轮 exploratory rerun 正式结论
+
+- `search/detail/user_home` 三个场景都已在 `real_browser + managed-profile + latest-head` 口径下获得新的独立 rerun 样本。
+- 三个场景都没有达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
+- `search` 的 current blocker 是 `formal_runtime_gate`：`risk_state=paused` 与 `ISSUE_ACTION_MATRIX_BLOCKED` 仍阻断 live path。
+- `detail` 与 `user_home` 的 current blocker 已更新为 `repo_latest_head_execution_bundle`，失败原文同为 `buildIssue209PostGateArtifacts is not defined`。
+- issue `#445` 在该轮 exploratory rerun 下的正式结论仍为 `No-Go/paused`；closeout 只能继续如实记录阻断，不能改写为 `Go` 或 `Fixes #445`。
+
 ## 未决项（进入下一轮复核前保留）
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
+- 若 docs-only PR 因 formal 回写继续前移 head，必须在新的 `pr_latest_head_sha` 上重新执行 `search/detail/user_home` 的独立 fresh rerun，并仅在 PR `live_evidence_record` 中维护 current gate evidence
 - 在风险状态满足准入、且具备合法 approval / gate 前提后，再重新执行 `search` 的 managed-profile `real_browser` fresh live rerun
-- 为 `detail` / `user_home` 提供 repo 内可复核的正式命令入口，或通过独立 formal review 明确其 latest-head 复核路径
-- 在满足上述前提后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
+- 在新的 latest head 上复核 `detail` / `user_home` 的 live 阻断是否仍为 `buildIssue209PostGateArtifacts is not defined`，或已转为 gate / API failure
+- 在满足上述前提后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun，并判断是否可能补齐 `reproduced_multi_round`
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
 - 对 `search/detail/user_home` 分别完成“required_headers 最小必要集”实验矩阵
