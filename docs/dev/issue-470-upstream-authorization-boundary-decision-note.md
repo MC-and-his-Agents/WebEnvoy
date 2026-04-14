@@ -55,7 +55,7 @@
 
 ### 1. WebEnvoy 的定位不支持把审批产品整体内置
 
-根据 [vision.md](/Users/mc/dev/WebEnvoy-470-authorization-protocol/vision.md) 与 [account.md](/Users/mc/dev/WebEnvoy-470-authorization-protocol/docs/dev/architecture/system-design/account.md)，WebEnvoy 当前只保留“完成网页执行所必需的最小身份 / 会话能力”，不以账号矩阵、长期运营、审批平台为目标。
+根据 [vision.md](../../vision.md) 与 [account.md](./architecture/system-design/account.md)，WebEnvoy 当前只保留“完成网页执行所必需的最小身份 / 会话能力”，不以账号矩阵、长期运营、审批平台为目标。
 
 这意味着：
 
