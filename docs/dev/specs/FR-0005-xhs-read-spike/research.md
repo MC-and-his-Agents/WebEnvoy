@@ -728,6 +728,34 @@
   - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
   - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
 
+### 5.5 2026-04-14 implementation base surface 预检（issue #445 当前执行基线）
+
+为执行本轮 `#445` latest-head managed-profile closeout，先在当前 `origin/main` 对齐提交
+`a4a5cfce92bf9a0e9fae016543f007e738922083` 上做命令面预检。该提交只作为本轮 docs-only closeout
+的 `implementation_base_sha`，不等同于后续 PR gate 所要求的 `pr_latest_head_sha`。
+
+本轮 implementation-base 命令面事实：
+
+- `implementation_base_sha=a4a5cfce92bf9a0e9fae016543f007e738922083`
+- `run_id=run-20260414044614552-77ddefef`
+- `command=runtime.help`
+- `evidence_collected_at=2026-04-14T04:46:14.567Z`
+- `./bin/webenvoy runtime.help` 返回的公开命令集合已包含：
+  - `xhs.search`
+  - `xhs.detail`
+  - `xhs.user_home`
+- 因此，5.4 历史样本中“`detail` / `user_home` 仍无公开 CLI 命令入口”的表述，只能保留为
+  `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49` 及其后续 gate refresh 样本的 dated historical fact，
+  不能继续作为当前 implementation base 的直接阻断结论。
+
+当前只冻结到这里：
+
+- 旧的“无公开 CLI 入口”停点已经对 current base 失效。
+- 是否能在 current docs PR latest head 上把 `detail` / `user_home` 升级为合法 fresh rerun 证据，仍以本轮
+  latest-head managed-profile rerun 为准。
+- repo formal docs 只保留 dated historical sample；最终 current gate evidence 仍只以 PR 描述中的
+  `live_evidence_record` 为准。
+
 ## 未决项（进入下一轮复核前保留）
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
