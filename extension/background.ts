@@ -599,12 +599,74 @@ const cloneAdmissionContext = (
 
 const bindAdmissionContextToRequest = (input: {
   admissionContext: Record<string, unknown> | null;
+  sessionId?: string | null;
 }): Record<string, unknown> | null => {
   const admissionContext = cloneAdmissionContext(input.admissionContext);
   if (!admissionContext) {
     return null;
   }
-  return admissionContext;
+  const sessionId = asNonEmptyString(input.sessionId);
+  if (!sessionId) {
+    return admissionContext;
+  }
+  const approvalEvidence = asRecord(admissionContext.approval_admission_evidence);
+  const auditEvidence = asRecord(admissionContext.audit_admission_evidence);
+  return {
+    ...(approvalEvidence
+      ? {
+          approval_admission_evidence: {
+            ...approvalEvidence,
+            session_id: sessionId
+          }
+        }
+      : {}),
+    ...(auditEvidence
+      ? {
+          audit_admission_evidence: {
+            ...auditEvidence,
+            session_id: sessionId
+          }
+        }
+      : {})
+  };
+};
+
+const bindXhsCommandParamsToSession = (input: {
+  commandParams: Record<string, unknown>;
+  sessionId?: string | null;
+}): Record<string, unknown> => {
+  const sessionId = asNonEmptyString(input.sessionId);
+  if (!sessionId) {
+    return input.commandParams;
+  }
+
+  const normalized: Record<string, unknown> = { ...input.commandParams };
+  const normalizedOptions = asRecord(input.commandParams.options)
+    ? { ...(asRecord(input.commandParams.options) as Record<string, unknown>) }
+    : null;
+  const admissionContext = bindAdmissionContextToRequest({
+    admissionContext:
+      asRecord(input.commandParams.admission_context) ??
+      asRecord(normalizedOptions?.admission_context),
+    sessionId
+  });
+
+  if (admissionContext) {
+    normalized.admission_context = admissionContext;
+    if (normalizedOptions) {
+      normalizedOptions.admission_context = admissionContext;
+    } else {
+      normalized.options = {
+        admission_context: admissionContext
+      };
+    }
+  }
+
+  if (normalizedOptions) {
+    normalized.options = normalizedOptions;
+  }
+
+  return normalized;
 };
 
 const emitCliInvalidArgs = (
@@ -2997,6 +3059,7 @@ class ChromeBackgroundBridge {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const suppressHostResponse = options?.suppressHostResponse === true;
     const command = String(request.params.command ?? "");
+    let dispatchRequest = request;
     if (command === "xhs.interact") {
       this.#emit({
         id: request.id,
@@ -3017,6 +3080,30 @@ class ChromeBackgroundBridge {
     let commandParams = XHS_GATE_COMMANDS.has(command)
       ? normalizeXhsSearchCommandParams(rawCommandParams)
       : rawCommandParams;
+    const activeSessionId =
+      asNonEmptyString(this.#sessionId) ?? asNonEmptyString(request.params.session_id);
+    if (activeSessionId) {
+      dispatchRequest = {
+        ...request,
+        params: {
+          ...request.params,
+          session_id: activeSessionId
+        }
+      };
+      if (XHS_GATE_COMMANDS.has(command)) {
+        commandParams = bindXhsCommandParamsToSession({
+          commandParams,
+          sessionId: activeSessionId
+        });
+        dispatchRequest = {
+          ...dispatchRequest,
+          params: {
+            ...dispatchRequest.params,
+            command_params: commandParams
+          }
+        };
+      }
+    }
     if (XHS_GATE_COMMANDS.has(command)) {
       try {
         validateXhsCommandInputContract(command, commandParams);
@@ -3059,9 +3146,9 @@ class ChromeBackgroundBridge {
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
     if (XHS_GATE_COMMANDS.has(command)) {
       const gateResult = await this.#evaluateXhsTargetGate({
-        ...request,
+        ...dispatchRequest,
         params: {
-          ...request.params,
+          ...dispatchRequest.params,
           command_params: commandParams
         }
       });
@@ -3069,7 +3156,7 @@ class ChromeBackgroundBridge {
       gatePayload = gateResult.gatePayload;
       if (!gateResult.allowed || (!gateResult.targetTabId && !gateResult.gateOnly)) {
         this.#emit({
-          id: request.id,
+          id: dispatchRequest.id,
           status: "error",
           summary: {
             relay_path: "host>background>content-script>background>host"
@@ -3084,18 +3171,18 @@ class ChromeBackgroundBridge {
       }
       if (gateResult.gateOnly) {
         this.#emit({
-          id: request.id,
+          id: dispatchRequest.id,
           status: "success",
           summary: {
-            session_id: String(request.params.session_id ?? "nm-session-001"),
-            run_id: String(request.params.run_id ?? request.id),
+            session_id: String(dispatchRequest.params.session_id ?? "nm-session-001"),
+            run_id: String(dispatchRequest.params.run_id ?? dispatchRequest.id),
             command,
-            profile: typeof request.profile === "string" ? request.profile : null,
-            cwd: String(request.params.cwd ?? ""),
+            profile: typeof dispatchRequest.profile === "string" ? dispatchRequest.profile : null,
+            cwd: String(dispatchRequest.params.cwd ?? ""),
             tab_id: null,
             relay_path: "host>background"
           },
-          payload: createBridgeXhsGateOnlyPayload(request, gateResult.gatePayload),
+          payload: createBridgeXhsGateOnlyPayload(dispatchRequest, gateResult.gatePayload),
           error: null
         });
         return;
@@ -3106,9 +3193,9 @@ class ChromeBackgroundBridge {
         requestedLiveMode
           ? this.#resolveValidatedTrustedFingerprintContext(
               {
-                ...request,
+                ...dispatchRequest,
                 params: {
-                  ...request.params,
+                  ...dispatchRequest.params,
                   command_params: commandParams
                 }
               },
@@ -3116,7 +3203,7 @@ class ChromeBackgroundBridge {
             ) ?? requestedFingerprintContext
           : requestedFingerprintContext;
     } else {
-      tabId = await this.#resolveTargetTabId(request);
+      tabId = await this.#resolveTargetTabId(dispatchRequest);
     }
 
     if (!tabId) {
@@ -3124,7 +3211,7 @@ class ChromeBackgroundBridge {
         return;
       }
       this.#emit({
-        id: request.id,
+        id: dispatchRequest.id,
         status: "error",
         summary: {
           relay_path: "host>background>content-script>background>host"
@@ -3148,7 +3235,7 @@ class ChromeBackgroundBridge {
         return;
       }
       this.#emit({
-        id: request.id,
+        id: dispatchRequest.id,
         status: "error",
         summary: {
           relay_path: "host>background>content-script>background>host"
@@ -3172,13 +3259,13 @@ class ChromeBackgroundBridge {
             message: "content script forward timed out"
           };
     const timeout = setTimeout(() => {
-      this.#failPending(request.id, {
+      this.#failPending(dispatchRequest.id, {
         code: timeoutError.code,
         message: timeoutError.message
       });
     }, forwardTimeoutMs);
-    this.#pendingState.register(request.id, {
-      request,
+    this.#pendingState.register(dispatchRequest.id, {
+      request: dispatchRequest,
       timeout,
       consumerGateResult,
       gatePayload,
@@ -3188,16 +3275,16 @@ class ChromeBackgroundBridge {
     const mergedCommandParams = mergeGateArtifactsIntoCommandParams(commandParams, gatePayload);
     const forward: BackgroundToContentMessage = {
       kind: "forward",
-      id: request.id,
-      runId: String(request.params.run_id ?? request.id),
+      id: dispatchRequest.id,
+      runId: String(dispatchRequest.params.run_id ?? dispatchRequest.id),
       tabId,
-      profile: typeof request.profile === "string" ? request.profile : null,
-      cwd: String(request.params.cwd ?? ""),
+      profile: typeof dispatchRequest.profile === "string" ? dispatchRequest.profile : null,
+      cwd: String(dispatchRequest.params.cwd ?? ""),
       timeoutMs: forwardTimeoutMs,
-      command: String(request.params.command ?? ""),
+      command: String(dispatchRequest.params.command ?? ""),
       params:
-        typeof request.params === "object" && request.params !== null
-          ? { ...(request.params as Record<string, unknown>) }
+        typeof dispatchRequest.params === "object" && dispatchRequest.params !== null
+          ? { ...(dispatchRequest.params as Record<string, unknown>) }
           : {},
       commandParams: mergedCommandParams,
       fingerprintContext: forwardFingerprintContext
@@ -3206,7 +3293,7 @@ class ChromeBackgroundBridge {
     try {
       await this.#sendMessageWithContentScriptRecovery(tabId, forward);
     } catch (error) {
-      this.#failPending(request.id, {
+      this.#failPending(dispatchRequest.id, {
         code: "ERR_TRANSPORT_FORWARD_FAILED",
         message: error instanceof Error ? error.message : "content script dispatch failed"
       });
