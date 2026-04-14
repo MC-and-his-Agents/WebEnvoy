@@ -43,3 +43,5 @@ mappings:
     canonical_issue_number: 153
   - spec_path: docs/dev/specs/FR-0022-layer4-platform-behavior-baseline/spec.md
     canonical_issue_number: 238
+  - spec_path: docs/dev/specs/FR-0023-upstream-authorization-request-admission-contract/spec.md
+    canonical_issue_number: 472
