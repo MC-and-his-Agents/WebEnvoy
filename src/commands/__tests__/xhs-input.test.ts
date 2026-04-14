@@ -712,8 +712,7 @@ describe("xhs-input", () => {
       ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
       input: {},
       options: {
-        requested_execution_mode: "live_write",
-        validation_action: "editor_input"
+        requested_execution_mode: "live_write"
       },
       ...buildUpstreamAuthorizationRequest({
         action_request: {
@@ -747,20 +746,30 @@ describe("xhs-input", () => {
       })
     });
 
-    expect(
-      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
-        command: "xhs.search",
-        abilityAction: envelope.ability.action,
-        runtimeProfile: "xhs_account_001",
-        upstreamAuthorization: envelope.upstreamAuthorization
-      }).options
-    ).toMatchObject({
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+      command: "xhs.search",
+      abilityAction: envelope.ability.action,
+      runtimeProfile: "xhs_account_001",
+      upstreamAuthorization: envelope.upstreamAuthorization
+    });
+
+    expect(gate.options).toMatchObject({
       action_type: "write",
+      validation_action: "editor_input",
       target_domain: "creator.xiaohongshu.com",
       target_tab_id: 11,
       target_page: "creator_publish_tab",
       issue_scope: "issue_208"
     });
+
+    expect(
+      parseSearchInputForContract(
+        envelope.input,
+        envelope.ability.id,
+        gate.options,
+        envelope.ability.action
+      )
+    ).toEqual({});
   });
 
   it("projects irreversible_write into legacy write gate fields while keeping the canonical action category", () => {
@@ -1039,8 +1048,7 @@ describe("xhs-input", () => {
       ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
       input: {},
       options: {
-        requested_execution_mode: "dry_run",
-        validation_action: "editor_input"
+        requested_execution_mode: "dry_run"
       },
       ...buildUpstreamAuthorizationRequest({
         action_request: {

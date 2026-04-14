@@ -811,6 +811,11 @@ export const normalizeGateOptionsForContract = (
     ? upstreamAuthorization.action_request.action_category
     : null;
   const legacyProjectedActionType = projectLegacyActionTypeForContract(normalizedActionType);
+  const projectedValidationAction =
+    upstreamAuthorization &&
+    upstreamAuthorization.action_request.action_name === "xhs.write_editor_input"
+      ? "editor_input"
+      : null;
 
   const targetDomain = upstreamAuthorization
     ? upstreamAuthorization.runtime_target.domain
@@ -871,6 +876,7 @@ export const normalizeGateOptionsForContract = (
   const inferredIssueScope = resolveInferredIssueScopeForContract({
     ...options,
     ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
+    ...(projectedValidationAction ? { validation_action: projectedValidationAction } : {}),
     target_domain: targetDomain,
     target_tab_id: targetTabId,
     target_page: targetPage,
@@ -892,6 +898,12 @@ export const normalizeGateOptionsForContract = (
   const legacyTargetPage = hasOwn(options, "target_page") ? asString(options.target_page) : null;
   if (upstreamAuthorization && hasOwn(options, "target_page") && !legacyTargetPage) {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+  const legacyValidationAction = hasOwn(options, "validation_action")
+    ? asString(options.validation_action)
+    : null;
+  if (upstreamAuthorization && hasOwn(options, "validation_action") && !legacyValidationAction) {
+    throw invalidAbilityInput("ACTION_REQUEST_INVALID", abilityId);
   }
   const explicitIssueScope = hasOwn(options, "issue_scope") ? asString(options.issue_scope) : null;
   if (
@@ -925,6 +937,14 @@ export const normalizeGateOptionsForContract = (
     legacyTargetPage !== targetPage
   ) {
     throw invalidAbilityInput("TARGET_PAGE_CONFLICT", abilityId);
+  }
+  if (
+    upstreamAuthorization &&
+    projectedValidationAction &&
+    legacyValidationAction &&
+    legacyValidationAction !== projectedValidationAction
+  ) {
+    throw invalidAbilityInput("ACTION_REQUEST_INVALID", abilityId);
   }
 
   if (upstreamAuthorization) {
@@ -1033,6 +1053,7 @@ export const normalizeGateOptionsForContract = (
     options: {
       ...options,
       ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
+      ...(projectedValidationAction ? { validation_action: projectedValidationAction } : {}),
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
