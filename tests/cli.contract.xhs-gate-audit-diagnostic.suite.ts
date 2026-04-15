@@ -1570,6 +1570,140 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     expect(body.observability).not.toHaveProperty("execution_audit");
   });
 
+  it("preserves explicit null execution_audit in CLI success summary when upstream summary sets it to null", async () => {
+    const hostDir = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-null-summary-"));
+    const nativeHostPath = path.join(hostDir, "native-host-null-summary.mjs");
+    await writeFile(
+      nativeHostPath,
+      `#!/usr/bin/env node
+let buffer = Buffer.alloc(0);
+let opened = false;
+const writeMessage = (message) => {
+  const payload = Buffer.from(JSON.stringify(message), "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(payload.length, 0);
+  process.stdout.write(Buffer.concat([header, payload]));
+};
+const onRequest = (request) => {
+  if (request.method === "bridge.open") {
+    opened = true;
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        protocol: "webenvoy.native-bridge.v1",
+        state: "ready",
+        session_id: "nm-session-001"
+      },
+      error: null
+    });
+    return;
+  }
+  if (request.method === "__ping__") {
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: "nm-session-001"
+      },
+      error: null
+    });
+    return;
+  }
+  if (request.method === "bridge.forward" && opened) {
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: String(request.params?.session_id ?? "nm-session-001"),
+        run_id: String(request.params?.run_id ?? request.id),
+        command: String(request.params?.command ?? "xhs.search"),
+        relay_path: "host>background>content-script>background>host"
+      },
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read",
+            outcome: "success"
+          },
+          request_admission_result: null,
+          execution_audit: null
+        }
+      },
+      error: null
+    });
+    process.exit(0);
+  }
+};
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (buffer.length >= 4) {
+    const frameLength = buffer.readUInt32LE(0);
+    const frameEnd = 4 + frameLength;
+    if (buffer.length < frameEnd) {
+      return;
+    }
+    const frame = buffer.subarray(4, frameEnd);
+    buffer = buffer.subarray(frameEnd);
+    onRequest(JSON.parse(frame.toString("utf8")));
+  }
+});
+`,
+      "utf8"
+    );
+    await chmod(nativeHostPath, 0o755);
+
+    try {
+      const result = runCli(
+        [
+          "xhs.search",
+          "--profile",
+          "profile-session-001",
+          "--run-id",
+          "run-cli-fr0023-execution-audit-success-null-001",
+          "--params",
+          JSON.stringify({
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              ...scopedReadGateOptions,
+              requested_execution_mode: "dry_run",
+              risk_state: "paused"
+            }
+          })
+        ],
+        repoRoot,
+        {
+          WEBENVOY_NATIVE_TRANSPORT: "native",
+          WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath)
+        }
+      );
+
+      expect(result.status).toBe(0);
+      const body = parseSingleJsonLine(result.stdout);
+      expect(body).toMatchObject({
+        status: "success",
+        summary: {
+          request_admission_result: null,
+          execution_audit: null
+        }
+      });
+      expect(body.summary).toHaveProperty("request_admission_result", null);
+      expect(body.summary).toHaveProperty("execution_audit", null);
+      expect(body.observability).not.toHaveProperty("execution_audit");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits execution_audit in CLI error details when canonical FR-0023 inputs are blocked", () => {
     const runId = "run-cli-fr0023-execution-audit-blocked-001";
     const requestId = "cli-fr0023-execution-audit-blocked-001";

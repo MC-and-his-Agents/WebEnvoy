@@ -1555,4 +1555,5 @@ describe("normalizeGateOptionsForContract", () => {
       }
     }
   });
+
 });

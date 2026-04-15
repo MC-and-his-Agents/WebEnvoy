@@ -38,6 +38,28 @@ const asObject = (value: unknown): JsonObject | null =>
     ? (value as JsonObject)
     : null;
 
+const hasOwn = (record: Record<string, unknown> | undefined | null, key: string): boolean =>
+  !!record && Object.prototype.hasOwnProperty.call(record, key);
+
+const pickCanonicalSummaryField = (
+  payload: Record<string, unknown>,
+  key: "request_admission_result" | "execution_audit"
+): JsonObject | null | undefined => {
+  const summary = asObject(payload.summary);
+  const value = hasOwn(payload, key)
+    ? payload[key]
+    : hasOwn(summary ?? undefined, key)
+      ? summary?.[key]
+      : undefined;
+  if (!hasOwn(payload, key) && !hasOwn(summary ?? undefined, key)) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  return asObject(value) ?? undefined;
+};
+
 const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
   code === "ERR_TRANSPORT_TIMEOUT" ||
@@ -342,17 +364,21 @@ const xhsReadCommand = async (
     }
 
     const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
-    const requestAdmissionResult =
-      asObject(bridgeResult.payload.request_admission_result) ??
-      asObject(asObject(bridgeResult.payload.summary)?.request_admission_result);
-    const executionAudit =
-      asObject(bridgeResult.payload.execution_audit) ??
-      asObject(asObject(bridgeResult.payload.summary)?.execution_audit);
+    const requestAdmissionResult = pickCanonicalSummaryField(
+      bridgeResult.payload,
+      "request_admission_result"
+    );
+    const executionAudit = pickCanonicalSummaryField(
+      bridgeResult.payload,
+      "execution_audit"
+    );
     const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
       ...(asObject(bridgeResult.payload.summary) ?? {}),
       ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
-      ...(requestAdmissionResult ? { request_admission_result: requestAdmissionResult } : {}),
-      ...(executionAudit ? { execution_audit: executionAudit } : {})
+      ...(requestAdmissionResult !== undefined
+        ? { request_admission_result: requestAdmissionResult }
+        : {}),
+      ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
     });
 
     return {
