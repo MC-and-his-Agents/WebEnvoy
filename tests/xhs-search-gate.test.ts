@@ -472,7 +472,7 @@ describe("xhs-search gate helpers", () => {
     expect(gate.request_admission_result.reason_codes).toContain("RESOURCE_KIND_OUT_OF_SCOPE");
   });
 
-  it("does not reject profile_session only because the local runtime profile slug differs", () => {
+  it("blocks profile_session when the actual runtime profile differs from the authorized profile_ref", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",
       riskState: "allowed",
@@ -495,10 +495,10 @@ describe("xhs-search gate helpers", () => {
     });
 
     expect(gate.request_admission_result).toMatchObject({
-      admission_decision: "allowed",
+      admission_decision: "blocked",
       grant_match: true
     });
-    expect(gate.request_admission_result.reason_codes).not.toContain(
+    expect(gate.request_admission_result.reason_codes).toContain(
       "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH"
     );
   });

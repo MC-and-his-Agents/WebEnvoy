@@ -2309,6 +2309,7 @@ const deriveCanonicalRequestedExecutionMode = (input) => {
 
 const applyCanonicalAdmissionReasons = (input) => {
   const upstream = input.upstream;
+  const runtimeProfileRef = asString(input.runtimeProfileRef);
   if (!upstream?.action_request || !upstream?.resource_binding || !upstream?.authorization_grant || !upstream?.runtime_target) {
     return;
   }
@@ -2338,6 +2339,14 @@ const applyCanonicalAdmissionReasons = (input) => {
     )
   ) {
     pushReason(input.gateReasons, "PROFILE_REF_OUT_OF_SCOPE");
+  }
+  if (
+    upstream.resource_binding.resource_kind === "profile_session" &&
+    upstream.resource_binding.profile_ref &&
+    runtimeProfileRef &&
+    runtimeProfileRef !== upstream.resource_binding.profile_ref
+  ) {
+    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH");
   }
   if (
     !upstream.authorization_grant.target_scope.allowed_domains.includes(upstream.runtime_target.domain)
@@ -3522,6 +3531,7 @@ const evaluateXhsGate = (input) => {
     upstream: state.upstreamAuthorizationRequest,
     requestedExecutionMode: state.requestedExecutionMode,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
+    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     actualTargetUrl: input.actualTargetUrl ?? input.__actual_target_url,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
