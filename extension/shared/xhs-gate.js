@@ -14,6 +14,9 @@ import {
   buildIssue209PostGateArtifacts
 } from "./issue209-live-read/postgate-audit.js";
 import {
+  resolveConsumedIssue209AdmissionEvidence
+} from "./issue209-live-read/source.js";
+import {
   isIssue209LiveReadGateRequest,
   resolveIssue209LiveReadApprovalId
 } from "./issue209-live-read/identity.js";
@@ -59,6 +62,14 @@ const XHS_READ_EXECUTION_POLICY = {
     "approval_admission_evidence_checks_all_true"
   ]
 };
+const EXECUTION_AUDIT_NON_RISK_REASON_CODES = new Set([
+  "LIVE_MODE_APPROVED",
+  "DEFAULT_MODE_DRY_RUN",
+  "DEFAULT_MODE_RECON",
+  "WRITE_INTERACTION_APPROVED",
+  "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+]);
+const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
 
 const asRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -390,6 +401,36 @@ const applyCanonicalAdmissionReasons = (input) => {
       pushReason(input.gateReasons, "ANONYMOUS_ISOLATION_UNVERIFIED");
     }
   }
+
+  if (
+    input.issueScope === "issue_209" &&
+    input.requestedExecutionMode &&
+    XHS_LIVE_READ_EXECUTION_MODE_SET.has(input.requestedExecutionMode)
+  ) {
+    const consumedEvidence = resolveConsumedIssue209AdmissionEvidence(input.admissionContext);
+    if (
+      consumedEvidence.approvalAdmissionRef &&
+      !upstream.authorization_grant.approval_refs.includes(consumedEvidence.approvalAdmissionRef)
+    ) {
+      pushReason(input.gateReasons, "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE");
+    }
+    if (
+      consumedEvidence.auditAdmissionRef &&
+      !upstream.authorization_grant.audit_refs.includes(consumedEvidence.auditAdmissionRef)
+    ) {
+      pushReason(input.gateReasons, "AUDIT_ADMISSION_REF_OUT_OF_SCOPE");
+    }
+  }
+};
+
+const deriveExecutionAuditRiskSignals = (reasonCodes) => {
+  const normalizedReasonCodes = asStringArray(reasonCodes) ?? [];
+  const riskSignals = normalizedReasonCodes.filter(
+    (reason) =>
+      !EXECUTION_AUDIT_NON_RISK_REASON_CODES.has(reason) &&
+      !reason.startsWith("WRITE_INTERACTION_TIER_")
+  );
+  return riskSignals.length > 0 ? riskSignals : [NO_ADDITIONAL_RISK_SIGNALS];
 };
 
 const evaluateRequestAdmissionResult = (input) => {
@@ -430,6 +471,12 @@ const evaluateRequestAdmissionResult = (input) => {
       grantMatch = false;
     }
     if (!allowedPages.includes(upstream.runtime_target.page)) {
+      grantMatch = false;
+    }
+    if (
+      input.gateReasons.includes("APPROVAL_ADMISSION_REF_OUT_OF_SCOPE") ||
+      input.gateReasons.includes("AUDIT_ADMISSION_REF_OUT_OF_SCOPE")
+    ) {
       grantMatch = false;
     }
   }
@@ -1541,10 +1588,12 @@ const evaluateXhsGate = (input) => {
   applyCanonicalAdmissionReasons({
     gateReasons,
     upstream: state.upstreamAuthorizationRequest,
+    issueScope: state.issueScope,
     requestedExecutionMode: state.requestedExecutionMode,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
     runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     actualTargetUrl: input.actualTargetUrl ?? input.__actual_target_url,
+    admissionContext,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true
@@ -1585,7 +1634,10 @@ const evaluateXhsGate = (input) => {
     decisionId,
     admissionContext
   });
-  return {
+  const executionAuditRiskSignals = deriveExecutionAuditRiskSignals(
+    requestAdmissionResult.reason_codes
+  );
+  const result = {
     scope_context: { ...XHS_SCOPE_CONTEXT },
     read_execution_policy: {
       default_mode: XHS_READ_EXECUTION_POLICY.default_mode,
@@ -1635,8 +1687,24 @@ const evaluateXhsGate = (input) => {
       write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null
     },
     request_admission_result: requestAdmissionResult,
-    approval_record: approvalRecord
+    approval_record: approvalRecord,
+    execution_audit: null
   };
+  if (
+    state.issueScope === "issue_209" &&
+    state.requestedExecutionMode &&
+    XHS_LIVE_READ_EXECUTION_MODE_SET.has(state.requestedExecutionMode)
+  ) {
+    result.execution_audit = buildIssue209PostGateArtifacts({
+      runId: asString(input.runId),
+      sessionId: asString(input.sessionId),
+      profile: asString(input.profile),
+      gate: result,
+      executionAuditRiskSignals,
+      now: typeof input.now === "function" ? input.now : undefined
+    }).execution_audit;
+  }
+  return result;
 };
 
 export {

@@ -667,6 +667,246 @@ describe("xhs-search gate helpers", () => {
     expect(gate.riskState).toBe("limited");
   });
 
+  it("maps matching legacy admission evidence into request-time grant input and emits execution_audit", () => {
+    const runId = "run-extension-execution-audit-001";
+    const requestId = "req-execution-audit-001";
+    const sessionId = "session-extension-execution-audit-001";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-001"
+    );
+    const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
+    const auditAdmissionRef = `audit_admission_${runId}_${requestId}`;
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext: createAdmissionContext({
+        run_id: runId,
+        request_id: requestId,
+        session_id: sessionId,
+        decision_id: decisionId,
+        approval_id: approvalId
+      }),
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: [approvalAdmissionRef],
+        auditRefs: [auditAdmissionRef],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      grant_match: true
+    });
+    expect(gate.execution_audit).toMatchObject({
+      audit_ref: `exec_audit_${decisionId}`,
+      request_ref: "upstream_req_gate_001",
+      consumed_inputs: {
+        action_request_ref: "upstream_req_gate_001",
+        resource_binding_ref: "binding_gate_001",
+        authorization_grant_ref: "grant_gate_001",
+        runtime_target_ref: "target_gate_001"
+      },
+      compatibility_refs: {
+        gate_run_id: runId,
+        approval_admission_ref: approvalAdmissionRef,
+        audit_admission_ref: auditAdmissionRef,
+        approval_record_ref: approvalId,
+        audit_record_ref: `gate_evt_${decisionId}`,
+        session_rhythm_window_id: null,
+        session_rhythm_decision_id: null
+      },
+      request_admission_decision: "allowed",
+      risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]
+    });
+    expect(gate.execution_audit?.risk_signals).not.toContain("LIVE_MODE_APPROVED");
+  });
+
+  it("blocks canonical live-read when consumed admission refs fall outside grant scope", () => {
+    const runId = "run-extension-execution-audit-002";
+    const requestId = "req-execution-audit-002";
+    const sessionId = "session-extension-execution-audit-002";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-002"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext: createAdmissionContext({
+        run_id: runId,
+        request_id: requestId,
+        session_id: sessionId,
+        decision_id: decisionId,
+        approval_id: approvalId
+      }),
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_other_request"],
+        auditRefs: ["audit_admission_other_request"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      grant_match: false
+    });
+    expect(gate.request_admission_result.reason_codes).toEqual(
+      expect.arrayContaining([
+        "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE",
+        "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
+      ])
+    );
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        approval_admission_ref: null,
+        audit_admission_ref: null,
+        approval_record_ref: null,
+        audit_record_ref: `gate_evt_${decisionId}`
+      },
+      risk_signals: expect.arrayContaining([
+        "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE",
+        "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
+      ])
+    });
+  });
+
+  it("does not fabricate consumed admission refs from grant refs alone", () => {
+    const runId = "run-extension-execution-audit-003";
+    const requestId = "req-execution-audit-003";
+    const sessionId = "session-extension-execution-audit-003";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_001"],
+        auditRefs: ["audit_admission_external_001"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.request_admission_result.reason_codes).toEqual(
+      expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
+    );
+    expect(gate.execution_audit).toMatchObject({
+      audit_ref: `exec_audit_${decisionId}`,
+      compatibility_refs: {
+        approval_admission_ref: null,
+        audit_admission_ref: null,
+        approval_record_ref: null,
+        audit_record_ref: `gate_evt_${decisionId}`
+      }
+    });
+  });
+
+  it("keeps execution_audit empty on legacy live-read paths without canonical FR-0023 objects", () => {
+    const runId = "run-extension-execution-audit-004";
+    const requestId = "req-execution-audit-004";
+    const sessionId = "session-extension-execution-audit-004";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-004"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-a",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      admissionContext: createAdmissionContext({
+        run_id: runId,
+        request_id: requestId,
+        session_id: sessionId,
+        decision_id: decisionId,
+        approval_id: approvalId
+      })
+    });
+
+    expect(gate.gate_outcome.gate_decision).toBe("allowed");
+    expect(gate.execution_audit).toBeNull();
+  });
+
   it("preserves request_admission_result on the loopback gate payload", () => {
     const gate = buildLoopbackGate(
       {
@@ -1767,6 +2007,7 @@ describe("xhs-search gate helpers", () => {
       gate_decision: "allowed",
       audited_checks: defaultAuditChecks
     });
+    expect(artifacts.execution_audit).toBeNull();
 
     const validation = validateIssue209AuditSourceAgainstCurrentLinkage({
       current: {

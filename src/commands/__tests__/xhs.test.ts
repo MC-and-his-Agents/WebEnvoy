@@ -1186,6 +1186,8 @@ describe("normalizeGateOptionsForContract", () => {
   it("preserves anonymous admission signals on the loopback runtime path and exposes request_admission_result", async () => {
     const runId = "run-anon-loopback-001";
     const requestId = "req-anon-loopback-001";
+    const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
+    const auditAdmissionRef = `audit_admission_${runId}_${requestId}`;
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
     const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
@@ -1245,8 +1247,8 @@ describe("normalizeGateOptionsForContract", () => {
                     allowed_pages: ["explore_detail_tab"]
                   },
                   resource_state_snapshot: "active",
-                  approval_refs: ["approval_admission_external_anon_001"],
-                  audit_refs: ["audit_admission_external_anon_001"]
+                  approval_refs: [approvalAdmissionRef],
+                  audit_refs: [auditAdmissionRef]
                 },
                 runtime_target: {
                   target_ref: "target_loopback_anon_001",

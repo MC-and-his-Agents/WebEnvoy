@@ -1318,6 +1318,9 @@ const normalizeChecks = (value) => {
   return Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, asBoolean(record?.[key])]));
 };
 
+const hasAllTrueChecks = (value) =>
+  APPROVAL_CHECK_KEYS.every((key) => value?.[key] === true);
+
 const normalizeApprovalAdmissionEvidence = (value) => {
   const record = asRecord(value);
   return {
@@ -1359,6 +1362,39 @@ const normalizeAuditAdmissionEvidence = (value) => {
     risk_state: asString(record?.risk_state),
     audited_checks: normalizeChecks(record?.audited_checks),
     recorded_at: asString(record?.recorded_at)
+  };
+};
+
+const resolveConsumedIssue209AdmissionEvidence = (value) => {
+  const admissionContext = cloneIssue209AdmissionContext(value);
+  const approvalEvidence = normalizeApprovalAdmissionEvidence(
+    admissionContext?.approval_admission_evidence
+  );
+  const auditEvidence = normalizeAuditAdmissionEvidence(
+    admissionContext?.audit_admission_evidence
+  );
+
+  const approvalAdmissionRef =
+    approvalEvidence.approval_admission_ref &&
+    approvalEvidence.recorded_at &&
+    approvalEvidence.approved === true &&
+    approvalEvidence.approver &&
+    approvalEvidence.approved_at &&
+    hasAllTrueChecks(approvalEvidence.checks)
+      ? approvalEvidence.approval_admission_ref
+      : null;
+  const auditAdmissionRef =
+    auditEvidence.audit_admission_ref &&
+    auditEvidence.recorded_at &&
+    hasAllTrueChecks(auditEvidence.audited_checks)
+      ? auditEvidence.audit_admission_ref
+      : null;
+
+  return {
+    approvalEvidence,
+    auditEvidence,
+    approvalAdmissionRef,
+    auditAdmissionRef
   };
 };
 
@@ -1429,7 +1465,7 @@ const prepareIssue209LiveReadSource = (input) => {
     auditSource: normalizeProvidedAuditSource(input?.auditRecord)
   };
 };
-return { APPROVAL_CHECK_KEYS, cloneIssue209AdmissionContext, normalizeApprovalAdmissionEvidence, normalizeAuditAdmissionEvidence, normalizeProvidedApprovalSource, normalizeProvidedAuditSource, prepareIssue209LiveReadSource };
+return { APPROVAL_CHECK_KEYS, cloneIssue209AdmissionContext, normalizeApprovalAdmissionEvidence, normalizeAuditAdmissionEvidence, resolveConsumedIssue209AdmissionEvidence, normalizeProvidedApprovalSource, normalizeProvidedAuditSource, prepareIssue209LiveReadSource };
 })();
 const __webenvoy_module_issue209_source_validation = (() => {
 const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;
@@ -1931,6 +1967,7 @@ return { validateIssue209ApprovalSourceAgainstCurrentLinkage, collectIssue209Liv
 const __webenvoy_module_issue209_postgate_audit = (() => {
 const { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } = __webenvoy_module_risk_state;
 const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;
+const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;
 const clone = (value) => structuredClone(value);
 const asRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -1938,9 +1975,90 @@ const asRecord = (value) =>
 const asString = (value) =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const asStringArray = (value) =>
+  Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
 const normalizeChecks = (value) => {
   const record = asRecord(value);
   return Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, record?.[key] === true]));
+};
+
+const ISSUE209_LIVE_READ_MODES = new Set(["live_read_limited", "live_read_high_risk"]);
+const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
+
+const hasCanonicalExecutionAuditInputs = (requestAdmissionResult) => {
+  const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
+  return Boolean(
+    asString(requestAdmissionResult?.request_ref) &&
+      asString(derivedFrom?.action_request_ref) &&
+      asString(derivedFrom?.resource_binding_ref) &&
+      asString(derivedFrom?.authorization_grant_ref) &&
+      asString(derivedFrom?.runtime_target_ref)
+  );
+};
+
+const hasApprovalEvidenceValidationIssue = (reasonCodes) =>
+  reasonCodes.some(
+    (reason) =>
+      reason === "MANUAL_CONFIRMATION_MISSING" ||
+      reason === "APPROVAL_CHECKS_INCOMPLETE" ||
+      reason === "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE"
+  );
+
+const hasAuditEvidenceValidationIssue = (reasonCodes) =>
+  reasonCodes.some(
+    (reason) =>
+      reason === "AUDIT_RECORD_MISSING" || reason === "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
+  );
+
+const buildIssue209ExecutionAudit = (input) => {
+  const requestAdmissionResult = asRecord(input.gate?.request_admission_result);
+  const requestedMode = asString(input.gate?.consumer_gate_result?.requested_execution_mode);
+  if (
+    !requestAdmissionResult ||
+    !requestedMode ||
+    !ISSUE209_LIVE_READ_MODES.has(requestedMode) ||
+    !hasCanonicalExecutionAuditInputs(requestAdmissionResult)
+  ) {
+    return null;
+  }
+
+  const derivedFrom = asRecord(requestAdmissionResult.derived_from);
+  const reasonCodes = asStringArray(requestAdmissionResult.reason_codes);
+  const consumedEvidence = resolveConsumedIssue209AdmissionEvidence(
+    input.gate?.gate_input?.admission_context
+  );
+  const riskSignals =
+    asStringArray(input.executionAuditRiskSignals).length > 0
+      ? asStringArray(input.executionAuditRiskSignals)
+      : [NO_ADDITIONAL_RISK_SIGNALS];
+
+  return {
+    audit_ref: `exec_audit_${input.decisionId}`,
+    request_ref: asString(requestAdmissionResult.request_ref),
+    consumed_inputs: {
+      action_request_ref: asString(derivedFrom?.action_request_ref),
+      resource_binding_ref: asString(derivedFrom?.resource_binding_ref),
+      authorization_grant_ref: asString(derivedFrom?.authorization_grant_ref),
+      runtime_target_ref: asString(derivedFrom?.runtime_target_ref)
+    },
+    compatibility_refs: {
+      gate_run_id: asString(input.runId),
+      approval_admission_ref: hasApprovalEvidenceValidationIssue(reasonCodes)
+        ? null
+        : consumedEvidence.approvalAdmissionRef,
+      audit_admission_ref: hasAuditEvidenceValidationIssue(reasonCodes)
+        ? null
+        : consumedEvidence.auditAdmissionRef,
+      approval_record_ref: asString(input.approvalRecord?.approval_id),
+      audit_record_ref: asString(input.auditRecord?.event_id),
+      session_rhythm_window_id: null,
+      session_rhythm_decision_id: null
+    },
+    request_admission_decision: requestAdmissionResult.admission_decision,
+    risk_signals: riskSignals,
+    recorded_at: input.recordedAt
+  };
 };
 
 const buildIssue209PostGateArtifacts = (input) => {
@@ -2017,10 +2135,20 @@ const buildIssue209PostGateArtifacts = (input) => {
   });
   auditRecord.next_state = asString(transitionAudit.next_state);
   auditRecord.transition_trigger = asString(transitionAudit.trigger);
+  const executionAudit = buildIssue209ExecutionAudit({
+    runId: input.runId,
+    gate,
+    decisionId,
+    approvalRecord,
+    auditRecord,
+    recordedAt,
+    executionAuditRiskSignals: input.executionAuditRiskSignals
+  });
 
   return {
     approval_record: approvalRecord,
-    audit_record: auditRecord
+    audit_record: auditRecord,
+    execution_audit: executionAudit
   };
 };
 return { buildIssue209PostGateArtifacts };
@@ -2035,6 +2163,7 @@ const {
   resolveIssueScope: resolveSharedIssueScope,
   resolveRiskState: resolveSharedRiskState
 } = __webenvoy_module_risk_state;
+const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;
 const { collectIssue209LiveReadMatrixGateReasons } = __webenvoy_module_issue209_gate;
 const { buildIssue209PostGateArtifacts } = __webenvoy_module_issue209_postgate_audit;
 const {
@@ -2082,6 +2211,14 @@ const XHS_READ_EXECUTION_POLICY = {
     "approval_admission_evidence_checks_all_true"
   ]
 };
+const EXECUTION_AUDIT_NON_RISK_REASON_CODES = new Set([
+  "LIVE_MODE_APPROVED",
+  "DEFAULT_MODE_DRY_RUN",
+  "DEFAULT_MODE_RECON",
+  "WRITE_INTERACTION_APPROVED",
+  "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+]);
+const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
 
 const asRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -2413,6 +2550,36 @@ const applyCanonicalAdmissionReasons = (input) => {
       pushReason(input.gateReasons, "ANONYMOUS_ISOLATION_UNVERIFIED");
     }
   }
+
+  if (
+    input.issueScope === "issue_209" &&
+    input.requestedExecutionMode &&
+    XHS_LIVE_READ_EXECUTION_MODE_SET.has(input.requestedExecutionMode)
+  ) {
+    const consumedEvidence = resolveConsumedIssue209AdmissionEvidence(input.admissionContext);
+    if (
+      consumedEvidence.approvalAdmissionRef &&
+      !upstream.authorization_grant.approval_refs.includes(consumedEvidence.approvalAdmissionRef)
+    ) {
+      pushReason(input.gateReasons, "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE");
+    }
+    if (
+      consumedEvidence.auditAdmissionRef &&
+      !upstream.authorization_grant.audit_refs.includes(consumedEvidence.auditAdmissionRef)
+    ) {
+      pushReason(input.gateReasons, "AUDIT_ADMISSION_REF_OUT_OF_SCOPE");
+    }
+  }
+};
+
+const deriveExecutionAuditRiskSignals = (reasonCodes) => {
+  const normalizedReasonCodes = asStringArray(reasonCodes) ?? [];
+  const riskSignals = normalizedReasonCodes.filter(
+    (reason) =>
+      !EXECUTION_AUDIT_NON_RISK_REASON_CODES.has(reason) &&
+      !reason.startsWith("WRITE_INTERACTION_TIER_")
+  );
+  return riskSignals.length > 0 ? riskSignals : [NO_ADDITIONAL_RISK_SIGNALS];
 };
 
 const evaluateRequestAdmissionResult = (input) => {
@@ -2453,6 +2620,12 @@ const evaluateRequestAdmissionResult = (input) => {
       grantMatch = false;
     }
     if (!allowedPages.includes(upstream.runtime_target.page)) {
+      grantMatch = false;
+    }
+    if (
+      input.gateReasons.includes("APPROVAL_ADMISSION_REF_OUT_OF_SCOPE") ||
+      input.gateReasons.includes("AUDIT_ADMISSION_REF_OUT_OF_SCOPE")
+    ) {
       grantMatch = false;
     }
   }
@@ -3564,10 +3737,12 @@ const evaluateXhsGate = (input) => {
   applyCanonicalAdmissionReasons({
     gateReasons,
     upstream: state.upstreamAuthorizationRequest,
+    issueScope: state.issueScope,
     requestedExecutionMode: state.requestedExecutionMode,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
     runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     actualTargetUrl: input.actualTargetUrl ?? input.__actual_target_url,
+    admissionContext,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true
@@ -3608,7 +3783,10 @@ const evaluateXhsGate = (input) => {
     decisionId,
     admissionContext
   });
-  return {
+  const executionAuditRiskSignals = deriveExecutionAuditRiskSignals(
+    requestAdmissionResult.reason_codes
+  );
+  const result = {
     scope_context: { ...XHS_SCOPE_CONTEXT },
     read_execution_policy: {
       default_mode: XHS_READ_EXECUTION_POLICY.default_mode,
@@ -3658,8 +3836,24 @@ const evaluateXhsGate = (input) => {
       write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null
     },
     request_admission_result: requestAdmissionResult,
-    approval_record: approvalRecord
+    approval_record: approvalRecord,
+    execution_audit: null
   };
+  if (
+    state.issueScope === "issue_209" &&
+    state.requestedExecutionMode &&
+    XHS_LIVE_READ_EXECUTION_MODE_SET.has(state.requestedExecutionMode)
+  ) {
+    result.execution_audit = buildIssue209PostGateArtifacts({
+      runId: asString(input.runId),
+      sessionId: asString(input.sessionId),
+      profile: asString(input.profile),
+      gate: result,
+      executionAuditRiskSignals,
+      now: typeof input.now === "function" ? input.now : undefined
+    }).execution_audit;
+  }
+  return result;
 };
 return { XHS_ALLOWED_DOMAINS, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN, buildIssue209PostGateArtifacts, evaluateXhsGate, resolveXhsGateDecisionId };
 })();

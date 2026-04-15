@@ -1,5 +1,6 @@
 import { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } from "../risk-state.js";
 import { resolveIssue209LiveReadApprovalId } from "./identity.js";
+import { resolveConsumedIssue209AdmissionEvidence } from "./source.js";
 
 const clone = (value) => structuredClone(value);
 const asRecord = (value) =>
@@ -8,9 +9,90 @@ const asRecord = (value) =>
 const asString = (value) =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const asStringArray = (value) =>
+  Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
 const normalizeChecks = (value) => {
   const record = asRecord(value);
   return Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, record?.[key] === true]));
+};
+
+const ISSUE209_LIVE_READ_MODES = new Set(["live_read_limited", "live_read_high_risk"]);
+const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
+
+const hasCanonicalExecutionAuditInputs = (requestAdmissionResult) => {
+  const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
+  return Boolean(
+    asString(requestAdmissionResult?.request_ref) &&
+      asString(derivedFrom?.action_request_ref) &&
+      asString(derivedFrom?.resource_binding_ref) &&
+      asString(derivedFrom?.authorization_grant_ref) &&
+      asString(derivedFrom?.runtime_target_ref)
+  );
+};
+
+const hasApprovalEvidenceValidationIssue = (reasonCodes) =>
+  reasonCodes.some(
+    (reason) =>
+      reason === "MANUAL_CONFIRMATION_MISSING" ||
+      reason === "APPROVAL_CHECKS_INCOMPLETE" ||
+      reason === "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE"
+  );
+
+const hasAuditEvidenceValidationIssue = (reasonCodes) =>
+  reasonCodes.some(
+    (reason) =>
+      reason === "AUDIT_RECORD_MISSING" || reason === "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
+  );
+
+const buildIssue209ExecutionAudit = (input) => {
+  const requestAdmissionResult = asRecord(input.gate?.request_admission_result);
+  const requestedMode = asString(input.gate?.consumer_gate_result?.requested_execution_mode);
+  if (
+    !requestAdmissionResult ||
+    !requestedMode ||
+    !ISSUE209_LIVE_READ_MODES.has(requestedMode) ||
+    !hasCanonicalExecutionAuditInputs(requestAdmissionResult)
+  ) {
+    return null;
+  }
+
+  const derivedFrom = asRecord(requestAdmissionResult.derived_from);
+  const reasonCodes = asStringArray(requestAdmissionResult.reason_codes);
+  const consumedEvidence = resolveConsumedIssue209AdmissionEvidence(
+    input.gate?.gate_input?.admission_context
+  );
+  const riskSignals =
+    asStringArray(input.executionAuditRiskSignals).length > 0
+      ? asStringArray(input.executionAuditRiskSignals)
+      : [NO_ADDITIONAL_RISK_SIGNALS];
+
+  return {
+    audit_ref: `exec_audit_${input.decisionId}`,
+    request_ref: asString(requestAdmissionResult.request_ref),
+    consumed_inputs: {
+      action_request_ref: asString(derivedFrom?.action_request_ref),
+      resource_binding_ref: asString(derivedFrom?.resource_binding_ref),
+      authorization_grant_ref: asString(derivedFrom?.authorization_grant_ref),
+      runtime_target_ref: asString(derivedFrom?.runtime_target_ref)
+    },
+    compatibility_refs: {
+      gate_run_id: asString(input.runId),
+      approval_admission_ref: hasApprovalEvidenceValidationIssue(reasonCodes)
+        ? null
+        : consumedEvidence.approvalAdmissionRef,
+      audit_admission_ref: hasAuditEvidenceValidationIssue(reasonCodes)
+        ? null
+        : consumedEvidence.auditAdmissionRef,
+      approval_record_ref: asString(input.approvalRecord?.approval_id),
+      audit_record_ref: asString(input.auditRecord?.event_id),
+      session_rhythm_window_id: null,
+      session_rhythm_decision_id: null
+    },
+    request_admission_decision: requestAdmissionResult.admission_decision,
+    risk_signals: riskSignals,
+    recorded_at: input.recordedAt
+  };
 };
 
 const buildIssue209PostGateArtifacts = (input) => {
@@ -87,10 +169,20 @@ const buildIssue209PostGateArtifacts = (input) => {
   });
   auditRecord.next_state = asString(transitionAudit.next_state);
   auditRecord.transition_trigger = asString(transitionAudit.trigger);
+  const executionAudit = buildIssue209ExecutionAudit({
+    runId: input.runId,
+    gate,
+    decisionId,
+    approvalRecord,
+    auditRecord,
+    recordedAt,
+    executionAuditRiskSignals: input.executionAuditRiskSignals
+  });
 
   return {
     approval_record: approvalRecord,
-    audit_record: auditRecord
+    audit_record: auditRecord,
+    execution_audit: executionAudit
   };
 };
 

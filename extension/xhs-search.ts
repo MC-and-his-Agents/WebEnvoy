@@ -10,6 +10,7 @@ export type {
   GateInputRecord,
   GateOutcomeRecord,
   JsonRecord,
+  RequestExecutionAudit,
   RequestedExecutionMode,
   ScopeContextRecord,
   SearchExecutionFailure,
