@@ -4,6 +4,7 @@ import { prepareIssue209LiveReadSource } from "../../shared/issue209-live-read/s
 import { validateIssue209ApprovalSourceAgainstCurrentLinkage, validateIssue209AuditSourceAgainstCurrentLinkage } from "../../shared/issue209-live-read/source-validation.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
+const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODES = new Set([
     "dry_run",
     "recon",
@@ -15,7 +16,30 @@ const XHS_LIVE_READ_EXECUTION_MODES = new Set([
     "live_read_limited",
     "live_read_high_risk"
 ]);
+const LEGACY_RISK_STATES = new Set(["paused", "limited", "allowed"]);
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const UPSTREAM_RESOURCE_KINDS = new Set([
+    "anonymous_context",
+    "profile_session"
+]);
+const RESOURCE_STATE_SNAPSHOTS = new Set([
+    "active",
+    "cool_down",
+    "paused"
+]);
+const UPSTREAM_AUTHORIZATION_KEYS = [
+    "action_request",
+    "resource_binding",
+    "authorization_grant",
+    "runtime_target"
+];
+const XHS_COMMAND_ACTION_NAMES = {
+    "xhs.search::xhs.note.search.v1": "xhs.read_search_results",
+    "xhs.search::xhs.editor.input.v1": "xhs.write_editor_input",
+    "xhs.detail::xhs.note.detail.v1": "xhs.read_note_detail",
+    "xhs.user_home::xhs.user.home.v1": "xhs.read_user_home"
+};
 const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 const ISSUE209_GATE_INVOCATION_ID_PREFIX = "issue209-gate";
 export const ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY = "__issue209_admission_draft";
@@ -23,7 +47,27 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asStringArray = (value) => {
+    if (!Array.isArray(value)) {
+        return null;
+    }
+    const normalized = value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter((item) => item.length > 0);
+    return normalized.length === value.length ? normalized : null;
+};
 const cloneJsonObject = (value) => JSON.parse(JSON.stringify(value));
+const projectLegacyActionTypeForContract = (actionType) => {
+    if (actionType === "read") {
+        return "read";
+    }
+    if (actionType === "write" || actionType === "irreversible_write") {
+        return "write";
+    }
+    return null;
+};
 const resolveIssue209ScopeFromAdmissionSource = (options) => {
     const admissionContext = asObject(options.admission_context);
     const approvalEvidence = asObject(admissionContext?.approval_admission_evidence);
@@ -34,6 +78,64 @@ const resolveIssue209ScopeFromAdmissionSource = (options) => {
     const auditRecord = asObject(options.audit_record);
     if (auditRecord?.issue_scope === "issue_209") {
         return "issue_209";
+    }
+    return null;
+};
+const projectRiskStateForContract = (resourceStateSnapshot) => {
+    if (resourceStateSnapshot === "active") {
+        return "allowed";
+    }
+    if (resourceStateSnapshot === "cool_down") {
+        return "limited";
+    }
+    if (resourceStateSnapshot === "paused") {
+        return "paused";
+    }
+    return null;
+};
+const inferRequestedExecutionModeForContract = (input) => {
+    if (!input.upstreamAuthorization) {
+        return input.explicitRequestedExecutionMode;
+    }
+    if (input.normalizedActionType === "write" || input.normalizedActionType === "irreversible_write") {
+        return "live_write";
+    }
+    if (input.normalizedActionType !== "read") {
+        return null;
+    }
+    const approvalRefs = input.upstreamAuthorization.authorization_grant.approval_refs ?? [];
+    const auditRefs = input.upstreamAuthorization.authorization_grant.audit_refs ?? [];
+    const hasLiveReadGrantRefs = approvalRefs.length > 0 && auditRefs.length > 0;
+    if (!hasLiveReadGrantRefs || input.targetDomain !== XHS_READ_DOMAIN) {
+        return "dry_run";
+    }
+    const projectedRiskState = projectRiskStateForContract(input.upstreamAuthorization.authorization_grant.resource_state_snapshot);
+    if (projectedRiskState === "allowed") {
+        return "live_read_high_risk";
+    }
+    return "live_read_limited";
+};
+const resolveInferredIssueScopeForContract = (options) => {
+    if (asString(options.validation_action) === "editor_input" &&
+        asString(options.action_type) === "write" &&
+        asString(options.target_domain) === XHS_WRITE_DOMAIN &&
+        asString(options.target_page) === "creator_publish_tab" &&
+        options.requested_execution_mode === "live_write") {
+        return "issue_208";
+    }
+    const explicitIssueScope = asString(options.issue_scope);
+    if (explicitIssueScope === "issue_209") {
+        return "issue_209";
+    }
+    if (typeof options.requested_execution_mode === "string" &&
+        XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode)) {
+        const sourceIssueScope = resolveIssue209ScopeFromAdmissionSource(options);
+        if (sourceIssueScope === "issue_209") {
+            return sourceIssueScope;
+        }
+        if (asString(options.action_type) === "read" && asString(options.target_domain) === XHS_READ_DOMAIN) {
+            return "issue_209";
+        }
     }
     return null;
 };
@@ -61,6 +163,215 @@ const invalidAbilityInput = (reason, abilityId = "unknown") => new CliError("ERR
         reason
     }
 });
+const parseRequiredObjectFieldForContract = (source, key, reason, abilityId) => {
+    const object = asObject(source[key]);
+    if (!object) {
+        throw invalidAbilityInput(reason, abilityId);
+    }
+    return object;
+};
+const parseRequiredStringFieldForContract = (source, key, reason, abilityId) => {
+    const value = asString(source[key]);
+    if (!value) {
+        throw invalidAbilityInput(reason, abilityId);
+    }
+    return value;
+};
+const parseOptionalStringFieldForContract = (source, key, reason, abilityId) => {
+    if (!hasOwn(source, key)) {
+        return undefined;
+    }
+    const value = asString(source[key]);
+    if (!value) {
+        throw invalidAbilityInput(reason, abilityId);
+    }
+    return value;
+};
+const parseOptionalNullableStringFieldForContract = (source, key, reason, abilityId) => {
+    if (!hasOwn(source, key)) {
+        return undefined;
+    }
+    if (source[key] === null) {
+        return null;
+    }
+    const value = asString(source[key]);
+    if (!value) {
+        throw invalidAbilityInput(reason, abilityId);
+    }
+    return value;
+};
+const parseActionRequestForContract = (source, abilityId) => {
+    const requestRef = parseRequiredStringFieldForContract(source, "request_ref", "ACTION_REQUEST_REF_INVALID", abilityId);
+    const actionName = parseRequiredStringFieldForContract(source, "action_name", "ACTION_REQUEST_NAME_INVALID", abilityId);
+    const actionCategory = asString(source.action_category);
+    if (!actionCategory || !GATE_ACTION_TYPES.has(actionCategory)) {
+        throw invalidAbilityInput("ACTION_CATEGORY_INVALID", abilityId);
+    }
+    const constraintRefs = hasOwn(source, "constraint_refs") && source.constraint_refs !== undefined
+        ? asStringArray(source.constraint_refs)
+        : undefined;
+    if (hasOwn(source, "constraint_refs") && source.constraint_refs !== undefined && !constraintRefs) {
+        throw invalidAbilityInput("ACTION_REQUEST_INVALID", abilityId);
+    }
+    const intent = parseOptionalStringFieldForContract(source, "intent", "ACTION_REQUEST_INVALID", abilityId);
+    const requestedAt = parseOptionalStringFieldForContract(source, "requested_at", "ACTION_REQUEST_INVALID", abilityId);
+    return {
+        request_ref: requestRef,
+        action_name: actionName,
+        action_category: actionCategory,
+        ...(intent ? { intent } : {}),
+        ...(constraintRefs ? { constraint_refs: constraintRefs } : {}),
+        ...(requestedAt ? { requested_at: requestedAt } : {})
+    };
+};
+const parseResourceBindingForContract = (source, abilityId) => {
+    const bindingRef = parseRequiredStringFieldForContract(source, "binding_ref", "BINDING_REF_INVALID", abilityId);
+    const resourceKind = asString(source.resource_kind);
+    if (!resourceKind || !UPSTREAM_RESOURCE_KINDS.has(resourceKind)) {
+        throw invalidAbilityInput("RESOURCE_KIND_INVALID", abilityId);
+    }
+    const profileRef = parseOptionalNullableStringFieldForContract(source, "profile_ref", resourceKind === "profile_session" ? "PROFILE_REF_REQUIRED" : "PROFILE_REF_FORBIDDEN", abilityId);
+    if (resourceKind === "profile_session" && !profileRef) {
+        throw invalidAbilityInput("PROFILE_REF_REQUIRED", abilityId);
+    }
+    if (resourceKind === "anonymous_context" && typeof profileRef === "string") {
+        throw invalidAbilityInput("PROFILE_REF_FORBIDDEN", abilityId);
+    }
+    const bindingConstraints = hasOwn(source, "binding_constraints") && source.binding_constraints !== undefined
+        ? asObject(source.binding_constraints)
+        : undefined;
+    if (hasOwn(source, "binding_constraints") && source.binding_constraints !== undefined && !bindingConstraints) {
+        throw invalidAbilityInput("RESOURCE_BINDING_INVALID", abilityId);
+    }
+    if (resourceKind === "anonymous_context") {
+        if (bindingConstraints?.anonymous_required !== true ||
+            bindingConstraints?.reuse_logged_in_context_forbidden !== true) {
+            throw invalidAbilityInput("ANONYMOUS_BINDING_CONSTRAINTS_INVALID", abilityId);
+        }
+    }
+    const subjectRef = parseOptionalStringFieldForContract(source, "subject_ref", "RESOURCE_BINDING_INVALID", abilityId);
+    const accountRef = parseOptionalStringFieldForContract(source, "account_ref", "RESOURCE_BINDING_INVALID", abilityId);
+    return {
+        binding_ref: bindingRef,
+        resource_kind: resourceKind,
+        ...(profileRef !== undefined ? { profile_ref: profileRef } : {}),
+        ...(subjectRef ? { subject_ref: subjectRef } : {}),
+        ...(accountRef ? { account_ref: accountRef } : {}),
+        ...(bindingConstraints ? { binding_constraints: cloneJsonObject(bindingConstraints) } : {})
+    };
+};
+const parseGrantScopeForContract = (source, scopeKey, reason, abilityId) => {
+    const scope = parseRequiredObjectFieldForContract(source, scopeKey, reason, abilityId);
+    return cloneJsonObject(scope);
+};
+const parseAuthorizationGrantForContract = (source, abilityId) => {
+    const grantRef = parseRequiredStringFieldForContract(source, "grant_ref", "GRANT_REF_INVALID", abilityId);
+    const allowedActions = asStringArray(source.allowed_actions);
+    if (!allowedActions || allowedActions.length === 0) {
+        throw invalidAbilityInput("GRANT_ALLOWED_ACTIONS_INVALID", abilityId);
+    }
+    const bindingScope = parseGrantScopeForContract(source, "binding_scope", "GRANT_BINDING_SCOPE_INVALID", abilityId);
+    if (!hasOwn(bindingScope, "allowed_resource_kinds") || !hasOwn(bindingScope, "allowed_profile_refs")) {
+        throw invalidAbilityInput("GRANT_BINDING_SCOPE_INVALID", abilityId);
+    }
+    const allowedResourceKinds = asStringArray(bindingScope.allowed_resource_kinds);
+    const allowedProfileRefs = asStringArray(bindingScope.allowed_profile_refs);
+    if (!allowedResourceKinds ||
+        allowedResourceKinds.length === 0 ||
+        !allowedProfileRefs ||
+        !allowedResourceKinds.every((value) => UPSTREAM_RESOURCE_KINDS.has(value))) {
+        throw invalidAbilityInput("GRANT_BINDING_SCOPE_INVALID", abilityId);
+    }
+    const targetScope = parseGrantScopeForContract(source, "target_scope", "GRANT_TARGET_SCOPE_INVALID", abilityId);
+    if (hasOwn(targetScope, "tab_id")) {
+        throw invalidAbilityInput("GRANT_TARGET_SCOPE_INVALID", abilityId);
+    }
+    if (!hasOwn(targetScope, "allowed_domains") || !hasOwn(targetScope, "allowed_pages")) {
+        throw invalidAbilityInput("GRANT_TARGET_SCOPE_INVALID", abilityId);
+    }
+    const allowedDomains = asStringArray(targetScope.allowed_domains);
+    const allowedPages = asStringArray(targetScope.allowed_pages);
+    if (!allowedDomains || allowedDomains.length === 0 || !allowedPages || allowedPages.length === 0) {
+        throw invalidAbilityInput("GRANT_TARGET_SCOPE_INVALID", abilityId);
+    }
+    const resourceStateSnapshot = parseOptionalStringFieldForContract(source, "resource_state_snapshot", "RESOURCE_STATE_SNAPSHOT_INVALID", abilityId);
+    if (resourceStateSnapshot &&
+        !RESOURCE_STATE_SNAPSHOTS.has(resourceStateSnapshot)) {
+        throw invalidAbilityInput("RESOURCE_STATE_SNAPSHOT_INVALID", abilityId);
+    }
+    const grantConstraints = hasOwn(source, "grant_constraints") && source.grant_constraints !== undefined
+        ? asObject(source.grant_constraints)
+        : undefined;
+    if (hasOwn(source, "grant_constraints") && source.grant_constraints !== undefined && !grantConstraints) {
+        throw invalidAbilityInput("AUTHORIZATION_GRANT_INVALID", abilityId);
+    }
+    const approvalRefs = hasOwn(source, "approval_refs") && source.approval_refs !== undefined
+        ? asStringArray(source.approval_refs)
+        : undefined;
+    const auditRefs = hasOwn(source, "audit_refs") && source.audit_refs !== undefined
+        ? asStringArray(source.audit_refs)
+        : undefined;
+    if ((hasOwn(source, "approval_refs") && source.approval_refs !== undefined && !approvalRefs) ||
+        (hasOwn(source, "audit_refs") && source.audit_refs !== undefined && !auditRefs)) {
+        throw invalidAbilityInput("AUTHORIZATION_GRANT_INVALID", abilityId);
+    }
+    const grantedAt = parseOptionalStringFieldForContract(source, "granted_at", "AUTHORIZATION_GRANT_INVALID", abilityId);
+    return {
+        grant_ref: grantRef,
+        allowed_actions: allowedActions,
+        binding_scope: {
+            allowed_resource_kinds: allowedResourceKinds,
+            allowed_profile_refs: allowedProfileRefs
+        },
+        target_scope: {
+            allowed_domains: allowedDomains,
+            allowed_pages: allowedPages
+        },
+        ...(resourceStateSnapshot
+            ? { resource_state_snapshot: resourceStateSnapshot }
+            : {}),
+        ...(grantConstraints ? { grant_constraints: cloneJsonObject(grantConstraints) } : {}),
+        ...(approvalRefs ? { approval_refs: approvalRefs } : {}),
+        ...(auditRefs ? { audit_refs: auditRefs } : {}),
+        ...(grantedAt ? { granted_at: grantedAt } : {})
+    };
+};
+const parseRuntimeTargetForContract = (source, abilityId) => {
+    const targetRef = parseRequiredStringFieldForContract(source, "target_ref", "RUNTIME_TARGET_REF_INVALID", abilityId);
+    const domain = parseRequiredStringFieldForContract(source, "domain", "TARGET_DOMAIN_INVALID", abilityId);
+    const page = parseRequiredStringFieldForContract(source, "page", "TARGET_PAGE_INVALID", abilityId);
+    const tabId = asInteger(source.tab_id);
+    if (tabId === null) {
+        throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
+    }
+    const url = parseOptionalStringFieldForContract(source, "url", "TARGET_URL_INVALID", abilityId);
+    return {
+        target_ref: targetRef,
+        domain,
+        page,
+        tab_id: tabId,
+        ...(url ? { url } : {})
+    };
+};
+const parseUpstreamAuthorizationForContract = (params, abilityId) => {
+    const presentKeys = UPSTREAM_AUTHORIZATION_KEYS.filter((key) => hasOwn(params, key));
+    if (presentKeys.length === 0) {
+        return null;
+    }
+    if (presentKeys.length !== UPSTREAM_AUTHORIZATION_KEYS.length) {
+        throw invalidAbilityInput("UPSTREAM_AUTHORIZATION_OBJECT_SET_INCOMPLETE", abilityId);
+    }
+    const actionRequest = parseActionRequestForContract(parseRequiredObjectFieldForContract(params, "action_request", "ACTION_REQUEST_INVALID", abilityId), abilityId);
+    const resourceBinding = parseResourceBindingForContract(parseRequiredObjectFieldForContract(params, "resource_binding", "RESOURCE_BINDING_INVALID", abilityId), abilityId);
+    const authorizationGrant = parseAuthorizationGrantForContract(parseRequiredObjectFieldForContract(params, "authorization_grant", "AUTHORIZATION_GRANT_INVALID", abilityId), abilityId);
+    const runtimeTarget = parseRuntimeTargetForContract(parseRequiredObjectFieldForContract(params, "runtime_target", "RUNTIME_TARGET_INVALID", abilityId), abilityId);
+    return {
+        action_request: actionRequest,
+        resource_binding: resourceBinding,
+        authorization_grant: authorizationGrant,
+        runtime_target: runtimeTarget
+    };
+};
 export const parseAbilityEnvelopeForContract = (params) => {
     const abilityObject = asObject(params.ability);
     if (!abilityObject) {
@@ -95,6 +406,7 @@ export const parseAbilityEnvelopeForContract = (params) => {
             : (() => {
                 throw invalidAbilityInput("REQUEST_ID_INVALID", abilityId);
             })();
+    const upstreamAuthorization = parseUpstreamAuthorizationForContract(params, abilityId);
     return {
         ability: {
             id: abilityId,
@@ -103,7 +415,8 @@ export const parseAbilityEnvelopeForContract = (params) => {
         },
         input,
         options,
-        requestId
+        requestId,
+        upstreamAuthorization
     };
 };
 export const parseSearchInputForContract = (input, abilityId, options, abilityAction) => {
@@ -170,22 +483,46 @@ export const parseXhsCommandInputForContract = (input) => {
     }
     throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
 };
-export const normalizeGateOptionsForContract = (options, abilityId) => {
-    const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
-        ? options.target_domain.trim()
+export const normalizeGateOptionsForContract = (options, abilityId, input) => {
+    const upstreamAuthorization = input?.upstreamAuthorization ?? null;
+    const canonicalActionName = upstreamAuthorization && input?.command
+        ? XHS_COMMAND_ACTION_NAMES[`${input.command}::${abilityId}`] ?? null
         : null;
+    if (upstreamAuthorization && !canonicalActionName) {
+        throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", abilityId);
+    }
+    if (upstreamAuthorization && upstreamAuthorization.action_request.action_name !== canonicalActionName) {
+        throw invalidAbilityInput("ACTION_NAME_COMMAND_MISMATCH", abilityId);
+    }
+    const normalizedActionType = upstreamAuthorization
+        ? upstreamAuthorization.action_request.action_category
+        : null;
+    const legacyProjectedActionType = projectLegacyActionTypeForContract(normalizedActionType);
+    const projectedValidationAction = upstreamAuthorization &&
+        upstreamAuthorization.action_request.action_name === "xhs.write_editor_input"
+        ? "editor_input"
+        : null;
+    const targetDomain = upstreamAuthorization
+        ? upstreamAuthorization.runtime_target.domain
+        : typeof options.target_domain === "string" && options.target_domain.trim().length > 0
+            ? options.target_domain.trim()
+            : null;
     if (!targetDomain) {
         throw invalidAbilityInput("TARGET_DOMAIN_INVALID", abilityId);
     }
-    const targetTabId = typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
-        ? options.target_tab_id
-        : null;
+    const targetTabId = upstreamAuthorization
+        ? upstreamAuthorization.runtime_target.tab_id
+        : typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
+            ? options.target_tab_id
+            : null;
     if (targetTabId === null) {
         throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
     }
-    const targetPage = typeof options.target_page === "string" && options.target_page.trim().length > 0
-        ? options.target_page.trim()
-        : null;
+    const targetPage = upstreamAuthorization
+        ? upstreamAuthorization.runtime_target.page
+        : typeof options.target_page === "string" && options.target_page.trim().length > 0
+            ? options.target_page.trim()
+            : null;
     if (!targetPage) {
         throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
     }
@@ -210,27 +547,164 @@ export const normalizeGateOptionsForContract = (options, abilityId) => {
         XHS_EXECUTION_MODES.has(options.requested_execution_mode)
         ? options.requested_execution_mode
         : null;
-    if (!requestedExecutionMode) {
+    const requestedExecutionModeFromContract = inferRequestedExecutionModeForContract({
+        normalizedActionType,
+        explicitRequestedExecutionMode: requestedExecutionMode,
+        targetDomain,
+        upstreamAuthorization
+    });
+    const projectedRiskState = upstreamAuthorization && requestedExecutionModeFromContract !== null
+        ? projectRiskStateForContract(upstreamAuthorization.authorization_grant.resource_state_snapshot) ??
+            (requestedExecutionModeFromContract === "live_read_high_risk"
+                ? "allowed"
+                : requestedExecutionModeFromContract === "live_read_limited"
+                    ? "limited"
+                    : null)
+        : null;
+    if (upstreamAuthorization && hasOwn(options, "risk_state")) {
+        if (typeof options.risk_state !== "string" ||
+            !LEGACY_RISK_STATES.has(options.risk_state)) {
+            throw invalidAbilityInput("RISK_STATE_INVALID", abilityId);
+        }
+    }
+    const normalizedRiskState = typeof options.risk_state === "string" && LEGACY_RISK_STATES.has(options.risk_state)
+        ? options.risk_state
+        : projectedRiskState;
+    if (upstreamAuthorization && projectedRiskState && normalizedRiskState !== projectedRiskState) {
+        throw invalidAbilityInput("RISK_STATE_CONFLICT", abilityId);
+    }
+    if (!requestedExecutionModeFromContract) {
         throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
     }
-    const canonicalIssueScope = resolveCanonicalIssueScopeForContract({
+    const inferredIssueScope = resolveInferredIssueScopeForContract({
         ...options,
+        ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
+        ...(projectedValidationAction ? { validation_action: projectedValidationAction } : {}),
         target_domain: targetDomain,
         target_tab_id: targetTabId,
         target_page: targetPage,
-        requested_execution_mode: requestedExecutionMode
+        requested_execution_mode: requestedExecutionModeFromContract
     });
-    return {
-        targetDomain,
-        targetTabId,
-        targetPage,
-        requestedExecutionMode,
-        options: {
+    const legacyActionType = hasOwn(options, "action_type") ? asString(options.action_type) : null;
+    if (upstreamAuthorization && hasOwn(options, "action_type") && !legacyActionType) {
+        throw invalidAbilityInput("ACTION_TYPE_INVALID", abilityId);
+    }
+    const legacyTargetDomain = hasOwn(options, "target_domain") ? asString(options.target_domain) : null;
+    if (upstreamAuthorization && hasOwn(options, "target_domain") && !legacyTargetDomain) {
+        throw invalidAbilityInput("TARGET_DOMAIN_INVALID", abilityId);
+    }
+    const legacyTargetTabId = hasOwn(options, "target_tab_id") ? asInteger(options.target_tab_id) : null;
+    if (upstreamAuthorization && hasOwn(options, "target_tab_id") && legacyTargetTabId === null) {
+        throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
+    }
+    const legacyTargetPage = hasOwn(options, "target_page") ? asString(options.target_page) : null;
+    if (upstreamAuthorization && hasOwn(options, "target_page") && !legacyTargetPage) {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
+    if (upstreamAuthorization && hasOwn(options, "requested_execution_mode") && !requestedExecutionMode) {
+        throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
+    }
+    const legacyValidationAction = hasOwn(options, "validation_action")
+        ? asString(options.validation_action)
+        : null;
+    if (upstreamAuthorization && hasOwn(options, "validation_action") && !legacyValidationAction) {
+        throw invalidAbilityInput("ACTION_REQUEST_INVALID", abilityId);
+    }
+    const explicitIssueScope = hasOwn(options, "issue_scope") ? asString(options.issue_scope) : null;
+    if (upstreamAuthorization &&
+        hasOwn(options, "issue_scope") &&
+        explicitIssueScope !== "issue_208" &&
+        explicitIssueScope !== "issue_209") {
+        throw invalidAbilityInput("ISSUE_SCOPE_INVALID", abilityId);
+    }
+    if (upstreamAuthorization && legacyActionType && legacyActionType !== legacyProjectedActionType) {
+        throw invalidAbilityInput("ACTION_TYPE_CONFLICT", abilityId);
+    }
+    if (upstreamAuthorization && legacyTargetDomain && legacyTargetDomain !== targetDomain) {
+        throw invalidAbilityInput("TARGET_DOMAIN_CONFLICT", abilityId);
+    }
+    if (upstreamAuthorization && legacyTargetTabId !== null && legacyTargetTabId !== targetTabId) {
+        throw invalidAbilityInput("TARGET_TAB_ID_CONFLICT", abilityId);
+    }
+    if (upstreamAuthorization && legacyTargetPage && legacyTargetPage !== targetPage) {
+        throw invalidAbilityInput("TARGET_PAGE_CONFLICT", abilityId);
+    }
+    if (upstreamAuthorization &&
+        projectedValidationAction &&
+        legacyValidationAction &&
+        legacyValidationAction !== projectedValidationAction) {
+        throw invalidAbilityInput("ACTION_REQUEST_INVALID", abilityId);
+    }
+    if (upstreamAuthorization) {
+        const expectedAbilityAction = normalizedActionType === "read" ? "read" : "write";
+        if (input?.abilityAction && input.abilityAction !== expectedAbilityAction) {
+            throw invalidAbilityInput("ACTION_NAME_COMMAND_MISMATCH", abilityId);
+        }
+        if (normalizedActionType === "read" && requestedExecutionModeFromContract === "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (normalizedActionType !== "read" &&
+            requestedExecutionModeFromContract !== "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (inferredIssueScope === "issue_209" &&
+            !XHS_LIVE_READ_EXECUTION_MODES.has(requestedExecutionModeFromContract)) {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        if (inferredIssueScope === "issue_208" && requestedExecutionModeFromContract !== "live_write") {
+            throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
+        }
+        const allowedResourceKinds = asStringArray(upstreamAuthorization.authorization_grant.binding_scope.allowed_resource_kinds);
+        const allowedProfileRefs = asStringArray(upstreamAuthorization.authorization_grant.binding_scope.allowed_profile_refs);
+        const allowedDomains = asStringArray(upstreamAuthorization.authorization_grant.target_scope.allowed_domains);
+        const allowedPages = asStringArray(upstreamAuthorization.authorization_grant.target_scope.allowed_pages);
+        if (!allowedResourceKinds ||
+            !allowedProfileRefs ||
+            !allowedDomains ||
+            !allowedPages) {
+            throw invalidAbilityInput("AUTHORIZATION_GRANT_INVALID", abilityId);
+        }
+        void allowedResourceKinds;
+        void allowedProfileRefs;
+        void allowedDomains;
+        void allowedPages;
+    }
+    if (upstreamAuthorization &&
+        hasOwn(options, "issue_scope") &&
+        explicitIssueScope !== inferredIssueScope) {
+        throw invalidAbilityInput("ISSUE_SCOPE_CONFLICT", abilityId);
+    }
+    const canonicalIssueScope = !upstreamAuthorization && inferredIssueScope === "issue_209"
+        ? inferredIssueScope
+        : explicitIssueScope ?? inferredIssueScope ?? resolveCanonicalIssueScopeForContract({
             ...options,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
-            requested_execution_mode: requestedExecutionMode,
+            requested_execution_mode: requestedExecutionModeFromContract
+        });
+    return {
+        targetDomain,
+        targetTabId,
+        targetPage,
+        requestedExecutionMode: requestedExecutionModeFromContract,
+        options: {
+            ...options,
+            ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
+            ...(projectedValidationAction ? { validation_action: projectedValidationAction } : {}),
+            target_domain: targetDomain,
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            requested_execution_mode: requestedExecutionModeFromContract,
+            ...(normalizedRiskState ? { risk_state: normalizedRiskState } : {}),
+            ...(upstreamAuthorization
+                ? {
+                    upstream_authorization_request: cloneJsonObject(upstreamAuthorization),
+                    ...(requestedExecutionMode
+                        ? { __legacy_requested_execution_mode: requestedExecutionMode }
+                        : {})
+                }
+                : {}),
             ...(canonicalIssueScope ? { issue_scope: canonicalIssueScope } : {})
         }
     };

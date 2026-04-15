@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildIssue209PostGateArtifacts,
+  evaluateXhsGate,
   evaluateXhsGateCore,
   resolveXhsGateDecisionId
 } from "../shared/xhs-gate.js";
@@ -153,6 +154,73 @@ const buildAuditValidationContext = () => {
   };
 };
 
+const createUpstreamAuthorizationRequest = (input?: {
+  resourceKind?: "anonymous_context" | "profile_session";
+  profileRef?: string | null;
+  allowedResourceKinds?: string[];
+  allowedProfileRefs?: string[];
+  allowedActions?: string[];
+  allowedDomains?: string[];
+  allowedPages?: string[];
+  approvalRefs?: string[];
+  auditRefs?: string[];
+  actionName?: string;
+  actionCategory?: "read" | "write" | "irreversible_write";
+  resourceStateSnapshot?: "active" | "cool_down" | "paused";
+  domain?: string;
+  page?: string;
+  tabId?: number;
+}) => {
+  const resourceKind = input?.resourceKind ?? "anonymous_context";
+  const profileRef =
+    resourceKind === "profile_session" ? (input?.profileRef ?? "profile-session-001") : null;
+
+  return {
+    action_request: {
+      request_ref: "upstream_req_gate_001",
+      action_name: input?.actionName ?? "xhs.read_search_results",
+      action_category: input?.actionCategory ?? "read",
+      requested_at: "2026-04-15T09:00:00.000Z"
+    },
+    resource_binding: {
+      binding_ref: "binding_gate_001",
+      resource_kind: resourceKind,
+      ...(resourceKind === "profile_session"
+        ? { profile_ref: profileRef }
+        : {
+            profile_ref: null,
+            binding_constraints: {
+              anonymous_required: true,
+              reuse_logged_in_context_forbidden: true
+            }
+          })
+    },
+    authorization_grant: {
+      grant_ref: "grant_gate_001",
+      allowed_actions: input?.allowedActions ?? ["xhs.read_search_results"],
+      binding_scope: {
+        allowed_resource_kinds: input?.allowedResourceKinds ?? [resourceKind],
+        allowed_profile_refs:
+          input?.allowedProfileRefs ?? (profileRef ? [profileRef] : [])
+      },
+      target_scope: {
+        allowed_domains: input?.allowedDomains ?? ["www.xiaohongshu.com"],
+        allowed_pages: input?.allowedPages ?? ["search_result_tab"]
+      },
+      approval_refs: input?.approvalRefs ?? [],
+      audit_refs: input?.auditRefs ?? [],
+      resource_state_snapshot: input?.resourceStateSnapshot ?? "paused"
+    },
+    runtime_target: {
+      target_ref: "target_gate_001",
+      domain: input?.domain ?? "www.xiaohongshu.com",
+      page: input?.page ?? "search_result_tab",
+      tab_id: input?.tabId ?? 12,
+      url: "https://www.xiaohongshu.com/search_result?keyword=camping"
+    }
+  };
+};
+
 describe("xhs-search gate helpers", () => {
   it("flags mismatched actual target context", () => {
     expect(
@@ -170,6 +238,177 @@ describe("xhs-search gate helpers", () => {
         "TARGET_TAB_CONTEXT_MISMATCH",
         "TARGET_PAGE_CONTEXT_MISMATCH"
       ])
+    );
+  });
+
+  it("blocks anonymous_context when the target site is known to be logged in", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest(),
+      anonymousIsolationVerified: true,
+      targetSiteLoggedIn: true
+    });
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      normalized_resource_kind: "anonymous_context",
+      anonymous_isolation_ok: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "ANONYMOUS_CONTEXT_REQUIRES_LOGGED_OUT_SITE_CONTEXT"
+    );
+  });
+
+  it("blocks anonymous_context when anonymous isolation cannot be proven", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest(),
+      anonymousIsolationVerified: false,
+      targetSiteLoggedIn: false
+    });
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      anonymous_isolation_ok: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "ANONYMOUS_ISOLATION_UNVERIFIED"
+    );
+  });
+
+  it("does not block a named anonymous runtime profile when site isolation is verified", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest(),
+      anonymousIsolationVerified: true,
+      targetSiteLoggedIn: false
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      runtime_target_match: true,
+      grant_match: true,
+      anonymous_isolation_ok: true,
+      effective_runtime_mode: "dry_run"
+    });
+  });
+
+  it("returns blocked request admission when runtime_target mismatches the current scene", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "creator.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session"
+      })
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      runtime_target_match: false,
+      grant_match: true
+    });
+  });
+
+  it("returns blocked request admission when grant scope does not match the canonical binding", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        allowedResourceKinds: ["profile_session"]
+      }),
+      anonymousIsolationVerified: true
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      runtime_target_match: true,
+      grant_match: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain("RESOURCE_KIND_OUT_OF_SCOPE");
+  });
+
+  it("blocks stale legacy requested_execution_mode instead of letting it own canonical mode", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      legacyRequestedExecutionMode: "live_write",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest(),
+      anonymousIsolationVerified: true
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      effective_runtime_mode: "dry_run"
+    });
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "STALE_LEGACY_REQUESTED_EXECUTION_MODE"
     );
   });
 

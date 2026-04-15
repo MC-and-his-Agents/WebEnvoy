@@ -29,6 +29,9 @@ export interface XhsSearchOptions {
   ability_action?: string;
   action_type?: string;
   requested_execution_mode?: string;
+  upstream_authorization_request?: Record<string, unknown>;
+  __legacy_requested_execution_mode?: string;
+  __anonymous_isolation_verified?: boolean;
   risk_state?: string;
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
@@ -134,6 +137,19 @@ export interface ConsumerGateResult {
   write_interaction_tier?: string | null;
 }
 
+export interface RequestAdmissionResult {
+  request_ref: string | null;
+  admission_decision: "allowed" | "blocked" | "deferred";
+  normalized_action_type: ActionType | null;
+  normalized_resource_kind: string | null;
+  runtime_target_match: boolean;
+  grant_match: boolean;
+  anonymous_isolation_ok: boolean;
+  effective_runtime_mode: EffectiveExecutionMode;
+  reason_codes: string[];
+  derived_from: Record<string, unknown>;
+}
+
 export interface XhsSearchGate {
   scope_context: ScopeContextRecord;
   read_execution_policy: {
@@ -148,6 +164,7 @@ export interface XhsSearchGate {
   gate_input: Omit<GateInputRecord, "run_id" | "session_id" | "profile">;
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
+  request_admission_result: RequestAdmissionResult;
   approval_record: {
     approval_id: string | null;
     decision_id: string;

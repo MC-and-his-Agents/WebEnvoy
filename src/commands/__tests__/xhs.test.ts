@@ -988,4 +988,107 @@ describe("normalizeGateOptionsForContract", () => {
       });
     }
   });
+
+  it("derives canonical compatibility mode from FR-0023 objects instead of stale legacy mode", () => {
+    const normalized = normalizeGateOptionsForContract(
+      {
+        requested_execution_mode: "live_write"
+      },
+      "xhs.note.search.v1",
+      {
+        command: "xhs.search",
+        abilityAction: "read",
+        runtimeProfile: "profile-anon-001",
+        upstreamAuthorization: {
+          action_request: {
+            request_ref: "upstream_req_mode_001",
+            action_name: "xhs.read_search_results",
+            action_category: "read"
+          },
+          resource_binding: {
+            binding_ref: "binding_mode_001",
+            resource_kind: "anonymous_context",
+            profile_ref: null,
+            binding_constraints: {
+              anonymous_required: true,
+              reuse_logged_in_context_forbidden: true
+            }
+          },
+          authorization_grant: {
+            grant_ref: "grant_mode_001",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["anonymous_context"],
+              allowed_profile_refs: []
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            },
+            resource_state_snapshot: "paused"
+          },
+          runtime_target: {
+            target_ref: "target_mode_001",
+            domain: "www.xiaohongshu.com",
+            page: "search_result_tab",
+            tab_id: 32
+          }
+        } as never
+      }
+    );
+
+    expect(normalized.requestedExecutionMode).toBe("dry_run");
+    expect(normalized.options).toMatchObject({
+      requested_execution_mode: "dry_run",
+      __legacy_requested_execution_mode: "live_write"
+    });
+  });
+
+  it("projects canonical live-read mode when legacy mode is omitted", () => {
+    const normalized = normalizeGateOptionsForContract(
+      {},
+      "xhs.note.search.v1",
+      {
+        command: "xhs.search",
+        abilityAction: "read",
+        runtimeProfile: "profile-session-001",
+        upstreamAuthorization: {
+          action_request: {
+            request_ref: "upstream_req_mode_002",
+            action_name: "xhs.read_search_results",
+            action_category: "read"
+          },
+          resource_binding: {
+            binding_ref: "binding_mode_002",
+            resource_kind: "profile_session",
+            profile_ref: "profile-session-001"
+          },
+          authorization_grant: {
+            grant_ref: "grant_mode_002",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["profile_session"],
+              allowed_profile_refs: ["profile-session-001"]
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            },
+            resource_state_snapshot: "active",
+            approval_refs: ["approval_admission_external_001"],
+            audit_refs: ["audit_admission_external_001"]
+          },
+          runtime_target: {
+            target_ref: "target_mode_002",
+            domain: "www.xiaohongshu.com",
+            page: "search_result_tab",
+            tab_id: 32
+          }
+        } as never
+      }
+    );
+
+    expect(normalized.requestedExecutionMode).toBe("live_read_high_risk");
+    expect(normalized.options).not.toHaveProperty("__legacy_requested_execution_mode");
+  });
 });
