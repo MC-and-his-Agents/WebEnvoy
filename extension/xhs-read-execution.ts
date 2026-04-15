@@ -563,6 +563,7 @@ const createGateOnlySuccess = (
       write_interaction_tier: gate.write_interaction_tier,
       write_action_matrix_decisions: gate.write_action_matrix_decisions,
       consumer_gate_result: gate.consumer_gate_result,
+      request_admission_result: gate.request_admission_result,
       approval_record: gate.approval_record,
       risk_state_output: resolveRiskStateOutput(gate, auditRecord),
       audit_record: auditRecord
@@ -834,6 +835,7 @@ const executeXhsRead = async (
             read_execution_policy: gate.read_execution_policy,
             issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
+            request_admission_result: gate.request_admission_result,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -1056,11 +1058,11 @@ const executeXhsRead = async (
   return {
     ok: true,
     payload: {
-      summary: {
-        capability_result: {
-          ability_id: input.abilityId,
-          layer: input.abilityLayer,
-          action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+        summary: {
+          capability_result: {
+            ability_id: input.abilityId,
+            layer: input.abilityLayer,
+            action: gate.consumer_gate_result.action_type ?? input.abilityAction,
           outcome: "success",
           data_ref: spec.buildDataRef(input.params, payload),
           metrics: {
@@ -1079,6 +1081,7 @@ const executeXhsRead = async (
         read_execution_policy: gate.read_execution_policy,
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
+        request_admission_result: gate.request_admission_result,
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord

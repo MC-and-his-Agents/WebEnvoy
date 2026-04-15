@@ -275,13 +275,20 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
+    const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
     const {
-      __anonymous_isolation_verified: _ignoredAnonymousIsolationVerified,
-      target_site_logged_in: _ignoredTargetSiteLoggedIn,
+      __anonymous_isolation_verified: anonymousIsolationVerified,
+      target_site_logged_in: targetSiteLoggedIn,
       ...preparedGateOptions
     } = preparedIssue209LiveRead.options;
     const runtimeGateOptions = {
       ...preparedGateOptions,
+      ...(transportIsLoopback && anonymousIsolationVerified === true
+        ? { __anonymous_isolation_verified: true }
+        : {}),
+      ...(transportIsLoopback && targetSiteLoggedIn === true
+        ? { target_site_logged_in: true }
+        : {}),
       ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {})
     };
     const commandParams = appendFingerprintContext(

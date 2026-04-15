@@ -3778,6 +3778,7 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
                 write_interaction_tier: gate.write_interaction_tier,
                 write_action_matrix_decisions: gate.write_action_matrix_decisions,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 ...(auditRecord ? { audit_record: auditRecord } : {})
@@ -4972,6 +4973,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
             write_interaction_tier: gate.write_interaction_tier,
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
+            request_admission_result: gate.request_admission_result,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -5201,6 +5203,7 @@ const executeXhsRead = async (input, spec, env) => {
                         read_execution_policy: gate.read_execution_policy,
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
+                        request_admission_result: gate.request_admission_result,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
@@ -5400,6 +5403,7 @@ const executeXhsRead = async (input, spec, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord

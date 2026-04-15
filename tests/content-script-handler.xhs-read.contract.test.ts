@@ -279,8 +279,12 @@ describe("content-script handler xhs read commands", () => {
     const resultPromise = waitForSingleResult(handler);
     expect(handler.onBackgroundMessage(message)).toBe(true);
     const result = await resultPromise;
+    const summary = ((result.payload as Record<string, unknown>).summary ?? {}) as Record<string, unknown>;
 
     expect(result.ok).toBe(true);
+    expect((summary.request_admission_result as Record<string, unknown>).admission_decision).toBe(
+      "allowed"
+    );
   });
 
   it("does not trust caller-supplied anonymous override flags when the target site is actually logged in", async () => {
@@ -305,9 +309,11 @@ describe("content-script handler xhs read commands", () => {
     const result = await resultPromise;
     const payload = (result.payload ?? {}) as Record<string, unknown>;
     const details = (payload.details ?? {}) as Record<string, unknown>;
+    const requestAdmissionResult = (payload.request_admission_result ?? {}) as Record<string, unknown>;
 
     expect(result.ok).toBe(false);
     expect(details.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
+    expect(requestAdmissionResult.admission_decision).toBe("blocked");
   });
 
   it("rejects xhs.detail when note_id is missing on the extension path", async () => {
