@@ -1091,4 +1091,50 @@ describe("normalizeGateOptionsForContract", () => {
     expect(normalized.requestedExecutionMode).toBe("live_read_high_risk");
     expect(normalized.options).not.toHaveProperty("__legacy_requested_execution_mode");
   });
+
+  it("keeps canonical mode at dry_run when grant snapshot is missing", () => {
+    const normalized = normalizeGateOptionsForContract(
+      {},
+      "xhs.note.search.v1",
+      {
+        command: "xhs.search",
+        abilityAction: "read",
+        runtimeProfile: "profile-session-001",
+        upstreamAuthorization: {
+          action_request: {
+            request_ref: "upstream_req_mode_003",
+            action_name: "xhs.read_search_results",
+            action_category: "read"
+          },
+          resource_binding: {
+            binding_ref: "binding_mode_003",
+            resource_kind: "profile_session",
+            profile_ref: "profile-session-001"
+          },
+          authorization_grant: {
+            grant_ref: "grant_mode_003",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["profile_session"],
+              allowed_profile_refs: ["profile-session-001"]
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            },
+            approval_refs: ["approval_admission_external_001"],
+            audit_refs: ["audit_admission_external_001"]
+          },
+          runtime_target: {
+            target_ref: "target_mode_003",
+            domain: "www.xiaohongshu.com",
+            page: "search_result_tab",
+            tab_id: 32
+          }
+        } as never
+      }
+    );
+
+    expect(normalized.requestedExecutionMode).toBe("dry_run");
+  });
 });

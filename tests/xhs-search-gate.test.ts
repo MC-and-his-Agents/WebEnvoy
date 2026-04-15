@@ -172,6 +172,7 @@ const createUpstreamAuthorizationRequest = (input?: {
   domain?: string;
   page?: string;
   tabId?: number;
+  url?: string;
 }) => {
   const resourceKind = input?.resourceKind ?? "anonymous_context";
   const profileRef =
@@ -218,7 +219,7 @@ const createUpstreamAuthorizationRequest = (input?: {
       domain: input?.domain ?? "www.xiaohongshu.com",
       page: input?.page ?? "search_result_tab",
       tab_id: input?.tabId ?? 12,
-      url: "https://www.xiaohongshu.com/search_result?keyword=camping"
+      url: input?.url ?? "https://www.xiaohongshu.com/search_result?keyword=camping"
     }
   };
 };
@@ -386,6 +387,32 @@ describe("xhs-search gate helpers", () => {
       runtime_target_match: false,
       grant_match: true
     });
+  });
+
+  it("returns blocked request admission when runtime_target.url does not match the declared target", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        url: "https://www.xiaohongshu.com/explore/note-id"
+      } as never)
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      runtime_target_match: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain("TARGET_URL_CONTEXT_MISMATCH");
   });
 
   it("returns blocked request admission when grant scope does not match the canonical binding", () => {

@@ -2188,6 +2188,39 @@ const projectRiskStateFromSnapshot = (snapshot) => {
   return null;
 };
 
+const matchesRuntimeTargetUrl = (input) => {
+  const runtimeTarget = input?.runtime_target;
+  if (!runtimeTarget?.url || !runtimeTarget.domain || !runtimeTarget.page) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(runtimeTarget.url);
+    if (parsed.hostname !== runtimeTarget.domain) {
+      return false;
+    }
+    if (runtimeTarget.page === "search_result_tab") {
+      return parsed.pathname.startsWith("/search_result");
+    }
+    if (runtimeTarget.page === "explore_detail_tab") {
+      return parsed.pathname.startsWith("/explore/");
+    }
+    if (runtimeTarget.page === "profile_tab") {
+      return parsed.pathname.startsWith("/user/profile/");
+    }
+    if (runtimeTarget.page === "creator_publish_tab") {
+      return (
+        parsed.hostname === XHS_WRITE_DOMAIN &&
+        parsed.pathname.startsWith("/publish")
+      );
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+};
+
 const deriveCanonicalRequestedExecutionMode = (input) => {
   const explicitRequestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
   const upstream = normalizeUpstreamAuthorizationRequest(
@@ -2213,13 +2246,17 @@ const deriveCanonicalRequestedExecutionMode = (input) => {
     const hasGrantRefs =
       upstream.authorization_grant.approval_refs.length > 0 &&
       upstream.authorization_grant.audit_refs.length > 0;
+    const projectedRiskState = projectRiskStateFromSnapshot(
+      upstream.authorization_grant.resource_state_snapshot
+    );
     if (!hasGrantRefs || targetDomain !== XHS_READ_DOMAIN) {
       requestedExecutionMode = "dry_run";
+    } else if (projectedRiskState === "allowed") {
+      requestedExecutionMode = "live_read_high_risk";
+    } else if (projectedRiskState === "limited") {
+      requestedExecutionMode = "live_read_limited";
     } else {
-      requestedExecutionMode =
-        projectRiskStateFromSnapshot(upstream.authorization_grant.resource_state_snapshot) === "allowed"
-          ? "live_read_high_risk"
-          : "live_read_limited";
+      requestedExecutionMode = "dry_run";
     }
   }
   let legacyRequestedExecutionMode = resolveXhsExecutionMode(
@@ -2300,6 +2337,9 @@ const applyCanonicalAdmissionReasons = (input) => {
   ) {
     pushReason(input.gateReasons, "TARGET_PAGE_OUT_OF_SCOPE");
   }
+  if (!matchesRuntimeTargetUrl(upstream)) {
+    pushReason(input.gateReasons, "TARGET_URL_CONTEXT_MISMATCH");
+  }
 
   if (upstream.resource_binding.resource_kind === "anonymous_context") {
     if (input.targetSiteLoggedIn) {
@@ -2323,7 +2363,8 @@ const evaluateRequestAdmissionResult = (input) => {
     !input.gateReasons.includes("TARGET_DOMAIN_CONTEXT_MISMATCH") &&
     !input.gateReasons.includes("TARGET_TAB_CONTEXT_MISMATCH") &&
     !input.gateReasons.includes("TARGET_PAGE_CONTEXT_UNRESOLVED") &&
-    !input.gateReasons.includes("TARGET_PAGE_CONTEXT_MISMATCH");
+    !input.gateReasons.includes("TARGET_PAGE_CONTEXT_MISMATCH") &&
+    !input.gateReasons.includes("TARGET_URL_CONTEXT_MISMATCH");
 
   let grantMatch = true;
   if (upstream?.authorization_grant && upstream?.action_request && upstream?.resource_binding && upstream?.runtime_target) {

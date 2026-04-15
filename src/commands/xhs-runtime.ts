@@ -264,7 +264,7 @@ const xhsReadCommand = async (
       : context.params.target_site_logged_in === false
         ? false
         : null;
-  const anonymousIsolationVerified = targetSiteLoggedIn === false;
+  const anonymousIsolationVerified = false;
 
   try {
     const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
@@ -294,8 +294,7 @@ const xhsReadCommand = async (
         : targetSiteLoggedIn !== null
           ? { target_site_logged_in: targetSiteLoggedIn }
           : {}),
-      __anonymous_isolation_verified:
-        providedAnonymousIsolationVerified || anonymousIsolationVerified
+      __anonymous_isolation_verified: providedAnonymousIsolationVerified || anonymousIsolationVerified
     };
     const commandParams = appendFingerprintContext(
       {

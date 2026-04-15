@@ -241,8 +241,11 @@ const inferRequestedExecutionModeForContract = (input: {
   if (projectedRiskState === "allowed") {
     return "live_read_high_risk";
   }
+  if (projectedRiskState === "limited") {
+    return "live_read_limited";
+  }
 
-  return "live_read_limited";
+  return "dry_run";
 };
 
 const resolveInferredIssueScopeForContract = (
