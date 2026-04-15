@@ -307,6 +307,55 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
+  it("defers anonymous canonical diagnostics on the extension gate path until page-state signals exist", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        limited_read_rollout_ready_true: true,
+        upstream_authorization_request: createUpstreamAuthorizationRequest({
+          approvalRefs: [
+            "approval_admission_run-extension-anon-defer-001_req-extension-anon-defer-001"
+          ],
+          auditRefs: ["audit_admission_run-extension-anon-defer-001_req-extension-anon-defer-001"],
+          resourceStateSnapshot: "active"
+        }),
+        approval_record: createApprovalRecord(
+          "gate_decision_issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001",
+          "gate_appr_gate_decision_issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001"
+        ),
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-anon-defer-001",
+          request_id: "req-extension-anon-defer-001",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        })
+      },
+      {
+        runId: "run-extension-anon-defer-001",
+        requestId: "req-extension-anon-defer-001",
+        sessionId: "session-extension-anon-defer-001",
+        profile: "profile-anon-001",
+        commandRequestId: "req-extension-anon-defer-001",
+        gateInvocationId: "issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001"
+      }
+    );
+
+    expect(gate.request_admission_result).toBeNull();
+    expect(gate.execution_audit).toBeNull();
+  });
+
   it("blocks anonymous_context when anonymous isolation cannot be proven", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",
