@@ -530,6 +530,62 @@ describe("xhs-search gate helpers", () => {
     expect(gate.request_admission_result.reason_codes).toContain("TARGET_URL_CONTEXT_MISMATCH");
   });
 
+  it("allows runtime_target.url matches when actual live tab query parameters are reordered", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actualTargetUrl:
+        "https://www.xiaohongshu.com/search_result?channel=web&keyword=camping",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        url: "https://www.xiaohongshu.com/search_result?keyword=camping&channel=web"
+      } as never)
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      runtime_target_match: true
+    });
+    expect(gate.request_admission_result.reason_codes).not.toContain("TARGET_URL_CONTEXT_MISMATCH");
+  });
+
+  it("allows runtime_target.url matches when the actual live tab adds non-authoritative query params", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actualTargetUrl:
+        "https://www.xiaohongshu.com/search_result?keyword=camping&channel=web&session_id=temp-001",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        url: "https://www.xiaohongshu.com/search_result?keyword=camping&channel=web"
+      } as never)
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      runtime_target_match: true
+    });
+    expect(gate.request_admission_result.reason_codes).not.toContain("TARGET_URL_CONTEXT_MISMATCH");
+  });
+
   it("blocks stale legacy requested_execution_mode instead of letting it own canonical mode", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",

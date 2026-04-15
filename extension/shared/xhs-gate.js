@@ -178,6 +178,41 @@ const deriveCanonicalRiskState = (inputRiskState, upstream) => {
     : resolveXhsRiskState(inputRiskState);
 };
 
+const buildSearchParamValueMap = (url) => {
+  const values = new Map();
+  for (const [key, value] of url.searchParams.entries()) {
+    const current = values.get(key) ?? [];
+    current.push(value);
+    values.set(key, current);
+  }
+  return values;
+};
+
+const actualUrlSatisfiesExpectedQuery = (expectedUrl, actualUrl) => {
+  const expectedParams = buildSearchParamValueMap(expectedUrl);
+  if (expectedParams.size === 0) {
+    return true;
+  }
+
+  const actualParams = buildSearchParamValueMap(actualUrl);
+  for (const [key, expectedValues] of expectedParams.entries()) {
+    const actualValues = [...(actualParams.get(key) ?? [])];
+    if (actualValues.length < expectedValues.length) {
+      return false;
+    }
+
+    for (const expectedValue of expectedValues) {
+      const matchIndex = actualValues.indexOf(expectedValue);
+      if (matchIndex === -1) {
+        return false;
+      }
+      actualValues.splice(matchIndex, 1);
+    }
+  }
+
+  return true;
+};
+
 const matchesRuntimeTargetUrl = (input, actualTargetUrl) => {
   const runtimeTarget = input?.runtime_target;
   if (!runtimeTarget?.url || !runtimeTarget.domain || !runtimeTarget.page) {
@@ -220,7 +255,7 @@ const matchesRuntimeTargetUrl = (input, actualTargetUrl) => {
       actual.protocol === parsed.protocol &&
       actual.hostname === parsed.hostname &&
       actual.pathname === parsed.pathname &&
-      actual.search === parsed.search
+      actualUrlSatisfiesExpectedQuery(parsed, actual)
     );
   } catch {
     return false;
