@@ -1431,6 +1431,157 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("returns structured blocked diagnostics when live actual-target lookup throws after prior gate blockers", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => {
+      throw new Error("tabs query failed");
+    });
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-query-failed-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-query-failed-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-mode-query-failed-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-mode-query-failed-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          gate_reasons: [
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE",
+            "AUDIT_RECORD_MISSING"
+          ]
+        }
+      }
+    });
+  });
+
+  it("blocks malformed live target_domain without querying tabs and keeps structured gate diagnostics", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { url?: string | string[] }) => {
+      const patterns = Array.isArray(filter.url)
+        ? filter.url
+        : typeof filter.url === "string"
+          ? [filter.url]
+          : [];
+      if (patterns.some((pattern) => pattern.includes("bad domain["))) {
+        throw new Error("invalid url pattern");
+      }
+      return [];
+    });
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-invalid-domain-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-invalid-domain-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_domain: "bad domain[",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(
+      chromeApi.tabs.query.mock.calls.some((call) => {
+        const filter =
+          typeof call[0] === "object" && call[0] !== null
+            ? (call[0] as { url?: string | string[] })
+            : {};
+        const patterns = Array.isArray(filter.url)
+          ? filter.url
+          : typeof filter.url === "string"
+            ? [filter.url]
+            : [];
+        return patterns.some((pattern) => pattern.includes("bad domain["));
+      })
+    ).toBe(false);
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            target_domain?: string | null;
+            requested_execution_mode?: string | null;
+            effective_execution_mode?: string;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-mode-invalid-domain-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-mode-invalid-domain-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          target_domain: "bad domain[",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          gate_reasons: ["TARGET_DOMAIN_OUT_OF_SCOPE"]
+        }
+      }
+    });
+  });
+
   it("blocks live_read_limited in background gate when admission evidence is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

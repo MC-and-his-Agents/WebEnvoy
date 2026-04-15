@@ -344,6 +344,17 @@ const parseUrl = (value) => {
         return null;
     }
 };
+const buildChromeUrlPatternForDomain = (value) => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0) {
+        return null;
+    }
+    const parsed = parseUrl(`https://${normalized}/`);
+    if (!parsed || parsed.hostname !== normalized) {
+        return null;
+    }
+    return `*://${normalized}/*`;
+};
 const classifyXhsPage = (url, domain) => {
     const parsed = parseUrl(url);
     if (!parsed) {
@@ -3129,40 +3140,51 @@ class ChromeBackgroundBridge {
         writeGateOnlyApprovalDecision = matrixResolution.writeGateOnlyApprovalDecision;
         const canonicalApprovalRecord = matrixResolution.approvalRecord;
         const canonicalAdmissionContext = matrixResolution.admissionContext;
-        const shouldResolveActualTargetContext = targetDomain &&
+        const resolvedTargetDomainForLookup = targetDomain !== null && XHS_DOMAIN_ALLOWLIST.has(targetDomain) ? targetDomain : null;
+        const actualTargetQueryPattern = resolvedTargetDomainForLookup !== null
+            ? buildChromeUrlPatternForDomain(resolvedTargetDomainForLookup)
+            : null;
+        const shouldResolveActualTargetContext = actualTargetQueryPattern !== null &&
             targetTabId !== null &&
             targetPage &&
             (gateReasons.length === 0 || requestedLiveMode);
-        if (shouldResolveActualTargetContext) {
-            const domainTabs = await this.chromeApi.tabs.query({
-                url: `*://${targetDomain}/*`
-            });
-            const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
-            if (!targetTab) {
-                pushReason("TARGET_TAB_NOT_FOUND");
-            }
-            else {
-                const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
-                const parsed = parseUrl(tabUrl);
-                if (!parsed) {
-                    pushReason("TARGET_TAB_URL_INVALID");
+        if (shouldResolveActualTargetContext && resolvedTargetDomainForLookup) {
+            try {
+                const domainTabs = await this.chromeApi.tabs.query({
+                    url: actualTargetQueryPattern
+                });
+                const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
+                if (!targetTab) {
+                    pushReason("TARGET_TAB_NOT_FOUND");
                 }
                 else {
-                    actualTargetDomain = parsed.hostname;
-                    actualTargetTabId = targetTabId;
-                    actualTargetUrl = tabUrl;
-                    if (parsed.hostname !== targetDomain) {
-                        pushReason("TARGET_DOMAIN_MISMATCH");
+                    const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
+                    const parsed = parseUrl(tabUrl);
+                    if (!parsed) {
+                        pushReason("TARGET_TAB_URL_INVALID");
                     }
-                    const actualPage = classifyXhsPage(tabUrl, targetDomain);
-                    actualTargetPage = actualPage;
-                    if (actualPage !== targetPage) {
-                        pushReason("TARGET_PAGE_MISMATCH");
+                    else {
+                        actualTargetDomain = parsed.hostname;
+                        actualTargetTabId = targetTabId;
+                        actualTargetUrl = tabUrl;
+                        if (parsed.hostname !== resolvedTargetDomainForLookup) {
+                            pushReason("TARGET_DOMAIN_MISMATCH");
+                        }
+                        const actualPage = classifyXhsPage(tabUrl, resolvedTargetDomainForLookup);
+                        actualTargetPage = actualPage;
+                        if (actualPage !== targetPage) {
+                            pushReason("TARGET_PAGE_MISMATCH");
+                        }
+                        if (issue208EditorInputValidation &&
+                            !isCreatorArticlePublishPage(tabUrl, resolvedTargetDomainForLookup)) {
+                            pushReason("TARGET_PAGE_ARTICLE_REQUIRED");
+                        }
                     }
-                    if (issue208EditorInputValidation &&
-                        !isCreatorArticlePublishPage(tabUrl, targetDomain)) {
-                        pushReason("TARGET_PAGE_ARTICLE_REQUIRED");
-                    }
+                }
+            }
+            catch {
+                if (gateReasons.length === 0) {
+                    pushReason("TARGET_TAB_NOT_FOUND");
                 }
             }
         }
