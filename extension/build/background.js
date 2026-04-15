@@ -3249,7 +3249,12 @@ class ChromeBackgroundBridge {
         });
         const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
         const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
-        const canonicalApprovalPayloadRecord = sharedCanonicalGate.approval_record;
+        // Approval linkage remains owned by the background/matrix path; shared gate output
+        // only supplies request-level admission/audit diagnostics.
+        const canonicalApprovalPayloadRecord = {
+            ...canonicalApprovalRecord,
+            checks: { ...canonicalApprovalRecord.checks }
+        };
         const requiresManualConfirmation = !gateState.issue208WriteGateOnly &&
             (requestedExecutionMode === "live_read_limited" ||
                 requestedExecutionMode === "live_read_high_risk" ||
