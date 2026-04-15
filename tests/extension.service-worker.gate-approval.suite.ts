@@ -1420,6 +1420,15 @@ describe("extension service worker / gate and approval", () => {
         }
       }
     });
+    expect(blocked?.payload).toMatchObject({
+      request_admission_result: {
+        runtime_target_match: true,
+        reason_codes: expect.not.arrayContaining([
+          "TARGET_PAGE_CONTEXT_UNRESOLVED",
+          "TARGET_URL_CONTEXT_MISMATCH"
+        ])
+      }
+    });
   });
 
   it("blocks live_read_limited in background gate when admission evidence is missing", async () => {

@@ -4029,7 +4029,7 @@ class ChromeBackgroundBridge {
     const canonicalApprovalRecord = matrixResolution.approvalRecord;
     const canonicalAdmissionContext = matrixResolution.admissionContext;
 
-    if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
+    if (requestedExecutionMode !== null && targetDomain && targetTabId !== null && targetPage) {
       const domainTabs = await this.chromeApi.tabs.query({
         url: `*://${targetDomain}/*`
       });
