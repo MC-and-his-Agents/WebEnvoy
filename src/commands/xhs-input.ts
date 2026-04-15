@@ -942,13 +942,18 @@ export const normalizeGateOptionsForContract = (
             ? "limited"
             : null)
       : null;
-const normalizedRiskState =
-  typeof options.risk_state === "string" && LEGACY_RISK_STATES.has(options.risk_state as LegacyRiskState)
+  if (upstreamAuthorization && hasOwn(options, "risk_state")) {
+    if (
+      typeof options.risk_state !== "string" ||
+      !LEGACY_RISK_STATES.has(options.risk_state as LegacyRiskState)
+    ) {
+      throw invalidAbilityInput("RISK_STATE_INVALID", abilityId);
+    }
+  }
+  const normalizedRiskState =
+    typeof options.risk_state === "string" && LEGACY_RISK_STATES.has(options.risk_state as LegacyRiskState)
       ? (options.risk_state as LegacyRiskState)
       : projectedRiskState;
-  if (upstreamAuthorization && hasOwn(options, "risk_state") && typeof options.risk_state !== "string") {
-    throw invalidAbilityInput("RISK_STATE_INVALID", abilityId);
-  }
   if (upstreamAuthorization && projectedRiskState && normalizedRiskState !== projectedRiskState) {
     throw invalidAbilityInput("RISK_STATE_CONFLICT", abilityId);
   }

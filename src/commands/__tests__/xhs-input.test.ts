@@ -1173,6 +1173,36 @@ describe("xhs-input", () => {
     );
   });
 
+  it("rejects invalid legacy risk_state values when FR-0023 objects are present", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "live_read_high_risk",
+        risk_state: "unsafe"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "RISK_STATE_INVALID"
+        })
+      })
+    );
+  });
+
   it("does not synthesize issue_209 live admission draft from upstream authorization grant refs", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
