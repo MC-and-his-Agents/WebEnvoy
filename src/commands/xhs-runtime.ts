@@ -101,8 +101,17 @@ const pickGateErrorDetails = (
     "risk_state_output"
   ] as const;
   const picked: JsonObject = {};
+  const hasOwn = (record: Record<string, unknown> | undefined | null, key: string): boolean =>
+    !!record && Object.prototype.hasOwnProperty.call(record, key);
   for (const key of detailKeys) {
-    const value = payload[key] ?? details?.[key];
+    const value = hasOwn(payload, key)
+      ? payload[key]
+      : hasOwn(details ?? undefined, key)
+        ? details?.[key]
+        : undefined;
+    if (!hasOwn(payload, key) && !hasOwn(details ?? undefined, key)) {
+      continue;
+    }
     if (value === null) {
       picked[key] = null;
       continue;

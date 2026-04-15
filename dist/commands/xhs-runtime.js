@@ -67,8 +67,16 @@ const pickGateErrorDetails = (payload, details) => {
         "risk_state_output"
     ];
     const picked = {};
+    const hasOwn = (record, key) => !!record && Object.prototype.hasOwnProperty.call(record, key);
     for (const key of detailKeys) {
-        const value = payload[key] ?? details?.[key];
+        const value = hasOwn(payload, key)
+            ? payload[key]
+            : hasOwn(details ?? undefined, key)
+                ? details?.[key]
+                : undefined;
+        if (!hasOwn(payload, key) && !hasOwn(details ?? undefined, key)) {
+            continue;
+        }
         if (value === null) {
             picked[key] = null;
             continue;
