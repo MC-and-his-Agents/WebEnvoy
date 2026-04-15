@@ -543,7 +543,7 @@ const buildHeaders = (env, options, signature) => ({
     "Content-Type": "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
-    const gate = resolveGate(input.options, input.executionContext);
+    const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     const payload = spec.buildPayload(input.params, env);

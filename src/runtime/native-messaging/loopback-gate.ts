@@ -107,10 +107,6 @@ export const buildLoopbackGate = (
     targetDomain: options.target_domain,
     targetTabId: options.target_tab_id,
     targetPage: options.target_page,
-    actualTargetUrl:
-      typeof (options as Record<string, unknown>).__actual_target_url === "string"
-        ? ((options as Record<string, unknown>).__actual_target_url as string)
-        : undefined,
     actionType: options.action_type,
     abilityAction,
     requestedExecutionMode: options.requested_execution_mode,

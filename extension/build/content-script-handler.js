@@ -444,7 +444,6 @@ export class ContentScriptHandler {
                     ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
                     ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
                     ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
-                    __actual_target_url: window.location.href,
                     ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
                     ...(typeof options.action_type === "string"
                         ? { action_type: options.action_type }

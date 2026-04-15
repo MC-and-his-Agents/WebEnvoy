@@ -50,9 +50,6 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         targetDomain: options.target_domain,
         targetTabId: options.target_tab_id,
         targetPage: options.target_page,
-        actualTargetUrl: typeof options.__actual_target_url === "string"
-            ? options.__actual_target_url
-            : undefined,
         actionType: options.action_type,
         abilityAction,
         requestedExecutionMode: options.requested_execution_mode,

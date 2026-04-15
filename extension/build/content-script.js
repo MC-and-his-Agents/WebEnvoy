@@ -4019,7 +4019,7 @@ const resolveActualTargetGateReasons = (options) => {
     }
     return gateReasons;
 };
-const resolveGate = (options, context) => {
+const resolveGate = (options, context, actualTargetUrl) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
     const decisionId = buildGateDecisionId(context, options);
@@ -4033,9 +4033,7 @@ const resolveGate = (options, context) => {
         actualTargetDomain: options.actual_target_domain,
         actualTargetTabId: options.actual_target_tab_id,
         actualTargetPage: options.actual_target_page,
-        actualTargetUrl: typeof options.__actual_target_url === "string"
-            ? options.__actual_target_url
-            : undefined,
+        actualTargetUrl,
         requireActualTargetPage: true,
         actionType: options.action_type,
         abilityAction: options.ability_action,
@@ -4206,7 +4204,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const executeXhsSearch = async (input, env) => {
-    const gate = resolveGate(input.options, input.executionContext);
+    const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     if (gate.consumer_gate_result.gate_decision === "blocked") {
@@ -5103,7 +5101,7 @@ const buildHeaders = (env, options, signature) => ({
     "Content-Type": "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
-    const gate = resolveGate(input.options, input.executionContext);
+    const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     const payload = spec.buildPayload(input.params, env);
@@ -6782,7 +6780,6 @@ class ContentScriptHandler {
                     ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
                     ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
                     ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
-                    __actual_target_url: window.location.href,
                     ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
                     ...(typeof options.action_type === "string"
                         ? { action_type: options.action_type }

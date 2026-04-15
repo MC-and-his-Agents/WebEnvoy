@@ -99,7 +99,8 @@ export const resolveActualTargetGateReasons = (options: XhsSearchOptions): strin
 
 export const resolveGate = (
   options: XhsSearchOptions,
-  context: XhsExecutionContext
+  context: XhsExecutionContext,
+  actualTargetUrl?: string
 ): XhsSearchGate => {
   const providedApprovalRecord = (options.approval_record ?? options.approval) as unknown;
   const approvalRecord = asRecord(providedApprovalRecord);
@@ -115,10 +116,7 @@ export const resolveGate = (
     actualTargetDomain: options.actual_target_domain,
     actualTargetTabId: options.actual_target_tab_id,
     actualTargetPage: options.actual_target_page,
-    actualTargetUrl:
-      typeof (options as Record<string, unknown>).__actual_target_url === "string"
-        ? ((options as Record<string, unknown>).__actual_target_url as string)
-        : undefined,
+    actualTargetUrl,
     requireActualTargetPage: true,
     actionType: options.action_type,
     abilityAction: options.ability_action,

@@ -753,7 +753,7 @@ const executeXhsRead = async (
   spec: XhsReadCommandSpec,
   env: XhsSearchEnvironment
 ): Promise<SearchExecutionResult> => {
-  const gate = resolveGate(input.options, input.executionContext);
+  const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
   const payload = spec.buildPayload(input.params, env);

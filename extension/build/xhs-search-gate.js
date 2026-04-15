@@ -44,7 +44,7 @@ export const resolveActualTargetGateReasons = (options) => {
     }
     return gateReasons;
 };
-export const resolveGate = (options, context) => {
+export const resolveGate = (options, context, actualTargetUrl) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
     const decisionId = buildGateDecisionId(context, options);
@@ -58,9 +58,7 @@ export const resolveGate = (options, context) => {
         actualTargetDomain: options.actual_target_domain,
         actualTargetTabId: options.actual_target_tab_id,
         actualTargetPage: options.actual_target_page,
-        actualTargetUrl: typeof options.__actual_target_url === "string"
-            ? options.__actual_target_url
-            : undefined,
+        actualTargetUrl,
         requireActualTargetPage: true,
         actionType: options.action_type,
         abilityAction: options.ability_action,
