@@ -165,7 +165,7 @@ const projectRiskStateFromSnapshot = (snapshot) => {
   return null;
 };
 
-const matchesRuntimeTargetUrl = (input) => {
+const matchesRuntimeTargetUrl = (input, actualTargetUrl) => {
   const runtimeTarget = input?.runtime_target;
   if (!runtimeTarget?.url || !runtimeTarget.domain || !runtimeTarget.page) {
     return true;
@@ -177,25 +177,41 @@ const matchesRuntimeTargetUrl = (input) => {
       return false;
     }
     if (runtimeTarget.page === "search_result_tab") {
-      return parsed.pathname.startsWith("/search_result");
+      if (!parsed.pathname.startsWith("/search_result")) {
+        return false;
+      }
     }
     if (runtimeTarget.page === "explore_detail_tab") {
-      return parsed.pathname.startsWith("/explore/");
+      if (!parsed.pathname.startsWith("/explore/")) {
+        return false;
+      }
     }
     if (runtimeTarget.page === "profile_tab") {
-      return parsed.pathname.startsWith("/user/profile/");
+      if (!parsed.pathname.startsWith("/user/profile/")) {
+        return false;
+      }
     }
     if (runtimeTarget.page === "creator_publish_tab") {
-      return (
-        parsed.hostname === XHS_WRITE_DOMAIN &&
-        parsed.pathname.startsWith("/publish")
-      );
+      if (
+        parsed.hostname !== XHS_WRITE_DOMAIN ||
+        !parsed.pathname.startsWith("/publish")
+      ) {
+        return false;
+      }
     }
+    if (!actualTargetUrl) {
+      return true;
+    }
+    const actual = new URL(actualTargetUrl);
+    return (
+      actual.protocol === parsed.protocol &&
+      actual.hostname === parsed.hostname &&
+      actual.pathname === parsed.pathname &&
+      actual.search === parsed.search
+    );
   } catch {
     return false;
   }
-
-  return true;
 };
 
 const deriveCanonicalRequestedExecutionMode = (input) => {
@@ -260,8 +276,6 @@ const applyCanonicalAdmissionReasons = (input) => {
   if (!upstream?.action_request || !upstream?.resource_binding || !upstream?.authorization_grant || !upstream?.runtime_target) {
     return;
   }
-  const runtimeProfileRef = asString(input.runtimeProfileRef);
-
   if (
     input.legacyRequestedExecutionMode &&
     input.requestedExecutionMode &&
@@ -290,21 +304,6 @@ const applyCanonicalAdmissionReasons = (input) => {
     pushReason(input.gateReasons, "PROFILE_REF_OUT_OF_SCOPE");
   }
   if (
-    upstream.resource_binding.resource_kind === "profile_session" &&
-    runtimeProfileRef &&
-    upstream.resource_binding.profile_ref &&
-    upstream.resource_binding.profile_ref !== runtimeProfileRef
-  ) {
-    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH");
-  }
-  if (
-    upstream.resource_binding.resource_kind === "profile_session" &&
-    runtimeProfileRef &&
-    !upstream.authorization_grant.binding_scope.allowed_profile_refs.includes(runtimeProfileRef)
-  ) {
-    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_OUT_OF_SCOPE");
-  }
-  if (
     !upstream.authorization_grant.target_scope.allowed_domains.includes(upstream.runtime_target.domain)
   ) {
     pushReason(input.gateReasons, "TARGET_DOMAIN_OUT_OF_SCOPE");
@@ -314,7 +313,7 @@ const applyCanonicalAdmissionReasons = (input) => {
   ) {
     pushReason(input.gateReasons, "TARGET_PAGE_OUT_OF_SCOPE");
   }
-  if (!matchesRuntimeTargetUrl(upstream)) {
+  if (!matchesRuntimeTargetUrl(upstream, asString(input.actualTargetUrl))) {
     pushReason(input.gateReasons, "TARGET_URL_CONTEXT_MISMATCH");
   }
 
@@ -335,7 +334,6 @@ const evaluateRequestAdmissionResult = (input) => {
   const requestRef = upstream?.action_request?.request_ref ?? asString(input.commandRequestId) ?? asString(input.requestId);
   const normalizedActionType = upstream?.action_request?.action_category ?? state.actionType ?? null;
   const normalizedResourceKind = upstream?.resource_binding?.resource_kind ?? null;
-  const runtimeProfileRef = asString(input.runtimeProfileRef);
   const runtimeTargetMatch =
     !input.gateReasons.includes("TARGET_DOMAIN_CONTEXT_MISMATCH") &&
     !input.gateReasons.includes("TARGET_TAB_CONTEXT_MISMATCH") &&
@@ -361,21 +359,6 @@ const evaluateRequestAdmissionResult = (input) => {
       upstream.resource_binding.resource_kind === "profile_session" &&
       upstream.resource_binding.profile_ref &&
       !allowedProfileRefs.includes(upstream.resource_binding.profile_ref)
-    ) {
-      grantMatch = false;
-    }
-    if (
-      upstream.resource_binding.resource_kind === "profile_session" &&
-      runtimeProfileRef &&
-      upstream.resource_binding.profile_ref &&
-      upstream.resource_binding.profile_ref !== runtimeProfileRef
-    ) {
-      grantMatch = false;
-    }
-    if (
-      upstream.resource_binding.resource_kind === "profile_session" &&
-      runtimeProfileRef &&
-      !allowedProfileRefs.includes(runtimeProfileRef)
     ) {
       grantMatch = false;
     }
@@ -1493,7 +1476,7 @@ const evaluateXhsGate = (input) => {
     upstream: state.upstreamAuthorizationRequest,
     requestedExecutionMode: state.requestedExecutionMode,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
-    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
+    actualTargetUrl: input.actualTargetUrl ?? input.__actual_target_url,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true
@@ -1525,7 +1508,6 @@ const evaluateXhsGate = (input) => {
     state,
     upstream: state.upstreamAuthorizationRequest,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
-    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true,

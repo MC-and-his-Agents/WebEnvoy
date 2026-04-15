@@ -58,6 +58,9 @@ export const resolveGate = (options, context) => {
         actualTargetDomain: options.actual_target_domain,
         actualTargetTabId: options.actual_target_tab_id,
         actualTargetPage: options.actual_target_page,
+        actualTargetUrl: typeof options.__actual_target_url === "string"
+            ? options.__actual_target_url
+            : undefined,
         requireActualTargetPage: true,
         actionType: options.action_type,
         abilityAction: options.ability_action,

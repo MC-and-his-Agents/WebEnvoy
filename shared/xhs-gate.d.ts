@@ -160,6 +160,8 @@ export interface XhsGateCoreInput {
   actualTargetDomain?: unknown;
   actualTargetTabId?: unknown;
   actualTargetPage?: unknown;
+  actualTargetUrl?: unknown;
+  __actual_target_url?: unknown;
   requireActualTargetPage?: boolean;
   actionType: unknown;
   requestedExecutionMode: unknown;
