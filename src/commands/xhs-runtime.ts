@@ -95,6 +95,7 @@ const pickGateErrorDetails = (
     "write_action_matrix_decisions",
     "consumer_gate_result",
     "request_admission_result",
+    "execution_audit",
     "approval_record",
     "audit_record",
     "risk_state_output"
@@ -335,10 +336,14 @@ const xhsReadCommand = async (
     const requestAdmissionResult =
       asObject(bridgeResult.payload.request_admission_result) ??
       asObject(asObject(bridgeResult.payload.summary)?.request_admission_result);
+    const executionAudit =
+      asObject(bridgeResult.payload.execution_audit) ??
+      asObject(asObject(bridgeResult.payload.summary)?.execution_audit);
     const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
       ...(asObject(bridgeResult.payload.summary) ?? {}),
       ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
-      ...(requestAdmissionResult ? { request_admission_result: requestAdmissionResult } : {})
+      ...(requestAdmissionResult ? { request_admission_result: requestAdmissionResult } : {}),
+      ...(executionAudit ? { execution_audit: executionAudit } : {})
     });
 
     return {

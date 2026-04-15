@@ -5,7 +5,7 @@ import { NativeBridgePendingForwardState } from "./native-bridge-pending-forward
 import { NativeBridgeRecoveryState } from "./native-bridge-recovery-state.js";
 import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, isApprovalRecordComplete, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
-import { buildXhsGatePolicyState, buildIssue209PostGateArtifacts, collectXhsCommandGateReasons, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsGateApprovalId, resolveXhsGateDecisionId, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
+import { buildXhsGatePolicyState, buildIssue209PostGateArtifacts, collectXhsCommandGateReasons, evaluateXhsGate, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsGateApprovalId, resolveXhsGateDecisionId, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
@@ -487,6 +487,11 @@ const XHS_FORWARD_OPTION_KEYS = [
     "approval_record",
     "audit_record",
     "admission_context",
+    "upstream_authorization_request",
+    "__legacy_requested_execution_mode",
+    "__runtime_profile_ref",
+    "__anonymous_isolation_verified",
+    "target_site_logged_in",
     "approval",
     "limited_read_rollout_ready_true",
     "timeout_ms",
@@ -538,6 +543,11 @@ const resolveXhsGateCommandInput = (input) => {
         approvalRecord: normalizeXhsApprovalRecord(readGateParam("approval_record") ?? readGateParam("approval")),
         auditRecord: asRecord(readGateParam("audit_record")),
         admissionContext: asRecord(readGateParam("admission_context")),
+        upstreamAuthorizationRequest: asRecord(readGateParam("upstream_authorization_request")),
+        legacyRequestedExecutionMode: resolveXhsExecutionMode(readGateParam("__legacy_requested_execution_mode")),
+        runtimeProfileRef: asNonEmptyString(readGateParam("__runtime_profile_ref")),
+        anonymousIsolationVerified: readGateParam("__anonymous_isolation_verified") === true,
+        targetSiteLoggedIn: readGateParam("target_site_logged_in") === true,
         limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
         validationAction: asNonEmptyString(readGateParam("validation_action")),
         requestedFingerprintContext: resolveFingerprintContext(commandParams)
@@ -560,6 +570,50 @@ const resolveBridgeRequestGateDecisionId = (request) => {
         gateInvocationId: asNonEmptyString(commandParams?.gate_invocation_id),
         issueScope: readGateParam("issue_scope"),
         requestedExecutionMode: readGateParam("requested_execution_mode")
+    });
+};
+const buildCanonicalGateAuditArtifacts = (input) => {
+    const commandParams = asRecord(input.request.params.command_params);
+    return evaluateXhsGate({
+        issueScope: input.issueScope,
+        riskState: input.riskState,
+        targetDomain: input.targetDomain,
+        targetTabId: input.targetTabId,
+        targetPage: input.targetPage,
+        actualTargetDomain: input.actualTargetDomain,
+        actualTargetTabId: input.actualTargetTabId,
+        actualTargetPage: input.actualTargetPage,
+        actualTargetUrl: input.actualTargetUrl,
+        requireActualTargetPage: true,
+        actionType: input.actionType,
+        abilityActionType: input.abilityActionType,
+        requestedExecutionMode: input.requestedExecutionMode,
+        legacyRequestedExecutionMode: input.legacyRequestedExecutionMode,
+        runtimeProfileRef: input.runtimeProfileRef,
+        upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
+        anonymousIsolationVerified: input.anonymousIsolationVerified,
+        targetSiteLoggedIn: input.targetSiteLoggedIn,
+        runId: String(input.request.params.run_id ?? input.request.id),
+        sessionId: String(input.request.params.session_id ?? "nm-session-001"),
+        gateInvocationId: input.gateInvocationId,
+        approvalRecord: input.approvalRecord,
+        auditRecord: input.auditRecord,
+        admissionContext: input.admissionContext,
+        limitedReadRolloutReadyTrue: input.limitedReadRolloutReadyTrue,
+        decisionId: resolveBridgeRequestGateDecisionId(input.request),
+        approvalId: resolveGatePayloadApprovalId({
+            approvalActive: input.requestedExecutionMode === "live_read_limited" ||
+                input.requestedExecutionMode === "live_read_high_risk" ||
+                input.requestedExecutionMode === "live_write",
+            approvalRecord: input.approvalRecord,
+            decisionId: resolveBridgeRequestGateDecisionId(input.request),
+            issueScope: input.issueScope,
+            requestedExecutionMode: input.requestedExecutionMode,
+            gateInvocationId: input.gateInvocationId ?? asNonEmptyString(commandParams?.gate_invocation_id)
+        }),
+        issue208EditorInputValidation: input.issue208EditorInputValidation,
+        treatMissingEditorValidationAsUnsupported: false,
+        additionalGateReasons: input.additionalGateReasons
     });
 };
 const resolveGateOnlyPageState = (gateInput, scopeContext) => {
@@ -971,6 +1025,7 @@ const createBackgroundXhsGatePayload = (input) => {
         },
         fingerprint_execution: input.fingerprintExecution ? { ...input.fingerprintExecution } : null,
         consumer_gate_result: input.consumerGateResult,
+        request_admission_result: input.requestAdmissionResult,
         approval_record: approvalRecord,
         issue_action_matrix: input.issueScope !== null
             ? resolveIssueActionMatrixEntry(input.issueScope, input.resolvedRiskState)
@@ -983,6 +1038,7 @@ const createBackgroundXhsGatePayload = (input) => {
             now: asNonEmptyString(auditRecord.recorded_at) ?? recordedAt
         }),
         audit_record: auditRecord,
+        execution_audit: input.executionAudit,
         risk_transition_audit: input.riskTransitionAudit
     };
 };
@@ -2949,7 +3005,7 @@ class ChromeBackgroundBridge {
     }
     async #evaluateXhsTargetGate(request) {
         const command = String(request.params.command ?? "");
-        const { commandParams, targetDomain, targetTabId: initialTargetTabId, targetPage, issueScope, riskState, actionType, abilityActionType, requestedExecutionMode, approvalRecord, auditRecord, admissionContext, gateInvocationId, limitedReadRolloutReadyTrue, validationAction, requestedFingerprintContext } = resolveXhsGateCommandInput(asRecord(request.params.command_params) ?? {});
+        const { commandParams, targetDomain, targetTabId: initialTargetTabId, targetPage, issueScope, riskState, actionType, abilityActionType, requestedExecutionMode, approvalRecord, auditRecord, admissionContext, upstreamAuthorizationRequest, legacyRequestedExecutionMode, runtimeProfileRef, anonymousIsolationVerified, targetSiteLoggedIn, gateInvocationId, limitedReadRolloutReadyTrue, validationAction, requestedFingerprintContext } = resolveXhsGateCommandInput(asRecord(request.params.command_params) ?? {});
         let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
         let fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
         let targetTabId = initialTargetTabId;
@@ -2963,6 +3019,10 @@ class ChromeBackgroundBridge {
         let fingerprintGateDecision = "allowed";
         let resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
         const gateReasons = [];
+        let actualTargetDomain = null;
+        let actualTargetTabId = null;
+        let actualTargetPage = null;
+        let actualTargetUrl = null;
         let writeGateOnlyApprovalDecision = null;
         let writeGateOnlyEligible = false;
         const requestRunId = String(request.params.run_id ?? request.id);
@@ -3042,8 +3102,6 @@ class ChromeBackgroundBridge {
         const canonicalApprovalRecord = matrixResolution.approvalRecord;
         const canonicalAdmissionContext = matrixResolution.admissionContext;
         if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
-            const trustedEntry = this.#resolveTrustedFingerprintContext(request);
-            const trustedTargetBound = trustedEntry?.sourceTabId === targetTabId && trustedEntry?.sourceDomain === targetDomain;
             const domainTabs = await this.chromeApi.tabs.query({
                 url: `*://${targetDomain}/*`
             });
@@ -3058,10 +3116,14 @@ class ChromeBackgroundBridge {
                     pushReason("TARGET_TAB_URL_INVALID");
                 }
                 else {
+                    actualTargetDomain = parsed.hostname;
+                    actualTargetTabId = targetTabId;
+                    actualTargetUrl = tabUrl;
                     if (parsed.hostname !== targetDomain) {
                         pushReason("TARGET_DOMAIN_MISMATCH");
                     }
                     const actualPage = classifyXhsPage(tabUrl, targetDomain);
+                    actualTargetPage = actualPage;
                     if (actualPage !== targetPage) {
                         pushReason("TARGET_PAGE_MISMATCH");
                     }
@@ -3130,6 +3192,36 @@ class ChromeBackgroundBridge {
         const gateDecision = finalizedGate.gateDecision;
         const allowed = finalizedGate.allowed;
         const resolvedEffectiveExecutionMode = finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
+        const sharedCanonicalGate = buildCanonicalGateAuditArtifacts({
+            request,
+            issueScope,
+            riskState,
+            targetDomain,
+            targetTabId,
+            targetPage,
+            actualTargetDomain,
+            actualTargetTabId,
+            actualTargetPage,
+            actualTargetUrl,
+            actionType,
+            abilityActionType,
+            requestedExecutionMode,
+            legacyRequestedExecutionMode,
+            runtimeProfileRef,
+            upstreamAuthorizationRequest,
+            anonymousIsolationVerified,
+            targetSiteLoggedIn,
+            approvalRecord: canonicalApprovalRecord,
+            auditRecord,
+            admissionContext: canonicalAdmissionContext,
+            limitedReadRolloutReadyTrue,
+            gateInvocationId,
+            issue208EditorInputValidation,
+            additionalGateReasons: finalizedGate.gateReasons
+        });
+        const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
+        const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
+        const canonicalApprovalPayloadRecord = sharedCanonicalGate.approval_record;
         const requiresManualConfirmation = !gateState.issue208WriteGateOnly &&
             (requestedExecutionMode === "live_read_limited" ||
                 requestedExecutionMode === "live_read_high_risk" ||
@@ -3167,8 +3259,8 @@ class ChromeBackgroundBridge {
             effective_execution_mode: resolvedEffectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: finalizedGate.gateReasons,
-            approver: canonicalApprovalRecord.approver,
-            approved_at: canonicalApprovalRecord.approved_at,
+            approver: canonicalApprovalPayloadRecord.approver,
+            approved_at: canonicalApprovalPayloadRecord.approved_at,
             write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
             write_matrix_decision: gateState.writeMatrixDecision?.decision ?? null,
             recorded_at: recordedAt
@@ -3181,7 +3273,7 @@ class ChromeBackgroundBridge {
             decision: gateDecision,
             gateReasons: finalizedGate.gateReasons,
             requestedExecutionMode,
-            approvalRecord: canonicalApprovalRecord,
+            approvalRecord: canonicalApprovalPayloadRecord,
             auditRecords: [gateAuditSeed],
             now: gateAuditSeed.recorded_at
         });
@@ -3203,7 +3295,9 @@ class ChromeBackgroundBridge {
             fingerprintGateDecision,
             fingerprintExecution,
             consumerGateResult,
-            approvalRecord: canonicalApprovalRecord,
+            approvalRecord: canonicalApprovalPayloadRecord,
+            requestAdmissionResult: canonicalRequestAdmissionResult,
+            executionAudit: canonicalExecutionAudit,
             admissionContext: canonicalAdmissionContext,
             writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
             writeMatrixDecision: gateState.writeMatrixDecision,
@@ -3342,6 +3436,8 @@ class ChromeBackgroundBridge {
             for (const key of [
                 "gate_outcome",
                 "consumer_gate_result",
+                "request_admission_result",
+                "execution_audit",
                 "audit_record",
                 "fingerprint_execution"
             ]) {

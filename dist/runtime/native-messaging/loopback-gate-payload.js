@@ -43,6 +43,7 @@ export const buildLoopbackGatePayload = (input) => {
         gate_outcome: clone(input.gate.gateOutcome),
         consumer_gate_result: clone(input.gate.consumerGateResult),
         request_admission_result: clone(input.gate.requestAdmissionResult),
+        execution_audit: input.gate.executionAudit ? clone(input.gate.executionAudit) : null,
         approval_record: clone(input.gate.approvalRecord),
         issue_action_matrix: clone(resolvedIssueActionMatrix),
         write_interaction_tier: clone(input.gate.writeInteractionTier),

@@ -1183,7 +1183,7 @@ describe("normalizeGateOptionsForContract", () => {
     expect(normalized.requestedExecutionMode).toBe("dry_run");
   });
 
-  it("preserves anonymous admission signals on the loopback runtime path and exposes request_admission_result", async () => {
+  it("preserves anonymous admission signals on the loopback runtime path and exposes request_admission_result plus execution_audit", async () => {
     const runId = "run-anon-loopback-001";
     const requestId = "req-anon-loopback-001";
     const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
@@ -1282,6 +1282,20 @@ describe("normalizeGateOptionsForContract", () => {
         request_admission_result: {
           admission_decision: "allowed",
           anonymous_isolation_ok: true
+        },
+        execution_audit: {
+          request_ref: "upstream_req_loopback_anon_001",
+          request_admission_decision: "allowed",
+          consumed_inputs: {
+            action_request_ref: "upstream_req_loopback_anon_001",
+            resource_binding_ref: "binding_loopback_anon_001",
+            authorization_grant_ref: "grant_loopback_anon_001",
+            runtime_target_ref: "target_loopback_anon_001"
+          },
+          compatibility_refs: {
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef
+          }
         }
       });
     } finally {

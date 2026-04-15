@@ -178,6 +178,7 @@ export const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
