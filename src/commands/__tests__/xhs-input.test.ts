@@ -1127,6 +1127,52 @@ describe("xhs-input", () => {
     );
   });
 
+  it("rejects legacy risk_state values that conflict with the grant snapshot", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "live_read_limited",
+        risk_state: "allowed"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        authorization_grant: {
+          grant_ref: "grant_paused",
+          allowed_actions: ["xhs.read_search_results"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          },
+          resource_state_snapshot: "paused",
+          approval_refs: ["approval_admission_001"],
+          audit_refs: ["audit_admission_001"]
+        }
+      })
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "RISK_STATE_CONFLICT"
+        })
+      })
+    );
+  });
+
   it("synthesizes issue_209 live admission draft from upstream authorization grant refs", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
@@ -1165,6 +1211,24 @@ describe("xhs-input", () => {
         }
       }
     });
+  });
+
+  it("ignores unvalidated options.upstream_authorization_request on legacy live-read requests", () => {
+    const prepared = prepareIssue209LiveReadEnvelopeForContract({
+      options: {
+        issue_scope: "issue_209",
+        action_type: "read",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 924,
+        target_page: "search_result_tab",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        upstream_authorization_request: buildUpstreamAuthorizationRequest()
+      },
+      runId: "run-cli-issue209-live-legacy"
+    });
+
+    expect(prepared.admissionDraft).toEqual({ kind: "missing" });
   });
 
   it("does not synthesize issue_209 live admission_context from an incomplete approval-only source", () => {

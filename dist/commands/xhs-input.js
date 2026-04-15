@@ -43,6 +43,7 @@ const XHS_COMMAND_ACTION_NAMES = {
 const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 const ISSUE209_GATE_INVOCATION_ID_PREFIX = "issue209-gate";
 export const ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY = "__issue209_admission_draft";
+const VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY = "__validated_upstream_authorization_request";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -559,6 +560,12 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
     const normalizedRiskState = typeof options.risk_state === "string" && LEGACY_RISK_STATES.has(options.risk_state)
         ? options.risk_state
         : projectedRiskState;
+    if (upstreamAuthorization && hasOwn(options, "risk_state") && typeof options.risk_state !== "string") {
+        throw invalidAbilityInput("RISK_STATE_INVALID", abilityId);
+    }
+    if (upstreamAuthorization && projectedRiskState && normalizedRiskState !== projectedRiskState) {
+        throw invalidAbilityInput("RISK_STATE_CONFLICT", abilityId);
+    }
     if (!requestedExecutionModeFromContract) {
         throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
     }
@@ -708,6 +715,7 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
             ...(normalizedRiskState ? { risk_state: normalizedRiskState } : {}),
             ...(upstreamAuthorization
                 ? {
+                    [VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY]: true,
                     upstream_authorization_request: cloneJsonObject(upstreamAuthorization)
                 }
                 : {}),
@@ -743,7 +751,10 @@ const cloneAdmissionDraftForContract = (value) => {
         admission_context: admissionContext
     };
 };
-const asUpstreamAuthorizationRequestForContract = (value) => {
+const asUpstreamAuthorizationRequestForContract = (value, validated) => {
+    if (!validated) {
+        return null;
+    }
     const record = asObject(value);
     if (!record) {
         return null;
@@ -836,7 +847,8 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
         approvalRecord: input.options.approval_record ?? input.options.approval,
         auditRecord: input.options.audit_record
     });
-    const upstreamAuthorization = asUpstreamAuthorizationRequestForContract(input.options.upstream_authorization_request);
+    const validatedUpstreamAuthorization = input.options[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY] === true;
+    const upstreamAuthorization = asUpstreamAuthorizationRequestForContract(input.options.upstream_authorization_request, validatedUpstreamAuthorization);
     const current = source.current;
     const hasAllTrueChecks = (checks) => Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true);
     const bindingMatches = (evidence, includeRiskState = false, riskState) => {
@@ -1019,6 +1031,7 @@ const bindIssue209AdmissionContextToSession = (admissionContext, sessionId) => {
 export const prepareIssue209LiveReadEnvelopeForContract = (input) => {
     const nextOptions = cloneJsonObject(input.options);
     if (!isIssue209LiveReadRequest(nextOptions)) {
+        delete nextOptions[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY];
         const admissionDraft = cloneAdmissionDraftForContract(input.admissionDraft);
         delete nextOptions.admission_context;
         delete nextOptions[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
@@ -1041,6 +1054,7 @@ export const prepareIssue209LiveReadEnvelopeForContract = (input) => {
         gateInvocationId,
         admissionDraft: input.admissionDraft
     });
+    delete nextOptions[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY];
     delete nextOptions.admission_context;
     delete nextOptions[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
     return {
