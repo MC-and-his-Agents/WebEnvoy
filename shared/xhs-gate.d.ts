@@ -139,6 +139,29 @@ export interface XhsRequestAdmissionResult {
   };
 }
 
+export interface XhsRequestExecutionAudit {
+  audit_ref: string | null;
+  request_ref: string | null;
+  consumed_inputs: {
+    action_request_ref: string | null;
+    resource_binding_ref: string | null;
+    authorization_grant_ref: string | null;
+    runtime_target_ref: string | null;
+  };
+  compatibility_refs: {
+    gate_run_id: string | null;
+    approval_admission_ref: string | null;
+    audit_admission_ref: string | null;
+    approval_record_ref: string | null;
+    audit_record_ref: string | null;
+    session_rhythm_window_id: string | null;
+    session_rhythm_decision_id: string | null;
+  };
+  request_admission_decision: "allowed" | "blocked" | "deferred";
+  risk_signals: string[];
+  recorded_at: string;
+}
+
 export interface XhsReadExecutionPolicy {
   default_mode: "dry_run";
   allowed_modes: Array<"dry_run" | "recon" | "live_read_limited" | "live_read_high_risk">;
@@ -444,11 +467,13 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
   };
   request_admission_result: XhsRequestAdmissionResult;
   approval_record: XhsApprovalRecord;
+  execution_audit: XhsRequestExecutionAudit | null;
 };
 export declare const buildIssue209PostGateArtifacts: (input: {
   runId: string;
   sessionId: string;
   profile: string | null;
+  executionAuditRiskSignals?: string[] | null;
   gate: {
     gate_input: {
       issue_scope: IssueScope;
@@ -479,6 +504,7 @@ export declare const buildIssue209PostGateArtifacts: (input: {
       gate_reasons: string[];
       write_interaction_tier: string | null;
     };
+    request_admission_result: XhsRequestAdmissionResult;
     approval_record: XhsApprovalRecord;
     write_action_matrix_decisions: WriteActionMatrixDecisionsOutput | null;
   };
@@ -486,4 +512,5 @@ export declare const buildIssue209PostGateArtifacts: (input: {
 }) => {
   approval_record: XhsApprovalRecord;
   audit_record: Record<string, unknown>;
+  execution_audit: XhsRequestExecutionAudit | null;
 };

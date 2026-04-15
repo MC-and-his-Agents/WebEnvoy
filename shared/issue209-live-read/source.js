@@ -34,6 +34,9 @@ const normalizeChecks = (value) => {
   return Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, asBoolean(record?.[key])]));
 };
 
+const hasAllTrueChecks = (value) =>
+  APPROVAL_CHECK_KEYS.every((key) => value?.[key] === true);
+
 const normalizeApprovalAdmissionEvidence = (value) => {
   const record = asRecord(value);
   return {
@@ -75,6 +78,39 @@ const normalizeAuditAdmissionEvidence = (value) => {
     risk_state: asString(record?.risk_state),
     audited_checks: normalizeChecks(record?.audited_checks),
     recorded_at: asString(record?.recorded_at)
+  };
+};
+
+const resolveConsumedIssue209AdmissionEvidence = (value) => {
+  const admissionContext = cloneIssue209AdmissionContext(value);
+  const approvalEvidence = normalizeApprovalAdmissionEvidence(
+    admissionContext?.approval_admission_evidence
+  );
+  const auditEvidence = normalizeAuditAdmissionEvidence(
+    admissionContext?.audit_admission_evidence
+  );
+
+  const approvalAdmissionRef =
+    approvalEvidence.approval_admission_ref &&
+    approvalEvidence.recorded_at &&
+    approvalEvidence.approved === true &&
+    approvalEvidence.approver &&
+    approvalEvidence.approved_at &&
+    hasAllTrueChecks(approvalEvidence.checks)
+      ? approvalEvidence.approval_admission_ref
+      : null;
+  const auditAdmissionRef =
+    auditEvidence.audit_admission_ref &&
+    auditEvidence.recorded_at &&
+    hasAllTrueChecks(auditEvidence.audited_checks)
+      ? auditEvidence.audit_admission_ref
+      : null;
+
+  return {
+    approvalEvidence,
+    auditEvidence,
+    approvalAdmissionRef,
+    auditAdmissionRef
   };
 };
 
@@ -151,6 +187,7 @@ export {
   cloneIssue209AdmissionContext,
   normalizeApprovalAdmissionEvidence,
   normalizeAuditAdmissionEvidence,
+  resolveConsumedIssue209AdmissionEvidence,
   normalizeProvidedApprovalSource,
   normalizeProvidedAuditSource,
   prepareIssue209LiveReadSource

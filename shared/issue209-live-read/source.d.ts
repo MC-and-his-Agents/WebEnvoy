@@ -112,6 +112,13 @@ export interface Issue209LiveReadSource {
   auditSource: Issue209ProvidedAuditSource;
 }
 
+export interface Issue209ConsumedAdmissionEvidence {
+  approvalEvidence: Issue209ApprovalAdmissionSource;
+  auditEvidence: Issue209AuditAdmissionSource;
+  approvalAdmissionRef: string | null;
+  auditAdmissionRef: string | null;
+}
+
 export declare const APPROVAL_CHECK_KEYS: readonly ApprovalCheckKey[];
 export declare const cloneIssue209AdmissionContext: (
   value: unknown
@@ -122,6 +129,9 @@ export declare const normalizeApprovalAdmissionEvidence: (
 export declare const normalizeAuditAdmissionEvidence: (
   value: unknown
 ) => Issue209AuditAdmissionSource;
+export declare const resolveConsumedIssue209AdmissionEvidence: (
+  value: unknown
+) => Issue209ConsumedAdmissionEvidence;
 export declare const normalizeProvidedApprovalSource: (
   value: unknown
 ) => Issue209ProvidedApprovalSource;

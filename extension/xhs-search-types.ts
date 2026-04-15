@@ -152,6 +152,29 @@ export interface RequestAdmissionResult {
   derived_from: Record<string, unknown>;
 }
 
+export interface RequestExecutionAudit {
+  audit_ref: string | null;
+  request_ref: string | null;
+  consumed_inputs: {
+    action_request_ref: string | null;
+    resource_binding_ref: string | null;
+    authorization_grant_ref: string | null;
+    runtime_target_ref: string | null;
+  };
+  compatibility_refs: {
+    gate_run_id: string | null;
+    approval_admission_ref: string | null;
+    audit_admission_ref: string | null;
+    approval_record_ref: string | null;
+    audit_record_ref: string | null;
+    session_rhythm_window_id: string | null;
+    session_rhythm_decision_id: string | null;
+  };
+  request_admission_decision: "allowed" | "blocked" | "deferred";
+  risk_signals: string[];
+  recorded_at: string;
+}
+
 export interface XhsSearchGate {
   scope_context: ScopeContextRecord;
   read_execution_policy: {
@@ -175,6 +198,7 @@ export interface XhsSearchGate {
     approved_at: string | null;
     checks: Record<string, boolean>;
   };
+  execution_audit: RequestExecutionAudit | null;
 }
 
 export interface XhsExecutionAuditRecord {
