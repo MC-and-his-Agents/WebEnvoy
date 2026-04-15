@@ -60,6 +60,7 @@ const pickGateErrorDetails = (payload, details) => {
         "write_interaction_tier",
         "write_action_matrix_decisions",
         "consumer_gate_result",
+        "request_admission_result",
         "approval_record",
         "audit_record",
         "risk_state_output"
@@ -143,7 +144,12 @@ const xhsUserHome = async (context) => {
 };
 const xhsReadCommand = async (context, inputConfig) => {
     const envelope = parseAbilityEnvelopeForContract(context.params);
-    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id);
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: context.command,
+        abilityAction: envelope.ability.action,
+        runtimeProfile: context.profile ?? null,
+        upstreamAuthorization: envelope.upstreamAuthorization
+    });
     const parsedInput = inputConfig.parseInput(envelope, gate);
     if (process.env.NODE_ENV === "test" &&
         process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
@@ -181,6 +187,18 @@ const xhsReadCommand = async (context, inputConfig) => {
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
         });
+        const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
+        const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
+        const runtimeGateOptions = {
+            ...preparedGateOptions,
+            ...(transportIsLoopback && anonymousIsolationVerified === true
+                ? { __anonymous_isolation_verified: true }
+                : {}),
+            ...(transportIsLoopback && targetSiteLoggedIn === true
+                ? { target_site_logged_in: true }
+                : {}),
+            ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {})
+        };
         const commandParams = appendFingerprintContext({
             ...(preparedIssue209LiveRead.commandRequestId
                 ? { request_id: preparedIssue209LiveRead.commandRequestId }
@@ -199,7 +217,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
             input: parsedInput,
-            options: preparedIssue209LiveRead.options,
+            options: runtimeGateOptions,
             session_id: bridgeSessionId
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({
@@ -213,9 +231,12 @@ const xhsReadCommand = async (context, inputConfig) => {
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
         }
         const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
+        const requestAdmissionResult = asObject(bridgeResult.payload.request_admission_result) ??
+            asObject(asObject(bridgeResult.payload.summary)?.request_admission_result);
         const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
             ...(asObject(bridgeResult.payload.summary) ?? {}),
-            ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {})
+            ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
+            ...(requestAdmissionResult ? { request_admission_result: requestAdmissionResult } : {})
         });
         return {
             summary,

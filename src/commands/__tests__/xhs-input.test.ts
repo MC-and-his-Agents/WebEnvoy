@@ -13,6 +13,175 @@ import {
 } from "../xhs-input.js";
 
 describe("xhs-input", () => {
+  it("accepts FR-0023 four objects without a legacy requested_execution_mode", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {},
+      action_request: {
+        request_ref: "upstream_req_001",
+        action_name: "xhs.read_search_results",
+        action_category: "read"
+      },
+      resource_binding: {
+        binding_ref: "binding_001",
+        resource_kind: "anonymous_context",
+        profile_ref: null,
+        binding_constraints: {
+          anonymous_required: true,
+          reuse_logged_in_context_forbidden: true
+        }
+      },
+      authorization_grant: {
+        grant_ref: "grant_001",
+        allowed_actions: ["xhs.read_search_results"],
+        binding_scope: {
+          allowed_resource_kinds: ["anonymous_context"],
+          allowed_profile_refs: []
+        },
+        target_scope: {
+          allowed_domains: ["www.xiaohongshu.com"],
+          allowed_pages: ["search_result_tab"]
+        },
+        resource_state_snapshot: "paused"
+      },
+      runtime_target: {
+        target_ref: "target_001",
+        domain: "www.xiaohongshu.com",
+        page: "search_result_tab",
+        tab_id: 32
+      }
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "local-profile",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toMatchObject({
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 32,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "dry_run"
+    });
+  });
+
+  it("does not hard-bind profile_session profile_ref to the local runtime profile", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {},
+      action_request: {
+        request_ref: "upstream_req_profile_session_001",
+        action_name: "xhs.read_search_results",
+        action_category: "read"
+      },
+      resource_binding: {
+        binding_ref: "binding_profile_session_001",
+        resource_kind: "profile_session",
+        profile_ref: "shared-anon-profile"
+      },
+      authorization_grant: {
+        grant_ref: "grant_profile_session_001",
+        allowed_actions: ["xhs.read_search_results"],
+        binding_scope: {
+          allowed_resource_kinds: ["profile_session"],
+          allowed_profile_refs: ["shared-anon-profile"]
+        },
+        target_scope: {
+          allowed_domains: ["www.xiaohongshu.com"],
+          allowed_pages: ["search_result_tab"]
+        },
+        resource_state_snapshot: "paused"
+      },
+      runtime_target: {
+        target_ref: "target_profile_session_001",
+        domain: "www.xiaohongshu.com",
+        page: "search_result_tab",
+        tab_id: 18
+      }
+    });
+
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+      command: "xhs.search",
+      abilityAction: envelope.ability.action,
+      runtimeProfile: "local-profile-that-does-not-match-profile-ref",
+      upstreamAuthorization: envelope.upstreamAuthorization
+    });
+
+    expect(gate.requestedExecutionMode).toBe("dry_run");
+    expect(gate.options.upstream_authorization_request).toMatchObject({
+      resource_binding: {
+        resource_kind: "profile_session",
+        profile_ref: "shared-anon-profile"
+      }
+    });
+  });
+
+  it("does not fabricate live admission evidence from authorization_grant approval_refs or audit_refs", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {},
+      action_request: {
+        request_ref: "upstream_req_live_refs_001",
+        action_name: "xhs.read_search_results",
+        action_category: "read"
+      },
+      resource_binding: {
+        binding_ref: "binding_live_refs_001",
+        resource_kind: "profile_session",
+        profile_ref: "profile-allowed-001"
+      },
+      authorization_grant: {
+        grant_ref: "grant_live_refs_001",
+        allowed_actions: ["xhs.read_search_results"],
+        binding_scope: {
+          allowed_resource_kinds: ["profile_session"],
+          allowed_profile_refs: ["profile-allowed-001"]
+        },
+        target_scope: {
+          allowed_domains: ["www.xiaohongshu.com"],
+          allowed_pages: ["search_result_tab"]
+        },
+        resource_state_snapshot: "active",
+        approval_refs: ["approval_admission_external_001"],
+        audit_refs: ["audit_admission_external_001"]
+      },
+      runtime_target: {
+        target_ref: "target_live_refs_001",
+        domain: "www.xiaohongshu.com",
+        page: "search_result_tab",
+        tab_id: 55
+      }
+    });
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+      command: "xhs.search",
+      abilityAction: envelope.ability.action,
+      runtimeProfile: "profile-allowed-001",
+      upstreamAuthorization: envelope.upstreamAuthorization
+    });
+
+    expect(gate.requestedExecutionMode).toBe("live_read_high_risk");
+    expect(
+      ensureIssue209AdmissionContextForContract({
+        options: gate.options,
+        runId: "run-cli-live-refs-001",
+        requestId: "issue209-live-refs-001",
+        gateInvocationId: "issue209-gate-run-cli-live-refs-001-001",
+        sessionId: "nm-session-live-refs-001"
+      })
+    ).not.toHaveProperty("admission_context");
+  });
+
   it("parses ability envelope and normalizes xhs.search input", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },

@@ -381,6 +381,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
             write_interaction_tier: gate.write_interaction_tier,
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
+            request_admission_result: gate.request_admission_result,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -543,7 +544,7 @@ const buildHeaders = (env, options, signature) => ({
     "Content-Type": "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
-    const gate = resolveGate(input.options, input.executionContext);
+    const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     const payload = spec.buildPayload(input.params, env);
@@ -610,6 +611,7 @@ const executeXhsRead = async (input, spec, env) => {
                         read_execution_policy: gate.read_execution_policy,
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
+                        request_admission_result: gate.request_admission_result,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
@@ -809,6 +811,7 @@ const executeXhsRead = async (input, spec, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord

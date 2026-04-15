@@ -76,6 +76,69 @@ export interface XhsAdmissionContext {
   audit_admission_evidence: XhsAuditAdmissionEvidence;
 }
 
+export interface XhsUpstreamAuthorizationRequest {
+  action_request: {
+    request_ref: string | null;
+    action_name: string | null;
+    action_category: ActionType | null;
+    requested_at: string | null;
+  } | null;
+  resource_binding: {
+    binding_ref: string | null;
+    resource_kind: "anonymous_context" | "profile_session" | null;
+    profile_ref?: string | null;
+    binding_constraints:
+      | {
+          anonymous_required: boolean;
+          reuse_logged_in_context_forbidden: boolean;
+        }
+      | null;
+  } | null;
+  authorization_grant: {
+    grant_ref: string | null;
+    allowed_actions: string[];
+    binding_scope: {
+      allowed_resource_kinds: string[];
+      allowed_profile_refs: string[];
+    };
+    target_scope: {
+      allowed_domains: string[];
+      allowed_pages: string[];
+    };
+    approval_refs: string[];
+    audit_refs: string[];
+    resource_state_snapshot: string | null;
+  } | null;
+  runtime_target: {
+    target_ref: string | null;
+    domain: string | null;
+    page: string | null;
+    tab_id: number | null;
+    url: string | null;
+  } | null;
+}
+
+export interface XhsRequestAdmissionResult {
+  request_ref: string | null;
+  admission_decision: "allowed" | "blocked" | "deferred";
+  normalized_action_type: ActionType | null;
+  normalized_resource_kind: "anonymous_context" | "profile_session" | null;
+  runtime_target_match: boolean;
+  grant_match: boolean;
+  anonymous_isolation_ok: boolean;
+  effective_runtime_mode: ExecutionMode | null;
+  reason_codes: string[];
+  derived_from: {
+    gate_input_ref: string | null;
+    action_request_ref: string | null;
+    resource_binding_ref: string | null;
+    authorization_grant_ref: string | null;
+    runtime_target_ref: string | null;
+    approval_admission_ref: string | null;
+    audit_admission_ref: string | null;
+  };
+}
+
 export interface XhsReadExecutionPolicy {
   default_mode: "dry_run";
   allowed_modes: Array<"dry_run" | "recon" | "live_read_limited" | "live_read_high_risk">;
@@ -97,6 +160,8 @@ export interface XhsGateCoreInput {
   actualTargetDomain?: unknown;
   actualTargetTabId?: unknown;
   actualTargetPage?: unknown;
+  actualTargetUrl?: unknown;
+  __actual_target_url?: unknown;
   requireActualTargetPage?: boolean;
   actionType: unknown;
   requestedExecutionMode: unknown;
@@ -116,6 +181,16 @@ export interface XhsGateCoreInput {
   includeWriteInteractionTierReason?: boolean;
   treatMissingEditorValidationAsUnsupported?: boolean;
   writeGateOnlyEligibleBehavior?: "allow" | "block";
+  legacyRequestedExecutionMode?: unknown;
+  legacy_requested_execution_mode?: unknown;
+  runtimeProfileRef?: unknown;
+  __runtime_profile_ref?: unknown;
+  upstreamAuthorizationRequest?: unknown;
+  upstream_authorization_request?: unknown;
+  anonymousIsolationVerified?: boolean;
+  __anonymous_isolation_verified?: boolean;
+  targetSiteLoggedIn?: boolean;
+  target_site_logged_in?: boolean;
 }
 
 export interface XhsGateCoreResult {
@@ -124,6 +199,8 @@ export interface XhsGateCoreResult {
   targetPage: string | null;
   actionType: ActionType | null;
   requestedExecutionMode: ExecutionMode | null;
+  legacyRequestedExecutionMode: ExecutionMode | null;
+  upstreamAuthorizationRequest: XhsUpstreamAuthorizationRequest;
   issueScope: IssueScope;
   riskState: RiskState;
   approvalRecord: XhsApprovalRecord;
@@ -241,12 +318,17 @@ export declare const buildXhsGatePolicyState: (input: {
   riskState: unknown;
   actionType: unknown;
   requestedExecutionMode: unknown;
+  legacyRequestedExecutionMode?: unknown;
+  upstreamAuthorizationRequest?: unknown;
+  upstream_authorization_request?: unknown;
   limitedReadRolloutReadyTrue?: boolean;
 }) => {
   issueScope: IssueScope;
   riskState: RiskState;
   actionType: ActionType | null;
   requestedExecutionMode: ExecutionMode | null;
+  legacyRequestedExecutionMode: ExecutionMode | null;
+  upstreamAuthorizationRequest: XhsUpstreamAuthorizationRequest;
   issueActionMatrix: IssueActionMatrixEntry;
   writeActionMatrixDecisions: WriteActionMatrixDecisionsOutput;
   writeMatrixDecision: WriteActionMatrixDecision;
@@ -360,6 +442,7 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     gate_reasons: string[];
     write_interaction_tier: string | null;
   };
+  request_admission_result: XhsRequestAdmissionResult;
   approval_record: XhsApprovalRecord;
 };
 export declare const buildIssue209PostGateArtifacts: (input: {

@@ -44,7 +44,7 @@ export const resolveActualTargetGateReasons = (options) => {
     }
     return gateReasons;
 };
-export const resolveGate = (options, context) => {
+export const resolveGate = (options, context, actualTargetUrl) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
     const decisionId = buildGateDecisionId(context, options);
@@ -58,10 +58,16 @@ export const resolveGate = (options, context) => {
         actualTargetDomain: options.actual_target_domain,
         actualTargetTabId: options.actual_target_tab_id,
         actualTargetPage: options.actual_target_page,
+        actualTargetUrl,
         requireActualTargetPage: true,
         actionType: options.action_type,
         abilityAction: options.ability_action,
         requestedExecutionMode: options.requested_execution_mode,
+        legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
+        runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
+        upstreamAuthorizationRequest: options.upstream_authorization_request,
+        anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
+        targetSiteLoggedIn: options.target_site_logged_in === true,
         runId: context.runId,
         sessionId: context.sessionId,
         gateInvocationId: context.gateInvocationId,
@@ -171,6 +177,7 @@ export const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
             write_interaction_tier: gate.write_interaction_tier,
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
+            request_admission_result: gate.request_admission_result,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord

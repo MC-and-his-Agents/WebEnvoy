@@ -207,6 +207,7 @@ export const createFailure = (
           write_interaction_tier: gate.write_interaction_tier,
           write_action_matrix_decisions: gate.write_action_matrix_decisions,
           consumer_gate_result: gate.consumer_gate_result,
+          request_admission_result: gate.request_admission_result,
           approval_record: gate.approval_record,
           risk_state_output: resolveRiskStateOutput(gate, auditRecord),
           ...(auditRecord ? { audit_record: auditRecord } : {})

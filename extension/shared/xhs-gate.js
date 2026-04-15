@@ -20,6 +20,8 @@ import {
 
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_UPSTREAM_RESOURCE_KINDS = new Set(["anonymous_context", "profile_session"]);
+const XHS_RESOURCE_STATE_SNAPSHOTS = new Set(["active", "cool_down", "paused"]);
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODE_SET = new Set(EXECUTION_MODES);
@@ -66,6 +68,410 @@ const asBoolean = (value) => value === true;
 const asString = (value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : null);
 
 const asInteger = (value) => (typeof value === "number" && Number.isInteger(value) ? value : null);
+
+const asStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const normalized = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return normalized.length === value.length ? normalized : null;
+};
+
+const normalizeUpstreamAuthorizationRequest = (value) => {
+  const record = asRecord(value);
+  const actionRequest = asRecord(record?.action_request);
+  const resourceBinding = asRecord(record?.resource_binding);
+  const authorizationGrant = asRecord(record?.authorization_grant);
+  const runtimeTarget = asRecord(record?.runtime_target);
+  const bindingScope = asRecord(authorizationGrant?.binding_scope);
+  const targetScope = asRecord(authorizationGrant?.target_scope);
+  const bindingConstraints = asRecord(resourceBinding?.binding_constraints);
+
+  const resourceKind = asString(resourceBinding?.resource_kind);
+  const resourceStateSnapshot = asString(authorizationGrant?.resource_state_snapshot);
+
+  return {
+    action_request: actionRequest
+      ? {
+          request_ref: asString(actionRequest.request_ref),
+          action_name: asString(actionRequest.action_name),
+          action_category: resolveXhsActionType(actionRequest.action_category),
+          requested_at: asString(actionRequest.requested_at)
+        }
+      : null,
+    resource_binding: resourceBinding
+      ? {
+          binding_ref: asString(resourceBinding.binding_ref),
+          resource_kind:
+            resourceKind && XHS_UPSTREAM_RESOURCE_KINDS.has(resourceKind) ? resourceKind : null,
+          profile_ref: Object.prototype.hasOwnProperty.call(resourceBinding, "profile_ref")
+            ? resourceBinding.profile_ref === null
+              ? null
+              : asString(resourceBinding.profile_ref)
+            : undefined,
+          binding_constraints: bindingConstraints
+            ? {
+                anonymous_required: bindingConstraints.anonymous_required === true,
+                reuse_logged_in_context_forbidden:
+                  bindingConstraints.reuse_logged_in_context_forbidden === true
+              }
+            : null
+        }
+      : null,
+    authorization_grant: authorizationGrant
+      ? {
+          grant_ref: asString(authorizationGrant.grant_ref),
+          allowed_actions: asStringArray(authorizationGrant.allowed_actions) ?? [],
+          binding_scope: {
+            allowed_resource_kinds: asStringArray(bindingScope?.allowed_resource_kinds) ?? [],
+            allowed_profile_refs: asStringArray(bindingScope?.allowed_profile_refs) ?? []
+          },
+          target_scope: {
+            allowed_domains: asStringArray(targetScope?.allowed_domains) ?? [],
+            allowed_pages: asStringArray(targetScope?.allowed_pages) ?? []
+          },
+          approval_refs: asStringArray(authorizationGrant.approval_refs) ?? [],
+          audit_refs: asStringArray(authorizationGrant.audit_refs) ?? [],
+          resource_state_snapshot:
+            resourceStateSnapshot && XHS_RESOURCE_STATE_SNAPSHOTS.has(resourceStateSnapshot)
+              ? resourceStateSnapshot
+              : null
+        }
+      : null,
+    runtime_target: runtimeTarget
+      ? {
+          target_ref: asString(runtimeTarget.target_ref),
+          domain: asString(runtimeTarget.domain),
+          page: asString(runtimeTarget.page),
+          tab_id: asInteger(runtimeTarget.tab_id),
+          url: asString(runtimeTarget.url)
+        }
+      : null
+  };
+};
+
+const projectRiskStateFromSnapshot = (snapshot) => {
+  if (snapshot === "active") {
+    return "allowed";
+  }
+  if (snapshot === "cool_down") {
+    return "limited";
+  }
+  if (snapshot === "paused") {
+    return "paused";
+  }
+  return null;
+};
+
+const deriveCanonicalRiskState = (inputRiskState, upstream) => {
+  const explicitRiskState = asString(inputRiskState);
+  if (explicitRiskState) {
+    return resolveXhsRiskState(explicitRiskState);
+  }
+  const projectedRiskState = projectRiskStateFromSnapshot(
+    upstream?.authorization_grant?.resource_state_snapshot
+  );
+  return projectedRiskState
+    ? resolveXhsRiskState(projectedRiskState)
+    : resolveXhsRiskState(inputRiskState);
+};
+
+const buildSearchParamValueMap = (url) => {
+  const values = new Map();
+  for (const [key, value] of url.searchParams.entries()) {
+    const current = values.get(key) ?? [];
+    current.push(value);
+    values.set(key, current);
+  }
+  return values;
+};
+
+const actualUrlSatisfiesExpectedQuery = (expectedUrl, actualUrl) => {
+  const expectedParams = buildSearchParamValueMap(expectedUrl);
+  if (expectedParams.size === 0) {
+    return true;
+  }
+
+  const actualParams = buildSearchParamValueMap(actualUrl);
+  for (const [key, expectedValues] of expectedParams.entries()) {
+    const actualValues = [...(actualParams.get(key) ?? [])];
+    if (actualValues.length < expectedValues.length) {
+      return false;
+    }
+
+    for (const expectedValue of expectedValues) {
+      const matchIndex = actualValues.indexOf(expectedValue);
+      if (matchIndex === -1) {
+        return false;
+      }
+      actualValues.splice(matchIndex, 1);
+    }
+  }
+
+  return true;
+};
+
+const matchesRuntimeTargetUrl = (input, actualTargetUrl) => {
+  const runtimeTarget = input?.runtime_target;
+  if (!runtimeTarget?.url || !runtimeTarget.domain || !runtimeTarget.page) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(runtimeTarget.url);
+    if (parsed.hostname !== runtimeTarget.domain) {
+      return false;
+    }
+    if (runtimeTarget.page === "search_result_tab") {
+      if (!parsed.pathname.startsWith("/search_result")) {
+        return false;
+      }
+    }
+    if (runtimeTarget.page === "explore_detail_tab") {
+      if (!parsed.pathname.startsWith("/explore/")) {
+        return false;
+      }
+    }
+    if (runtimeTarget.page === "profile_tab") {
+      if (!parsed.pathname.startsWith("/user/profile/")) {
+        return false;
+      }
+    }
+    if (runtimeTarget.page === "creator_publish_tab") {
+      if (
+        parsed.hostname !== XHS_WRITE_DOMAIN ||
+        !parsed.pathname.startsWith("/publish")
+      ) {
+        return false;
+      }
+    }
+    if (!actualTargetUrl) {
+      return true;
+    }
+    const actual = new URL(actualTargetUrl);
+    return (
+      actual.protocol === parsed.protocol &&
+      actual.hostname === parsed.hostname &&
+      actual.pathname === parsed.pathname &&
+      actualUrlSatisfiesExpectedQuery(parsed, actual)
+    );
+  } catch {
+    return false;
+  }
+};
+
+const deriveCanonicalRequestedExecutionMode = (input) => {
+  const explicitRequestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
+  const upstream = normalizeUpstreamAuthorizationRequest(
+    input.upstreamAuthorizationRequest ?? input.upstream_authorization_request
+  );
+  const actionCategory = upstream.action_request?.action_category ?? null;
+  const targetDomain = upstream.runtime_target?.domain ?? asString(input.targetDomain);
+
+  if (!upstream.action_request || !upstream.resource_binding || !upstream.authorization_grant || !upstream.runtime_target) {
+    return {
+      requestedExecutionMode: explicitRequestedExecutionMode,
+      upstream,
+      legacyRequestedExecutionMode: resolveXhsExecutionMode(
+        input.legacyRequestedExecutionMode ?? input.legacy_requested_execution_mode
+      )
+    };
+  }
+
+  let requestedExecutionMode = null;
+  if (actionCategory === "write" || actionCategory === "irreversible_write") {
+    requestedExecutionMode = "live_write";
+  } else if (actionCategory === "read") {
+    const hasGrantRefs =
+      upstream.authorization_grant.approval_refs.length > 0 &&
+      upstream.authorization_grant.audit_refs.length > 0;
+    const projectedRiskState = projectRiskStateFromSnapshot(
+      upstream.authorization_grant.resource_state_snapshot
+    );
+    if (!hasGrantRefs || targetDomain !== XHS_READ_DOMAIN) {
+      requestedExecutionMode = "dry_run";
+    } else if (projectedRiskState === "allowed") {
+      requestedExecutionMode = "live_read_high_risk";
+    } else if (projectedRiskState === "limited") {
+      requestedExecutionMode = "live_read_limited";
+    } else {
+      requestedExecutionMode = "dry_run";
+    }
+  }
+  let legacyRequestedExecutionMode = resolveXhsExecutionMode(
+    input.legacyRequestedExecutionMode ?? input.legacy_requested_execution_mode
+  );
+  if (
+    !legacyRequestedExecutionMode &&
+    explicitRequestedExecutionMode &&
+    requestedExecutionMode &&
+    explicitRequestedExecutionMode !== requestedExecutionMode
+  ) {
+    legacyRequestedExecutionMode = explicitRequestedExecutionMode;
+  }
+
+  return {
+    requestedExecutionMode: requestedExecutionMode ?? explicitRequestedExecutionMode,
+    upstream,
+    legacyRequestedExecutionMode
+  };
+};
+
+const applyCanonicalAdmissionReasons = (input) => {
+  const upstream = input.upstream;
+  const runtimeProfileRef = asString(input.runtimeProfileRef);
+  if (!upstream?.action_request || !upstream?.resource_binding || !upstream?.authorization_grant || !upstream?.runtime_target) {
+    return;
+  }
+  if (
+    input.legacyRequestedExecutionMode &&
+    input.requestedExecutionMode &&
+    input.legacyRequestedExecutionMode !== input.requestedExecutionMode
+  ) {
+    pushReason(input.gateReasons, "STALE_LEGACY_REQUESTED_EXECUTION_MODE");
+  }
+
+  if (!upstream.authorization_grant.allowed_actions.includes(upstream.action_request.action_name)) {
+    pushReason(input.gateReasons, "ACTION_NOT_ALLOWED_BY_GRANT");
+  }
+  if (
+    !upstream.authorization_grant.binding_scope.allowed_resource_kinds.includes(
+      upstream.resource_binding.resource_kind
+    )
+  ) {
+    pushReason(input.gateReasons, "RESOURCE_KIND_OUT_OF_SCOPE");
+  }
+  if (
+    upstream.resource_binding.resource_kind === "profile_session" &&
+    upstream.resource_binding.profile_ref &&
+    !upstream.authorization_grant.binding_scope.allowed_profile_refs.includes(
+      upstream.resource_binding.profile_ref
+    )
+  ) {
+    pushReason(input.gateReasons, "PROFILE_REF_OUT_OF_SCOPE");
+  }
+  if (
+    upstream.resource_binding.resource_kind === "profile_session" &&
+    upstream.resource_binding.profile_ref &&
+    runtimeProfileRef &&
+    runtimeProfileRef !== upstream.resource_binding.profile_ref
+  ) {
+    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH");
+  }
+  if (
+    !upstream.authorization_grant.target_scope.allowed_domains.includes(upstream.runtime_target.domain)
+  ) {
+    pushReason(input.gateReasons, "TARGET_DOMAIN_OUT_OF_SCOPE");
+  }
+  if (
+    !upstream.authorization_grant.target_scope.allowed_pages.includes(upstream.runtime_target.page)
+  ) {
+    pushReason(input.gateReasons, "TARGET_PAGE_OUT_OF_SCOPE");
+  }
+  if (!matchesRuntimeTargetUrl(upstream, asString(input.actualTargetUrl))) {
+    pushReason(input.gateReasons, "TARGET_URL_CONTEXT_MISMATCH");
+  }
+
+  if (upstream.resource_binding.resource_kind === "anonymous_context") {
+    const bindingConstraints = upstream.resource_binding.binding_constraints;
+    if (
+      bindingConstraints?.anonymous_required !== true ||
+      bindingConstraints?.reuse_logged_in_context_forbidden !== true
+    ) {
+      pushReason(input.gateReasons, "ANONYMOUS_BINDING_CONSTRAINTS_INVALID");
+    }
+    if (input.targetSiteLoggedIn) {
+      pushReason(input.gateReasons, "ANONYMOUS_CONTEXT_REQUIRES_LOGGED_OUT_SITE_CONTEXT");
+      return;
+    }
+    if (!input.anonymousIsolationVerified) {
+      pushReason(input.gateReasons, "ANONYMOUS_ISOLATION_UNVERIFIED");
+    }
+  }
+};
+
+const evaluateRequestAdmissionResult = (input) => {
+  const state = input.state ?? {};
+  const upstream = input.upstream;
+  const requestRef = upstream?.action_request?.request_ref ?? asString(input.commandRequestId) ?? asString(input.requestId);
+  const normalizedActionType = upstream?.action_request?.action_category ?? state.actionType ?? null;
+  const normalizedResourceKind = upstream?.resource_binding?.resource_kind ?? null;
+  const runtimeTargetMatch =
+    !input.gateReasons.includes("TARGET_DOMAIN_CONTEXT_MISMATCH") &&
+    !input.gateReasons.includes("TARGET_TAB_CONTEXT_MISMATCH") &&
+    !input.gateReasons.includes("TARGET_PAGE_CONTEXT_UNRESOLVED") &&
+    !input.gateReasons.includes("TARGET_PAGE_CONTEXT_MISMATCH") &&
+    !input.gateReasons.includes("TARGET_URL_CONTEXT_MISMATCH");
+
+  let grantMatch = true;
+  if (upstream?.authorization_grant && upstream?.action_request && upstream?.resource_binding && upstream?.runtime_target) {
+    const allowedActions = upstream.authorization_grant.allowed_actions;
+    const allowedResourceKinds = upstream.authorization_grant.binding_scope.allowed_resource_kinds;
+    const allowedProfileRefs = upstream.authorization_grant.binding_scope.allowed_profile_refs;
+    const allowedDomains = upstream.authorization_grant.target_scope.allowed_domains;
+    const allowedPages = upstream.authorization_grant.target_scope.allowed_pages;
+
+    if (!allowedActions.includes(upstream.action_request.action_name)) {
+      grantMatch = false;
+    }
+    if (!allowedResourceKinds.includes(upstream.resource_binding.resource_kind)) {
+      grantMatch = false;
+    }
+    if (
+      upstream.resource_binding.resource_kind === "profile_session" &&
+      upstream.resource_binding.profile_ref &&
+      !allowedProfileRefs.includes(upstream.resource_binding.profile_ref)
+    ) {
+      grantMatch = false;
+    }
+    if (!allowedDomains.includes(upstream.runtime_target.domain)) {
+      grantMatch = false;
+    }
+    if (!allowedPages.includes(upstream.runtime_target.page)) {
+      grantMatch = false;
+    }
+  }
+
+  const anonymousIsolationVerified = input.anonymousIsolationVerified === true;
+  const targetSiteLoggedIn = input.targetSiteLoggedIn === true;
+  const anonymousBindingConstraintsOk = !input.gateReasons.includes(
+    "ANONYMOUS_BINDING_CONSTRAINTS_INVALID"
+  );
+  const anonymousIsolationOk =
+    normalizedResourceKind !== "anonymous_context"
+      ? true
+      : !targetSiteLoggedIn && anonymousIsolationVerified && anonymousBindingConstraintsOk;
+
+  const admissionDecision =
+    !runtimeTargetMatch || !grantMatch || !anonymousIsolationOk || input.outcome.gateDecision === "blocked"
+      ? "blocked"
+      : input.outcome.gateDecision === "allowed"
+        ? "allowed"
+        : "deferred";
+
+  return {
+    request_ref: requestRef,
+    admission_decision: admissionDecision,
+    normalized_action_type: normalizedActionType,
+    normalized_resource_kind: normalizedResourceKind,
+    runtime_target_match: runtimeTargetMatch,
+    grant_match: grantMatch,
+    anonymous_isolation_ok: anonymousIsolationOk,
+    effective_runtime_mode: input.outcome.effectiveExecutionMode,
+    reason_codes: [...input.gateReasons],
+    derived_from: {
+      gate_input_ref: asString(input.runId) ?? input.decisionId,
+      action_request_ref: upstream?.action_request?.request_ref ?? null,
+      resource_binding_ref: upstream?.resource_binding?.binding_ref ?? null,
+      authorization_grant_ref: upstream?.authorization_grant?.grant_ref ?? null,
+      runtime_target_ref: upstream?.runtime_target?.target_ref ?? null,
+      approval_admission_ref: input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null,
+      audit_admission_ref: input.admissionContext?.audit_admission_evidence?.audit_admission_ref ?? null
+    }
+  };
+};
 
 const resolveXhsGateDecisionId = (input) => {
   const explicitDecisionId = asString(input?.decisionId);
@@ -464,13 +870,18 @@ const resolveXhsFallbackMode = (requestedExecutionMode, riskState) => {
 };
 
 const evaluateXhsGateCore = (input) => {
+  const {
+    requestedExecutionMode,
+    upstream,
+    legacyRequestedExecutionMode
+  } = deriveCanonicalRequestedExecutionMode(input);
   const issueScope = resolveXhsIssueScope(input.issueScope);
-  const riskState = resolveXhsRiskState(input.riskState);
-  const actionType = resolveXhsActionType(input.actionType);
-  const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
-  const targetDomain = asString(input.targetDomain);
-  const targetTabId = asInteger(input.targetTabId);
-  const targetPage = asString(input.targetPage);
+  const riskState = deriveCanonicalRiskState(input.riskState, upstream);
+  const actionType =
+    upstream.action_request?.action_category ?? resolveXhsActionType(input.actionType);
+  const targetDomain = upstream.runtime_target?.domain ?? asString(input.targetDomain);
+  const targetTabId = upstream.runtime_target?.tab_id ?? asInteger(input.targetTabId);
+  const targetPage = upstream.runtime_target?.page ?? asString(input.targetPage);
   const actualTargetDomain = asString(input.actualTargetDomain);
   const actualTargetTabId = asInteger(input.actualTargetTabId);
   const actualTargetPage = asString(input.actualTargetPage);
@@ -636,6 +1047,8 @@ const evaluateXhsGateCore = (input) => {
     targetPage,
     actionType,
     requestedExecutionMode,
+    legacyRequestedExecutionMode,
+    upstreamAuthorizationRequest: upstream,
     issueScope,
     riskState,
     approvalRecord,
@@ -748,10 +1161,15 @@ const finalizeXhsGateOutcome = (input) => {
 };
 
 const buildXhsGatePolicyState = (input) => {
+  const {
+    requestedExecutionMode,
+    upstream,
+    legacyRequestedExecutionMode
+  } = deriveCanonicalRequestedExecutionMode(input);
   const issueScope = resolveXhsIssueScope(input.issueScope);
-  const riskState = resolveXhsRiskState(input.riskState);
-  const actionType = resolveXhsActionType(input.actionType);
-  const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
+  const riskState = deriveCanonicalRiskState(input.riskState, upstream);
+  const actionType =
+    upstream.action_request?.action_category ?? resolveXhsActionType(input.actionType);
   const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
   const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
     issueScope,
@@ -786,6 +1204,8 @@ const buildXhsGatePolicyState = (input) => {
     riskState,
     actionType,
     requestedExecutionMode,
+    legacyRequestedExecutionMode,
+    upstreamAuthorizationRequest: upstream,
     issueActionMatrix,
     writeActionMatrixDecisions,
     writeMatrixDecision,
@@ -1079,12 +1499,15 @@ const evaluateXhsGate = (input) => {
   const expectedApprovalId = deriveApprovalId(input, decisionId);
   collectXhsCommandGateReasons({
     gateReasons,
-    actionType: input.actionType,
-    requestedExecutionMode: input.requestedExecutionMode,
+    actionType: state.actionType,
+    requestedExecutionMode: state.requestedExecutionMode,
     abilityAction: input.abilityAction ?? input.abilityActionType,
-    targetDomain: input.targetDomain,
-    targetTabId: input.targetTabId,
-    targetPage: input.targetPage,
+    targetDomain:
+      state.upstreamAuthorizationRequest?.runtime_target?.domain ?? input.targetDomain,
+    targetTabId:
+      state.upstreamAuthorizationRequest?.runtime_target?.tab_id ?? input.targetTabId,
+    targetPage:
+      state.upstreamAuthorizationRequest?.runtime_target?.page ?? input.targetPage,
     actualTargetDomain: input.actualTargetDomain,
     actualTargetTabId: input.actualTargetTabId,
     actualTargetPage: input.actualTargetPage,
@@ -1106,11 +1529,25 @@ const evaluateXhsGate = (input) => {
     approvalRecord: input.approvalRecord,
     auditRecord: input.auditRecord,
     admissionContext: input.admissionContext,
-    targetDomain: input.targetDomain,
-    targetTabId: input.targetTabId,
-    targetPage: input.targetPage,
+    targetDomain:
+      state.upstreamAuthorizationRequest?.runtime_target?.domain ?? input.targetDomain,
+    targetTabId:
+      state.upstreamAuthorizationRequest?.runtime_target?.tab_id ?? input.targetTabId,
+    targetPage:
+      state.upstreamAuthorizationRequest?.runtime_target?.page ?? input.targetPage,
     issue208EditorInputValidation: input.issue208EditorInputValidation === true,
     includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
+  });
+  applyCanonicalAdmissionReasons({
+    gateReasons,
+    upstream: state.upstreamAuthorizationRequest,
+    requestedExecutionMode: state.requestedExecutionMode,
+    legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
+    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
+    actualTargetUrl: input.actualTargetUrl ?? input.__actual_target_url,
+    anonymousIsolationVerified:
+      input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
+    targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true
   });
   const approvalId = expectedApprovalId;
   approvalRecord.approval_id = approvalId;
@@ -1135,6 +1572,19 @@ const evaluateXhsGate = (input) => {
     pushReason(outcome.gateReasons, state.writeTierReason);
   }
   approvalRecord.approval_id = approvalActive ? approvalId : null;
+  const requestAdmissionResult = evaluateRequestAdmissionResult({
+    state,
+    upstream: state.upstreamAuthorizationRequest,
+    legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
+    anonymousIsolationVerified:
+      input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
+    targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true,
+    gateReasons: outcome.gateReasons,
+    outcome,
+    runId: input.runId,
+    decisionId,
+    admissionContext
+  });
   return {
     scope_context: { ...XHS_SCOPE_CONTEXT },
     read_execution_policy: {
@@ -1148,9 +1598,12 @@ const evaluateXhsGate = (input) => {
     write_action_matrix_decisions: state.writeActionMatrixDecisions,
     gate_input: {
       issue_scope: state.issueScope,
-      target_domain: asString(input.targetDomain),
-      target_tab_id: asInteger(input.targetTabId),
-      target_page: asString(input.targetPage),
+      target_domain:
+        state.upstreamAuthorizationRequest?.runtime_target?.domain ?? asString(input.targetDomain),
+      target_tab_id:
+        state.upstreamAuthorizationRequest?.runtime_target?.tab_id ?? asInteger(input.targetTabId),
+      target_page:
+        state.upstreamAuthorizationRequest?.runtime_target?.page ?? asString(input.targetPage),
       action_type: state.actionType,
       requested_execution_mode: state.requestedExecutionMode,
       risk_state: state.riskState,
@@ -1168,9 +1621,12 @@ const evaluateXhsGate = (input) => {
     },
     consumer_gate_result: {
       issue_scope: state.issueScope,
-      target_domain: asString(input.targetDomain),
-      target_tab_id: asInteger(input.targetTabId),
-      target_page: asString(input.targetPage),
+      target_domain:
+        state.upstreamAuthorizationRequest?.runtime_target?.domain ?? asString(input.targetDomain),
+      target_tab_id:
+        state.upstreamAuthorizationRequest?.runtime_target?.tab_id ?? asInteger(input.targetTabId),
+      target_page:
+        state.upstreamAuthorizationRequest?.runtime_target?.page ?? asString(input.targetPage),
       action_type: state.actionType,
       requested_execution_mode: state.requestedExecutionMode,
       effective_execution_mode: outcome.effectiveExecutionMode,
@@ -1178,6 +1634,7 @@ const evaluateXhsGate = (input) => {
       gate_reasons: outcome.gateReasons,
       write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null
     },
+    request_admission_result: requestAdmissionResult,
     approval_record: approvalRecord
   };
 };

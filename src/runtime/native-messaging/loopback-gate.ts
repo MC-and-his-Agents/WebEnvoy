@@ -73,6 +73,7 @@ export const buildLoopbackGate = (
   linkage?: {
     runId?: string;
     sessionId?: string;
+    profile?: string;
     gateInvocationId?: string;
     decisionId?: string;
     approvalId?: string;
@@ -87,6 +88,7 @@ export const buildLoopbackGate = (
   gateInput: Record<string, unknown>;
   gateOutcome: Record<string, unknown>;
   consumerGateResult: Record<string, unknown>;
+  requestAdmissionResult: Record<string, unknown>;
   approvalRecord: Record<string, unknown>;
 } => {
   const clone = <T>(value: T): T => structuredClone(value);
@@ -108,6 +110,11 @@ export const buildLoopbackGate = (
     actionType: options.action_type,
     abilityAction,
     requestedExecutionMode: options.requested_execution_mode,
+    legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
+    runtimeProfileRef: options.__runtime_profile_ref ?? linkage?.profile,
+    upstreamAuthorizationRequest: options.upstream_authorization_request,
+    anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
+    targetSiteLoggedIn: options.target_site_logged_in === true,
     approvalRecord: options.approval_record ?? options.approval,
     auditRecord: options.audit_record,
     admissionContext: boundAdmissionContext,
@@ -130,6 +137,8 @@ export const buildLoopbackGate = (
     gateInput: clone(evaluatedGate.gate_input),
     gateOutcome: clone(evaluatedGate.gate_outcome),
     consumerGateResult: clone(evaluatedGate.consumer_gate_result),
+    requestAdmissionResult:
+      clone(evaluatedGate.request_admission_result) as unknown as Record<string, unknown>,
     approvalRecord: clone(evaluatedGate.approval_record) as unknown as Record<string, unknown>,
     writeInteractionTier: clone(WRITE_INTERACTION_TIER),
     writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions
