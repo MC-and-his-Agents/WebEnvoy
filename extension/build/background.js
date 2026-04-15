@@ -241,6 +241,15 @@ const hasSuccessfulExecutionAttestation = (payload) => {
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
+const asOptionalBoolean = (value) => {
+    if (value === true) {
+        return true;
+    }
+    if (value === false) {
+        return false;
+    }
+    return null;
+};
 const cloneAdmissionContext = (admissionContext) => {
     const normalizedAdmissionContext = asRecord(admissionContext);
     if (!normalizedAdmissionContext) {
@@ -546,12 +555,17 @@ const resolveXhsGateCommandInput = (input) => {
         upstreamAuthorizationRequest: asRecord(readGateParam("upstream_authorization_request")),
         legacyRequestedExecutionMode: resolveXhsExecutionMode(readGateParam("__legacy_requested_execution_mode")),
         runtimeProfileRef: asNonEmptyString(readGateParam("__runtime_profile_ref")),
-        anonymousIsolationVerified: readGateParam("__anonymous_isolation_verified") === true,
-        targetSiteLoggedIn: readGateParam("target_site_logged_in") === true,
+        anonymousIsolationVerified: asOptionalBoolean(readGateParam("__anonymous_isolation_verified")),
+        targetSiteLoggedIn: asOptionalBoolean(readGateParam("target_site_logged_in")),
         limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
         validationAction: asNonEmptyString(readGateParam("validation_action")),
         requestedFingerprintContext: resolveFingerprintContext(commandParams)
     };
+};
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input) => {
+    const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+    return (resourceBinding?.resource_kind === "anonymous_context" &&
+        (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null));
 };
 const resolveBridgeRequestGateDecisionId = (request) => {
     const runId = String(request.params.run_id ?? request.id);
@@ -574,7 +588,7 @@ const resolveBridgeRequestGateDecisionId = (request) => {
 };
 const buildCanonicalGateAuditArtifacts = (input) => {
     const commandParams = asRecord(input.request.params.command_params);
-    return evaluateXhsGate({
+    const canonicalGate = evaluateXhsGate({
         issueScope: input.issueScope,
         riskState: input.riskState,
         targetDomain: input.targetDomain,
@@ -591,8 +605,10 @@ const buildCanonicalGateAuditArtifacts = (input) => {
         legacyRequestedExecutionMode: input.legacyRequestedExecutionMode,
         runtimeProfileRef: input.runtimeProfileRef,
         upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
-        anonymousIsolationVerified: input.anonymousIsolationVerified,
-        targetSiteLoggedIn: input.targetSiteLoggedIn,
+        ...(input.anonymousIsolationVerified !== null
+            ? { anonymousIsolationVerified: input.anonymousIsolationVerified }
+            : {}),
+        ...(input.targetSiteLoggedIn !== null ? { targetSiteLoggedIn: input.targetSiteLoggedIn } : {}),
         runId: String(input.request.params.run_id ?? input.request.id),
         sessionId: String(input.request.params.session_id ?? "nm-session-001"),
         gateInvocationId: input.gateInvocationId,
@@ -615,6 +631,18 @@ const buildCanonicalGateAuditArtifacts = (input) => {
         treatMissingEditorValidationAsUnsupported: false,
         additionalGateReasons: input.additionalGateReasons
     });
+    if (shouldDeferAnonymousCanonicalGateDiagnostics({
+        upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
+        anonymousIsolationVerified: input.anonymousIsolationVerified,
+        targetSiteLoggedIn: input.targetSiteLoggedIn
+    })) {
+        return {
+            ...canonicalGate,
+            request_admission_result: null,
+            execution_audit: null
+        };
+    }
+    return canonicalGate;
 };
 const resolveGateOnlyPageState = (gateInput, scopeContext) => {
     const targetPage = asNonEmptyString(gateInput.target_page);

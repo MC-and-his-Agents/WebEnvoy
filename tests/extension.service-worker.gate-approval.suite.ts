@@ -254,6 +254,91 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("does not fabricate anonymous canonical gate diagnostics before content-script page state exists", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    chromeApi.tabs.sendMessage.mockRejectedValue(new Error("content script missing"));
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-anon-forward-failed-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-anon-forward-failed-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-anon-forward-failed-001",
+              action_name: "xhs.read_search_results",
+              action_category: "read"
+            },
+            resource_binding: {
+              binding_ref: "binding-anon-forward-failed-001",
+              resource_kind: "anonymous_context",
+              profile_ref: null,
+              binding_constraints: {
+                anonymous_required: true,
+                reuse_logged_in_context_forbidden: true
+              }
+            },
+            authorization_grant: {
+              grant_ref: "grant-anon-forward-failed-001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["anonymous_context"],
+                allowed_profile_refs: []
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              approval_refs: [],
+              audit_refs: [],
+              resource_state_snapshot: "paused"
+            },
+            runtime_target: {
+              target_ref: "target-anon-forward-failed-001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const forwardedError = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+        .find((entry) => entry.id === "run-xhs-anon-forward-failed-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(forwardedError).toMatchObject({
+      id: "run-xhs-anon-forward-failed-001",
+      status: "error",
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED"
+      }
+    });
+    const payload = asRecord(forwardedError.payload) ?? {};
+    expect(payload.request_admission_result ?? null).toBeNull();
+    expect(payload.execution_audit ?? null).toBeNull();
+  });
+
   it("pins xhs.search to xiaohongshu tab instead of generic active tab", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

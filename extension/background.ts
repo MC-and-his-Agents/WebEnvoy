@@ -543,6 +543,16 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const asOptionalBoolean = (value: unknown): boolean | null => {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  return null;
+};
+
 const cloneAdmissionContext = (
   admissionContext: Record<string, unknown> | null
 ): Record<string, unknown> | null => {
@@ -909,8 +919,8 @@ type ResolvedXhsGateCommandInput = {
   upstreamAuthorizationRequest: Record<string, unknown> | null;
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   runtimeProfileRef: string | null;
-  anonymousIsolationVerified: boolean;
-  targetSiteLoggedIn: boolean;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
   limitedReadRolloutReadyTrue: boolean;
   validationAction: string | null;
   requestedFingerprintContext: FingerprintRuntimeContext | null;
@@ -950,12 +960,24 @@ const resolveXhsGateCommandInput = (
       readGateParam("__legacy_requested_execution_mode")
     ),
     runtimeProfileRef: asNonEmptyString(readGateParam("__runtime_profile_ref")),
-    anonymousIsolationVerified: readGateParam("__anonymous_isolation_verified") === true,
-    targetSiteLoggedIn: readGateParam("target_site_logged_in") === true,
+    anonymousIsolationVerified: asOptionalBoolean(readGateParam("__anonymous_isolation_verified")),
+    targetSiteLoggedIn: asOptionalBoolean(readGateParam("target_site_logged_in")),
     limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
   };
+};
+
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input: {
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
+}): boolean => {
+  const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+  return (
+    resourceBinding?.resource_kind === "anonymous_context" &&
+    (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null)
+  );
 };
 
 const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
@@ -995,8 +1017,8 @@ const buildCanonicalGateAuditArtifacts = (input: {
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   runtimeProfileRef: string | null;
   upstreamAuthorizationRequest: Record<string, unknown> | null;
-  anonymousIsolationVerified: boolean;
-  targetSiteLoggedIn: boolean;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
   approvalRecord: XhsApprovalRecord;
   auditRecord: Record<string, unknown> | null;
   admissionContext: Record<string, unknown> | null;
@@ -1006,8 +1028,7 @@ const buildCanonicalGateAuditArtifacts = (input: {
   additionalGateReasons: string[];
 }) => {
   const commandParams = asRecord(input.request.params.command_params);
-
-  return evaluateXhsGate({
+  const canonicalGate = evaluateXhsGate({
     issueScope: input.issueScope,
     riskState: input.riskState,
     targetDomain: input.targetDomain,
@@ -1024,8 +1045,10 @@ const buildCanonicalGateAuditArtifacts = (input: {
     legacyRequestedExecutionMode: input.legacyRequestedExecutionMode,
     runtimeProfileRef: input.runtimeProfileRef,
     upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
-    anonymousIsolationVerified: input.anonymousIsolationVerified,
-    targetSiteLoggedIn: input.targetSiteLoggedIn,
+    ...(input.anonymousIsolationVerified !== null
+      ? { anonymousIsolationVerified: input.anonymousIsolationVerified }
+      : {}),
+    ...(input.targetSiteLoggedIn !== null ? { targetSiteLoggedIn: input.targetSiteLoggedIn } : {}),
     runId: String(input.request.params.run_id ?? input.request.id),
     sessionId: String(input.request.params.session_id ?? "nm-session-001"),
     gateInvocationId: input.gateInvocationId,
@@ -1050,6 +1073,22 @@ const buildCanonicalGateAuditArtifacts = (input: {
     treatMissingEditorValidationAsUnsupported: false,
     additionalGateReasons: input.additionalGateReasons
   });
+
+  if (
+    shouldDeferAnonymousCanonicalGateDiagnostics({
+      upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
+      anonymousIsolationVerified: input.anonymousIsolationVerified,
+      targetSiteLoggedIn: input.targetSiteLoggedIn
+    })
+  ) {
+    return {
+      ...canonicalGate,
+      request_admission_result: null,
+      execution_audit: null
+    };
+  }
+
+  return canonicalGate;
 };
 
 const resolveGateOnlyPageState = (
