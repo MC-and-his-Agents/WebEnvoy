@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 import { prepareIssue209LiveReadSource } from "../../shared/issue209-live-read/source.js";
+import { APPROVAL_CHECK_KEYS } from "../../shared/issue209-live-read/source.js";
 import {
   validateIssue209ApprovalSourceAgainstCurrentLinkage,
   validateIssue209AuditSourceAgainstCurrentLinkage
@@ -32,6 +33,7 @@ export interface AbilityEnvelope {
 
 export type GateActionType = "read" | "write" | "irreversible_write";
 type LegacyGateActionType = "read" | "write";
+type LegacyRiskState = "paused" | "limited" | "allowed";
 export type UpstreamResourceKind = "anonymous_context" | "profile_session";
 export type ResourceStateSnapshot = "active" | "cool_down" | "paused";
 
@@ -117,6 +119,7 @@ const XHS_LIVE_READ_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_limited",
   "live_read_high_risk"
 ]);
+const LEGACY_RISK_STATES = new Set<LegacyRiskState>(["paused", "limited", "allowed"]);
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const UPSTREAM_RESOURCE_KINDS = new Set<UpstreamResourceKind>([
   "anonymous_context",
@@ -190,6 +193,60 @@ const resolveIssue209ScopeFromAdmissionSource = (options: JsonObject): "issue_20
   }
 
   return null;
+};
+
+const projectRiskStateForContract = (
+  resourceStateSnapshot?: ResourceStateSnapshot
+): LegacyRiskState | null => {
+  if (resourceStateSnapshot === "active") {
+    return "allowed";
+  }
+  if (resourceStateSnapshot === "cool_down") {
+    return "limited";
+  }
+  if (resourceStateSnapshot === "paused") {
+    return "paused";
+  }
+  return null;
+};
+
+const inferRequestedExecutionModeForContract = (input: {
+  normalizedActionType: GateActionType | null;
+  explicitRequestedExecutionMode: XhsExecutionMode | null;
+  targetDomain: string;
+  upstreamAuthorization: UpstreamAuthorizationRequest | null;
+}): XhsExecutionMode | null => {
+  if (!input.upstreamAuthorization) {
+    return input.explicitRequestedExecutionMode;
+  }
+
+  if (input.explicitRequestedExecutionMode) {
+    return input.explicitRequestedExecutionMode;
+  }
+
+  if (input.normalizedActionType === "write" || input.normalizedActionType === "irreversible_write") {
+    return "live_write";
+  }
+
+  if (input.normalizedActionType !== "read") {
+    return null;
+  }
+
+  const approvalRefs = input.upstreamAuthorization.authorization_grant.approval_refs ?? [];
+  const auditRefs = input.upstreamAuthorization.authorization_grant.audit_refs ?? [];
+  const hasLiveReadGrantRefs = approvalRefs.length > 0 && auditRefs.length > 0;
+  if (!hasLiveReadGrantRefs || input.targetDomain !== XHS_READ_DOMAIN) {
+    return "dry_run";
+  }
+
+  const projectedRiskState = projectRiskStateForContract(
+    input.upstreamAuthorization.authorization_grant.resource_state_snapshot
+  );
+  if (projectedRiskState === "allowed") {
+    return "live_read_high_risk";
+  }
+
+  return "live_read_limited";
 };
 
 const resolveInferredIssueScopeForContract = (
@@ -870,7 +927,26 @@ export const normalizeGateOptionsForContract = (
     XHS_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode)
       ? (options.requested_execution_mode as XhsExecutionMode)
       : null;
-  if (!requestedExecutionMode) {
+  const requestedExecutionModeFromContract = inferRequestedExecutionModeForContract({
+    normalizedActionType,
+    explicitRequestedExecutionMode: requestedExecutionMode,
+    targetDomain,
+    upstreamAuthorization
+  });
+  const projectedRiskState =
+    upstreamAuthorization && requestedExecutionModeFromContract !== null
+      ? projectRiskStateForContract(upstreamAuthorization.authorization_grant.resource_state_snapshot) ??
+        (requestedExecutionModeFromContract === "live_read_high_risk"
+          ? "allowed"
+          : requestedExecutionModeFromContract === "live_read_limited"
+            ? "limited"
+            : null)
+      : null;
+  const normalizedRiskState =
+    typeof options.risk_state === "string" && LEGACY_RISK_STATES.has(options.risk_state as LegacyRiskState)
+      ? (options.risk_state as LegacyRiskState)
+      : projectedRiskState;
+  if (!requestedExecutionModeFromContract) {
     throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
   }
   const inferredIssueScope = resolveInferredIssueScopeForContract({
@@ -880,7 +956,7 @@ export const normalizeGateOptionsForContract = (
     target_domain: targetDomain,
     target_tab_id: targetTabId,
     target_page: targetPage,
-    requested_execution_mode: requestedExecutionMode
+    requested_execution_mode: requestedExecutionModeFromContract
   });
 
   const legacyActionType = hasOwn(options, "action_type") ? asString(options.action_type) : null;
@@ -898,6 +974,9 @@ export const normalizeGateOptionsForContract = (
   const legacyTargetPage = hasOwn(options, "target_page") ? asString(options.target_page) : null;
   if (upstreamAuthorization && hasOwn(options, "target_page") && !legacyTargetPage) {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+  if (upstreamAuthorization && hasOwn(options, "requested_execution_mode") && !requestedExecutionMode) {
+    throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
   }
   const legacyValidationAction = hasOwn(options, "validation_action")
     ? asString(options.validation_action)
@@ -953,22 +1032,22 @@ export const normalizeGateOptionsForContract = (
     if (input?.abilityAction && input.abilityAction !== expectedAbilityAction) {
       throw invalidAbilityInput("ACTION_NAME_COMMAND_MISMATCH", abilityId);
     }
-    if (normalizedActionType === "read" && requestedExecutionMode === "live_write") {
+    if (normalizedActionType === "read" && requestedExecutionModeFromContract === "live_write") {
       throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
     }
     if (
       normalizedActionType !== "read" &&
-      requestedExecutionMode !== "live_write"
+      requestedExecutionModeFromContract !== "live_write"
     ) {
       throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
     }
     if (
       inferredIssueScope === "issue_209" &&
-      !XHS_LIVE_READ_EXECUTION_MODES.has(requestedExecutionMode)
+      !XHS_LIVE_READ_EXECUTION_MODES.has(requestedExecutionModeFromContract)
     ) {
       throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
     }
-    if (inferredIssueScope === "issue_208" && requestedExecutionMode !== "live_write") {
+    if (inferredIssueScope === "issue_208" && requestedExecutionModeFromContract !== "live_write") {
       throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_CONFLICT", abilityId);
     }
 
@@ -1049,7 +1128,7 @@ export const normalizeGateOptionsForContract = (
     targetDomain,
     targetTabId,
     targetPage,
-    requestedExecutionMode,
+    requestedExecutionMode: requestedExecutionModeFromContract,
     options: {
       ...options,
       ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
@@ -1057,7 +1136,8 @@ export const normalizeGateOptionsForContract = (
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
-      requested_execution_mode: requestedExecutionMode,
+      requested_execution_mode: requestedExecutionModeFromContract,
+      ...(normalizedRiskState ? { risk_state: normalizedRiskState } : {}),
       ...(upstreamAuthorization
         ? {
             upstream_authorization_request: cloneJsonObject(
@@ -1104,6 +1184,94 @@ const cloneAdmissionDraftForContract = (value: unknown): JsonObject | null => {
   };
 };
 
+const asUpstreamAuthorizationRequestForContract = (
+  value: unknown
+): UpstreamAuthorizationRequest | null => {
+  const record = asObject(value);
+  if (!record) {
+    return null;
+  }
+  const actionRequest = asObject(record.action_request);
+  const resourceBinding = asObject(record.resource_binding);
+  const authorizationGrant = asObject(record.authorization_grant);
+  const runtimeTarget = asObject(record.runtime_target);
+  if (!actionRequest || !resourceBinding || !authorizationGrant || !runtimeTarget) {
+    return null;
+  }
+  return record as UpstreamAuthorizationRequest;
+};
+
+const buildIssue209DerivedTimestampForContract = (
+  upstreamAuthorization: UpstreamAuthorizationRequest
+): string => {
+  return (
+    asString(upstreamAuthorization.authorization_grant.granted_at) ??
+    asString(upstreamAuthorization.action_request.requested_at) ??
+    "1970-01-01T00:00:00.000Z"
+  );
+};
+
+const buildIssue209AllTrueChecksForContract = (): Record<string, boolean> =>
+  Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]));
+
+const synthesizeIssue209AdmissionDraftFromUpstreamAuthorizationForContract = (input: {
+  current: ReturnType<typeof prepareIssue209LiveReadSource>["current"];
+  upstreamAuthorization: UpstreamAuthorizationRequest | null;
+}): JsonObject | null => {
+  const upstreamAuthorization = input.upstreamAuthorization;
+  if (!upstreamAuthorization) {
+    return null;
+  }
+
+  const approvalRef = upstreamAuthorization.authorization_grant.approval_refs?.[0] ?? null;
+  const auditRef = upstreamAuthorization.authorization_grant.audit_refs?.[0] ?? null;
+  if (!approvalRef || !auditRef) {
+    return null;
+  }
+
+  const recordedAt = buildIssue209DerivedTimestampForContract(upstreamAuthorization);
+  const approver = `upstream_grant:${upstreamAuthorization.authorization_grant.grant_ref}`;
+  const checks = buildIssue209AllTrueChecksForContract();
+
+  return {
+    kind: "draft",
+    admission_context: {
+      approval_admission_evidence: {
+        approval_admission_ref: approvalRef,
+        ...(input.current.commandRequestId ? { request_id: input.current.commandRequestId } : {}),
+        run_id: input.current.runId,
+        session_id: null,
+        issue_scope: input.current.issueScope,
+        target_domain: input.current.targetDomain,
+        target_tab_id: input.current.targetTabId,
+        target_page: input.current.targetPage,
+        action_type: input.current.actionType,
+        requested_execution_mode: input.current.requestedExecutionMode,
+        approved: true,
+        approver,
+        approved_at: recordedAt,
+        checks,
+        recorded_at: recordedAt
+      },
+      audit_admission_evidence: {
+        audit_admission_ref: auditRef,
+        ...(input.current.commandRequestId ? { request_id: input.current.commandRequestId } : {}),
+        run_id: input.current.runId,
+        session_id: null,
+        issue_scope: input.current.issueScope,
+        target_domain: input.current.targetDomain,
+        target_tab_id: input.current.targetTabId,
+        target_page: input.current.targetPage,
+        action_type: input.current.actionType,
+        requested_execution_mode: input.current.requestedExecutionMode,
+        ...(input.current.riskState ? { risk_state: input.current.riskState } : {}),
+        audited_checks: checks,
+        recorded_at: recordedAt
+      }
+    }
+  };
+};
+
 const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
@@ -1139,6 +1307,9 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     approvalRecord: input.options.approval_record ?? input.options.approval,
     auditRecord: input.options.audit_record
   });
+  const upstreamAuthorization = asUpstreamAuthorizationRequestForContract(
+    input.options.upstream_authorization_request
+  );
 
   const current = source.current;
   const hasAllTrueChecks = (checks: Record<string, boolean>): boolean =>
@@ -1322,6 +1493,14 @@ const resolveIssue209AdmissionDraftForContract = (input: {
         }
       }
     };
+  }
+
+  const derivedUpstreamDraft = synthesizeIssue209AdmissionDraftFromUpstreamAuthorizationForContract({
+    current,
+    upstreamAuthorization
+  });
+  if (derivedUpstreamDraft) {
+    return derivedUpstreamDraft;
   }
 
   return { kind: "missing" };

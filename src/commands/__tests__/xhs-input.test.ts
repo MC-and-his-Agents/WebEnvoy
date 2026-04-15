@@ -7,6 +7,7 @@ import {
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
+  prepareIssue209LiveReadEnvelopeForContract,
   prepareIssue209LiveReadContract,
   resolveIssue209CommandRequestIdForContract,
   resolveIssue209GateInvocationIdForContract
@@ -711,9 +712,7 @@ describe("xhs-input", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
       input: {},
-      options: {
-        requested_execution_mode: "live_write"
-      },
+      options: {},
       ...buildUpstreamAuthorizationRequest({
         action_request: {
           request_ref: "upstream_req_002",
@@ -759,6 +758,7 @@ describe("xhs-input", () => {
       target_domain: "creator.xiaohongshu.com",
       target_tab_id: 11,
       target_page: "creator_publish_tab",
+      requested_execution_mode: "live_write",
       issue_scope: "issue_208"
     });
 
@@ -770,6 +770,34 @@ describe("xhs-input", () => {
         envelope.ability.action
       )
     ).toEqual({});
+  });
+
+  it("accepts FR-0023 live-read requests without legacy requested_execution_mode and derives issue_209 gate fields", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {},
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      }).options
+    ).toMatchObject({
+      action_type: "read",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 924,
+      target_page: "search_result_tab",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed",
+      issue_scope: "issue_209"
+    });
   });
 
   it("projects irreversible_write into legacy write gate fields while keeping the canonical action category", () => {
@@ -1097,6 +1125,46 @@ describe("xhs-input", () => {
         })
       })
     );
+  });
+
+  it("synthesizes issue_209 live admission draft from upstream authorization grant refs", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {},
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+      command: "xhs.search",
+      abilityAction: envelope.ability.action,
+      runtimeProfile: "xhs_account_001",
+      upstreamAuthorization: envelope.upstreamAuthorization
+    });
+    const prepared = prepareIssue209LiveReadEnvelopeForContract({
+      options: gate.options,
+      runId: "run-cli-issue209-live-upstream"
+    });
+
+    expect(prepared.admissionDraft).toMatchObject({
+      kind: "draft",
+      admission_context: {
+        approval_admission_evidence: {
+          approval_admission_ref: "approval_admission_001",
+          issue_scope: "issue_209",
+          requested_execution_mode: "live_read_high_risk",
+          approved: true
+        },
+        audit_admission_evidence: {
+          audit_admission_ref: "audit_admission_001",
+          issue_scope: "issue_209",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        }
+      }
+    });
   });
 
   it("does not synthesize issue_209 live admission_context from an incomplete approval-only source", () => {
