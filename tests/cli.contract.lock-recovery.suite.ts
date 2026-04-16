@@ -1292,6 +1292,73 @@ describe("webenvoy cli contract / runtime profile lifecycle and recovery", () =>
     });
   });
 
+  it("allows runtime.stop when a stale controller pid has been reused by another process", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "recover_stop_stale_controller_profile", "--run-id", "run-contract-506b"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, BROWSER_STATE_FILENAME);
+    const unrelatedController = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore"
+    });
+
+    try {
+      const lockRaw = await readFile(lockPath, "utf8");
+      const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+      lock.controllerPid = unrelatedController.pid;
+      lock.controllerPidState = "stale";
+      lock.lastHeartbeatAt = new Date().toISOString();
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+      const browserStateRaw = await readFile(browserStatePath, "utf8");
+      const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+      browserState.controllerPid = unrelatedController.pid;
+      await writeFile(browserStatePath, `${JSON.stringify(browserState, null, 2)}\n`, "utf8");
+
+      const stop = runCli(
+        [
+          "runtime.stop",
+          "--profile",
+          "recover_stop_stale_controller_profile",
+          "--run-id",
+          "run-contract-506b"
+        ],
+        runtimeCwd
+      );
+      expect(stop.status).toBe(0);
+      const stopBody = parseSingleJsonLine(stop.stdout);
+      expect(stopBody).toMatchObject({
+        command: "runtime.stop",
+        status: "success",
+        summary: {
+          profile: "recover_stop_stale_controller_profile",
+          profileState: "stopped",
+          lockHeld: false,
+          orphanRecovered: false
+        }
+      });
+
+      expect(isPidAlive(unrelatedController.pid)).toBe(true);
+      await assertLockMissing(profileDir);
+      await expect(readFile(path.join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(readFile(path.join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+    } finally {
+      if (isPidAlive(unrelatedController.pid)) {
+        unrelatedController.kill("SIGTERM");
+      }
+    }
+  });
+
   it("allows explicit runtime.stop orphan recovery from a new run_id after controller ownership is lost", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const runtimeEnv = { WEBENVOY_BROWSER_MOCK_TTL: "10" };

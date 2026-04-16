@@ -1174,11 +1174,21 @@ export class ProfileRuntimeService {
           : browserState?.controllerPid ?? null;
       const controllerAlive =
         typeof shutdownControllerPid === "number" && this.#isProcessAlive(shutdownControllerPid);
-      if (
-        !controllerAlive &&
+      const browserPidAlive =
         browserState &&
         browserState.runId === stopOwnerRunId &&
-        this.#isProcessAlive(browserState.browserPid)
+        this.#isProcessAlive(browserState.browserPid);
+      if (
+        stalePinnedController &&
+        browserState &&
+        browserPidAlive
+      ) {
+        await this.#terminateProcess(browserState.browserPid);
+        await this.#deleteBrowserStateFiles(profileDir);
+      } else if (
+        !controllerAlive &&
+        browserState &&
+        browserPidAlive
       ) {
         await this.#terminateProcess(browserState.browserPid);
         await this.#deleteBrowserStateFiles(profileDir);
