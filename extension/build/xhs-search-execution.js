@@ -302,6 +302,9 @@ export const executeXhsSearch = async (input, env) => {
             method: "POST",
             headers,
             body: JSON.stringify(payload),
+            pageContextRequest: true,
+            referrer: env.getLocationHref(),
+            referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
                 : 30_000

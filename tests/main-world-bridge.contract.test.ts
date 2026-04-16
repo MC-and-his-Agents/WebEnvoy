@@ -47,6 +47,7 @@ describe("main-world bridge contract", () => {
     delete (globalThis as { window?: unknown }).window;
     delete (globalThis as { document?: unknown }).document;
     delete (globalThis as { CustomEvent?: unknown }).CustomEvent;
+    delete (globalThis as Record<string, unknown>).__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__;
   });
 
   it("does not expose a page-observable control listener when no staged event channel is present", async () => {
@@ -99,6 +100,32 @@ describe("main-world bridge contract", () => {
     } as unknown as Event);
 
     expect(added.map((entry) => entry.type)).toContain(secretChannel.requestEvent);
+  });
+
+  it("does not publish a page-visible install marker when reinjected into the same page", async () => {
+    const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+
+    (globalThis as { window?: unknown }).window = mockWindow;
+    (globalThis as { document?: unknown }).document = mockDocument;
+    (globalThis as { CustomEvent?: unknown }).CustomEvent = class MockCustomEvent<T> {
+      readonly type: string;
+      readonly detail: T;
+
+      constructor(type: string, init: { detail: T }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    };
+
+    await import("../extension/main-world-bridge.js");
+    expect(added.filter((entry) => entry.type === "__mw_bootstrap__")).toHaveLength(1);
+
+    vi.resetModules();
+    await import("../extension/main-world-bridge.js");
+
+    expect(
+      (globalThis as Record<string, unknown>).__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__
+    ).toBeUndefined();
   });
 
   it("routes fingerprint install and verify through the bootstrapped event channel", async () => {
@@ -176,4 +203,5 @@ describe("main-world bridge contract", () => {
       })
     });
   });
+
 });

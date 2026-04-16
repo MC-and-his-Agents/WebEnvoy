@@ -4,13 +4,41 @@ const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 export const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+type MainWorldRequestType =
+  | "fingerprint-install"
+  | "fingerprint-verify"
+  | "page-state-read";
+
+type MainWorldFetchResult = {
+  status: number;
+  body: unknown;
+};
+
+type XhsMainWorldRequestMessage = {
+  kind: "xhs-main-world-request";
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body?: string;
+  timeout_ms: number;
+  referrer?: string;
+  referrerPolicy?: string;
+};
+
+type XhsMainWorldRequestResponseMessage = {
+  ok: boolean;
+  result?: MainWorldFetchResult;
+  error?: { code?: string; message?: string; name?: string };
+};
 
 type MainWorldResultEnvelope = {
   id?: unknown;
   ok?: unknown;
   result?: unknown;
   message?: unknown;
+  error_name?: unknown;
+  error_code?: unknown;
 };
 
 type MainWorldEventChannel = {
@@ -69,6 +97,15 @@ const createMainWorldBootstrapDetail = (
   };
 };
 
+const emitMainWorldBootstrap = (secret: string): void => {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(
+    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(secret))
+  );
+};
+
 export const resolveMainWorldEventNamesForSecret = (
   secret: string
 ): { requestEvent: string; resultEvent: string } => {
@@ -103,7 +140,14 @@ const onMainWorldResultEvent = (event: Event): void => {
     return;
   }
   const message = typeof detail.message === "string" ? detail.message : "main world call failed";
-  pending.reject(new Error(message));
+  const error = new Error(message) as Error & { code?: string };
+  if (typeof detail.error_name === "string" && detail.error_name.length > 0) {
+    error.name = detail.error_name;
+  }
+  if (typeof detail.error_code === "string" && detail.error_code.length > 0) {
+    error.code = detail.error_code;
+  }
+  pending.reject(error);
 };
 
 const detachMainWorldResultListener = (): void => {
@@ -156,9 +200,7 @@ export const installMainWorldEventChannelSecret = (secret: string | null): boole
   };
   mainWorldResultListener = onMainWorldResultEvent;
   mainWorldResultListenerEventName = names.resultEvent;
-  window.dispatchEvent(
-    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret))
-  );
+  emitMainWorldBootstrap(normalizedSecret);
   return true;
 };
 
@@ -173,7 +215,7 @@ export const resetMainWorldEventChannelForContract = (): void => {
 };
 
 const mainWorldCall = async <T>(request: {
-  type: "fingerprint-install" | "fingerprint-verify" | "page-state-read";
+  type: MainWorldRequestType;
   payload: Record<string, unknown>;
 }): Promise<T> => {
   const requestId =
@@ -189,10 +231,12 @@ const mainWorldCall = async <T>(request: {
       reject(new Error("main world event channel unavailable"));
       return;
     }
+    emitMainWorldBootstrap(mainWorldEventChannel.secret);
+    const responseTimeoutMs = DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       pendingMainWorldRequests.delete(requestId);
       reject(new Error("main world event channel response timeout"));
-    }, MAIN_WORLD_CALL_TIMEOUT_MS);
+    }, responseTimeoutMs);
     pendingMainWorldRequests.set(requestId, {
       resolve: (value) => resolve(value as T),
       reject,
@@ -236,4 +280,82 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
   return typeof result === "object" && result !== null && !Array.isArray(result)
     ? (result as Record<string, unknown>)
     : null;
+};
+
+const resolveMainWorldRequestUrl = (value: string): string => {
+  const baseHref =
+    typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
+      ? globalThis.location.href
+      : "https://www.xiaohongshu.com/";
+  return new URL(value, baseHref).toString();
+};
+
+export const requestXhsSearchJsonViaMainWorld = async (input: {
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body?: string;
+  timeoutMs: number;
+  referrer?: string;
+  referrerPolicy?: string;
+}): Promise<MainWorldFetchResult> => {
+  const runtime = (globalThis as {
+    chrome?: {
+      runtime?: {
+        sendMessage?: (
+          message: XhsMainWorldRequestMessage,
+          callback?: (response?: XhsMainWorldRequestResponseMessage) => void
+        ) => Promise<XhsMainWorldRequestResponseMessage | undefined> | void;
+      };
+    };
+  }).chrome?.runtime;
+  const sendMessage = runtime?.sendMessage;
+  if (!sendMessage) {
+    throw new Error("extension runtime.sendMessage is unavailable");
+  }
+
+  const request: XhsMainWorldRequestMessage = {
+    kind: "xhs-main-world-request",
+    url: resolveMainWorldRequestUrl(input.url),
+    method: input.method,
+    headers: input.headers,
+    ...(typeof input.body === "string" ? { body: input.body } : {}),
+    timeout_ms: input.timeoutMs,
+    ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+    ...(typeof input.referrerPolicy === "string"
+      ? { referrerPolicy: input.referrerPolicy }
+      : {})
+  };
+  const response = await new Promise<XhsMainWorldRequestResponseMessage>((resolve, reject) => {
+    try {
+      const maybePromise = sendMessage(request, (message?: XhsMainWorldRequestResponseMessage) => {
+        resolve(message ?? { ok: false, error: { message: "xhs main-world response missing" } });
+      });
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === "function") {
+        void (maybePromise as Promise<XhsMainWorldRequestResponseMessage | undefined>)
+          .then((message) => {
+            if (message) {
+              resolve(message);
+            }
+          })
+          .catch((error) => {
+            reject(error);
+          });
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+  if (!response.ok || !response.result) {
+    const error = new Error(
+      typeof response.error?.message === "string"
+        ? response.error.message
+        : "xhs main-world request failed"
+    );
+    if (typeof response.error?.name === "string" && response.error.name.length > 0) {
+      error.name = response.error.name;
+    }
+    throw error;
+  }
+  return response.result;
 };

@@ -74,10 +74,13 @@ export interface XhsSearchEnvironment {
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;
-    method: "POST";
+    method: "POST" | "GET";
     headers: Record<string, string>;
-    body: string;
+    body?: string;
     timeoutMs: number;
+    pageContextRequest?: boolean;
+    referrer?: string;
+    referrerPolicy?: string;
   }): Promise<FetchResult>;
   performEditorInputValidation?(
     input: { text: string; focusAttestation?: EditorInputFocusAttestation | null }

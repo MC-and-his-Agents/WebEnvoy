@@ -4,7 +4,7 @@ import { createMockPort, createEditorInputProbeResult, createChromeApi, respondH
 describe("extension service worker / recovery and relay prerequisites", () => {
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
     ]);
@@ -45,8 +45,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -58,6 +57,12 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         })
       })
     );
+    const mainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(mainWorldBridgeInject).toBeUndefined();
 
     runtimeMessageListeners[0]?.(
       {
@@ -358,6 +363,12 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
     );
     expect(proactiveContentScriptInject).toBeUndefined();
+    const proactiveMainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(proactiveMainWorldBridgeInject).toBeUndefined();
     await vi.waitFor(() => {
       expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
         32,
@@ -470,6 +481,93 @@ describe("extension service worker / recovery and relay prerequisites", () => {
     });
   });
 
+  it("injects main-world bridge for issue_208 live_write xhs.search on recovered tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input) {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(1)",
+                  centerX: 200,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-recovery-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-recovery-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-recovery-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    const proactiveMainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(proactiveMainWorldBridgeInject).toBeUndefined();
+  });
+
   it("attests the active editor target when multiple editor candidates match", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
@@ -566,6 +664,77 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         })
       );
     });
+  });
+
+  it("does not reinject main-world bridge after worker-state loss when a request-derived probe proves the tab is ready", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
+      ) => {
+        if (input.world === "MAIN" && "func" in input && typeof input.func === "function") {
+          return [{ result: true }];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-bridge-dedupe-001",
+      profile: "profile-a",
+      fingerprintContext,
+      runtimeContextId: "ctx-xhs-live-bridge-dedupe-001",
+      tabId: 32,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
+
+    const emitForward = (id: string, runId: string) => {
+      firstPort.onMessageListeners[0]?.({
+        id,
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: runId,
+          command: "xhs.search",
+          command_params: createRequestBoundXhsCommandParams({
+            runId,
+            requestId: id,
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            approval_record: createApprovedReadApprovalRecord(),
+            audit_record: createApprovedReadAuditRecordForRequest({
+              runId,
+              requestId: id
+            })
+          }),
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 100
+      });
+    };
+
+    emitForward("run-xhs-live-bridge-dedupe-001", "run-xhs-live-bridge-dedupe-001");
+    await waitForBridgeTurn();
+    emitForward("run-xhs-live-bridge-dedupe-002", "run-xhs-live-bridge-dedupe-001");
+    await waitForBridgeTurn();
+
+    const mainWorldBridgeInjectCalls = executeScript.mock.calls.filter(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(mainWorldBridgeInjectCalls).toHaveLength(0);
   });
 
   it("annotates editor_input forward with debugger attach failure attestation", async () => {
@@ -805,8 +974,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -918,8 +1086,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

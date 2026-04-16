@@ -4,10 +4,10 @@ import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
-import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
+import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
-export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
+export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -114,6 +114,19 @@ const createBrowserEnvironment = () => ({
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
+        if (input.pageContextRequest === true) {
+            return await requestXhsSearchJsonViaMainWorld({
+                url: input.url,
+                method: input.method,
+                headers: input.headers,
+                ...(typeof input.body === "string" ? { body: input.body } : {}),
+                timeoutMs: input.timeoutMs,
+                ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+                ...(typeof input.referrerPolicy === "string"
+                    ? { referrerPolicy: input.referrerPolicy }
+                    : {})
+            });
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => {
             controller.abort();
@@ -124,6 +137,10 @@ const createBrowserEnvironment = () => ({
                 headers: input.headers,
                 body: input.body,
                 credentials: "include",
+                ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+                ...(typeof input.referrerPolicy === "string"
+                    ? { referrerPolicy: input.referrerPolicy }
+                    : {}),
                 signal: controller.signal
             });
             return {

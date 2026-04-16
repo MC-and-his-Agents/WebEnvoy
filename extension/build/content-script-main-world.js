@@ -2,7 +2,7 @@ const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 export const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 let mainWorldEventChannel = null;
 let mainWorldResultListener = null;
 let mainWorldResultListenerEventName = null;
@@ -34,6 +34,12 @@ const createMainWorldBootstrapDetail = (secret) => {
         result_event: names.resultEvent
     };
 };
+const emitMainWorldBootstrap = (secret) => {
+    if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+        return;
+    }
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(secret)));
+};
 export const resolveMainWorldEventNamesForSecret = (secret) => {
     const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
@@ -64,7 +70,14 @@ const onMainWorldResultEvent = (event) => {
         return;
     }
     const message = typeof detail.message === "string" ? detail.message : "main world call failed";
-    pending.reject(new Error(message));
+    const error = new Error(message);
+    if (typeof detail.error_name === "string" && detail.error_name.length > 0) {
+        error.name = detail.error_name;
+    }
+    if (typeof detail.error_code === "string" && detail.error_code.length > 0) {
+        error.code = detail.error_code;
+    }
+    pending.reject(error);
 };
 const detachMainWorldResultListener = () => {
     if (!mainWorldResultListener || !mainWorldResultListenerEventName) {
@@ -107,7 +120,7 @@ export const installMainWorldEventChannelSecret = (secret) => {
     };
     mainWorldResultListener = onMainWorldResultEvent;
     mainWorldResultListenerEventName = names.resultEvent;
-    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret)));
+    emitMainWorldBootstrap(normalizedSecret);
     return true;
 };
 export const resetMainWorldEventChannelForContract = () => {
@@ -130,10 +143,12 @@ const mainWorldCall = async (request) => {
             reject(new Error("main world event channel unavailable"));
             return;
         }
+        emitMainWorldBootstrap(mainWorldEventChannel.secret);
+        const responseTimeoutMs = DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
         const timeout = setTimeout(() => {
             pendingMainWorldRequests.delete(requestId);
             reject(new Error("main world event channel response timeout"));
-        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        }, responseTimeoutMs);
         pendingMainWorldRequests.set(requestId, {
             resolve: (value) => resolve(value),
             reject,
@@ -171,4 +186,60 @@ export const readPageStateViaMainWorld = async () => {
     return typeof result === "object" && result !== null && !Array.isArray(result)
         ? result
         : null;
+};
+const resolveMainWorldRequestUrl = (value) => {
+    const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
+        ? globalThis.location.href
+        : "https://www.xiaohongshu.com/";
+    return new URL(value, baseHref).toString();
+};
+export const requestXhsSearchJsonViaMainWorld = async (input) => {
+    const runtime = globalThis.chrome?.runtime;
+    const sendMessage = runtime?.sendMessage;
+    if (!sendMessage) {
+        throw new Error("extension runtime.sendMessage is unavailable");
+    }
+    const request = {
+        kind: "xhs-main-world-request",
+        url: resolveMainWorldRequestUrl(input.url),
+        method: input.method,
+        headers: input.headers,
+        ...(typeof input.body === "string" ? { body: input.body } : {}),
+        timeout_ms: input.timeoutMs,
+        ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+        ...(typeof input.referrerPolicy === "string"
+            ? { referrerPolicy: input.referrerPolicy }
+            : {})
+    };
+    const response = await new Promise((resolve, reject) => {
+        try {
+            const maybePromise = sendMessage(request, (message) => {
+                resolve(message ?? { ok: false, error: { message: "xhs main-world response missing" } });
+            });
+            if (maybePromise && typeof maybePromise.then === "function") {
+                void maybePromise
+                    .then((message) => {
+                    if (message) {
+                        resolve(message);
+                    }
+                })
+                    .catch((error) => {
+                    reject(error);
+                });
+            }
+        }
+        catch (error) {
+            reject(error);
+        }
+    });
+    if (!response.ok || !response.result) {
+        const error = new Error(typeof response.error?.message === "string"
+            ? response.error.message
+            : "xhs main-world request failed");
+        if (typeof response.error?.name === "string" && response.error.name.length > 0) {
+            error.name = response.error.name;
+        }
+        throw error;
+    }
+    return response.result;
 };
