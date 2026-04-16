@@ -37,6 +37,13 @@ type BundledXhsExportName =
   | "executeXhsDetail"
   | "executeXhsUserHome";
 
+type BundledContentScriptHandlerModule = {
+  ContentScriptHandler: new (options?: { xhsEnv?: Record<string, unknown> }) => {
+    onResult(listener: (message: unknown) => void): () => void;
+    onBackgroundMessage(message: Record<string, unknown>): boolean;
+  };
+};
+
 const loadBundleExports = (bundlePath: string, moduleVar: BundledXhsModuleVar) => {
   const bundleSource = fs.readFileSync(bundlePath, "utf8");
   const context: Record<string, unknown> = {};
@@ -52,6 +59,21 @@ const loadBundleExports = (bundlePath: string, moduleVar: BundledXhsModuleVar) =
       [exportName: string]: (input: Record<string, unknown>, env: Record<string, unknown>) => Promise<unknown>;
     };
   };
+};
+
+const loadBundledContentScriptHandlerModule = (
+  bundlePath: string
+): BundledContentScriptHandlerModule => {
+  const bundleSource = fs.readFileSync(bundlePath, "utf8");
+  const context: Record<string, unknown> = {};
+  context.globalThis = context;
+  context.structuredClone = structuredClone;
+  runInNewContext(
+    `${bundleSource}\n;globalThis.__bundle_handler_exports = __webenvoy_module_content_script_handler;`,
+    context,
+    { filename: bundlePath }
+  );
+  return context.__bundle_handler_exports as BundledContentScriptHandlerModule;
 };
 
 const executeBundledXhsCommand = async (
@@ -282,6 +304,90 @@ describe("extension build contract", () => {
         }
       }
     });
+  });
+
+  it("executes bundled content-script handler xhs.search dry_run without unresolved telemetry helpers", async () => {
+    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath);
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_710_000_000_000,
+        randomId: () => "bundle-handler-req-001",
+        getLocationHref: () =>
+          "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=session-cookie",
+        callSignature: async () => ({
+          "X-s": "signature",
+          "X-t": "timestamp"
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        })
+      }
+    });
+
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        off();
+        reject(new Error("did not receive bundled content-script handler result"));
+      }, 500);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-search-001",
+        runId: "run-bundled-handler-search-001",
+        tabId: 8,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-search-001"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-search-001",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 8,
+            target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "limited",
+            requested_execution_mode: "dry_run"
+          }
+        }
+      })
+    ).toBe(true);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({
+      kind: "result"
+    });
+    expect((result.error as { message?: string } | undefined)?.message).not.toBe(
+      "containsCookie is not defined"
+    );
   });
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
