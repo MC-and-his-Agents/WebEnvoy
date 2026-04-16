@@ -17,6 +17,8 @@ type MainWorldResult = {
   ok: boolean;
   result?: unknown;
   message?: string;
+  error_name?: string;
+  error_code?: string;
 };
 
 type MainWorldWindow = Window & typeof globalThis;
@@ -691,10 +693,20 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
       if (!activeMainWorldEventChannel) {
         return;
       }
+      const errorName =
+        typeof error === "object" && error !== null && "name" in error
+          ? String((error as { name?: unknown }).name)
+          : undefined;
+      const errorCode =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : undefined;
       await emitResult(activeMainWorldEventChannel.resultEvent, {
         id: request.id,
         ok: false,
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
+        ...(errorName ? { error_name: errorName } : {}),
+        ...(errorCode ? { error_code: errorCode } : {})
       });
     });
   };

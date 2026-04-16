@@ -358,7 +358,7 @@ describe("main-world bridge contract", () => {
     }
   });
 
-  it("replays bootstrap before xhs search request when main-world bridge loads late", async () => {
+  it("replays bootstrap before fingerprint install and xhs search request when main-world bridge loads late", async () => {
     const { mockWindow, mockDocument } = createMockMainWorldEnvironment();
     const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
     const fetchMock = vi.fn(async () =>
@@ -384,10 +384,24 @@ describe("main-world bridge contract", () => {
 
       const {
         installMainWorldEventChannelSecret,
+        installFingerprintRuntimeViaMainWorld,
         requestXhsSearchJsonViaMainWorld
       } = await import("../extension/content-script-main-world.js");
       installMainWorldEventChannelSecret("contract-secret-late-001");
       await import("../extension/main-world-bridge.js");
+
+      await expect(
+        installFingerprintRuntimeViaMainWorld({
+          source: "contract",
+          fingerprint_profile_bundle: {},
+          fingerprint_patch_manifest: {
+            required_patches: ["navigator_plugins"]
+          }
+        })
+      ).resolves.toMatchObject({
+        installed: true,
+        applied_patches: expect.arrayContaining(["navigator_plugins"])
+      });
 
       await expect(
         requestXhsSearchJsonViaMainWorld({
@@ -420,6 +434,57 @@ describe("main-world bridge contract", () => {
           credentials: "include"
         })
       );
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
+    }
+  });
+
+  it("preserves AbortError metadata when relaying main-world fetch failures", async () => {
+    const { mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const timeoutError = new Error("request aborted by timeout");
+    timeoutError.name = "AbortError";
+    const fetchMock = vi.fn(async () => {
+      throw timeoutError;
+    });
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock;
+
+    try {
+      (globalThis as { window?: unknown }).window = mockWindow;
+      (globalThis as { document?: unknown }).document = mockDocument;
+      (globalThis as { CustomEvent?: unknown }).CustomEvent = class MockCustomEvent<T> {
+        readonly type: string;
+        readonly detail: T;
+
+        constructor(type: string, init: { detail: T }) {
+          this.type = type;
+          this.detail = init.detail;
+        }
+      };
+
+      const {
+        installMainWorldEventChannelSecret,
+        requestXhsSearchJsonViaMainWorld
+      } = await import("../extension/content-script-main-world.js");
+      installMainWorldEventChannelSecret("contract-secret-timeout-001");
+      await import("../extension/main-world-bridge.js");
+
+      await expect(
+        requestXhsSearchJsonViaMainWorld({
+          url: "/api/sns/web/v1/search/notes",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1"
+          },
+          body: "{\"keyword\":\"露营\"}",
+          timeoutMs: 1_000
+        })
+      ).rejects.toMatchObject({
+        name: "AbortError",
+        message: "request aborted by timeout"
+      });
     } finally {
       (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
     }

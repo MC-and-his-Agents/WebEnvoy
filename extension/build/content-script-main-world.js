@@ -70,7 +70,14 @@ const onMainWorldResultEvent = (event) => {
         return;
     }
     const message = typeof detail.message === "string" ? detail.message : "main world call failed";
-    pending.reject(new Error(message));
+    const error = new Error(message);
+    if (typeof detail.error_name === "string" && detail.error_name.length > 0) {
+        error.name = detail.error_name;
+    }
+    if (typeof detail.error_code === "string" && detail.error_code.length > 0) {
+        error.code = detail.error_code;
+    }
+    pending.reject(error);
 };
 const detachMainWorldResultListener = () => {
     if (!mainWorldResultListener || !mainWorldResultListenerEventName) {
@@ -136,9 +143,7 @@ const mainWorldCall = async (request) => {
             reject(new Error("main world event channel unavailable"));
             return;
         }
-        if (request.type === "xhs-search-request") {
-            emitMainWorldBootstrap(mainWorldEventChannel.secret);
-        }
+        emitMainWorldBootstrap(mainWorldEventChannel.secret);
         const responseTimeoutMs = request.type === "xhs-search-request" &&
             typeof request.payload.timeoutMs === "number" &&
             Number.isFinite(request.payload.timeoutMs)

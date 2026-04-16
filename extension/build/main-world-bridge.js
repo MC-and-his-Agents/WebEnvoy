@@ -544,10 +544,18 @@ const attachMainWorldEventChannel = (channel) => {
             if (!activeMainWorldEventChannel) {
                 return;
             }
+            const errorName = typeof error === "object" && error !== null && "name" in error
+                ? String(error.name)
+                : undefined;
+            const errorCode = typeof error === "object" && error !== null && "code" in error
+                ? String(error.code)
+                : undefined;
             await emitResult(activeMainWorldEventChannel.resultEvent, {
                 id: request.id,
                 ok: false,
-                message: error instanceof Error ? error.message : String(error)
+                message: error instanceof Error ? error.message : String(error),
+                ...(errorName ? { error_name: errorName } : {}),
+                ...(errorCode ? { error_code: errorCode } : {})
             });
         });
     };
