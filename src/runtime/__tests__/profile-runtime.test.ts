@@ -2161,7 +2161,8 @@ describe("profile-runtime identity preflight", () => {
     const nextLock = JSON.parse(nextLockRaw) as ProfileLock;
     expect(nextLock.ownerRunId).toBe("run-runtime-attach-recoverable-next-001");
     expect(nextLock.ownerPid).toBe(process.pid);
-    expect(nextLock.controllerPid).toBeNull();
+    expect(nextLock.controllerPid).toBe(12345);
+    expect(nextLock.controllerPidState).toBe("stale");
     const nextMetaRaw = await readFile(metaPath, "utf8");
     const nextMeta = JSON.parse(nextMetaRaw) as { profileState?: unknown };
     expect(nextMeta.profileState).toBe("ready");

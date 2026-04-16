@@ -53,21 +53,17 @@ export const inspectProfileLock = (input: {
   const pinnedControllerPid =
     typeof input.lock.controllerPid === "number"
       ? input.lock.controllerPid
-      : input.lock.controllerPid === null
-        ? null
-        : input.lock.ownerPid;
+      : input.lock.ownerPid;
+  const stalePinnedController = input.lock.controllerPidState === "stale";
   const stateMatchesRun =
     browserInstanceState !== null && browserInstanceState.runId === input.lock.ownerRunId;
   const stateMatchesPinnedController =
-    stateMatchesRun &&
-    (pinnedControllerPid === null || browserInstanceState.controllerPid === pinnedControllerPid);
+    stateMatchesRun && browserInstanceState.controllerPid === pinnedControllerPid;
   const controllerAlive =
     stateMatchesRun &&
-    (
-      pinnedControllerPid === null
-        ? input.isProcessAlive(browserInstanceState.controllerPid)
-        : stateMatchesPinnedController && input.isProcessAlive(browserInstanceState.controllerPid)
-    );
+    !stalePinnedController &&
+    stateMatchesPinnedController &&
+    input.isProcessAlive(browserInstanceState.controllerPid);
   const browserAlive =
     browserInstanceState !== null && input.isProcessAlive(browserInstanceState.browserPid);
   const orphanRecoverable =

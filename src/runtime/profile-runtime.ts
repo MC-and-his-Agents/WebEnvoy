@@ -970,14 +970,12 @@ export class ProfileRuntimeService {
     const pinnedControllerPid =
       typeof lock.controllerPid === "number"
         ? lock.controllerPid
-        : lock.controllerPid === null
-          ? null
-          : lock.ownerPid;
+        : lock.ownerPid;
     const attachableReadyRuntime =
       accessState.healthyLock &&
       accessState.controlConnected &&
       accessState.profileState === "ready" &&
-      pinnedControllerPid !== null;
+      Number.isInteger(pinnedControllerPid);
     const attachableRecoverableRuntime =
       (storedProfileState === "ready" || storedProfileState === "disconnected") &&
       lockInspection.orphanRecoverable;
@@ -1123,23 +1121,19 @@ export class ProfileRuntimeService {
       const pinnedControllerPid =
         typeof lock.controllerPid === "number"
           ? lock.controllerPid
-          : lock.controllerPid === null
-            ? null
-            : lock.ownerPid;
+          : lock.ownerPid;
+      const stalePinnedController = lock.controllerPidState === "stale";
       if (
         browserState &&
         (browserState.runId !== stopOwnerRunId ||
-          (
-            pinnedControllerPid !== null &&
-            browserState.controllerPid !== pinnedControllerPid
-          ))
+          browserState.controllerPid !== pinnedControllerPid)
       ) {
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全停止 live runtime", {
           retryable: true
         });
       }
       const shutdownControllerPid =
-        pinnedControllerPid !== null
+        !stalePinnedController
           ? pinnedControllerPid
           : browserState?.controllerPid ?? null;
       const controllerAlive =
@@ -1152,7 +1146,7 @@ export class ProfileRuntimeService {
       ) {
         await this.#terminateProcess(browserState.browserPid);
         await this.#deleteBrowserStateFiles(profileDir);
-      } else if (lock.controllerPid === null && controllerAlive) {
+      } else if (stalePinnedController && controllerAlive) {
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "缺少锁定的浏览器控制者，无法安全停止 live runtime", {
           retryable: true
         });
@@ -1285,6 +1279,7 @@ export class ProfileRuntimeService {
       ...existing,
       ownerPid,
       controllerPid: ownerPid,
+      controllerPidState: "live",
       lastHeartbeatAt: nowIso
     };
     await this.#writeLock(lockPath, updated);
@@ -1388,6 +1383,7 @@ export class ProfileRuntimeService {
             typeof existingLock.controllerPid === "number"
               ? existingLock.controllerPid
               : existingLock.ownerPid,
+          controllerPidState: existingLock.controllerPidState ?? "live",
           lastHeartbeatAt: input.nowIso
         };
         await this.#writeLock(input.lockPath, updatedLock);
@@ -1520,13 +1516,11 @@ export class ProfileRuntimeService {
     const pinnedControllerPid =
       typeof input.lock.controllerPid === "number"
         ? input.lock.controllerPid
-        : input.lock.controllerPid === null
-          ? null
-          : input.lock.ownerPid;
+        : input.lock.ownerPid;
     if (
       parsedState === null ||
       parsedState.runId !== input.lock.ownerRunId ||
-      (pinnedControllerPid !== null && parsedState.controllerPid !== pinnedControllerPid)
+      parsedState.controllerPid !== pinnedControllerPid
     ) {
       throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
         retryable: true
@@ -1545,8 +1539,10 @@ export class ProfileRuntimeService {
     };
     if (!input.orphanRecoverable) {
       nextLock.controllerPid = parsedState.controllerPid;
+      nextLock.controllerPidState = "live";
     } else {
-      nextLock.controllerPid = null;
+      nextLock.controllerPid = parsedState.controllerPid;
+      nextLock.controllerPidState = "stale";
     }
 
     await this.#lockFileAdapter.writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
