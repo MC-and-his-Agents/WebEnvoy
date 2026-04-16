@@ -21,6 +21,7 @@ import {
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
   readPageStateViaMainWorld,
+  requestXhsJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } from "./content-script-main-world.js";
@@ -36,6 +37,7 @@ export {
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
   readPageStateViaMainWorld,
+  requestXhsJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 };
@@ -225,6 +227,20 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
   ) => await requestXhsSignatureViaExtension(uri, payload),
   fetchJson: async (input: Parameters<XhsSearchEnvironment["fetchJson"]>[0]) => {
+    if (input.pageContextRequest === true) {
+      return await requestXhsJsonViaMainWorld({
+        url: input.url,
+        method: input.method,
+        headers: input.headers,
+        ...(typeof input.body === "string" ? { body: input.body } : {}),
+        timeoutMs: input.timeoutMs,
+        ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+        ...(typeof input.referrerPolicy === "string"
+          ? { referrerPolicy: input.referrerPolicy }
+          : {})
+      });
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
@@ -236,6 +252,10 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
         headers: input.headers,
         body: input.body,
         credentials: "include",
+        ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+        ...(typeof input.referrerPolicy === "string"
+          ? { referrerPolicy: input.referrerPolicy as ReferrerPolicy }
+          : {}),
         signal: controller.signal
       });
 

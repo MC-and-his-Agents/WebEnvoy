@@ -4785,6 +4785,9 @@ const executeXhsSearch = async (input, env) => {
             method: "POST",
             headers,
             body: JSON.stringify(payload),
+            pageContextRequest: true,
+            referrer: env.getLocationHref(),
+            referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
                 : 30_000
@@ -6414,6 +6417,33 @@ const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+const requestXhsJsonViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "xhs-request",
+        payload: {
+            url: input.url,
+            method: input.method,
+            headers: input.headers,
+            ...(typeof input.body === "string" ? { body: input.body } : {}),
+            timeoutMs: input.timeoutMs,
+            ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+            ...(typeof input.referrerPolicy === "string"
+                ? { referrerPolicy: input.referrerPolicy }
+                : {})
+        }
+    });
+    const record = typeof result === "object" && result !== null && !Array.isArray(result)
+        ? result
+        : null;
+    const status = typeof record?.status === "number" ? record.status : null;
+    if (status === null || !Number.isFinite(status)) {
+        throw new Error("main world request returned invalid status");
+    }
+    return {
+        status,
+        body: record?.body ?? null
+    };
+};
 return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {
@@ -6806,6 +6836,19 @@ const createBrowserEnvironment = () => ({
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
+        if (input.pageContextRequest === true) {
+            return await requestXhsJsonViaMainWorld({
+                url: input.url,
+                method: input.method,
+                headers: input.headers,
+                ...(typeof input.body === "string" ? { body: input.body } : {}),
+                timeoutMs: input.timeoutMs,
+                ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+                ...(typeof input.referrerPolicy === "string"
+                    ? { referrerPolicy: input.referrerPolicy }
+                    : {})
+            });
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => {
             controller.abort();
@@ -6816,6 +6859,10 @@ const createBrowserEnvironment = () => ({
                 headers: input.headers,
                 body: input.body,
                 credentials: "include",
+                ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+                ...(typeof input.referrerPolicy === "string"
+                    ? { referrerPolicy: input.referrerPolicy }
+                    : {}),
                 signal: controller.signal
             });
             return {

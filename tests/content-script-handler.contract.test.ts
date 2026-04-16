@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ContentScriptHandler,
@@ -330,6 +330,73 @@ const withMockMainWorld = async (
             message: error instanceof Error ? error.message : String(error)
           });
         }
+        return;
+      }
+
+      if (requestType === "xhs-request") {
+        if (
+          (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsRequest__ ===
+          true
+        ) {
+          return;
+        }
+        const fetchHandler =
+          (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ ??
+          (globalThis as { fetch?: typeof fetch }).fetch;
+        if (typeof fetchHandler !== "function") {
+          emitResult({ id: requestId, ok: false, message: "main world fetch handler unavailable" });
+          return;
+        }
+        const url = typeof requestPayload?.url === "string" ? requestPayload.url : "";
+        const method =
+          requestPayload?.method === "GET" ? "GET" : requestPayload?.method === "POST" ? "POST" : "POST";
+        const headers =
+          typeof requestPayload?.headers === "object" && requestPayload.headers !== null
+            ? (requestPayload.headers as Record<string, string>)
+            : {};
+        const body = typeof requestPayload?.body === "string" ? requestPayload.body : undefined;
+        const referrer =
+          typeof requestPayload?.referrer === "string" ? requestPayload.referrer : undefined;
+        const referrerPolicy =
+          typeof requestPayload?.referrerPolicy === "string"
+            ? requestPayload.referrerPolicy
+            : undefined;
+        void Promise.resolve(
+          fetchHandler(url, {
+            method,
+            headers,
+            body,
+            credentials: "include",
+            ...(referrer ? { referrer } : {}),
+            ...(referrerPolicy ? { referrerPolicy } : {})
+          })
+        )
+          .then(async (response: Response) => {
+            const text = await response.text();
+            let parsedBody: unknown = null;
+            if (text.length > 0) {
+              try {
+                parsedBody = JSON.parse(text);
+              } catch {
+                parsedBody = { message: text };
+              }
+            }
+            emitResult({
+              id: requestId,
+              ok: true,
+              result: {
+                status: response.status,
+                body: parsedBody
+              }
+            });
+          })
+          .catch((error: unknown) => {
+            emitResult({
+              id: requestId,
+              ok: false,
+              message: error instanceof Error ? error.message : String(error)
+            });
+          });
         return;
       }
 
@@ -1186,6 +1253,120 @@ describe("content-script handler contract", () => {
         const injection = fingerprintRuntime?.injection as Record<string, unknown>;
         expect(details?.reason).toBe("SIGNATURE_ENTRY_MISSING");
         expect(injection?.installed).toBe(true);
+      } finally {
+        (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
+      }
+    });
+  });
+
+  it("routes xhs.search live request through main-world fetch and preserves canonical gate fields", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+      (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
+      (mockWindow as Window & Record<string, unknown>)._webmsxyw = () => ({
+        "X-s": "signed",
+        "X-t": "1700000000"
+      });
+
+      const mainWorldFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              items: [{ id: "note-001" }]
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      });
+      (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ = mainWorldFetch;
+      (globalThis as { fetch?: typeof fetch }).fetch = async () => {
+        throw new Error("content script fetch should not be used for live xhs.search");
+      };
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      try {
+        const runId = "run-xhs-main-world-request-001";
+        const issue209Linkage = createIssue209InvocationLinkage(runId, "main-world-request");
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: runId,
+          runId,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            request_id: "issue209-main-world-request-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue209-main-world-request-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue209-main-world-request-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              })
+            }
+          },
+          fingerprintContext: createFingerprintContext()
+        });
+
+        await waitForResult(results);
+
+        expect(results[0]?.ok).toBe(true);
+        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
+        expect(mainWorldFetch).toHaveBeenCalledWith(
+          "/api/sns/web/v1/search/notes",
+          expect.objectContaining({
+            method: "POST",
+            credentials: "include",
+            referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
+            referrerPolicy: "strict-origin-when-cross-origin"
+          })
+        );
+
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        expect((summary?.request_admission_result as Record<string, unknown>)?.admission_decision).toBe(
+          "allowed"
+        );
+        expect(payload?.observability).toBeTruthy();
+        expect(payload?.observability).not.toHaveProperty("execution_audit");
       } finally {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
       }

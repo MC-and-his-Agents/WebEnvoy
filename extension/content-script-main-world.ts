@@ -5,6 +5,16 @@ const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 export const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+type MainWorldRequestType =
+  | "fingerprint-install"
+  | "fingerprint-verify"
+  | "page-state-read"
+  | "xhs-request";
+
+type MainWorldFetchResult = {
+  status: number;
+  body: unknown;
+};
 
 type MainWorldResultEnvelope = {
   id?: unknown;
@@ -173,7 +183,7 @@ export const resetMainWorldEventChannelForContract = (): void => {
 };
 
 const mainWorldCall = async <T>(request: {
-  type: "fingerprint-install" | "fingerprint-verify" | "page-state-read";
+  type: MainWorldRequestType;
   payload: Record<string, unknown>;
 }): Promise<T> => {
   const requestId =
@@ -236,4 +246,41 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
   return typeof result === "object" && result !== null && !Array.isArray(result)
     ? (result as Record<string, unknown>)
     : null;
+};
+
+export const requestXhsJsonViaMainWorld = async (input: {
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body?: string;
+  timeoutMs: number;
+  referrer?: string;
+  referrerPolicy?: string;
+}): Promise<MainWorldFetchResult> => {
+  const result = await mainWorldCall<unknown>({
+    type: "xhs-request",
+    payload: {
+      url: input.url,
+      method: input.method,
+      headers: input.headers,
+      ...(typeof input.body === "string" ? { body: input.body } : {}),
+      timeoutMs: input.timeoutMs,
+      ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+      ...(typeof input.referrerPolicy === "string"
+        ? { referrerPolicy: input.referrerPolicy }
+        : {})
+    }
+  });
+  const record =
+    typeof result === "object" && result !== null && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : null;
+  const status = typeof record?.status === "number" ? record.status : null;
+  if (status === null || !Number.isFinite(status)) {
+    throw new Error("main world request returned invalid status");
+  }
+  return {
+    status,
+    body: record?.body ?? null
+  };
 };

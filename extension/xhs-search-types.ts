@@ -71,6 +71,9 @@ export interface XhsSearchEnvironment {
     headers: Record<string, string>;
     body?: string;
     timeoutMs: number;
+    pageContextRequest?: boolean;
+    referrer?: string;
+    referrerPolicy?: string;
   }): Promise<FetchResult>;
   performEditorInputValidation?(
     input: { text: string; focusAttestation?: EditorInputFocusAttestation | null }

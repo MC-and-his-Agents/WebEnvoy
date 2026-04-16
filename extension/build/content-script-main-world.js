@@ -172,3 +172,30 @@ export const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+export const requestXhsJsonViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "xhs-request",
+        payload: {
+            url: input.url,
+            method: input.method,
+            headers: input.headers,
+            ...(typeof input.body === "string" ? { body: input.body } : {}),
+            timeoutMs: input.timeoutMs,
+            ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+            ...(typeof input.referrerPolicy === "string"
+                ? { referrerPolicy: input.referrerPolicy }
+                : {})
+        }
+    });
+    const record = typeof result === "object" && result !== null && !Array.isArray(result)
+        ? result
+        : null;
+    const status = typeof record?.status === "number" ? record.status : null;
+    if (status === null || !Number.isFinite(status)) {
+        throw new Error("main world request returned invalid status");
+    }
+    return {
+        status,
+        body: record?.body ?? null
+    };
+};

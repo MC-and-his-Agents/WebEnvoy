@@ -50,6 +50,20 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+const extractFetchBody = async (response) => {
+    const text = await response.text();
+    if (text.length === 0) {
+        return null;
+    }
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return {
+            message: text
+        };
+    }
+};
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {
         return new CustomEvent(type, { detail });
@@ -315,7 +329,8 @@ const parseMainWorldRequest = (event) => {
     if (!id ||
         (type !== "fingerprint-install" &&
             type !== "fingerprint-verify" &&
-            type !== "page-state-read")) {
+            type !== "page-state-read" &&
+            type !== "xhs-request")) {
         return null;
     }
     return {
@@ -353,6 +368,51 @@ const handlePageStateReadRequest = async (request) => {
         result: initialState ?? null
     });
 };
+const handleXhsRequest = async (request) => {
+    const url = asString(request.payload.url);
+    const method = request.payload.method === "GET" ? "GET" : request.payload.method === "POST" ? "POST" : null;
+    const headers = asRecord(request.payload.headers) ?? {};
+    const body = asString(request.payload.body);
+    const timeoutMs = asNumber(request.payload.timeoutMs);
+    const referrer = asString(request.payload.referrer);
+    const referrerPolicy = asString(request.payload.referrerPolicy);
+    if (!url || !method || timeoutMs === null) {
+        throw new Error("invalid xhs request payload");
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+        controller.abort();
+    }, Math.max(1, Math.trunc(timeoutMs)));
+    try {
+        const requestInit = {
+            method,
+            headers: Object.fromEntries(Object.entries(headers).filter((entry) => typeof entry[1] === "string")),
+            credentials: "include",
+            signal: controller.signal
+        };
+        if (typeof body === "string" && body.length > 0) {
+            requestInit.body = body;
+        }
+        if (referrer) {
+            requestInit.referrer = referrer;
+        }
+        if (referrerPolicy) {
+            requestInit.referrerPolicy = referrerPolicy;
+        }
+        const response = await fetch(url, requestInit);
+        await emitMainWorldResult({
+            id: request.id,
+            ok: true,
+            result: {
+                status: response.status,
+                body: await extractFetchBody(response)
+            }
+        });
+    }
+    finally {
+        clearTimeout(timer);
+    }
+};
 const handleFingerprintInstallRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
@@ -369,6 +429,10 @@ const handleRequest = async (request) => {
     }
     if (request.type === "page-state-read") {
         await handlePageStateReadRequest(request);
+        return;
+    }
+    if (request.type === "xhs-request") {
+        await handleXhsRequest(request);
         return;
     }
     await handleFingerprintInstallRequest(request);
