@@ -717,6 +717,20 @@ export class ProfileRuntimeService {
             requestedExecutionMode
         });
         ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
+        if (attachableRecoverableRuntime) {
+            const preAttachReadiness = await this.#readRuntimeReadiness({
+                runtimeInput: input,
+                lockHeld: false,
+                observedRunId: accessState.observedRunId,
+                identityPreflight,
+                profileState: accessState.profileState
+            });
+            if (preAttachReadiness.bootstrapState === "stale") {
+                throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
+                    retryable: true
+                });
+            }
+        }
         const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;
         let attachedLock = lock;
         if (lock.ownerRunId !== input.runId ||
@@ -731,11 +745,10 @@ export class ProfileRuntimeService {
                 nowIso
             });
         }
-        const attachedProfileState = attachableRecoverableRuntime
-            ? "ready"
-            : accessState.profileState;
-        if (attachableRecoverableRuntime && meta) {
-            await store.writeMeta(input.profile, this.#patchMeta(meta, {
+        let attachedProfileState = accessState.profileState;
+        let nextMeta = meta;
+        if (attachableRecoverableRuntime && meta && meta.profileState !== attachedProfileState) {
+            nextMeta = this.#patchMeta(meta, {
                 profileName: input.profile,
                 profileDir,
                 profileState: attachedProfileState,
@@ -744,7 +757,8 @@ export class ProfileRuntimeService {
                 fingerprintProfileBundle: meta.fingerprintProfileBundle ?? null,
                 updatedAt: nowIso,
                 lastDisconnectedAt: meta.lastDisconnectedAt ?? nowIso
-            }));
+            });
+            await store.writeMeta(input.profile, nextMeta);
         }
         const readiness = await this.#readRuntimeReadiness({
             runtimeInput: input,
@@ -752,6 +766,25 @@ export class ProfileRuntimeService {
             identityPreflight,
             profileState: attachedProfileState
         });
+        if (attachableRecoverableRuntime &&
+            readiness.runtimeReadiness === "ready" &&
+            readiness.transportState === "ready" &&
+            readiness.bootstrapState === "ready") {
+            attachedProfileState = "ready";
+            if (nextMeta) {
+                nextMeta = this.#patchMeta(nextMeta, {
+                    profileName: input.profile,
+                    profileDir,
+                    profileState: attachedProfileState,
+                    proxyBinding: nextMeta.proxyBinding,
+                    persistentExtensionBinding: nextMeta.persistentExtensionBinding ?? null,
+                    fingerprintProfileBundle: nextMeta.fingerprintProfileBundle ?? null,
+                    updatedAt: nowIso,
+                    lastDisconnectedAt: nextMeta.lastDisconnectedAt ?? nowIso
+                });
+                await store.writeMeta(input.profile, nextMeta);
+            }
+        }
         return {
             profile: input.profile,
             profileState: attachedProfileState,
@@ -766,9 +799,9 @@ export class ProfileRuntimeService {
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: attachedLock.ownerPid,
             orphanRecoverable: attachableRecoverableRuntime,
-            recoverableSession: buildRecoverableSessionSummary(meta),
+            recoverableSession: buildRecoverableSessionSummary(nextMeta),
             fingerprint_runtime: fingerprintRuntime,
-            updatedAt: meta?.updatedAt ?? null
+            updatedAt: nextMeta?.updatedAt ?? null
         };
     }
     async stop(input) {
@@ -1305,7 +1338,9 @@ export class ProfileRuntimeService {
             });
         }
         if (!input.lockHeld) {
-            if (baseIdentity === "bound" && input.profileState === "ready" && input.observedRunId) {
+            if (baseIdentity === "bound" &&
+                input.observedRunId &&
+                (input.profileState === "ready" || input.profileState === "disconnected")) {
                 const readiness = await this.#readPersistentRuntimeReadiness({
                     ...input,
                     runtimeInput: {
@@ -1317,12 +1352,16 @@ export class ProfileRuntimeService {
                 });
                 return {
                     ...readiness,
-                    runtimeReadiness: buildRuntimeReadiness({
-                        lockHeld: false,
-                        identityBindingState: readiness.identityBindingState,
-                        transportState: readiness.transportState,
-                        bootstrapState: readiness.bootstrapState
-                    })
+                    runtimeReadiness: input.profileState === "disconnected"
+                        ? readiness.bootstrapState === "stale"
+                            ? "blocked"
+                            : "recoverable"
+                        : buildRuntimeReadiness({
+                            lockHeld: false,
+                            identityBindingState: readiness.identityBindingState,
+                            transportState: readiness.transportState,
+                            bootstrapState: readiness.bootstrapState
+                        })
                 };
             }
             return buildUnlockedPersistentRuntimeReadiness({
