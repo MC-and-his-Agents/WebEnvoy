@@ -32,7 +32,6 @@
 - [x] 仓库内已固化的历史 fresh rerun 样本头 `eca28babebe929821aa20fbb113b2f94d6ce4f49` 已确认：`#445-A` 修复后的 `xhs.search` 不再出现 `executeXhsSearchImpl is not defined`
 - [x] 同一轮 fresh rerun 已确认 `xhs_001` 仍满足 managed-profile / official runtime / `real_browser` 启动前提，且 `runtime.start`、`runtime.ping`、internal `runtime.tabs` 均可达
 - [x] 仓库内已固化样本中的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
-- [x] 仓库当前已具备 repo 内可复核的 `xhs.detail` / `xhs.user_home` 公开命令面；对应 fresh rerun 证据只在 issue / PR 当前记录中维护，不再在 formal FR docs 中逐头追写
 - [x] FR-0016 新治理口径已收口：repo formal docs 只保留 fixed/historical sample 与稳定 closeout bar，不再在仓库 formal 记录中承接 moving latest-head gate truth；formal 结论继续保持 `No-Go/paused`
 - [x] 当前 formal FR 的文档收口已完成；正式功能停点继续保持为：`search/detail/user_home` 仍缺 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`；其中 `search` 还需补齐 required headers 最小必要集矩阵，正式结论继续 `No-Go/paused`
 
