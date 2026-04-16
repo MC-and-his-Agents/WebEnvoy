@@ -725,14 +725,130 @@
   - `risk_state_output.current_state=paused`
 - 该组 PR gate refresh 参考样本结论：
   - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
-  - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
-  - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
+- `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+- 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
+
+### 5.5 2026-04-16 latest-head fresh rerun（`c9ba10a9772006119bfd29f6c15f93d04eebc22a`）
+
+本节记录 2026-04-16 在 current `origin/main` latest head
+`c9ba10a9772006119bfd29f6c15f93d04eebc22a` 上完成的一轮 fresh rerun。该轮执行现场与 artifact 如下：
+
+- worktree: `/Users/mc/dev/WebEnvoy-445-fresh-rerun`
+- runtime cwd: `/Users/mc/dev/WebEnvoy`
+- profile: `xhs_001`
+- browser_channel: `chrome`
+- execution_surface: `real_browser`
+- artifact_root: `/tmp/webenvoy-445/c9ba10a9772006119bfd29f6c15f93d04eebc22a/2026-04-16T05:29:07Z`
+
+#### 5.5.1 runtime readiness 与基础 relay
+
+- `run_id=issue445-c9ba10a-start-003`
+  - `runtime.start` 成功，Chrome 真实以
+    `/Users/mc/dev/WebEnvoy/.webenvoy/profiles/xhs_001`
+    启动
+- `run_id=issue445-c9ba10a-ping-002`
+  - `runtime.ping` 成功
+  - `relay_path=host>background>content-script>background>host`
+- 由于中途需要受控清场，本轮后续又执行：
+  - `run_id=issue445-c9ba10a-start-004`
+  - `run_id=issue445-c9ba10a-ping-003`
+  - 两者均成功，说明 latest head 上 managed-profile official runtime 仍可 fresh 拉起并完成基础 relay
+
+#### 5.5.2 fresh detail/profile 页面与真实 tab 绑定
+
+本轮不复用旧 token URL，而是从当轮搜索结果页取得 fresh 链接后，在真实 `xhs_001` 窗口中打开：
+
+- detail URL:
+  - `https://www.xiaohongshu.com/explore/69d8ed16000000002200dfb4?...`
+- profile URL:
+  - `https://www.xiaohongshu.com/user/profile/5bc815952ed18200014e53e6?...`
+
+同轮实际 tab 绑定为：
+
+- `detail.target_tab_id=1230419134`
+- `detail.target_page=explore_detail_tab`
+- `user_home.target_tab_id=1230419136`
+- `user_home.target_page=profile_tab`
+
+这一步证明 current latest head 下，`xhs.detail` / `xhs.user_home` 已具备 repo 内可复核的公开 command surface；此前“detail/user_home 无公开 CLI 入口”的说法只能保留为 dated historical fact，不再是当前阻断。
+
+#### 5.5.3 search / detail / user_home fresh 结果
+
+`search`
+
+- `run_id=issue445-c9ba10a-search-dry-002`
+  - `xhs.search dry_run` 成功
+- `run_id=issue445-c9ba10a-search-live-002`
+  - `xhs.search live` 失败
+  - `error.code=ERR_EXECUTION_FAILED`
+  - `error.details.reason=GATEWAY_INVOKER_FAILED`
+  - `error.details.gate_reasons=["LIVE_MODE_APPROVED","GATEWAY_INVOKER_FAILED"]`
+  - `error.details.request_admission_result.admission_decision=allowed`
+  - `error.details.execution_audit.request_admission_decision=allowed`
+  - `error.details.execution_audit.risk_signals=["NO_ADDITIONAL_RISK_SIGNALS"]`
+  - 该样本证明 `#476/#477/#478` 所冻结的 canonical `request_admission_result` / `execution_audit` 已经穿过 runtime/bridge/CLI 到真实消费面；当前 blocker 已不在 shared truth，而在真实搜索请求执行上下文不足
+
+`detail`
+
+- `run_id=issue445-c9ba10a-detail-dry-001`
+  - `xhs.detail dry_run` 成功
+  - `observability.page_state.page_kind=detail`
+  - `target_tab_id=1230419134`
+- `run_id=issue445-c9ba10a-detail-live-001`
+  - `xhs.detail live` 失败
+  - `error.code=ERR_PROFILE_LOCKED`
+  - `error.details.runtime_readiness=recoverable`
+  - `error.details.transport_state=disconnected`
+  - `error.details.lock_held=false`
+
+`user_home`
+
+- `run_id=issue445-c9ba10a-user-home-dry-001`
+  - `xhs.user_home dry_run` 成功
+  - `observability.page_state.page_kind=user_home`
+  - `target_tab_id=1230419136`
+- `run_id=issue445-c9ba10a-user-home-live-001`
+  - `xhs.user_home live` 失败
+  - `error.code=ERR_PROFILE_LOCKED`
+  - `error.details.runtime_readiness=recoverable`
+  - `error.details.transport_state=disconnected`
+  - `error.details.lock_held=false`
+
+#### 5.5.4 latest-head blocker 归因
+
+本轮 latest-head fresh rerun 已把 `#445` 的阻断精确收敛为两类：
+
+- blocker A: `xhs.search live`
+  - blocker_level=`execution_request_context`
+  - direct_signal=`GATEWAY_INVOKER_FAILED`
+  - 说明：formal gate、request admission、execution audit、runtime/bridge/CLI 接线均已到位，但真实 `/api/sns/web/v1/search/notes` 执行上下文仍不足
+- blocker B: `xhs.detail live` / `xhs.user_home live`
+  - blocker_level=`runtime_transport_owner`
+  - direct_signal=`ERR_PROFILE_LOCKED`
+  - 辅助信号：`runtime_readiness=recoverable`、`transport_state=disconnected`
+  - 说明：这两条 live 请求尚未进入 primary API 成功路径，而是在 execution 前后命中 runtime transport ownership/attach 稳定性问题
+
+同时，本轮已明确排除以下旧 blocker 作为 current latest-head 主因：
+
+- `detail/user_home` 无公开 CLI 命令入口
+- shared truth 未接到 runtime/bridge/CLI
+- `executeXhsSearchImpl is not defined`
+- worktree/main profile root mismatch
+- `e7adc48` 阶段的 `xhs.search dry_run` timeout
+
+#### 5.5.5 本轮正式结论
+
+截至 `c9ba10a9772006119bfd29f6c15f93d04eebc22a`：
+
+- `xhs.search`、`xhs.detail`、`xhs.user_home` 的 dry_run fresh evidence 已补齐
+- `xhs.search live` 仍未达到 `primary + api + success`
+- `xhs.detail live` / `xhs.user_home live` 也仍未达到 `primary + api + success`
+- 因此 issue `#445` 还不能 closeout；正式结论继续保持：`No-Go/paused`，issue 状态维持 `OPEN`
 
 ## 未决项（进入下一轮复核前保留）
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
 - 在风险状态满足准入、且具备合法 approval / gate 前提后，再重新执行 `search` 的 managed-profile `real_browser` fresh live rerun
-- 为 `detail` / `user_home` 提供 repo 内可复核的正式命令入口，或通过独立 formal review 明确其 latest-head 复核路径
 - 在满足上述前提后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
