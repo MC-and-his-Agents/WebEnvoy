@@ -684,9 +684,11 @@ export class ProfileRuntimeService {
             lockInspection,
             runtimeRunId: input.runId
         });
+        const hasPinnedController = typeof lock.controllerPid === "number";
         const attachableReadyRuntime = accessState.healthyLock &&
             accessState.controlConnected &&
-            accessState.profileState === "ready";
+            accessState.profileState === "ready" &&
+            hasPinnedController;
         const attachableRecoverableRuntime = (storedProfileState === "ready" || storedProfileState === "disconnected") &&
             lockInspection.orphanRecoverable;
         if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
@@ -805,8 +807,18 @@ export class ProfileRuntimeService {
         const previousMeta = existingMeta;
         try {
             const browserState = await this.#readBrowserInstanceState(profileDir);
-            const shutdownControllerPid = browserState?.controllerPid ?? lock.ownerPid;
-            const controllerAlive = this.#isProcessAlive(shutdownControllerPid);
+            if (browserState &&
+                (browserState.runId !== stopOwnerRunId ||
+                    (typeof lock.controllerPid === "number" &&
+                        browserState.controllerPid !== lock.controllerPid))) {
+                throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全停止 live runtime", {
+                    retryable: true
+                });
+            }
+            const shutdownControllerPid = typeof lock.controllerPid === "number"
+                ? lock.controllerPid
+                : browserState?.controllerPid ?? null;
+            const controllerAlive = typeof shutdownControllerPid === "number" && this.#isProcessAlive(shutdownControllerPid);
             if (!controllerAlive &&
                 browserState &&
                 browserState.runId === stopOwnerRunId &&
@@ -814,11 +826,16 @@ export class ProfileRuntimeService {
                 await this.#terminateProcess(browserState.browserPid);
                 await this.#deleteBrowserStateFiles(profileDir);
             }
-            else {
+            else if (typeof shutdownControllerPid === "number") {
                 await this.#browserLauncher.shutdown({
                     profileDir,
                     controllerPid: shutdownControllerPid,
                     runId: stopOwnerRunId
+                });
+            }
+            else {
+                throw new CliError("ERR_RUNTIME_UNAVAILABLE", "缺少可验证的浏览器控制者，无法安全停止 live runtime", {
+                    retryable: true
                 });
             }
             await store.writeMeta(input.profile, this.#patchMeta(existingMeta, {
@@ -1117,7 +1134,10 @@ export class ProfileRuntimeService {
             });
         }
         const parsedState = this.#parseBrowserInstanceState(stateRaw);
-        if (parsedState === null || parsedState.runId !== input.lock.ownerRunId) {
+        const pinnedControllerPid = typeof input.lock.controllerPid === "number" ? input.lock.controllerPid : null;
+        if (parsedState === null ||
+            parsedState.runId !== input.lock.ownerRunId ||
+            (pinnedControllerPid !== null && parsedState.controllerPid !== pinnedControllerPid)) {
             throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
                 retryable: true
             });

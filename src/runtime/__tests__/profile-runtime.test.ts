@@ -3132,6 +3132,66 @@ describe("profile-runtime stale lock reclaim", () => {
       killSpy.mockRestore();
     }
   });
+
+  it("rejects runtime.stop when browser state drifts away from the pinned controller", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-controller-drift-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999, 223355, 223356]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "stop_controller_drift_profile",
+      runId: "run-runtime-test-731",
+      params: {}
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "stop_controller_drift_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "state-token-731",
+          profileDir,
+          runId: "run-runtime-test-731",
+          browserPath: "/mock/chrome",
+          controllerPid: 223355,
+          browserPid: 223356,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+
+    await expect(
+      service.stop({
+        cwd: baseDir,
+        profile: "stop_controller_drift_profile",
+        runId: "run-runtime-test-731",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_UNAVAILABLE"
+    });
+
+    const lockAfterReject = JSON.parse(await readFile(lockPath, "utf8")) as ProfileLock;
+    expect(lockAfterReject.ownerRunId).toBe("run-runtime-test-731");
+  });
 });
 
 describe("profile-runtime login", () => {
