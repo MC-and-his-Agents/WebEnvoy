@@ -2054,8 +2054,57 @@ describe("profile-runtime identity preflight", () => {
       profile: "attach_recoverable_profile"
     });
     const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_profile");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
     const service = createTestService({
-      isProcessAlive: (pid: number) => alivePids.has(pid)
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({
+          command,
+          params,
+          profile,
+          runId
+        }: {
+          command: string;
+          params: Record<string, unknown>;
+          profile: string | null;
+          runId: string;
+        }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            const browserStateRaw = await readFile(browserStatePath, "utf8");
+            const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "ready",
+                bootstrap_state:
+                  browserState.runId === runId &&
+                  profile === "attach_recoverable_profile" &&
+                  String(params.run_id) === runId
+                    ? "ready"
+                    : "stale"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
     });
 
     await service.start({
@@ -2069,8 +2118,6 @@ describe("profile-runtime identity preflight", () => {
         }
       }
     });
-
-    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_profile");
     const lockPath = join(profileDir, "__webenvoy_lock.json");
     const metaPath = join(profileDir, "__webenvoy_meta.json");
     const lockRaw = await readFile(lockPath, "utf8");
@@ -2082,7 +2129,7 @@ describe("profile-runtime identity preflight", () => {
 
     const browserPid = 223344;
     await writeFile(
-      join(profileDir, BROWSER_STATE_FILENAME),
+      browserStatePath,
       `${JSON.stringify(
         {
           schemaVersion: 1,
@@ -2166,7 +2213,7 @@ describe("profile-runtime identity preflight", () => {
     const nextMeta = JSON.parse(nextMetaRaw) as { profileState?: unknown };
     expect(nextMeta.profileState).toBe("ready");
 
-    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
     const browserState = JSON.parse(browserStateRaw) as { runId?: unknown; controllerPid?: unknown };
     expect(browserState.runId).toBe("run-runtime-attach-recoverable-next-001");
     expect(browserState.controllerPid).toBe(12345);

@@ -34,7 +34,8 @@ export const inspectProfileLock = (input) => {
     };
 };
 export const resolveProfileAccessState = (input) => {
-    const activeState = isRuntimeActiveProfileState(input.storedProfileState);
+    const activeState = isRuntimeActiveProfileState(input.storedProfileState) ||
+        input.storedProfileState === "disconnected";
     const healthyLock = input.lockInspection?.blocksReuse ?? false;
     const controlConnected = input.lockInspection?.controlConnected ?? false;
     const profileState = activeState && !controlConnected ? "disconnected" : input.storedProfileState;
