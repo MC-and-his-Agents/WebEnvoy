@@ -666,9 +666,10 @@ describe("extension service worker / recovery and relay prerequisites", () => {
     });
   });
 
-  it("does not reinject main-world bridge after the tab already reports it installed", async () => {
+  it("does not reinject main-world bridge after a trusted bootstrap secret probes the tab as ready", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
     let mainWorldProbeCount = 0;
     executeScript.mockImplementation(
       async (
@@ -693,9 +694,44 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       runtimeMessageListeners,
       runId: "run-xhs-live-bridge-dedupe-001",
       profile: "profile-a",
-      fingerprintContext: createFingerprintRuntimeContext(),
+      fingerprintContext,
+      runtimeContextId: "ctx-xhs-live-bridge-dedupe-001",
       tabId: 32,
       tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-bridge-bootstrap-000",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-bridge-dedupe-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-xhs-live-bridge-dedupe-001",
+          runtime_context_id: "ctx-xhs-live-bridge-dedupe-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-xhs-live-bridge-dedupe-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-xhs-live-bridge-bootstrap-000",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
     });
 
     const emitForward = (id: string, runId: string) => {
@@ -726,7 +762,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
 
     emitForward("run-xhs-live-bridge-dedupe-001", "run-xhs-live-bridge-dedupe-001");
     await waitForBridgeTurn();
-    emitForward("run-xhs-live-bridge-dedupe-002", "run-xhs-live-bridge-dedupe-002");
+    emitForward("run-xhs-live-bridge-dedupe-002", "run-xhs-live-bridge-dedupe-001");
     await waitForBridgeTurn();
 
     const mainWorldBridgeInjectCalls = executeScript.mock.calls.filter(

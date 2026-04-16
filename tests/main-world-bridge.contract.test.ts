@@ -102,7 +102,7 @@ describe("main-world bridge contract", () => {
     expect(added.map((entry) => entry.type)).toContain(secretChannel.requestEvent);
   });
 
-  it("does not re-register bootstrap listeners when reinjected into the same page", async () => {
+  it("does not publish a page-visible install marker when reinjected into the same page", async () => {
     const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
 
     (globalThis as { window?: unknown }).window = mockWindow;
@@ -123,7 +123,9 @@ describe("main-world bridge contract", () => {
     vi.resetModules();
     await import("../extension/main-world-bridge.js");
 
-    expect(added.filter((entry) => entry.type === "__mw_bootstrap__")).toHaveLength(1);
+    expect(
+      (globalThis as Record<string, unknown>).__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__
+    ).toBeUndefined();
   });
 
   it("routes fingerprint install and verify through the bootstrapped event channel", async () => {

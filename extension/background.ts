@@ -91,7 +91,6 @@ const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
-const mainWorldBridgeInstallMarker = "__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__";
 const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"] as const;
@@ -236,6 +235,7 @@ interface RuntimeBootstrapState {
   profile: string;
   sessionId: string;
   status: RuntimeBootstrapStatus;
+  mainWorldSecret: string;
   serializedFingerprintRuntime: string;
   updatedAt: string;
 }
@@ -1698,6 +1698,7 @@ class ChromeBackgroundBridge {
   #runtimeTrustState = new BackgroundRuntimeTrustState({
     serializeFingerprintRuntimeContext
   });
+  #pendingMainWorldBridgeEnsures = new Map<number, Promise<void>>();
   #recoveryState: NativeBridgeRecoveryState;
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -2504,6 +2505,7 @@ class ChromeBackgroundBridge {
         profile,
         sessionId: requestSessionId,
         status: "stale",
+        mainWorldSecret,
         serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
         updatedAt: new Date().toISOString()
       });
@@ -2563,6 +2565,7 @@ class ChromeBackgroundBridge {
         profile,
         sessionId: requestSessionId,
         status: "ready",
+        mainWorldSecret,
         serializedFingerprintRuntime,
         updatedAt: new Date().toISOString()
       });
@@ -2604,6 +2607,7 @@ class ChromeBackgroundBridge {
       profile,
       sessionId: requestSessionId,
       status: "pending",
+      mainWorldSecret,
       serializedFingerprintRuntime,
       updatedAt: new Date().toISOString()
     });
@@ -3333,7 +3337,7 @@ class ChromeBackgroundBridge {
 
     if (this.#shouldEnsureMainWorldBridge(command, requestedExecutionMode)) {
       try {
-        await this.#ensureMainWorldBridgeInjected(tabId);
+        await this.#ensureMainWorldBridgeInjected(dispatchRequest, tabId);
       } catch (error) {
         if (suppressHostResponse) {
           return;
@@ -4685,11 +4689,29 @@ class ChromeBackgroundBridge {
     });
   }
 
-  async #ensureMainWorldBridgeInjected(tabId: number): Promise<void> {
+  async #ensureMainWorldBridgeInjected(request: BridgeRequest, tabId: number): Promise<void> {
+    const existingEnsure = this.#pendingMainWorldBridgeEnsures.get(tabId);
+    if (existingEnsure) {
+      await existingEnsure;
+      return;
+    }
+    const ensurePromise = this.#ensureMainWorldBridgeInjectedInternal(request, tabId);
+    this.#pendingMainWorldBridgeEnsures.set(tabId, ensurePromise);
+    try {
+      await ensurePromise;
+    } finally {
+      if (this.#pendingMainWorldBridgeEnsures.get(tabId) === ensurePromise) {
+        this.#pendingMainWorldBridgeEnsures.delete(tabId);
+      }
+    }
+  }
+
+  async #ensureMainWorldBridgeInjectedInternal(request: BridgeRequest, tabId: number): Promise<void> {
     if (!this.chromeApi.scripting?.executeScript) {
       return;
     }
-    if (await this.#isMainWorldBridgeInstalled(tabId)) {
+    const probeSecret = this.#resolveMainWorldBridgeProbeSecret(request);
+    if (probeSecret && await this.#isMainWorldBridgeInstalled(tabId, probeSecret)) {
       return;
     }
     await this.chromeApi.scripting.executeScript({
@@ -4699,19 +4721,83 @@ class ChromeBackgroundBridge {
     });
   }
 
-  async #isMainWorldBridgeInstalled(tabId: number): Promise<boolean> {
+  #resolveMainWorldBridgeProbeSecret(request: BridgeRequest): string | null {
+    const profile = asNonEmptyString(request.profile);
+    if (!profile) {
+      return null;
+    }
+    const requestRunId = asNonEmptyString(request.params.run_id);
+    const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+    if (
+      !bootstrap ||
+      bootstrap.sessionId !== requestSessionId ||
+      !requestRunId ||
+      bootstrap.runId !== requestRunId ||
+      (bootstrap.status !== "pending" && bootstrap.status !== "ready")
+    ) {
+      return null;
+    }
+    return bootstrap.mainWorldSecret;
+  }
+
+  async #isMainWorldBridgeInstalled(tabId: number, mainWorldSecret: string): Promise<boolean> {
     if (!this.chromeApi.scripting?.executeScript) {
       return false;
     }
+    const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
     const probe = await this.chromeApi.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: (...args: unknown[]) => {
-        const marker = typeof args[0] === "string" ? args[0] : "";
-        const scope = globalThis as typeof globalThis & Record<string, unknown>;
-        return scope[marker] === true;
+      func: async (requestEventName: unknown, resultEventName: unknown) => {
+        const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+        const requestEvent =
+          typeof requestEventName === "string" ? requestEventName : "";
+        const resultEvent =
+          typeof resultEventName === "string" ? resultEventName : "";
+        if (!requestEvent || !resultEvent) {
+          return false;
+        }
+        return await new Promise<boolean>((resolve) => {
+          let settled = false;
+          const onResult = () => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener(resultEvent, onResult as EventListener);
+            resolve(true);
+          };
+          const timer = setTimeout(() => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            window.removeEventListener(resultEvent, onResult as EventListener);
+            resolve(false);
+          }, 1_500);
+          window.addEventListener(resultEvent, onResult as EventListener);
+          window.dispatchEvent(
+            new CustomEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
+              detail: {
+                request_event: requestEvent,
+                result_event: resultEvent
+              }
+            })
+          );
+          window.dispatchEvent(
+            new CustomEvent(requestEvent, {
+              detail: {
+                id: `probe-${Date.now()}`,
+                type: "fingerprint-install",
+                payload: {}
+              }
+            })
+          );
+        });
       },
-      args: [mainWorldBridgeInstallMarker]
+      args: [requestEvent, resultEvent]
     });
     return probe[0]?.result === true;
   }

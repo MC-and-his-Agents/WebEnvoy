@@ -19,6 +19,7 @@ interface RuntimeBootstrapState {
   profile: string;
   sessionId: string;
   status: RuntimeBootstrapStatus;
+  mainWorldSecret: string;
   serializedFingerprintRuntime: string;
   updatedAt: string;
 }
