@@ -6691,6 +6691,7 @@ const {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } = __webenvoy_module_xhs_command_contract;
+const { containsCookie } = __webenvoy_module_xhs_search_telemetry;
 const {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
