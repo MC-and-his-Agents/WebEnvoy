@@ -3703,6 +3703,72 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("upgrades dry_run xhs.search to the trusted injected fingerprint context", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const startupRunId = "run-xhs-dry-trusted-upgrade-startup-001";
+    const dryRunId = "run-xhs-dry-trusted-upgrade-dry-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: startupRunId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const dryRequestId = `${dryRunId}-request`;
+    firstPort.onMessageListeners[0]?.({
+      id: dryRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: dryRunId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId: dryRunId,
+          requestId: dryRequestId,
+          requested_execution_mode: "dry_run",
+          risk_state: "paused",
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: dryRequestId,
+        command: "xhs.search",
+        fingerprintContext: expect.objectContaining({
+          injection: expect.objectContaining({
+            installed: true,
+            missing_required_patches: []
+          })
+        })
+      })
+    );
+  });
+
   it("keeps target_tab_id existence as a hard gate even when trusted fingerprint context is bound", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
