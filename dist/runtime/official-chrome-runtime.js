@@ -221,11 +221,13 @@ export const prepareOfficialChromeRuntime = async (input) => {
         profile_state: profileState,
         confirmation_required: confirmationRequired
     });
-    if (!lockHeld &&
-        profileState === "ready" &&
+    const shouldAttemptAttach = !lockHeld &&
         identityBindingState === "bound" &&
-        transportState === "ready" &&
-        bootstrapState !== "stale") {
+        bootstrapState !== "stale" &&
+        ((profileState === "ready" && transportState === "ready") ||
+            (runtimeReadiness === "recoverable" &&
+                (profileState === "disconnected" || profileState === "ready")));
+    if (shouldAttemptAttach) {
         syncRuntimeStatus(await attachRuntime());
     }
     const attemptExecutionBootstrap = async () => {

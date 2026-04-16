@@ -2042,6 +2042,188 @@ describe("profile-runtime identity preflight", () => {
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
   });
 
+  it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_recoverable_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_recoverable_profile",
+      runId: "run-runtime-attach-recoverable-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-recoverable-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223344;
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-recoverable-token-001",
+          profileDir,
+          runId: "run-runtime-attach-recoverable-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: false,
+      transportState: "disconnected",
+      runtimeReadiness: "recoverable"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: true,
+      transportState: "ready",
+      runtimeReadiness: "ready"
+    });
+
+    const nextLockRaw = await readFile(lockPath, "utf8");
+    const nextLock = JSON.parse(nextLockRaw) as ProfileLock;
+    expect(nextLock.ownerRunId).toBe("run-runtime-attach-recoverable-next-001");
+
+    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+    expect(browserState.runId).toBe("run-runtime-attach-recoverable-next-001");
+  });
+
+  it("keeps recoverable disconnected runtime blocked when browser state no longer matches the lock owner", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-mismatch-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_recoverable_mismatch_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_recoverable_mismatch_profile",
+      runId: "run-runtime-attach-mismatch-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_mismatch_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-mismatch-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223355;
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-mismatch-token-001",
+          profileDir,
+          runId: "run-runtime-attach-mismatch-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 54321,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_recoverable_mismatch_profile",
+        runId: "run-runtime-attach-mismatch-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
   it("accepts relocated manifest path when stable identity still matches", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-relocate-"));
     tempDirs.push(baseDir);

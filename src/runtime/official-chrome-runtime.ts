@@ -352,13 +352,15 @@ export const prepareOfficialChromeRuntime = async (input: {
     confirmation_required: confirmationRequired
   });
 
-  if (
+  const shouldAttemptAttach =
     !lockHeld &&
-    profileState === "ready" &&
     identityBindingState === "bound" &&
-    transportState === "ready" &&
-    bootstrapState !== "stale"
-  ) {
+    bootstrapState !== "stale" &&
+    ((profileState === "ready" && transportState === "ready") ||
+      (runtimeReadiness === "recoverable" &&
+        (profileState === "disconnected" || profileState === "ready")));
+
+  if (shouldAttemptAttach) {
     syncRuntimeStatus(await attachRuntime());
   }
 

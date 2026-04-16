@@ -272,6 +272,90 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("attempts attach for a recoverable disconnected ready runtime before bootstrapping", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "disconnected",
+        runtimeReadiness: "recoverable",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "disconnected",
+        lockHeld: false
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "pending",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-recoverable-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_recoverable_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_recoverable_attach_profile",
+          run_id: "run-runtime-recoverable-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("waits for bridge readiness when bootstrap is initially not delivered", async () => {
     const readStatus = vi
       .fn()

@@ -965,7 +965,14 @@ export class ProfileRuntimeService {
       lockInspection,
       runtimeRunId: input.runId
     });
-    if (!accessState.healthyLock || !accessState.controlConnected || accessState.profileState !== "ready") {
+    const attachableReadyRuntime =
+      accessState.healthyLock &&
+      accessState.controlConnected &&
+      accessState.profileState === "ready";
+    const attachableRecoverableRuntime =
+      storedProfileState === "ready" &&
+      lockInspection.orphanRecoverable;
+    if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
       throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
         retryable: true
       });
