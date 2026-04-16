@@ -666,7 +666,7 @@ export class ProfileRuntimeService {
             mode: readFingerprintMetaMode(input.params) ?? "readonly"
         });
         const storedProfileState = meta?.profileState ?? "uninitialized";
-        const activeState = isRuntimeActiveProfileState(storedProfileState);
+        const activeState = isRuntimeActiveProfileState(storedProfileState) || storedProfileState === "disconnected";
         if (!activeState) {
             throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${storedProfileState} 不能接管 live runtime`, { retryable: true });
         }
@@ -686,7 +686,7 @@ export class ProfileRuntimeService {
         const attachableReadyRuntime = accessState.healthyLock &&
             accessState.controlConnected &&
             accessState.profileState === "ready";
-        const attachableRecoverableRuntime = storedProfileState === "ready" &&
+        const attachableRecoverableRuntime = (storedProfileState === "ready" || storedProfileState === "disconnected") &&
             lockInspection.orphanRecoverable;
         if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
             throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
@@ -721,16 +721,19 @@ export class ProfileRuntimeService {
                 nowIso
             });
         }
+        const attachedProfileState = attachableRecoverableRuntime
+            ? "ready"
+            : accessState.profileState;
         const readiness = await this.#readRuntimeReadiness({
             runtimeInput: input,
             lockHeld: true,
             identityPreflight,
-            profileState: accessState.profileState
+            profileState: attachedProfileState
         });
         return {
             profile: input.profile,
-            profileState: accessState.profileState,
-            browserState: browserStateFromProfileState(accessState.profileState, true),
+            profileState: attachedProfileState,
+            browserState: browserStateFromProfileState(attachedProfileState, true),
             profileDir,
             proxyUrl: meta?.proxyBinding?.url ?? null,
             lockHeld: true,

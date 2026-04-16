@@ -2072,6 +2072,7 @@ describe("profile-runtime identity preflight", () => {
 
     const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_profile");
     const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const metaPath = join(profileDir, "__webenvoy_meta.json");
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     lock.ownerPid = 12345;
@@ -2091,6 +2092,21 @@ describe("profile-runtime identity preflight", () => {
           controllerPid: 12345,
           browserPid,
           launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          profileState: "disconnected",
+          lastDisconnectedAt: new Date().toISOString()
         },
         null,
         2
@@ -2133,7 +2149,8 @@ describe("profile-runtime identity preflight", () => {
         }
       })
     ).resolves.toMatchObject({
-      profileState: "disconnected",
+      profileState: "ready",
+      browserState: "ready",
       lockHeld: true,
       transportState: "ready",
       runtimeReadiness: "ready"
