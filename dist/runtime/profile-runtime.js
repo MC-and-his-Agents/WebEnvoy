@@ -712,12 +712,16 @@ export class ProfileRuntimeService {
             requestedExecutionMode
         });
         ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-        if (lock.ownerRunId !== input.runId) {
-            await this.#rebindActiveRuntimeOwnership({
+        const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;
+        let attachedLock = lock;
+        if (lock.ownerRunId !== input.runId ||
+            (attachableRecoverableRuntime && lock.ownerPid !== nextOwnerPid)) {
+            attachedLock = await this.#rebindActiveRuntimeOwnership({
                 profileDir,
                 lockPath,
                 lock,
                 nextRunId: input.runId,
+                nextOwnerPid,
                 nowIso
             });
         }
@@ -754,7 +758,7 @@ export class ProfileRuntimeService {
             bootstrapState: readiness.bootstrapState,
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
-            lockOwnerPid: lock.ownerPid,
+            lockOwnerPid: attachedLock.ownerPid,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: meta?.updatedAt ?? null
@@ -1114,10 +1118,12 @@ export class ProfileRuntimeService {
         }
         const nextState = {
             ...parsedState,
-            runId: input.nextRunId
+            runId: input.nextRunId,
+            controllerPid: input.nextOwnerPid
         };
         const nextLock = {
             ...input.lock,
+            ownerPid: input.nextOwnerPid,
             ownerRunId: input.nextRunId,
             lastHeartbeatAt: input.nowIso
         };
@@ -1129,6 +1135,7 @@ export class ProfileRuntimeService {
             await this.#lockFileAdapter.writeFile(statePath, stateRaw, "utf8").catch(() => undefined);
             throw error;
         }
+        return nextLock;
     }
     async #inspectProfileLock(lock, profileDir) {
         return inspectProfileLock({

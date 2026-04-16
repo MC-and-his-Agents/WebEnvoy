@@ -2053,7 +2053,7 @@ describe("profile-runtime identity preflight", () => {
       baseDir,
       profile: "attach_recoverable_profile"
     });
-    const alivePids = new Set<number>([999998, 999999]);
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
     const service = createTestService({
       isProcessAlive: (pid: number) => alivePids.has(pid)
     });
@@ -2159,13 +2159,34 @@ describe("profile-runtime identity preflight", () => {
     const nextLockRaw = await readFile(lockPath, "utf8");
     const nextLock = JSON.parse(nextLockRaw) as ProfileLock;
     expect(nextLock.ownerRunId).toBe("run-runtime-attach-recoverable-next-001");
+    expect(nextLock.ownerPid).toBe(process.pid);
     const nextMetaRaw = await readFile(metaPath, "utf8");
     const nextMeta = JSON.parse(nextMetaRaw) as { profileState?: unknown };
     expect(nextMeta.profileState).toBe("ready");
 
     const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
-    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown; controllerPid?: unknown };
     expect(browserState.runId).toBe("run-runtime-attach-recoverable-next-001");
+    expect(browserState.controllerPid).toBe(process.pid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      transportState: "ready",
+      runtimeReadiness: "ready"
+    });
   });
 
   it("keeps recoverable disconnected runtime blocked when browser state no longer matches the lock owner", async () => {
