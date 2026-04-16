@@ -3247,11 +3247,8 @@ class ChromeBackgroundBridge {
       issueScope === "issue_208" &&
       requestedExecutionMode === "live_write" &&
       validationAction === "editor_input";
-    const requestedLiveMode =
-      requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
     const requestedFingerprintContext = resolveFingerprintContext(commandParams);
-    let forwardFingerprintContext =
-      XHS_GATE_COMMANDS.has(command) ? requestedFingerprintContext : requestedFingerprintContext;
+    let forwardFingerprintContext = requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
@@ -3301,18 +3298,16 @@ class ChromeBackgroundBridge {
       tabId = gateResult.targetTabId;
       commandParams = normalizeXhsSearchCommandParams(commandParams, tabId);
       forwardFingerprintContext =
-        requestedLiveMode
-          ? this.#resolveValidatedTrustedFingerprintContext(
-              {
-                ...dispatchRequest,
-                params: {
-                  ...dispatchRequest.params,
-                  command_params: commandParams
-                }
-              },
-              requestedFingerprintContext
-            ) ?? requestedFingerprintContext
-          : requestedFingerprintContext;
+        this.#resolveValidatedTrustedFingerprintContext(
+          {
+            ...dispatchRequest,
+            params: {
+              ...dispatchRequest.params,
+              command_params: commandParams
+            }
+          },
+          requestedFingerprintContext
+        ) ?? requestedFingerprintContext;
     } else {
       tabId = await this.#resolveTargetTabId(dispatchRequest);
     }
