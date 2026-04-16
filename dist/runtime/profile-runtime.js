@@ -725,7 +725,9 @@ export class ProfileRuntimeService {
                 identityPreflight,
                 profileState: accessState.profileState
             });
-            if (preAttachReadiness.bootstrapState === "stale") {
+            if (preAttachReadiness.bootstrapState === "stale" ||
+                preAttachReadiness.transportState === "not_connected" ||
+                preAttachReadiness.runtimeReadiness !== "recoverable") {
                 throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
                     retryable: true
                 });
@@ -1353,7 +1355,8 @@ export class ProfileRuntimeService {
                 return {
                     ...readiness,
                     runtimeReadiness: input.profileState === "disconnected"
-                        ? readiness.bootstrapState === "stale"
+                        ? readiness.bootstrapState === "stale" ||
+                            readiness.transportState === "not_connected"
                             ? "blocked"
                             : "recoverable"
                         : buildRuntimeReadiness({
