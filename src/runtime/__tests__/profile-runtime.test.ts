@@ -2159,6 +2159,9 @@ describe("profile-runtime identity preflight", () => {
     const nextLockRaw = await readFile(lockPath, "utf8");
     const nextLock = JSON.parse(nextLockRaw) as ProfileLock;
     expect(nextLock.ownerRunId).toBe("run-runtime-attach-recoverable-next-001");
+    const nextMetaRaw = await readFile(metaPath, "utf8");
+    const nextMeta = JSON.parse(nextMetaRaw) as { profileState?: unknown };
+    expect(nextMeta.profileState).toBe("ready");
 
     const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
     const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };

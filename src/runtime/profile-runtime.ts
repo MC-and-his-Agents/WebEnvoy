@@ -1015,6 +1015,21 @@ export class ProfileRuntimeService {
     const attachedProfileState: ProfileState = attachableRecoverableRuntime
       ? "ready"
       : accessState.profileState;
+    if (attachableRecoverableRuntime && meta) {
+      await store.writeMeta(
+        input.profile,
+        this.#patchMeta(meta, {
+          profileName: input.profile,
+          profileDir,
+          profileState: attachedProfileState,
+          proxyBinding: meta.proxyBinding,
+          persistentExtensionBinding: meta.persistentExtensionBinding ?? null,
+          fingerprintProfileBundle: meta.fingerprintProfileBundle ?? null,
+          updatedAt: nowIso,
+          lastDisconnectedAt: meta.lastDisconnectedAt ?? nowIso
+        })
+      );
+    }
     const readiness = await this.#readRuntimeReadiness({
       runtimeInput: input,
       lockHeld: true,
