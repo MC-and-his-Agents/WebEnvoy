@@ -8,12 +8,28 @@ const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read"
-  | "xhs-search-request";
+  | "page-state-read";
 
 type MainWorldFetchResult = {
   status: number;
   body: unknown;
+};
+
+type XhsMainWorldRequestMessage = {
+  kind: "xhs-main-world-request";
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body?: string;
+  timeout_ms: number;
+  referrer?: string;
+  referrerPolicy?: string;
+};
+
+type XhsMainWorldRequestResponseMessage = {
+  ok: boolean;
+  result?: MainWorldFetchResult;
+  error?: { code?: string; message?: string };
 };
 
 type MainWorldResultEnvelope = {
@@ -216,12 +232,7 @@ const mainWorldCall = async <T>(request: {
       return;
     }
     emitMainWorldBootstrap(mainWorldEventChannel.secret);
-    const responseTimeoutMs =
-      request.type === "xhs-search-request" &&
-      typeof request.payload.timeoutMs === "number" &&
-      Number.isFinite(request.payload.timeoutMs)
-        ? Math.max(DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS, Math.trunc(request.payload.timeoutMs) + 1_000)
-        : DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
+    const responseTimeoutMs = DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       pendingMainWorldRequests.delete(requestId);
       reject(new Error("main world event channel response timeout"));
@@ -280,30 +291,59 @@ export const requestXhsSearchJsonViaMainWorld = async (input: {
   referrer?: string;
   referrerPolicy?: string;
 }): Promise<MainWorldFetchResult> => {
-  const result = await mainWorldCall<unknown>({
-    type: "xhs-search-request",
-    payload: {
-      url: input.url,
-      method: input.method,
-      headers: input.headers,
-      ...(typeof input.body === "string" ? { body: input.body } : {}),
-      timeoutMs: input.timeoutMs,
-      ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
-      ...(typeof input.referrerPolicy === "string"
-        ? { referrerPolicy: input.referrerPolicy }
-        : {})
+  const runtime = (globalThis as {
+    chrome?: {
+      runtime?: {
+        sendMessage?: (
+          message: XhsMainWorldRequestMessage,
+          callback?: (response?: XhsMainWorldRequestResponseMessage) => void
+        ) => Promise<XhsMainWorldRequestResponseMessage | undefined> | void;
+      };
+    };
+  }).chrome?.runtime;
+  const sendMessage = runtime?.sendMessage;
+  if (!sendMessage) {
+    throw new Error("extension runtime.sendMessage is unavailable");
+  }
+
+  const request: XhsMainWorldRequestMessage = {
+    kind: "xhs-main-world-request",
+    url: input.url,
+    method: input.method,
+    headers: input.headers,
+    ...(typeof input.body === "string" ? { body: input.body } : {}),
+    timeout_ms: input.timeoutMs,
+    ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
+    ...(typeof input.referrerPolicy === "string"
+      ? { referrerPolicy: input.referrerPolicy }
+      : {})
+  };
+  const response = await new Promise<XhsMainWorldRequestResponseMessage>((resolve, reject) => {
+    try {
+      const maybePromise = sendMessage(request, (message?: XhsMainWorldRequestResponseMessage) => {
+        resolve(message ?? { ok: false, error: { message: "xhs main-world response missing" } });
+      });
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === "function") {
+        void (maybePromise as Promise<XhsMainWorldRequestResponseMessage | undefined>)
+          .then((message) => {
+            if (message) {
+              resolve(message);
+            }
+          })
+          .catch((error) => {
+            reject(error);
+          });
+      }
+    } catch (error) {
+      reject(error);
     }
   });
-  const record =
-    typeof result === "object" && result !== null && !Array.isArray(result)
-      ? (result as Record<string, unknown>)
-      : null;
-  const status = typeof record?.status === "number" ? record.status : null;
-  if (status === null || !Number.isFinite(status)) {
-    throw new Error("main world request returned invalid status");
+  if (!response.ok || !response.result) {
+    throw new Error(
+      typeof response.error?.message === "string"
+        ? response.error.message
+        : "xhs main-world request failed"
+    );
   }
-  return {
-    status,
-    body: record?.body ?? null
-  };
+  return response.result;
 };

@@ -731,7 +731,59 @@ const withMockMainWorld = async (
         callback?: (response?: Record<string, unknown>) => void
       ) => {
         let response: Record<string, unknown>;
-        if (message.kind !== "xhs-sign-request") {
+        if (message.kind === "xhs-main-world-request") {
+          const fetchHandler =
+            (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ ??
+            (globalThis as { fetch?: typeof fetch }).fetch;
+          if (typeof fetchHandler !== "function") {
+            response = {
+              ok: false,
+              error: {
+                code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
+                message: "main world fetch handler unavailable"
+              }
+            };
+          } else {
+            try {
+              const url = typeof message.url === "string" ? message.url : "";
+              const method = message.method === "GET" ? "GET" : "POST";
+              const headers =
+                typeof message.headers === "object" && message.headers !== null
+                  ? (message.headers as Record<string, string>)
+                  : {};
+              const body = typeof message.body === "string" ? message.body : undefined;
+              const referrer =
+                typeof message.referrer === "string" ? message.referrer : undefined;
+              const referrerPolicy =
+                typeof message.referrerPolicy === "string"
+                  ? message.referrerPolicy
+                  : undefined;
+              const fetchResult = await fetchHandler(url, {
+                method,
+                headers,
+                body,
+                credentials: "include",
+                ...(referrer ? { referrer } : {}),
+                ...(referrerPolicy ? { referrerPolicy } : {})
+              });
+              response = {
+                ok: true,
+                result: {
+                  status: fetchResult.status,
+                  body: await fetchResult.json()
+                }
+              };
+            } catch (error) {
+              response = {
+                ok: false,
+                error: {
+                  code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
+                  message: error instanceof Error ? error.message : String(error)
+                }
+              };
+            }
+          }
+        } else if (message.kind !== "xhs-sign-request") {
           response = {
             ok: false,
             error: {

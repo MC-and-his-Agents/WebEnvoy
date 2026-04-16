@@ -13,6 +13,7 @@ const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
 const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
+const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"];
 const editorInputSelectors = [
@@ -1153,6 +1154,10 @@ class ChromeBackgroundBridge {
         this.chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (this.#isXhsSignRequestMessage(message)) {
                 void this.#handleXhsSignRequest(message, sender, sendResponse);
+                return true;
+            }
+            if (this.#isXhsMainWorldRequestMessage(message)) {
+                void this.#handleXhsMainWorldRequest(message, sender, sendResponse);
                 return true;
             }
             this.#onContentScriptResult(message, sender);
@@ -3417,6 +3422,28 @@ class ChromeBackgroundBridge {
             record.uri.length > 0 &&
             asRecord(record.body) !== null);
     }
+    #isXhsMainWorldRequestMessage(message) {
+        const record = asRecord(message);
+        if (record?.kind !== "xhs-main-world-request" ||
+            typeof record.url !== "string" ||
+            (record.method !== "POST" && record.method !== "GET") ||
+            asRecord(record.headers) === null) {
+            return false;
+        }
+        if (record.body !== undefined && typeof record.body !== "string") {
+            return false;
+        }
+        if (record.timeout_ms !== undefined && readTimeoutMs(record.timeout_ms) === null) {
+            return false;
+        }
+        if (record.referrer !== undefined && asNonEmptyString(record.referrer) === null) {
+            return false;
+        }
+        if (record.referrerPolicy !== undefined && asNonEmptyString(record.referrerPolicy) === null) {
+            return false;
+        }
+        return true;
+    }
     async #executeXhsSignInMainWorld(tabId, uri, body) {
         if (!this.chromeApi.scripting?.executeScript) {
             throw new Error("chrome.scripting.executeScript is unavailable");
@@ -3457,6 +3484,78 @@ class ChromeBackgroundBridge {
             "X-t": signature["X-t"]
         };
     }
+    async #executeXhsRequestInMainWorld(tabId, input) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            throw new Error("chrome.scripting.executeScript is unavailable");
+        }
+        const results = await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: async (requestUrl, requestMethod, requestHeaders, requestBody, requestTimeoutMs, requestReferrer, requestReferrerPolicy) => {
+                const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+                    ? value
+                    : null;
+                const headersRecord = asRecord(requestHeaders) ?? {};
+                const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string"));
+                const timeoutMs = typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
+                    ? Math.max(1, Math.trunc(requestTimeoutMs))
+                    : 5_000;
+                const controller = new AbortController();
+                const timer = setTimeout(() => {
+                    controller.abort();
+                }, timeoutMs);
+                try {
+                    const response = await fetch(String(requestUrl), {
+                        method: requestMethod === "GET" ? "GET" : "POST",
+                        headers,
+                        credentials: "include",
+                        ...(typeof requestBody === "string" ? { body: requestBody } : {}),
+                        ...(typeof requestReferrer === "string" ? { referrer: requestReferrer } : {}),
+                        ...(typeof requestReferrerPolicy === "string"
+                            ? { referrerPolicy: requestReferrerPolicy }
+                            : {}),
+                        signal: controller.signal
+                    });
+                    const text = await response.text();
+                    let body = null;
+                    if (text.length > 0) {
+                        try {
+                            body = JSON.parse(text);
+                        }
+                        catch {
+                            body = { message: text };
+                        }
+                    }
+                    return {
+                        status: response.status,
+                        body
+                    };
+                }
+                finally {
+                    clearTimeout(timer);
+                }
+            },
+            args: [
+                input.url,
+                input.method,
+                input.headers,
+                input.body,
+                input.timeoutMs,
+                input.referrer,
+                input.referrerPolicy
+            ]
+        });
+        const first = Array.isArray(results) ? results[0] : null;
+        const response = asRecord(first?.result);
+        const status = typeof response?.status === "number" ? response.status : null;
+        if (status === null || !Number.isFinite(status)) {
+            throw new Error("main-world request returned invalid status");
+        }
+        return {
+            status,
+            body: response?.body ?? null
+        };
+    }
     async #handleXhsSignRequest(message, sender, sendResponse) {
         const tabId = asInteger(sender.tab?.id);
         const senderUrl = asNonEmptyString(sender.tab?.url);
@@ -3483,6 +3582,53 @@ class ChromeBackgroundBridge {
                 ok: false,
                 error: {
                     code: "ERR_XHS_SIGN_FAILED",
+                    message: error instanceof Error ? error.message : String(error)
+                }
+            });
+        }
+    }
+    async #handleXhsMainWorldRequest(message, sender, sendResponse) {
+        const tabId = asInteger(sender.tab?.id);
+        const senderUrl = asNonEmptyString(sender.tab?.url);
+        const parsedSenderUrl = senderUrl ? parseUrl(senderUrl) : null;
+        const parsedRequestUrl = parseUrl(message.url);
+        if (tabId === null ||
+            !parsedSenderUrl ||
+            !parsedRequestUrl ||
+            !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname) ||
+            !XHS_DOMAIN_ALLOWLIST.has(parsedRequestUrl.hostname) ||
+            parsedRequestUrl.pathname !== XHS_SEARCH_REQUEST_PATH) {
+            sendResponse({
+                ok: false,
+                error: {
+                    code: "ERR_XHS_MAIN_WORLD_REQUEST_FORBIDDEN",
+                    message: "xhs main-world request is out of allowlist scope"
+                }
+            });
+            return;
+        }
+        try {
+            const result = await this.#executeXhsRequestInMainWorld(tabId, {
+                url: message.url,
+                method: message.method,
+                headers: message.headers,
+                ...(typeof message.body === "string" ? { body: message.body } : {}),
+                timeoutMs: readTimeoutMs(message.timeout_ms) ?? 5_000,
+                ...(typeof message.referrer === "string" ? { referrer: message.referrer } : {}),
+                ...(typeof message.referrerPolicy === "string"
+                    ? { referrerPolicy: message.referrerPolicy }
+                    : {})
+            });
+            sendResponse({
+                ok: true,
+                result
+            });
+        }
+        catch (error) {
+            sendResponse({
+                ok: false,
+                error: {
+                    code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
                     message: error instanceof Error ? error.message : String(error)
                 }
             });
@@ -3849,12 +3995,9 @@ class ChromeBackgroundBridge {
         return probe[0]?.result === true;
     }
     #shouldEnsureMainWorldBridge(command, requestedExecutionMode) {
-        if (command !== "xhs.search") {
-            return false;
-        }
-        return (requestedExecutionMode !== null &&
-            requestedExecutionMode !== "dry_run" &&
-            requestedExecutionMode !== "recon");
+        void command;
+        void requestedExecutionMode;
+        return false;
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {

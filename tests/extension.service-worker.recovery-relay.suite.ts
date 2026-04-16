@@ -62,7 +62,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
         ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
     );
-    expect(mainWorldBridgeInject).toBeDefined();
+    expect(mainWorldBridgeInject).toBeUndefined();
 
     runtimeMessageListeners[0]?.(
       {
@@ -368,7 +368,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
         ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
     );
-    expect(proactiveMainWorldBridgeInject).toBeDefined();
+    expect(proactiveMainWorldBridgeInject).toBeUndefined();
     await vi.waitFor(() => {
       expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
         32,
@@ -565,7 +565,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
         ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
     );
-    expect(proactiveMainWorldBridgeInject).toBeDefined();
+    expect(proactiveMainWorldBridgeInject).toBeUndefined();
   });
 
   it("attests the active editor target when multiple editor candidates match", async () => {
