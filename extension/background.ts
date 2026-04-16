@@ -4703,8 +4703,9 @@ class ChromeBackgroundBridge {
       return false;
     }
     return (
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk"
+      requestedExecutionMode !== null &&
+      requestedExecutionMode !== "dry_run" &&
+      requestedExecutionMode !== "recon"
     );
   }
 

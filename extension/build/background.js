@@ -3745,8 +3745,9 @@ class ChromeBackgroundBridge {
         if (command !== "xhs.search") {
             return false;
         }
-        return (requestedExecutionMode === "live_read_limited" ||
-            requestedExecutionMode === "live_read_high_risk");
+        return (requestedExecutionMode !== null &&
+            requestedExecutionMode !== "dry_run" &&
+            requestedExecutionMode !== "recon");
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {

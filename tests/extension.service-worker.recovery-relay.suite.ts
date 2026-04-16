@@ -368,7 +368,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
         ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
     );
-    expect(proactiveMainWorldBridgeInject).toBeUndefined();
+    expect(proactiveMainWorldBridgeInject).toBeDefined();
     await vi.waitFor(() => {
       expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
         32,
@@ -479,6 +479,93 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         }
       }
     });
+  });
+
+  it("injects main-world bridge for issue_208 live_write xhs.search on recovered tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input) {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(1)",
+                  centerX: 200,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-recovery-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-recovery-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-recovery-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    const proactiveMainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(proactiveMainWorldBridgeInject).toBeDefined();
   });
 
   it("attests the active editor target when multiple editor candidates match", async () => {

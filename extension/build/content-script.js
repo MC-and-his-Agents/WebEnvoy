@@ -6279,6 +6279,12 @@ const createMainWorldBootstrapDetail = (secret) => {
         result_event: names.resultEvent
     };
 };
+const emitMainWorldBootstrap = (secret) => {
+    if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+        return;
+    }
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(secret)));
+};
 const resolveMainWorldEventNamesForSecret = (secret) => {
     const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
@@ -6352,7 +6358,7 @@ const installMainWorldEventChannelSecret = (secret) => {
     };
     mainWorldResultListener = onMainWorldResultEvent;
     mainWorldResultListenerEventName = names.resultEvent;
-    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret)));
+    emitMainWorldBootstrap(normalizedSecret);
     return true;
 };
 const resetMainWorldEventChannelForContract = () => {
@@ -6374,6 +6380,9 @@ const mainWorldCall = async (request) => {
             typeof window.dispatchEvent !== "function") {
             reject(new Error("main world event channel unavailable"));
             return;
+        }
+        if (request.type === "xhs-search-request") {
+            emitMainWorldBootstrap(mainWorldEventChannel.secret);
         }
         const responseTimeoutMs = request.type === "xhs-search-request" &&
             typeof request.payload.timeoutMs === "number" &&

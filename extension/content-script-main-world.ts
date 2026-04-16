@@ -79,6 +79,15 @@ const createMainWorldBootstrapDetail = (
   };
 };
 
+const emitMainWorldBootstrap = (secret: string): void => {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(
+    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(secret))
+  );
+};
+
 export const resolveMainWorldEventNamesForSecret = (
   secret: string
 ): { requestEvent: string; resultEvent: string } => {
@@ -166,9 +175,7 @@ export const installMainWorldEventChannelSecret = (secret: string | null): boole
   };
   mainWorldResultListener = onMainWorldResultEvent;
   mainWorldResultListenerEventName = names.resultEvent;
-  window.dispatchEvent(
-    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret))
-  );
+  emitMainWorldBootstrap(normalizedSecret);
   return true;
 };
 
@@ -198,6 +205,9 @@ const mainWorldCall = async <T>(request: {
     ) {
       reject(new Error("main world event channel unavailable"));
       return;
+    }
+    if (request.type === "xhs-search-request") {
+      emitMainWorldBootstrap(mainWorldEventChannel.secret);
     }
     const responseTimeoutMs =
       request.type === "xhs-search-request" &&
