@@ -36,6 +36,7 @@ type FingerprintPatchInstallContext = {
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+const MAIN_WORLD_BRIDGE_INSTALL_MARKER = "__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__";
 const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
 const XHS_SEARCH_REQUEST_HOST_ALLOWLIST = new Set([
   "www.xiaohongshu.com",
@@ -88,6 +89,7 @@ const DEFAULT_MIME_TYPE_DESCRIPTORS = [
 ] as const;
 
 const mainWindow = window as MainWorldWindow;
+const mainWorldGlobal = globalThis as typeof globalThis & Record<string, unknown>;
 
 const asRecord = (value: unknown): RecordValue | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -716,9 +718,12 @@ const ensureBootstrapListener = (): void => {
   );
 };
 
-const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
-if (expectedMainWorldEventChannel) {
-  attachMainWorldEventChannel(expectedMainWorldEventChannel);
-} else {
-  ensureBootstrapListener();
+if (mainWorldGlobal[MAIN_WORLD_BRIDGE_INSTALL_MARKER] !== true) {
+  mainWorldGlobal[MAIN_WORLD_BRIDGE_INSTALL_MARKER] = true;
+  const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+  if (expectedMainWorldEventChannel) {
+    attachMainWorldEventChannel(expectedMainWorldEventChannel);
+  } else {
+    ensureBootstrapListener();
+  }
 }

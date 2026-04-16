@@ -666,6 +666,77 @@ describe("extension service worker / recovery and relay prerequisites", () => {
     });
   });
 
+  it("does not reinject main-world bridge after the tab already reports it installed", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let mainWorldProbeCount = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
+      ) => {
+        if (input.world === "MAIN" && "func" in input && typeof input.func === "function") {
+          mainWorldProbeCount += 1;
+          return [{ result: mainWorldProbeCount >= 2 }];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-bridge-dedupe-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext(),
+      tabId: 32,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
+
+    const emitForward = (id: string, runId: string) => {
+      firstPort.onMessageListeners[0]?.({
+        id,
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: runId,
+          command: "xhs.search",
+          command_params: createRequestBoundXhsCommandParams({
+            runId,
+            requestId: id,
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            approval_record: createApprovedReadApprovalRecord(),
+            audit_record: createApprovedReadAuditRecordForRequest({
+              runId,
+              requestId: id
+            })
+          }),
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 100
+      });
+    };
+
+    emitForward("run-xhs-live-bridge-dedupe-001", "run-xhs-live-bridge-dedupe-001");
+    await waitForBridgeTurn();
+    emitForward("run-xhs-live-bridge-dedupe-002", "run-xhs-live-bridge-dedupe-002");
+    await waitForBridgeTurn();
+
+    const mainWorldBridgeInjectCalls = executeScript.mock.calls.filter(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(mainWorldBridgeInjectCalls).toHaveLength(1);
+  });
+
   it("annotates editor_input forward with debugger attach failure attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, debuggerAttach } = createChromeApi([firstPort]);

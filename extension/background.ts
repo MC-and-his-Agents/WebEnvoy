@@ -91,6 +91,7 @@ const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
+const mainWorldBridgeInstallMarker = "__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__";
 const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"] as const;
@@ -4688,11 +4689,31 @@ class ChromeBackgroundBridge {
     if (!this.chromeApi.scripting?.executeScript) {
       return;
     }
+    if (await this.#isMainWorldBridgeInstalled(tabId)) {
+      return;
+    }
     await this.chromeApi.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
       files: ["build/main-world-bridge.js"]
     });
+  }
+
+  async #isMainWorldBridgeInstalled(tabId: number): Promise<boolean> {
+    if (!this.chromeApi.scripting?.executeScript) {
+      return false;
+    }
+    const probe = await this.chromeApi.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (...args: unknown[]) => {
+        const marker = typeof args[0] === "string" ? args[0] : "";
+        const scope = globalThis as typeof globalThis & Record<string, unknown>;
+        return scope[marker] === true;
+      },
+      args: [mainWorldBridgeInstallMarker]
+    });
+    return probe[0]?.result === true;
   }
 
   #shouldEnsureMainWorldBridge(
