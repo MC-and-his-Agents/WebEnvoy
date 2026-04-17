@@ -90,6 +90,15 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   );
 };
 
+const explicitAdmissionRefMatchesCurrentGrant = (grantRefs, explicitRef) => {
+  const normalizedExplicitRef = asString(explicitRef);
+  if (normalizedExplicitRef === null) {
+    return false;
+  }
+
+  return asStringArray(grantRefs).includes(normalizedExplicitRef);
+};
+
 const normalizeApprovalAdmissionEvidence = (value) => {
   const record = asRecord(value);
   const checksRecord = asRecord(record?.checks);
@@ -384,22 +393,36 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
-  const explicitApprovalSatisfied = approvalAdmissionRequirementGaps.length === 0;
-  const explicitAuditSatisfied = auditAdmissionRequirementGaps.length === 0;
-  const explicitAdmissionSatisfied =
-    explicitApprovalSatisfied && explicitAuditSatisfied;
   const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
+  const explicitApprovalAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.approval_refs,
+      approvalAdmissionEvidence.approval_admission_ref
+    );
+  const explicitAuditAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.audit_refs,
+      auditAdmissionEvidence.audit_admission_ref
+    );
+  const explicitApprovalUsable =
+    approvalAdmissionRequirementGaps.length === 0 && explicitApprovalAlignedWithCurrentGrant;
+  const explicitAuditUsable =
+    auditAdmissionRequirementGaps.length === 0 && explicitAuditAlignedWithCurrentGrant;
+  const explicitAdmissionUsable =
+    explicitApprovalUsable && explicitAuditUsable;
   const effectiveApprovalAdmissionEvidence =
-    canonicalGrantBackedAdmission && !explicitApprovalSatisfied
+    canonicalGrantBackedAdmission && !explicitApprovalUsable
       ? normalizeApprovalAdmissionEvidence(null)
       : approvalAdmissionEvidence;
   const effectiveAuditAdmissionEvidence =
-    canonicalGrantBackedAdmission && !explicitAuditSatisfied
+    canonicalGrantBackedAdmission && !explicitAuditUsable
       ? normalizeAuditAdmissionEvidence(null)
       : auditAdmissionEvidence;
   const liveAdmissionSatisfied =
-    explicitAdmissionSatisfied || canonicalGrantBackedAdmission;
-  const canonicalApprovalRecord = explicitApprovalSatisfied
+    explicitAdmissionUsable || canonicalGrantBackedAdmission;
+  const canonicalApprovalRecord = explicitApprovalUsable
     ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
         decisionId: input.decisionId ?? null,
         approvalId: input.expectedApprovalId ?? null

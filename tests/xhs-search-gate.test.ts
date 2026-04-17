@@ -797,7 +797,7 @@ describe("xhs-search gate helpers", () => {
     expect(gate.execution_audit?.risk_signals).not.toContain("LIVE_MODE_APPROVED");
   });
 
-  it("blocks canonical live-read when consumed admission refs fall outside grant scope", () => {
+  it("drops stale explicit admission refs when the current canonical grant is still usable", () => {
     const runId = "run-extension-execution-audit-002";
     const requestId = "req-execution-audit-002";
     const sessionId = "session-extension-execution-audit-002";
@@ -842,28 +842,36 @@ describe("xhs-search gate helpers", () => {
       })
     });
 
-    expect(gate.request_admission_result).toMatchObject({
-      admission_decision: "blocked",
-      grant_match: false
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
     });
-    expect(gate.request_admission_result.reason_codes).toEqual(
-      expect.arrayContaining([
-        "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE",
-        "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
-      ])
-    );
+    expect(gate.gate_input.admission_context).toEqual({
+      approval_admission_evidence: expect.objectContaining({
+        approval_admission_ref: null
+      }),
+      audit_admission_evidence: expect.objectContaining({
+        audit_admission_ref: null
+      })
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      grant_match: true,
+      derived_from: {
+        approval_admission_ref: "approval_admission_other_request",
+        audit_admission_ref: "audit_admission_other_request"
+      }
+    });
     expect(gate.execution_audit).toMatchObject({
-      request_admission_decision: "blocked",
+      request_admission_decision: "allowed",
       compatibility_refs: {
-        approval_admission_ref: null,
-        audit_admission_ref: null,
-        approval_record_ref: null,
+        approval_admission_ref: "approval_admission_other_request",
+        audit_admission_ref: "audit_admission_other_request",
+        approval_record_ref: `gate_appr_${decisionId}`,
         audit_record_ref: `gate_evt_${decisionId}`
       },
-      risk_signals: expect.arrayContaining([
-        "APPROVAL_ADMISSION_REF_OUT_OF_SCOPE",
-        "AUDIT_ADMISSION_REF_OUT_OF_SCOPE"
-      ])
+      risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]
     });
   });
 
@@ -1499,6 +1507,92 @@ describe("xhs-search gate helpers", () => {
       approved: true,
       approver: "qa-reviewer",
       approved_at: "2026-03-23T10:00:00.000Z"
+    });
+  });
+
+  it("drops stale explicit approval refs before canonical fallback and allows the renewed grant", () => {
+    const runId = "run-extension-execution-audit-003ba";
+    const requestId = "req-execution-audit-003ba";
+    const sessionId = "session-extension-execution-audit-003ba";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003ba"
+    );
+    const admissionContext = createAdmissionContext({
+      run_id: runId,
+      request_id: requestId,
+      session_id: sessionId,
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
+
+    admissionContext.approval_admission_evidence.approval_admission_ref =
+      "approval_admission_external_stale_003ba";
+    admissionContext.audit_admission_evidence.audit_admission_ref = null;
+    admissionContext.audit_admission_evidence.recorded_at = null;
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext,
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_current_003ba"],
+        auditRefs: ["audit_admission_external_current_003ba"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(gate.gate_input.admission_context).toEqual({
+      approval_admission_evidence: expect.objectContaining({
+        approval_admission_ref: null
+      }),
+      audit_admission_evidence: expect.objectContaining({
+        audit_admission_ref: null
+      })
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_current_003ba",
+        audit_admission_ref: "audit_admission_external_current_003ba"
+      }
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "allowed",
+      compatibility_refs: {
+        approval_admission_ref: "approval_admission_external_current_003ba",
+        audit_admission_ref: "audit_admission_external_current_003ba"
+      }
+    });
+    expect(gate.approval_record).toMatchObject({
+      approval_id: approvalId,
+      decision_id: decisionId,
+      approved: true,
+      approver: "authorization_grant"
     });
   });
 
