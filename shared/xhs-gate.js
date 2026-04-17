@@ -1746,7 +1746,7 @@ const evaluateXhsGate = (input) => {
       asString(explicitApprovalEvidence?.approval_admission_ref) === null;
     const canBackfillAuditAdmissionRef =
       asString(explicitAuditEvidence?.audit_admission_ref) === null;
-    if (compatibilityRefs && derivedFrom) {
+    if (compatibilityRefs && derivedFrom && requestAdmissionResult?.admission_decision === "allowed") {
       if (
         canBackfillApprovalAdmissionRef &&
         compatibilityRefs.approval_admission_ref === null &&

@@ -598,6 +598,91 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
+  it("does not expose execution_audit compatibility refs when a canonical loopback grant is blocked", async () => {
+    const runId = "run-loopback-blocked-canonical-grant-001";
+    const requestId = "issue209-live-blocked-canonical-grant-001";
+    const targetTabId = 38;
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "blocked-canonical-grant-001"
+    );
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const blockedAuthorizationRequest = buildCanonicalReadAuthorizationRequest({
+      requestRef: `upstream_req_${requestId}`,
+      targetTabId,
+      profileRef: "loopback_profile",
+      approvalRefs: ["approval_admission_external_blocked_loopback_001"],
+      auditRefs: ["audit_admission_external_blocked_loopback_001"],
+      resourceStateSnapshot: "active"
+    });
+    blockedAuthorizationRequest.authorization_grant.target_scope.allowed_domains = [
+      "creator.xiaohongshu.com"
+    ];
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          upstream_authorization_request: blockedAuthorizationRequest
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: decisionId,
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["TARGET_DOMAIN_OUT_OF_SCOPE"])
+        }),
+        request_admission_result: expect.objectContaining({
+          admission_decision: "blocked",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: "approval_admission_external_blocked_loopback_001",
+            audit_admission_ref: "audit_admission_external_blocked_loopback_001"
+          })
+        }),
+        execution_audit: expect.objectContaining({
+          request_admission_decision: "blocked",
+          compatibility_refs: expect.objectContaining({
+            approval_admission_ref: null,
+            audit_admission_ref: null
+          })
+        })
+      })
+    );
+    expect(result.payload?.details).toEqual(
+      expect.objectContaining({
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      })
+    );
+  });
+
   it("keeps canonical execution_audit on execution failures without leaking into observability", async () => {
     const runId = "run-loopback-live-read-failure-001";
     const requestId = "issue209-live-read-failure-001";
