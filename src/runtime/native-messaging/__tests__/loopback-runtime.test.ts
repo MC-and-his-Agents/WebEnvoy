@@ -173,8 +173,8 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
 
-  it("blocks stale approval linkage in live loopback bundles", async () => {
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+  it("ignores stale caller approval linkage in live loopback bundles when canonical grant refs authorize the request", async () => {
+    const { gateInvocationId } = createIssue209InvocationLinkage(
       "run-loopback-custom-approval-001",
       "custom-approval-001"
     );
@@ -231,47 +231,62 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.payload).toEqual(
+    expect(result.ok).toBe(true);
+    expect(result.payload.summary).toEqual(
       expect.objectContaining({
-        execution_audit: expect.objectContaining({
-          audit_ref: `exec_audit_${decisionId}`,
+        request_admission_result: expect.objectContaining({
           request_ref: "upstream_loopback_custom_approval_001",
-          request_admission_decision: "blocked",
+          admission_decision: "allowed",
+          effective_runtime_mode: "live_read_high_risk",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: "approval_admission_external_001",
+            audit_admission_ref: "audit_admission_external_001"
+          })
+        }),
+        execution_audit: expect.objectContaining({
+          audit_ref: expect.stringMatching(/^exec_audit_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          request_ref: "upstream_loopback_custom_approval_001",
+          request_admission_decision: "allowed",
           compatibility_refs: expect.objectContaining({
-            approval_admission_ref: null,
-            audit_admission_ref: null,
-            approval_record_ref: null,
-            audit_record_ref: `gate_evt_${decisionId}`
+            approval_admission_ref: "approval_admission_external_001",
+            audit_admission_ref: "audit_admission_external_001",
+            approval_record_ref: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+            audit_record_ref: expect.stringMatching(/^gate_evt_gate_decision_issue209-gate-run-loopback-custom-approval-001-/)
           }),
-          risk_signals: expect.arrayContaining([
-            "MANUAL_CONFIRMATION_MISSING",
-            "AUDIT_RECORD_MISSING"
-          ])
+          risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]
         }),
         gate_outcome: expect.objectContaining({
-          decision_id: decisionId,
-          effective_execution_mode: "dry_run",
-          gate_decision: "blocked",
-          gate_reasons: expect.arrayContaining([
-            "MANUAL_CONFIRMATION_MISSING",
-            "AUDIT_RECORD_MISSING"
-          ])
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
         }),
         approval_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          decision_id: expect.stringMatching(/^gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          approved: false,
+          approver: null
         }),
         audit_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          decision_id: expect.stringMatching(/^gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          gate_decision: "allowed"
+        })
+      })
+    );
+    expect(result.payload.summary?.gate_input).toEqual(
+      expect.objectContaining({
+        admission_context: expect.objectContaining({
+          approval_admission_evidence: expect.objectContaining({
+            approval_admission_ref: null
+          }),
+          audit_admission_evidence: expect.objectContaining({
+            audit_admission_ref: null
+          })
         })
       })
     );
     expect(result.payload.observability).toMatchObject({
-      failure_site: {
-        summary: "MANUAL_CONFIRMATION_MISSING"
-      }
+      failure_site: null
     });
     expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
