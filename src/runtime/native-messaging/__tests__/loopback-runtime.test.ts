@@ -263,8 +263,16 @@ describe("native messaging legacy loopback runtime", () => {
         approval_record: expect.objectContaining({
           approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
           decision_id: expect.stringMatching(/^gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
-          approved: false,
-          approver: null
+          approved: true,
+          approver: "authorization_grant",
+          approved_at: "2026-04-15T09:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
         }),
         audit_record: expect.objectContaining({
           approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),

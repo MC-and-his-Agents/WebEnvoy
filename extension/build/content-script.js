@@ -1730,6 +1730,15 @@ const buildApprovalRecordFromAdmissionEvidence = (approvalAdmissionEvidence, exp
   )
 });
 
+const buildSyntheticApprovalRecordFromCanonicalGrant = (expected) => ({
+  approval_id: expected.approvalId ?? null,
+  decision_id: expected.decisionId ?? null,
+  approved: true,
+  approver: "authorization_grant",
+  approved_at: expected.approvedAt ?? "1970-01-01T00:00:00.000Z",
+  checks: Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]))
+});
+
 const resolveIssue209ApprovalAdmissionRequirementGaps = (
   requirements,
   approvalAdmissionEvidence,
@@ -1968,7 +1977,13 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
         decisionId: input.decisionId ?? null,
         approvalId: input.expectedApprovalId ?? null
       })
-    : approvalRecord;
+    : canonicalGrantBackedAdmission
+      ? buildSyntheticApprovalRecordFromCanonicalGrant({
+          decisionId: input.decisionId ?? null,
+          approvalId: input.expectedApprovalId ?? null,
+          approvedAt: asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at)
+        })
+      : approvalRecord;
 
   if (!liveAdmissionSatisfied && approvalAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");

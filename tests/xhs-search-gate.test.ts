@@ -929,6 +929,20 @@ describe("xhs-search gate helpers", () => {
         audit_record_ref: `gate_evt_${decisionId}`
       }
     });
+    expect(gate.approval_record).toMatchObject({
+      approval_id: `gate_appr_${decisionId}`,
+      decision_id: decisionId,
+      approved: true,
+      approver: "authorization_grant",
+      approved_at: "2026-04-15T09:00:00.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
   });
 
   it("uses the first valid grant ref when canonical live-read grant arrays contain leading empty slots", () => {
