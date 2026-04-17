@@ -1218,6 +1218,7 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const canonicalGrantActionType = asString(canonicalGrantActionRequest?.action_category);
   const canonicalGrantResourceKind = asString(canonicalGrantResourceBinding?.resource_kind);
   const canonicalGrantProfileRef = asString(canonicalGrantResourceBinding?.profile_ref);
+  const canonicalGrantBindingConstraints = asObject(canonicalGrantResourceBinding?.binding_constraints);
   const canonicalGrantDomain = asString(canonicalGrantRuntimeTarget?.domain);
   const canonicalGrantPage = asString(canonicalGrantRuntimeTarget?.page);
   const canonicalGrantTabId = asInteger(canonicalGrantRuntimeTarget?.tab_id);
@@ -1236,6 +1237,17 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     canonicalGrantDomain === current.targetDomain &&
     canonicalGrantPage === current.targetPage &&
     canonicalGrantTabId === current.targetTabId;
+  const canonicalGrantHasSupportedResourceKind =
+    canonicalGrantResourceKind !== null &&
+    UPSTREAM_RESOURCE_KINDS.has(canonicalGrantResourceKind as UpstreamResourceKind);
+  const canonicalGrantHasExecutableBinding =
+    canonicalGrantResourceKind === "profile_session"
+      ? canonicalGrantProfileRef !== null
+      : canonicalGrantResourceKind === "anonymous_context"
+        ? canonicalGrantProfileRef === null &&
+          canonicalGrantBindingConstraints?.anonymous_required === true &&
+          canonicalGrantBindingConstraints?.reuse_logged_in_context_forbidden === true
+        : false;
   const canonicalGrantCanDriveAdmission =
     canonicalGrantActionRequest !== null &&
     canonicalGrantResourceBinding !== null &&
@@ -1249,7 +1261,8 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     canonicalGrantSupportsRequestedMode &&
     canonicalGrantActionType === current.actionType &&
     canonicalGrantMatchesCurrentTarget &&
-    canonicalGrantResourceKind !== null &&
+    canonicalGrantHasSupportedResourceKind &&
+    canonicalGrantHasExecutableBinding &&
     canonicalGrantDomain !== null &&
     canonicalGrantPage !== null &&
     (asStringArray(canonicalGrant?.allowed_actions)?.includes(
