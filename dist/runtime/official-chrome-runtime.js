@@ -196,7 +196,6 @@ export const prepareOfficialChromeRuntime = async (input) => {
     let bootstrapState = typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
     let transportState = typeof status.transportState === "string" ? status.transportState : "not_connected";
     let orphanRecoverable = status.orphanRecoverable === true;
-    let attachableReadyRuntime = status.attachableReadyRuntime === true;
     const syncRuntimeStatus = (nextStatus) => {
         status = nextStatus;
         profileState =
@@ -212,7 +211,6 @@ export const prepareOfficialChromeRuntime = async (input) => {
         transportState =
             typeof status.transportState === "string" ? status.transportState : "not_connected";
         orphanRecoverable = status.orphanRecoverable === true;
-        attachableReadyRuntime = status.attachableReadyRuntime === true;
     };
     const buildBaseDetails = () => ({
         ability_id: input.consumerId,
@@ -228,7 +226,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
     const shouldAttemptAttach = !lockHeld &&
         identityBindingState === "bound" &&
         bootstrapState !== "stale" &&
-        ((attachableReadyRuntime && transportState === "ready") ||
+        ((profileState === "ready" && transportState === "ready") ||
             (runtimeReadiness === "recoverable" &&
                 orphanRecoverable &&
                 (profileState === "disconnected" || profileState === "ready")));

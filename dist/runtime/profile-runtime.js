@@ -646,12 +646,6 @@ export class ProfileRuntimeService {
             identityPreflight,
             profileState: accessState.profileState
         });
-        const attachableReadyRuntime = canAttachReadyRuntime({
-            healthyLock: accessState.healthyLock,
-            profileState: accessState.profileState,
-            pinnedControllerPid,
-            readiness
-        });
         return {
             profile: input.profile,
             profileState: accessState.profileState,
@@ -665,7 +659,6 @@ export class ProfileRuntimeService {
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: lock?.ownerPid ?? null,
-            attachableReadyRuntime,
             orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,

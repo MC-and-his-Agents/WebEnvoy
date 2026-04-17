@@ -1898,8 +1898,7 @@ describe("profile-runtime identity preflight", () => {
       identityBindingState: "bound",
       transportState: "ready",
       bootstrapState: "ready",
-      runtimeReadiness: "blocked",
-      attachableReadyRuntime: true
+      runtimeReadiness: "blocked"
     });
   });
 
@@ -2118,8 +2117,7 @@ describe("profile-runtime identity preflight", () => {
       lockHeld: false,
       transportState: "not_connected",
       bootstrapState: "not_started",
-      runtimeReadiness: "blocked",
-      attachableReadyRuntime: false
+      runtimeReadiness: "blocked"
     });
 
     await expect(
@@ -2243,8 +2241,7 @@ describe("profile-runtime identity preflight", () => {
       lockHeld: false,
       transportState: "ready",
       bootstrapState: "failed",
-      runtimeReadiness: "blocked",
-      attachableReadyRuntime: true
+      runtimeReadiness: "blocked"
     });
 
     await expect(
@@ -2944,8 +2941,7 @@ describe("profile-runtime identity preflight", () => {
       lockHeld: false,
       transportState: "not_connected",
       bootstrapState: "pending",
-      runtimeReadiness: "blocked",
-      attachableReadyRuntime: false
+      runtimeReadiness: "blocked"
     });
 
     await expect(
