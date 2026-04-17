@@ -4262,8 +4262,21 @@ class ChromeBackgroundBridge {
     const allowed = finalizedGate.allowed;
     const resolvedEffectiveExecutionMode =
       finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
+    const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
+      commandParams: normalizeXhsSearchCommandParams(commandParams, targetTabId),
+      requestedExecutionMode: canonicalRequestedExecutionMode,
+      legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
+      upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest
+    });
+    const canonicalGateRequest: BridgeRequest = {
+      ...request,
+      params: {
+        ...request.params,
+        command_params: forwardCommandParams
+      }
+    };
     const sharedCanonicalGate = buildCanonicalGateAuditArtifacts({
-      request,
+      request: canonicalGateRequest,
       issueScope: canonicalIssueScope,
       riskState: canonicalRiskState,
       targetDomain,
@@ -4354,7 +4367,7 @@ class ChromeBackgroundBridge {
     });
     const resolvedRiskState = resolveSharedRiskState(riskTransitionAudit.next_state);
     const gatePayload = createBackgroundXhsGatePayload({
-      request,
+      request: canonicalGateRequest,
       issueScope: canonicalIssueScope,
       riskState: canonicalRiskState,
       resolvedRiskState,
@@ -4378,12 +4391,6 @@ class ChromeBackgroundBridge {
       writeMatrixDecision: gateState.writeMatrixDecision,
       writeGateOnlyDecision: writeGateOnlyApprovalDecision,
       riskTransitionAudit
-    });
-    const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
-      commandParams: normalizeXhsSearchCommandParams(commandParams, targetTabId),
-      requestedExecutionMode: canonicalRequestedExecutionMode,
-      legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
-      upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest
     });
     return {
       allowed,

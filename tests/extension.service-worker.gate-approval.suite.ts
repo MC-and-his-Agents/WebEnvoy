@@ -386,7 +386,10 @@ describe("extension service worker / gate and approval", () => {
       .find((message) => message.id === runId);
     expect(forwarded?.status).toBe("error");
     const payload = asRecord(forwarded?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
     const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const approvalRecord = asRecord(payload.approval_record);
+    const auditRecord = asRecord(payload.audit_record);
     const requestAdmissionResult = asRecord(payload.request_admission_result);
     const executionAudit = asRecord(payload.execution_audit);
     expect(consumerGateResult).toMatchObject({
@@ -394,6 +397,9 @@ describe("extension service worker / gate and approval", () => {
       effective_execution_mode: "live_read_high_risk",
       issue_scope: "issue_209"
     });
+    expect(gateOutcome?.decision_id).toBe(approvalRecord?.decision_id);
+    expect(gateOutcome?.decision_id).toBe(auditRecord?.decision_id);
+    expect(approvalRecord?.approval_id).toBe(auditRecord?.approval_id);
     expect(requestAdmissionResult).toMatchObject({
       admission_decision: "allowed",
       effective_runtime_mode: "live_read_high_risk",
