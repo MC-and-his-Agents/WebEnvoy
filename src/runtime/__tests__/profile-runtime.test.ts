@@ -2265,6 +2265,126 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("keeps ready-runtime attach blocked when readiness failed with a context conflict", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-conflict-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_ready_conflict_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: false as const,
+              error: {
+                code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+                message: "runtime context conflicted"
+              },
+              payload: null,
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_ready_conflict_profile",
+      runId: "run-runtime-ready-conflict-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+    await writeFile(
+      join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "attach_ready_conflict_profile",
+        BROWSER_STATE_FILENAME
+      ),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-ready-conflict-token-001",
+          profileDir: join(baseDir, ".webenvoy", "profiles", "attach_ready_conflict_profile"),
+          runId: "run-runtime-ready-conflict-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_conflict_profile",
+        runId: "run-runtime-ready-conflict-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_ready_conflict_profile",
+        runId: "run-runtime-ready-conflict-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
   it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
     tempDirs.push(baseDir);

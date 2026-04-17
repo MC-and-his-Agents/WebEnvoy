@@ -85,8 +85,11 @@ const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean =>
 };
 
 const hasVerifiedReadyRuntimeSignal = (readiness: RuntimeReadinessSnapshot): boolean =>
+  readiness.identityBindingState === "bound" &&
   readiness.transportState === "ready" &&
-  readiness.bootstrapState !== "stale";
+  readiness.bootstrapState !== "stale" &&
+  ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH") &&
+  ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
 
 const canAttachReadyRuntime = (input: {
   healthyLock: boolean;

@@ -22,8 +22,11 @@ const hasRequestedPersistentExtensionIdentity = (params) => {
     const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
     return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
-const hasVerifiedReadyRuntimeSignal = (readiness) => readiness.transportState === "ready" &&
-    readiness.bootstrapState !== "stale";
+const hasVerifiedReadyRuntimeSignal = (readiness) => readiness.identityBindingState === "bound" &&
+    readiness.transportState === "ready" &&
+    readiness.bootstrapState !== "stale" &&
+    (readiness.details?.code !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH") &&
+    (readiness.details?.code !== "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
 const canAttachReadyRuntime = (input) => input.healthyLock &&
     input.profileState === "ready" &&
     Number.isInteger(input.pinnedControllerPid) &&
