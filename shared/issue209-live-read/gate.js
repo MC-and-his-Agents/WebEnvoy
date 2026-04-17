@@ -72,6 +72,10 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const resourceBinding = asRecord(upstream?.resource_binding);
   const authorizationGrant = asRecord(upstream?.authorization_grant);
   const runtimeTarget = asRecord(upstream?.runtime_target);
+  const actionRequestRef = asString(actionRequest?.request_ref);
+  const resourceBindingRef = asString(resourceBinding?.binding_ref);
+  const authorizationGrantRef = asString(authorizationGrant?.grant_ref);
+  const runtimeTargetRef = asString(runtimeTarget?.target_ref);
 
   return (
     liveRequirements.length > 0 &&
@@ -83,6 +87,10 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
     resourceBinding !== null &&
     authorizationGrant !== null &&
     runtimeTarget !== null &&
+    actionRequestRef !== null &&
+    resourceBindingRef !== null &&
+    authorizationGrantRef !== null &&
+    runtimeTargetRef !== null &&
     resolveCanonicalGrantApprovedAt(input) !== null &&
     asStringArray(authorizationGrant.approval_refs).length > 0 &&
     asStringArray(authorizationGrant.audit_refs).length > 0

@@ -960,6 +960,66 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("rejects canonical live-read from direct shared-gate requests when four-object refs are missing", () => {
+    const runId = "run-extension-execution-audit-003-missing-refs";
+    const requestId = "req-execution-audit-003-missing-refs";
+    const sessionId = "session-extension-execution-audit-003-missing-refs";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003-missing-refs"
+    );
+    const upstreamAuthorizationRequest = createUpstreamAuthorizationRequest({
+      resourceKind: "profile_session",
+      profileRef: "profile-session-001",
+      allowedResourceKinds: ["profile_session"],
+      allowedProfileRefs: ["profile-session-001"],
+      approvalRefs: ["approval_admission_external_missing_ref_001"],
+      auditRefs: ["audit_admission_external_missing_ref_001"],
+      resourceStateSnapshot: "active"
+    });
+
+    delete upstreamAuthorizationRequest.action_request.request_ref;
+    delete upstreamAuthorizationRequest.resource_binding.binding_ref;
+    delete upstreamAuthorizationRequest.authorization_grant.grant_ref;
+    delete upstreamAuthorizationRequest.runtime_target.target_ref;
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      gate_reasons: expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "APPROVAL_CHECKS_INCOMPLETE",
+        "AUDIT_RECORD_MISSING"
+      ])
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked"
+    });
+    expect(gate.execution_audit).toBeNull();
+  });
+
   it("does not publish execution_audit compatibility refs when a canonical grant is blocked", () => {
     const runId = "run-extension-execution-audit-003-blocked-scope";
     const requestId = "req-execution-audit-003-blocked-scope";
