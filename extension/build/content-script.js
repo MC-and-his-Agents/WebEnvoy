@@ -1678,8 +1678,8 @@ const hasExplicitAdmissionEvidence = (admissionContext) => {
 };
 
 const resolveCanonicalGrantApprovedAt = (input) =>
-  asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at) ??
-  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at) ??
+  asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at);
 
 const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
@@ -1998,11 +1998,17 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
-  const canonicalGrantBackedAdmission =
-    !hasExplicitAdmissionEvidence(admissionContext) &&
-    hasCanonicalGrantBackedAdmission(input, liveRequirements);
   const explicitAdmissionSatisfied =
     approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
+  const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
+  const effectiveAdmissionContext =
+    canonicalGrantBackedAdmission && !explicitAdmissionSatisfied ? null : admissionContext;
+  const effectiveApprovalAdmissionEvidence = normalizeApprovalAdmissionEvidence(
+    effectiveAdmissionContext?.approval_admission_evidence
+  );
+  const effectiveAuditAdmissionEvidence = normalizeAuditAdmissionEvidence(
+    effectiveAdmissionContext?.audit_admission_evidence
+  );
   const liveAdmissionSatisfied =
     explicitAdmissionSatisfied || canonicalGrantBackedAdmission;
   const canonicalApprovalRecord = explicitAdmissionSatisfied
@@ -2038,8 +2044,8 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     gateReasons,
     approvalRecord: canonicalApprovalRecord,
     admissionContext: {
-      approval_admission_evidence: approvalAdmissionEvidence,
-      audit_admission_evidence: auditAdmissionEvidence
+      approval_admission_evidence: effectiveApprovalAdmissionEvidence,
+      audit_admission_evidence: effectiveAuditAdmissionEvidence
     },
     writeGateOnlyEligible: false,
     writeGateOnlyDecision: null,

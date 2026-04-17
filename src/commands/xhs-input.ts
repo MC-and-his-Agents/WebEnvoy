@@ -1225,7 +1225,7 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     asString(canonicalGrant?.resource_state_snapshot) as ResourceStateSnapshot | undefined
   );
   const canonicalGrantRequestedAt =
-    asString(canonicalGrantActionRequest?.requested_at) ?? asString(canonicalGrant?.granted_at);
+    asString(canonicalGrant?.granted_at) ?? asString(canonicalGrantActionRequest?.requested_at);
   const canonicalGrantSupportsRequestedMode =
     input.options.requested_execution_mode === "live_read_high_risk"
       ? canonicalGrantRiskState === "allowed"

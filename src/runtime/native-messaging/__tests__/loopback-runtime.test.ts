@@ -503,6 +503,101 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
+  it("ignores stale legacy admission_context on the loopback path when canonical grant-backed live-read is valid", async () => {
+    const runId = "run-loopback-stale-admission-001";
+    const requestId = "issue209-live-stale-admission-001";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "stale-admission-001"
+    );
+    const staleAdmissionContext = createApprovedReadAdmissionContext({
+      runId: "run-loopback-stale-admission-old",
+      requestId,
+      targetTabId: 33,
+      requestedExecutionMode: "live_read_high_risk",
+      riskState: "allowed"
+    });
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 33,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          admission_context: staleAdmissionContext,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId: 33,
+            profileRef: "loopback_profile",
+            approvalRefs: ["approval_admission_external_stale_001"],
+            auditRefs: ["audit_admission_external_stale_001"],
+            resourceStateSnapshot: "active"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            admission_decision: "allowed",
+            derived_from: expect.objectContaining({
+              approval_admission_ref: "approval_admission_external_stale_001",
+              audit_admission_ref: "audit_admission_external_stale_001"
+            })
+          }),
+          gate_input: expect.objectContaining({
+            admission_context: expect.objectContaining({
+              approval_admission_evidence: expect.objectContaining({
+                approval_admission_ref: null
+              }),
+              audit_admission_evidence: expect.objectContaining({
+                audit_admission_ref: null
+              })
+            })
+          }),
+          approval_record: expect.objectContaining({
+            approval_id: expect.stringMatching(
+              /^gate_appr_gate_decision_issue209-gate-run-loopback-stale-admission-001-/
+            ),
+            decision_id: decisionId,
+            approved: true,
+            approver: "authorization_grant"
+          }),
+          gate_outcome: expect.objectContaining({
+            gate_decision: "allowed",
+            effective_execution_mode: "live_read_high_risk",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          })
+        })
+      })
+    );
+  });
+
   it("keeps canonical execution_audit on execution failures without leaking into observability", async () => {
     const runId = "run-loopback-live-read-failure-001";
     const requestId = "issue209-live-read-failure-001";
