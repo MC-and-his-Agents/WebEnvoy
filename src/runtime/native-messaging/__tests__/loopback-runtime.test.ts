@@ -1028,7 +1028,7 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
-  it("blocks stale admission evidence in loopback bundles even when caller records match current decision", async () => {
+  it("drops stale admission evidence in loopback bundles so canonical grant refs still allow live reads", async () => {
     const runId = "run-loopback-live-admission-stale-001";
     const requestId = "issue209-live-admission-current-001";
     const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
@@ -1116,22 +1116,31 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.payload).toEqual(
+    expect(result.ok).toBe(true);
+    expect(result.payload?.summary).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
           decision_id: decisionId,
-          gate_decision: "blocked",
-          effective_execution_mode: "recon",
-          gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
+          gate_decision: "allowed",
+          effective_execution_mode: "live_read_limited"
         }),
         approval_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: approvalId,
+          decision_id: decisionId,
+          approved: true,
+          approver: "authorization_grant"
         }),
         audit_record: expect.objectContaining({
-          approval_id: null,
+          approval_id: approvalId,
           decision_id: decisionId
+        }),
+        request_admission_result: expect.objectContaining({
+          admission_decision: "allowed",
+          effective_runtime_mode: "live_read_limited",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef
+          })
         })
       })
     );

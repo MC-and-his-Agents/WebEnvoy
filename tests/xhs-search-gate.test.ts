@@ -11,6 +11,7 @@ import {
 } from "../shared/issue209-live-read/source-validation.js";
 import { buildLoopbackGate } from "../src/runtime/native-messaging/loopback-gate.js";
 import { buildLoopbackGatePayload } from "../src/runtime/native-messaging/loopback-gate-payload.js";
+import { ensureIssue209AdmissionContextForContract } from "../src/commands/xhs-input.js";
 
 const createAdmissionContext = (input?: {
   run_id?: string;
@@ -941,6 +942,77 @@ describe("xhs-search gate helpers", () => {
         target_page_confirmed: true,
         risk_state_checked: true,
         action_type_confirmed: true
+      }
+    });
+  });
+
+  it("drops stale mixed-client admission_context before canonical grant-backed live-read gating", () => {
+    const runId = "run-extension-execution-audit-003b";
+    const requestId = "req-execution-audit-003b";
+    const sessionId = "session-extension-execution-audit-003b";
+    const { gateInvocationId } = createIssue209InvocationLinkage(runId, "execution-audit-003b");
+
+    const preparedOptions = ensureIssue209AdmissionContextForContract({
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_high_risk",
+        risk_state: "allowed",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-stale-mixed-client",
+          request_id: requestId
+        })
+      },
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId
+    });
+
+    expect(preparedOptions).not.toHaveProperty("admission_context");
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext: preparedOptions.admission_context,
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_003b"],
+        auditRefs: ["audit_admission_external_003b"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_003b",
+        audit_admission_ref: "audit_admission_external_003b"
       }
     });
   });

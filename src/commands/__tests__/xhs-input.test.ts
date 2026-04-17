@@ -692,10 +692,11 @@ describe("xhs-input", () => {
     expect(options).not.toHaveProperty("admission_context");
   });
 
-  it("preserves conflicting caller admission_context when legacy execution artifacts are also present", () => {
+  it("replaces stale caller admission_context with current linkage when formal legacy execution artifacts are complete", () => {
     const decisionId =
       "gate_decision_issue209-gate-run-cli-issue209-formal-source-conflict-001-001";
     const approvalId = `gate_appr_${decisionId}`;
+    const gateInvocationId = "issue209-gate-run-cli-issue209-formal-source-conflict-001-001";
     const options = ensureIssue209AdmissionContextForContract({
       options: {
         issue_scope: "issue_209",
@@ -787,27 +788,17 @@ describe("xhs-input", () => {
       },
       runId: "run-cli-issue209-formal-source-conflict-001",
       requestId: "issue209-live-formal-source-conflict-001",
-      gateInvocationId: "issue209-gate-run-cli-issue209-formal-source-conflict-001-001",
+      gateInvocationId,
       sessionId: "nm-session-001"
     });
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
-        approval_admission_ref: "approval_admission_conflict",
+        approval_admission_ref: `approval_admission_${gateInvocationId}`,
+        decision_id: decisionId,
+        approval_id: approvalId,
         request_id: "issue209-live-formal-source-conflict-001",
-        run_id: "run-cli-issue209-formal-source-conflict-stale",
-        session_id: "nm-session-001",
-        issue_scope: "issue_209",
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 32,
-        target_page: "search_result_tab",
-        action_type: "read",
-        requested_execution_mode: "live_read_limited"
-      },
-      audit_admission_evidence: {
-        audit_admission_ref: "audit_admission_conflict",
-        request_id: "issue209-live-formal-source-conflict-001",
-        run_id: "run-cli-issue209-formal-source-conflict-stale",
+        run_id: "run-cli-issue209-formal-source-conflict-001",
         session_id: "nm-session-001",
         issue_scope: "issue_209",
         target_domain: "www.xiaohongshu.com",
@@ -815,7 +806,26 @@ describe("xhs-input", () => {
         target_page: "search_result_tab",
         action_type: "read",
         requested_execution_mode: "live_read_limited",
-        risk_state: "limited"
+        approved: true,
+        approver: "qa-reviewer",
+        approved_at: "2026-03-23T10:00:00Z",
+        recorded_at: "2026-03-23T10:00:00Z"
+      },
+      audit_admission_evidence: {
+        audit_admission_ref: `audit_admission_${gateInvocationId}`,
+        decision_id: decisionId,
+        approval_id: approvalId,
+        request_id: "issue209-live-formal-source-conflict-001",
+        run_id: "run-cli-issue209-formal-source-conflict-001",
+        session_id: "nm-session-001",
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        recorded_at: "2026-03-23T10:05:00Z"
       }
     });
   });
