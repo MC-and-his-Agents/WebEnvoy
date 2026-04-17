@@ -931,6 +931,65 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("uses the first valid grant ref when canonical live-read grant arrays contain leading empty slots", () => {
+    const runId = "run-extension-execution-audit-003a";
+    const requestId = "req-execution-audit-003a";
+    const sessionId = "session-extension-execution-audit-003a";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003a"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["", "approval_admission_external_003a"],
+        auditRefs: [null, "audit_admission_external_003a"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_003a",
+        audit_admission_ref: "audit_admission_external_003a"
+      }
+    });
+    expect(gate.execution_audit).toMatchObject({
+      audit_ref: `exec_audit_${decisionId}`,
+      request_admission_decision: "allowed",
+      compatibility_refs: {
+        approval_admission_ref: "approval_admission_external_003a",
+        audit_admission_ref: "audit_admission_external_003a"
+      }
+    });
+  });
+
   it("backfills missing execution_audit compatibility refs per field from canonical grant input", () => {
     const runId = "run-extension-execution-audit-003b";
     const requestId = "req-execution-audit-003b";

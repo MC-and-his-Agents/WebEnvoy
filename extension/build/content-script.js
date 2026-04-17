@@ -2275,6 +2275,13 @@ const asStringArray = (value) => {
   return normalized.length === value.length ? normalized : null;
 };
 
+const normalizeGrantRefs = (value) =>
+  Array.isArray(value)
+    ? value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter((item) => item.length > 0)
+    : [];
+
 const normalizeUpstreamAuthorizationRequest = (value) => {
   const record = asRecord(value);
   const actionRequest = asRecord(record?.action_request);
@@ -2328,8 +2335,8 @@ const normalizeUpstreamAuthorizationRequest = (value) => {
             allowed_domains: asStringArray(targetScope?.allowed_domains) ?? [],
             allowed_pages: asStringArray(targetScope?.allowed_pages) ?? []
           },
-          approval_refs: asStringArray(authorizationGrant.approval_refs) ?? [],
-          audit_refs: asStringArray(authorizationGrant.audit_refs) ?? [],
+          approval_refs: normalizeGrantRefs(authorizationGrant.approval_refs),
+          audit_refs: normalizeGrantRefs(authorizationGrant.audit_refs),
           resource_state_snapshot:
             resourceStateSnapshot && XHS_RESOURCE_STATE_SNAPSHOTS.has(resourceStateSnapshot)
               ? resourceStateSnapshot
@@ -2618,9 +2625,11 @@ const deriveExecutionAuditRiskSignals = (reasonCodes) => {
   return riskSignals.length > 0 ? riskSignals : [NO_ADDITIONAL_RISK_SIGNALS];
 };
 
+const firstValidGrantRef = (value) => normalizeGrantRefs(value)[0] ?? null;
+
 const resolveCanonicalCompatibilityRefs = (input) => {
-  const upstreamApprovalRef = input.upstream?.authorization_grant?.approval_refs?.[0] ?? null;
-  const upstreamAuditRef = input.upstream?.authorization_grant?.audit_refs?.[0] ?? null;
+  const upstreamApprovalRef = firstValidGrantRef(input.upstream?.authorization_grant?.approval_refs);
+  const upstreamAuditRef = firstValidGrantRef(input.upstream?.authorization_grant?.audit_refs);
   const admissionApprovalRef =
     input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null;
   const admissionAuditRef =
