@@ -193,7 +193,8 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: false
+        lockHeld: false,
+        attachableReadyRuntime: true
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -372,7 +373,8 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "not_started",
         transportState: "not_connected",
         lockHeld: false,
-        orphanRecoverable: false
+        orphanRecoverable: false,
+        attachableReadyRuntime: true
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -480,6 +482,61 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_non_orphan_recoverable_profile",
           run_id: "run-runtime-non-orphan-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not attach a ready runtime unless status proves it can be safely reclaimed", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "not_started",
+      transportState: "not_connected",
+      lockHeld: false,
+      orphanRecoverable: false,
+      attachableReadyRuntime: false
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "ready",
+      identityBindingState: "bound",
+      bootstrapState: "ready",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_attach_unverified_profile",
+          run_id: "run-runtime-ready-attach-unverified-001",
           command: "xhs.detail",
           params: {}
         } as never,

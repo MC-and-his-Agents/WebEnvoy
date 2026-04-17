@@ -897,6 +897,13 @@ export class ProfileRuntimeService {
       lockInspection,
       runtimeRunId: input.runId
     });
+    const pinnedControllerPid =
+      typeof lock?.controllerPid === "number" ? lock.controllerPid : lock?.ownerPid;
+    const attachableReadyRuntime =
+      accessState.healthyLock &&
+      accessState.controlConnected &&
+      accessState.profileState === "ready" &&
+      Number.isInteger(pinnedControllerPid);
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -927,6 +934,7 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: lock?.ownerPid ?? null,
+      attachableReadyRuntime,
       orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
