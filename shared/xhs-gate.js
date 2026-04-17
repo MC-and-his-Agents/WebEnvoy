@@ -90,12 +90,7 @@ const asStringArray = (value) => {
   return normalized.length === value.length ? normalized : null;
 };
 
-const normalizeGrantRefs = (value) =>
-  Array.isArray(value)
-    ? value
-        .map((item) => (typeof item === "string" ? item.trim() : ""))
-        .filter((item) => item.length > 0)
-    : [];
+const normalizeGrantRefs = (value) => asStringArray(value) ?? [];
 
 const normalizeUpstreamAuthorizationRequest = (value) => {
   const record = asRecord(value);
@@ -152,6 +147,7 @@ const normalizeUpstreamAuthorizationRequest = (value) => {
           },
           approval_refs: normalizeGrantRefs(authorizationGrant.approval_refs),
           audit_refs: normalizeGrantRefs(authorizationGrant.audit_refs),
+          granted_at: asString(authorizationGrant.granted_at),
           resource_state_snapshot:
             resourceStateSnapshot && XHS_RESOURCE_STATE_SNAPSHOTS.has(resourceStateSnapshot)
               ? resourceStateSnapshot

@@ -19,8 +19,15 @@ const asBoolean = (value) => value === true;
 const hasOwnNonNullValue = (record, key) =>
   Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null;
 
-const asStringArray = (value) =>
-  Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const asStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return normalized.length === value.length ? normalized : [];
+};
 
 const pushReason = (target, reason) => {
   if (!target.includes(reason)) {
@@ -34,6 +41,10 @@ const hasExplicitAdmissionEvidence = (admissionContext) => {
 
   return approvalEvidence !== null || auditEvidence !== null;
 };
+
+const resolveCanonicalGrantApprovedAt = (input) =>
+  asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at) ??
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
 
 const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
@@ -52,6 +63,7 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
     resourceBinding !== null &&
     authorizationGrant !== null &&
     runtimeTarget !== null &&
+    resolveCanonicalGrantApprovedAt(input) !== null &&
     asStringArray(authorizationGrant.approval_refs).length > 0 &&
     asStringArray(authorizationGrant.audit_refs).length > 0
   );
@@ -121,7 +133,7 @@ const buildSyntheticApprovalRecordFromCanonicalGrant = (expected) => ({
   decision_id: expected.decisionId ?? null,
   approved: true,
   approver: "authorization_grant",
-  approved_at: expected.approvedAt ?? "1970-01-01T00:00:00.000Z",
+  approved_at: expected.approvedAt ?? null,
   checks: Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]))
 });
 
@@ -367,7 +379,7 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
       ? buildSyntheticApprovalRecordFromCanonicalGrant({
           decisionId: input.decisionId ?? null,
           approvalId: input.expectedApprovalId ?? null,
-          approvedAt: asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at)
+          approvedAt: resolveCanonicalGrantApprovedAt(input)
         })
       : approvalRecord;
 
