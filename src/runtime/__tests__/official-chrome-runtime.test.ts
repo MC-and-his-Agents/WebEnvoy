@@ -448,6 +448,94 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("still attempts attach when a ready runtime reports bootstrap failure but transport remains healthy", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "failed",
+        transportState: "ready",
+        lockHeld: false,
+        orphanRecoverable: false,
+        attachableReadyRuntime: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true,
+        orphanRecoverable: false
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: true,
+      orphanRecoverable: false
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-bootstrap-failed-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_failed_bootstrap_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_failed_bootstrap_attach_profile",
+          run_id: "run-runtime-bootstrap-failed-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("does not attach a recoverable runtime unless status proves it is orphan-recoverable", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {

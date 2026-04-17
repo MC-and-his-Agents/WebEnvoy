@@ -23,9 +23,7 @@ const hasRequestedPersistentExtensionIdentity = (params) => {
     return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
 const hasVerifiedReadyRuntimeSignal = (readiness) => readiness.transportState === "ready" &&
-    (readiness.bootstrapState === "ready" ||
-        readiness.bootstrapState === "pending" ||
-        readiness.bootstrapState === "not_started");
+    readiness.bootstrapState !== "stale";
 const canAttachReadyRuntime = (input) => input.healthyLock &&
     input.profileState === "ready" &&
     Number.isInteger(input.pinnedControllerPid) &&

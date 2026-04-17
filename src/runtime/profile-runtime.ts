@@ -86,9 +86,7 @@ const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean =>
 
 const hasVerifiedReadyRuntimeSignal = (readiness: RuntimeReadinessSnapshot): boolean =>
   readiness.transportState === "ready" &&
-  (readiness.bootstrapState === "ready" ||
-    readiness.bootstrapState === "pending" ||
-    readiness.bootstrapState === "not_started");
+  readiness.bootstrapState !== "stale";
 
 const canAttachReadyRuntime = (input: {
   healthyLock: boolean;

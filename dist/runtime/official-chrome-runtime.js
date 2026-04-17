@@ -359,7 +359,10 @@ export const prepareOfficialChromeRuntime = async (input) => {
     if (lockHeld &&
         identityBindingState === "bound" &&
         transportState === "ready" &&
-        (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")) {
+        (bootstrapState === "not_started" ||
+            bootstrapState === "pending" ||
+            bootstrapState === "stale" ||
+            bootstrapState === "failed")) {
         await attemptExecutionBootstrap();
         syncRuntimeStatus(await readStatus());
         if (runtimeReadiness !== "ready" && lockHeld && identityBindingState === "bound") {

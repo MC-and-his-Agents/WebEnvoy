@@ -2139,6 +2139,135 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("keeps a ready runtime attachable when transport is healthy but the previous bootstrap failed", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-bootstrap-failed-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_ready_bootstrap_failed_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "failed",
+                transport_state: "ready"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_ready_bootstrap_failed_profile",
+      runId: "run-runtime-ready-bootstrap-failed-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+    await writeFile(
+      join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "attach_ready_bootstrap_failed_profile",
+        BROWSER_STATE_FILENAME
+      ),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-ready-bootstrap-failed-token-001",
+          profileDir: join(
+            baseDir,
+            ".webenvoy",
+            "profiles",
+            "attach_ready_bootstrap_failed_profile"
+          ),
+          runId: "run-runtime-ready-bootstrap-failed-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_bootstrap_failed_profile",
+        runId: "run-runtime-ready-bootstrap-failed-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "blocked",
+      attachableReadyRuntime: true
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_ready_bootstrap_failed_profile",
+        runId: "run-runtime-ready-bootstrap-failed-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
   it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
     tempDirs.push(baseDir);
