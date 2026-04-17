@@ -1409,7 +1409,7 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
-  it("falls back to canonical grant admission when partial legacy evidence leaves execution_audit refs to be backfilled", () => {
+  it("preserves explicit approval evidence while backfilling missing audit evidence from the canonical grant", () => {
     const runId = "run-extension-execution-audit-003b";
     const requestId = "req-execution-audit-003b";
     const sessionId = "session-extension-execution-audit-003b";
@@ -1470,6 +1470,15 @@ describe("xhs-search gate helpers", () => {
       effective_execution_mode: "live_read_high_risk",
       gate_reasons: ["LIVE_MODE_APPROVED"]
     });
+    expect(gate.gate_input.admission_context).toEqual({
+      approval_admission_evidence: expect.objectContaining({
+        approval_admission_ref: approvalAdmissionRef,
+        approver: "qa-reviewer"
+      }),
+      audit_admission_evidence: expect.objectContaining({
+        audit_admission_ref: null
+      })
+    });
     expect(gate.request_admission_result).toMatchObject({
       admission_decision: "allowed",
       derived_from: {
@@ -1483,6 +1492,13 @@ describe("xhs-search gate helpers", () => {
         approval_admission_ref: approvalAdmissionRef,
         audit_admission_ref: "audit_admission_external_003b"
       }
+    });
+    expect(gate.approval_record).toMatchObject({
+      approval_id: approvalId,
+      decision_id: decisionId,
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00.000Z"
     });
   });
 

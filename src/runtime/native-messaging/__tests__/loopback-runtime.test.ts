@@ -598,6 +598,93 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
+  it("preserves explicit approval evidence when only the audit side falls back to the canonical grant on loopback", async () => {
+    const runId = "run-loopback-partial-admission-001";
+    const requestId = "issue209-live-partial-admission-001";
+    const targetTabId = 39;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "partial-admission-001"
+    );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      targetTabId,
+      requestedExecutionMode: "live_read_high_risk",
+      riskState: "allowed",
+      decisionId,
+      approvalId
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    admissionContext.audit_admission_evidence.audit_admission_ref = null;
+    admissionContext.audit_admission_evidence.recorded_at = null;
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          admission_context: admissionContext,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: ["audit_admission_external_partial_loopback_001"],
+            resourceStateSnapshot: "active"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            admission_decision: "allowed",
+            derived_from: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_partial_loopback_001"
+            })
+          }),
+          execution_audit: expect.objectContaining({
+            request_admission_decision: "allowed",
+            compatibility_refs: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_partial_loopback_001"
+            })
+          })
+        })
+      })
+    );
+  });
+
   it("does not expose execution_audit compatibility refs when a canonical loopback grant is blocked", async () => {
     const runId = "run-loopback-blocked-canonical-grant-001";
     const requestId = "issue209-live-blocked-canonical-grant-001";

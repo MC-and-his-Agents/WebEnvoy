@@ -384,20 +384,22 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
+  const explicitApprovalSatisfied = approvalAdmissionRequirementGaps.length === 0;
+  const explicitAuditSatisfied = auditAdmissionRequirementGaps.length === 0;
   const explicitAdmissionSatisfied =
-    approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
+    explicitApprovalSatisfied && explicitAuditSatisfied;
   const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
-  const effectiveAdmissionContext =
-    canonicalGrantBackedAdmission && !explicitAdmissionSatisfied ? null : admissionContext;
-  const effectiveApprovalAdmissionEvidence = normalizeApprovalAdmissionEvidence(
-    effectiveAdmissionContext?.approval_admission_evidence
-  );
-  const effectiveAuditAdmissionEvidence = normalizeAuditAdmissionEvidence(
-    effectiveAdmissionContext?.audit_admission_evidence
-  );
+  const effectiveApprovalAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitApprovalSatisfied
+      ? normalizeApprovalAdmissionEvidence(null)
+      : approvalAdmissionEvidence;
+  const effectiveAuditAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitAuditSatisfied
+      ? normalizeAuditAdmissionEvidence(null)
+      : auditAdmissionEvidence;
   const liveAdmissionSatisfied =
     explicitAdmissionSatisfied || canonicalGrantBackedAdmission;
-  const canonicalApprovalRecord = explicitAdmissionSatisfied
+  const canonicalApprovalRecord = explicitApprovalSatisfied
     ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
         decisionId: input.decisionId ?? null,
         approvalId: input.expectedApprovalId ?? null
