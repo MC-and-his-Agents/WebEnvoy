@@ -359,6 +359,93 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("attempts attach for a ready runtime when a new run loses lock ownership before execution", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "not_started",
+        transportState: "not_connected",
+        lockHeld: false,
+        orphanRecoverable: false
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true,
+        orphanRecoverable: false
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "pending",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true,
+      orphanRecoverable: false
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-owner-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_ready_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_attach_profile",
+          run_id: "run-runtime-owner-attach-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("does not attach a recoverable runtime unless status proves it is orphan-recoverable", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {

@@ -358,7 +358,7 @@ export const prepareOfficialChromeRuntime = async (input: {
     !lockHeld &&
     identityBindingState === "bound" &&
     bootstrapState !== "stale" &&
-    ((profileState === "ready" && transportState === "ready") ||
+    (profileState === "ready" ||
       (runtimeReadiness === "recoverable" &&
         orphanRecoverable &&
         (profileState === "disconnected" || profileState === "ready")));
