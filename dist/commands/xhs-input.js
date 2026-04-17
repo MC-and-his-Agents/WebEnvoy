@@ -813,49 +813,6 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
         hasAllTrueChecks(explicitAudit.audited_checks) &&
         bindingMatches(explicitAudit, true, explicitAudit.risk_state) &&
         linkageMatches(explicitAudit.decision_id, explicitAudit.approval_id);
-    if (explicitSourceValid) {
-        return {
-            kind: "draft",
-            admission_context: {
-                approval_admission_evidence: {
-                    approval_admission_ref: explicitApproval.approval_admission_ref,
-                    decision_id: current.decisionId,
-                    approval_id: current.approvalId,
-                    ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
-                    run_id: current.runId,
-                    session_id: null,
-                    issue_scope: current.issueScope,
-                    target_domain: current.targetDomain,
-                    target_tab_id: current.targetTabId,
-                    target_page: current.targetPage,
-                    action_type: current.actionType,
-                    requested_execution_mode: current.requestedExecutionMode,
-                    approved: true,
-                    approver: explicitApproval.approver,
-                    approved_at: explicitApproval.approved_at,
-                    checks: explicitApproval.checks,
-                    recorded_at: explicitApproval.recorded_at
-                },
-                audit_admission_evidence: {
-                    audit_admission_ref: explicitAudit.audit_admission_ref,
-                    decision_id: current.decisionId,
-                    approval_id: current.approvalId,
-                    ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
-                    run_id: current.runId,
-                    session_id: null,
-                    issue_scope: current.issueScope,
-                    target_domain: current.targetDomain,
-                    target_tab_id: current.targetTabId,
-                    target_page: current.targetPage,
-                    action_type: current.actionType,
-                    requested_execution_mode: current.requestedExecutionMode,
-                    risk_state: current.riskState,
-                    audited_checks: explicitAudit.audited_checks,
-                    recorded_at: explicitAudit.recorded_at
-                }
-            }
-        };
-    }
     const approvalSource = source.approvalSource;
     const auditSource = source.auditSource;
     const validatedApprovalSource = validateIssue209ApprovalSourceAgainstCurrentLinkage({
@@ -870,8 +827,54 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
     const formalApprovalValid = validatedApprovalSource.isValid;
     const formalAuditValid = validatedAuditSource.isValid;
     const completeFormalSource = formalApprovalValid && formalAuditValid;
-    if (source.explicitAdmissionContext !== null && completeFormalSource && !explicitSourceValid) {
-        return { kind: "missing" };
+    if (source.explicitAdmissionContext !== null) {
+        if (explicitSourceValid) {
+            return {
+                kind: "draft",
+                admission_context: {
+                    approval_admission_evidence: {
+                        approval_admission_ref: explicitApproval.approval_admission_ref,
+                        decision_id: current.decisionId,
+                        approval_id: current.approvalId,
+                        ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
+                        run_id: current.runId,
+                        session_id: null,
+                        issue_scope: current.issueScope,
+                        target_domain: current.targetDomain,
+                        target_tab_id: current.targetTabId,
+                        target_page: current.targetPage,
+                        action_type: current.actionType,
+                        requested_execution_mode: current.requestedExecutionMode,
+                        approved: true,
+                        approver: explicitApproval.approver,
+                        approved_at: explicitApproval.approved_at,
+                        checks: explicitApproval.checks,
+                        recorded_at: explicitApproval.recorded_at
+                    },
+                    audit_admission_evidence: {
+                        audit_admission_ref: explicitAudit.audit_admission_ref,
+                        decision_id: current.decisionId,
+                        approval_id: current.approvalId,
+                        ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
+                        run_id: current.runId,
+                        session_id: null,
+                        issue_scope: current.issueScope,
+                        target_domain: current.targetDomain,
+                        target_tab_id: current.targetTabId,
+                        target_page: current.targetPage,
+                        action_type: current.actionType,
+                        requested_execution_mode: current.requestedExecutionMode,
+                        risk_state: current.riskState,
+                        audited_checks: explicitAudit.audited_checks,
+                        recorded_at: explicitAudit.recorded_at
+                    }
+                }
+            };
+        }
+        return {
+            kind: "draft",
+            admission_context: source.explicitAdmissionContext
+        };
     }
     if (completeFormalSource) {
         return {

@@ -1737,12 +1737,13 @@ const evaluateXhsGate = (input) => {
     const explicitAdmissionContext = asRecord(result.gate_input?.admission_context);
     const explicitApprovalEvidence = asRecord(explicitAdmissionContext?.approval_admission_evidence);
     const explicitAuditEvidence = asRecord(explicitAdmissionContext?.audit_admission_evidence);
-    const canBackfillCompatibilityRefs =
-      asString(explicitApprovalEvidence?.approval_admission_ref) === null &&
+    const canBackfillApprovalAdmissionRef =
+      asString(explicitApprovalEvidence?.approval_admission_ref) === null;
+    const canBackfillAuditAdmissionRef =
       asString(explicitAuditEvidence?.audit_admission_ref) === null;
     if (compatibilityRefs && derivedFrom) {
       if (
-        canBackfillCompatibilityRefs &&
+        canBackfillApprovalAdmissionRef &&
         compatibilityRefs.approval_admission_ref === null &&
         typeof derivedFrom.approval_admission_ref === "string" &&
         derivedFrom.approval_admission_ref.length > 0
@@ -1750,7 +1751,7 @@ const evaluateXhsGate = (input) => {
         compatibilityRefs.approval_admission_ref = derivedFrom.approval_admission_ref;
       }
       if (
-        canBackfillCompatibilityRefs &&
+        canBackfillAuditAdmissionRef &&
         compatibilityRefs.audit_admission_ref === null &&
         typeof derivedFrom.audit_admission_ref === "string" &&
         derivedFrom.audit_admission_ref.length > 0

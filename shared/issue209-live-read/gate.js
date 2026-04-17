@@ -28,6 +28,13 @@ const pushReason = (target, reason) => {
   }
 };
 
+const hasExplicitAdmissionEvidence = (admissionContext) => {
+  const approvalEvidence = asRecord(admissionContext?.approval_admission_evidence);
+  const auditEvidence = asRecord(admissionContext?.audit_admission_evidence);
+
+  return approvalEvidence !== null || auditEvidence !== null;
+};
+
 const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
   const actionRequest = asRecord(upstream?.action_request);
@@ -335,7 +342,9 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
-  const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
+  const canonicalGrantBackedAdmission =
+    !hasExplicitAdmissionEvidence(admissionContext) &&
+    hasCanonicalGrantBackedAdmission(input, liveRequirements);
   const explicitAdmissionSatisfied =
     approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
   const liveAdmissionSatisfied =

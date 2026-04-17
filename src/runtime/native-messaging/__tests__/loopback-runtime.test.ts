@@ -1027,6 +1027,17 @@ describe("native messaging legacy loopback runtime", () => {
       runId,
       "live-admission-stale-001"
     );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId: "run-loopback-live-admission-stale-legacy-001",
+      requestId,
+      targetTabId: 35,
+      requestedExecutionMode: "live_read_limited",
+      riskState: "limited"
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    const auditAdmissionRef = String(admissionContext.audit_admission_evidence.audit_admission_ref);
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -1057,6 +1068,14 @@ describe("native messaging legacy loopback runtime", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           limited_read_rollout_ready_true: true,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId: 35,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: [auditAdmissionRef],
+            resourceStateSnapshot: "cool_down"
+          }),
           approval_record: {
             approval_id: approvalId,
             decision_id: decisionId,
@@ -1071,13 +1090,7 @@ describe("native messaging legacy loopback runtime", () => {
               action_type_confirmed: true
             }
           },
-          admission_context: createApprovedReadAdmissionContext({
-            runId: "run-loopback-live-admission-stale-legacy-001",
-            requestId,
-            targetTabId: 35,
-            requestedExecutionMode: "live_read_limited",
-            riskState: "limited"
-          }),
+          admission_context: admissionContext,
           audit_record: {
             event_id: "audit-live-read-limited-loopback-stale-admission-001",
             decision_id: decisionId,

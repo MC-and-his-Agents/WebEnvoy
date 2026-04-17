@@ -931,6 +931,83 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("backfills missing execution_audit compatibility refs per field from canonical grant input", () => {
+    const runId = "run-extension-execution-audit-003b";
+    const requestId = "req-execution-audit-003b";
+    const sessionId = "session-extension-execution-audit-003b";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003b"
+    );
+    const completeAdmissionContext = createAdmissionContext({
+      run_id: runId,
+      request_id: requestId,
+      session_id: sessionId,
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
+    const approvalAdmissionRef = String(
+      completeAdmissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    const partialAdmissionContext = {
+      ...completeAdmissionContext,
+      audit_admission_evidence: {
+        ...completeAdmissionContext.audit_admission_evidence,
+        audit_admission_ref: null
+      }
+    };
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext: partialAdmissionContext,
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: [approvalAdmissionRef],
+        auditRefs: ["audit_admission_external_003b"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      gate_reasons: expect.arrayContaining(["AUDIT_RECORD_MISSING"])
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      derived_from: {
+        approval_admission_ref: approvalAdmissionRef,
+        audit_admission_ref: "audit_admission_external_003b"
+      }
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        approval_admission_ref: approvalAdmissionRef,
+        audit_admission_ref: "audit_admission_external_003b"
+      }
+    });
+  });
+
   it("keeps execution_audit empty on legacy live-read paths without canonical FR-0023 objects", () => {
     const runId = "run-extension-execution-audit-004";
     const requestId = "req-execution-audit-004";
