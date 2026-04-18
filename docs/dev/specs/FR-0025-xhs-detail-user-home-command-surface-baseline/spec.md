@@ -17,7 +17,7 @@ Canonical Issue: #504
 ## 目标
 
 1. 冻结 `xhs.detail` 与 `xhs.user_home` 已属于 current main 公共 CLI command surface 的正式结论。
-2. 冻结两个命令的 canonical command input、canonical shared-path ability 对齐边界、target-page baseline 与 public CLI request-context baseline。
+2. 冻结两个命令的 canonical command input、canonical shared-path ability metadata 对齐边界、target-page baseline 与 public CLI request-context baseline。
 3. 冻结两个命令如何消费 `FR-0023` 的 `action_request/resource_binding/authorization_grant/runtime_target` 四对象。
 4. 冻结 `request_admission_result` 与 `execution_audit` 在这两个命令上的 command-level ownership，并与 current implementation 对齐。
 5. 显式声明 detail identity 不在本 FR 冻结，`image_scenes` 继续转交 `#505`。
@@ -48,22 +48,20 @@ Canonical Issue: #504
 
 ### 2. canonical command input
 
-系统必须冻结以下 canonical command input 与 current canonical shared-path ability 对齐边界：
+系统必须冻结以下 canonical command input 与 current canonical shared-path ability metadata 对齐边界：
 
 - `xhs.detail`
   - command: `xhs.detail`
   - required input: `note_id`
-  - canonical shared-path ability alignment: `xhs.note.detail.v1`
 - `xhs.user_home`
   - command: `xhs.user_home`
   - required input: `user_id`
-  - canonical shared-path ability alignment: `xhs.user.home.v1`
 
 约束：
 
 - `note_id` 与 `user_id` 都必须是必填、非空、去首尾空白后的字符串。
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
-- canonical `upstream_authorization_request` path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到上述 canonical ability id。
+- canonical `upstream_authorization_request` path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到 canonical ability metadata：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
 - legacy public CLI path 当前仍按 command + input 进入 shared parser；只要 `ability.id` 非空且未进入 canonical action-name 对齐校验，current main 不会仅因 ability id 不是上述 canonical 值就直接拒绝输入；本 FR 不把 legacy path 预先收紧为更严格的 rejection 规则。
 - 本 FR 只冻结 command input，不冻结 detail request identity 的附加字段。
 
@@ -87,7 +85,7 @@ Canonical Issue: #504
 - `target_domain` 仍是 legacy public CLI path 的必填 shared gate field；当前 parser 只要求其为非空字符串，本 FR 不把它额外收紧为新的固定域常量。
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `xhs.user_home` 在 target-page 不为 `profile_tab` 时，必须按 invalid-args / blocked 输入处理。
-- `requested_execution_mode` 必须继续对齐 current CLI 支持的 XHS read execution modes，不得在本 FR 中被放宽或另起一套模式定义。
+- `requested_execution_mode` 必须继续对齐 current CLI parser 接受面与后续 gate/runtime 校验链路；本 FR 不把它预先收紧为 read-only allowlist，也不另起一套模式定义。
 - current background/extension direct path 中可能存在基于页面语义的内部 target-tab resolution，但该行为尚未进入 current public CLI 输入契约，不属于本 FR 冻结范围。
 - 本 FR 冻结的是 public CLI request-context baseline，而不是 background/extension 内部自动选 tab 行为。
 
@@ -228,7 +226,7 @@ Given 调用方通过 legacy public CLI path 发起 `xhs.detail` 或 `xhs.user_h
 And 输入已满足当前 command input 与 shared gate fields 基线
 When `ability.id` 不是 canonical shared-path ability id 但仍为非空字符串
 Then 本 FR 不得把该情况预先冻结为 current main 必然拒绝
-And 只能把 canonical ability 对齐冻结为 canonical upstream path 与 current shared runtime 输出边界
+And 只能把 canonical ability 对齐冻结为 canonical upstream path 与 current shared runtime 输出 metadata
 
 ### 场景 12：canonical upstream objects 被命令面消费后保留请求级结果
 

@@ -5,9 +5,10 @@
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface
 - [ ] reviewer 确认 `FR-0005` 中“缺失公开命令面”只保留为 dated historical fact
 - [ ] reviewer 确认 `note_id` / `user_id` 是唯一 required canonical command input
-- [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical 对齐边界，而不是被误写成 legacy public CLI path 的新 rejection 规则
+- [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical metadata 对齐边界，而不是被误写成 legacy public CLI path 的新 rejection 规则
 - [ ] reviewer 确认 `explore_detail_tab` / `profile_tab` 是唯一 target-page baseline
 - [ ] reviewer 确认 legacy public CLI request-context 仍要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
+- [ ] reviewer 确认 `requested_execution_mode` 只冻结 parser 接受面与后续 rejection chain，而未被 formal 误收窄为 read-only allowlist
 - [ ] reviewer 确认 canonical `upstream_authorization_request` path 继续从 `runtime_target` / current parser 行为派生 shared gate fields，而不是新增第二套外显输入
 - [ ] reviewer 确认 background/extension direct path 的内部 auto target-tab resolution 未被误冻结为公共 CLI 契约
 - [ ] reviewer 确认 canonical upstream path 下两条命令继续消费 `FR-0023` 四对象输入，不新增第二套授权输入

@@ -5,7 +5,6 @@
 ```ts
 type XhsDetailCommand = {
   command: "xhs.detail";
-  canonical_shared_path_ability_id: "xhs.note.detail.v1";
   input: {
     note_id: string;
   };
@@ -13,7 +12,6 @@ type XhsDetailCommand = {
 
 type XhsUserHomeCommand = {
   command: "xhs.user_home";
-  canonical_shared_path_ability_id: "xhs.user.home.v1";
   input: {
     user_id: string;
   };
@@ -25,7 +23,7 @@ type XhsUserHomeCommand = {
 - 两条命令都属于 current public CLI command surface。
 - 两条命令都 `requiresProfile=true`。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
-- canonical `upstream_authorization_request` path 与 current runtime / contract output path 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
+- canonical `upstream_authorization_request` path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
 - legacy public CLI path 当前不因 ability id 偏离上述 canonical 值而单独形成 formal rejection；本契约不预先冻结更严格的 ability-mismatch 阻断。
 
 ## 2. Target baseline
@@ -70,7 +68,7 @@ type CanonicalXhsUserHomeTargetBaseline = {
 - `xhs.user_home` 只允许 `profile_tab`
 - legacy public CLI contract 下，`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 这组 shared gate fields 都必须显式提供
 - `target_domain` 在 current parser truth 下仍只要求非空字符串
-- `requested_execution_mode` 继续对齐 current CLI 支持的 XHS read execution modes
+- `requested_execution_mode` 继续对齐 current CLI parser 接受面；若当前命令组合在后续 gate/runtime 校验中被拒绝，本契约按 existing rejection chain 处理，而不提前收窄为 read-only allowlist
 - canonical `upstream_authorization_request` path 下，`target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
 - background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
 
