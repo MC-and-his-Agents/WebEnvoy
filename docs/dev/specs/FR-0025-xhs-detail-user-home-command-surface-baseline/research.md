@@ -23,7 +23,8 @@
   - `parseUserHomeInputForContract()` 要求 `user_id`
   - `xhs.note.detail.v1` 只允许 `explore_detail_tab`
   - `xhs.user.home.v1` 只允许 `profile_tab`
-  - `normalizeGateOptionsForContract()` 在 public CLI contract 下要求显式 `target_domain`、`target_tab_id` / `runtime_target.tab_id`、`target_page`、`requested_execution_mode`
+  - `normalizeGateOptionsForContract()` 在 legacy public CLI contract 下要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
+  - `normalizeGateOptionsForContract()` 在 canonical `upstream_authorization_request` path 下继续从 `runtime_target` 派生 `target_domain`、`target_tab_id`、`target_page`，并推导 `requested_execution_mode`
 
 ### 3. current tests 已证明 command surface 与 unified read path 存在
 
@@ -39,7 +40,9 @@
 结论补充：
 
 - 上述 background/extension direct path 行为不能直接提升为 public CLI 输入契约。
-- 当前 formal freeze 只能冻结 public CLI 已明确暴露的输入边界：`target_domain`、`target_tab_id` / `runtime_target.tab_id`、`target_page`、`requested_execution_mode` 仍需显式提供。
+- 当前 formal freeze 只能冻结两条现有入口的真实边界：
+  - legacy public CLI path：`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 仍需显式提供
+  - canonical upstream path：shared gate fields 继续从 `runtime_target` 与 current parser 行为派生，不另起第二套输入
 
 ### 4. current implementation 已消费 FR-0023 四对象输入
 

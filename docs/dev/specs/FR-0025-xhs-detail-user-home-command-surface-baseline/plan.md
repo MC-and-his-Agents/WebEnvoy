@@ -65,7 +65,8 @@
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `xhs.detail` / `xhs.user_home` 的 current command surface 不回退
   - `note_id` / `user_id` 缺失时的入口失败
-  - target-page mismatch 与缺失 `target_domain` / `target_tab_id` / `requested_execution_mode` 的入口失败
+  - legacy public CLI path 下 target-page mismatch 与缺失 `target_domain` / `target_tab_id` / `requested_execution_mode` 的入口失败
+  - canonical upstream path 下 shared gate fields 继续从 `runtime_target` / parser 派生，不回退为第二套外显输入
   - canonical upstream objects 存在时的 `request_admission_result` / `execution_audit` canonical slot ownership
   - canonical upstream path 下 `execution_audit` 允许为 `null` 的现状兼容
   - legacy path 下 `request_admission_result` / `execution_audit` 为 `null` 时的兼容行为
@@ -84,7 +85,7 @@
 
 - FR-0025 spec review 通过。
 - reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface。
-- reviewer 确认 `note_id` / `user_id`、`explore_detail_tab` / `profile_tab` 以及 public CLI shared gate fields 的 baseline 无阻断歧义。
+- reviewer 确认 `note_id` / `user_id`、`explore_detail_tab` / `profile_tab`、legacy public CLI shared gate fields，以及 canonical upstream path 的派生规则都无阻断歧义。
 - reviewer 确认两个命令的四对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
 - reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把 audit 产出写成强制真相。
 - reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`。
