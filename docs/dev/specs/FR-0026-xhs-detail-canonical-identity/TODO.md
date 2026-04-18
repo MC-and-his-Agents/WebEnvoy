@@ -1,0 +1,21 @@
+# FR-0026 TODO
+
+- [x] 建立 `FR-0026-xhs-detail-canonical-identity` 正式套件
+- [x] 建立 canonical issue 绑定 `#505`
+- [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
+- [ ] reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` / media-scene 字段当前不进入 identity
+- [ ] reviewer 确认这些字段只属于 diagnostics / compatibility context
+- [ ] reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段
+- [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
+- [ ] reviewer 确认 future identity expansion 必须等待新的 spec 修订
+- [ ] reviewer 确认 `Closing=Refs #505`、`review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
+- [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/FR-0026-xhs-detail-canonical-identity main` 与单分支职责一致
+- [ ] spec review 通过并形成可进入实现的新冻结输入
+
+## Handoff
+
+- 当前阶段只冻结 current v1 detail identity，不承诺实现代码。
+- 后续实现应优先消费本 FR 冻结的：
+  - `note_id` only identity
+  - `image_scenes` not-in-shape 结论
+  - future revision 准入条件
