@@ -9,7 +9,7 @@ Canonical Issue: #505
 当前 GitHub 与仓库证据已经稳定收敛出一个最小结论：
 
 - current main 上，`xhs.detail` 的 command input、runtime、bridge、contract test 和 fallback test 都稳定围绕 `note_id` 运转。
-- current in-tree fallback artifact 已出现 `source_note_id`，并可被 current detail path 映射回同一个 canonical `note_id`。
+- current in-tree fallback artifact 已出现 `source_note_id`，但当前仓库证据只证明 canonical `note_id` 会被写出到该兼容字段，尚未证明存在反向 identity 归一化读路径。
 - 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 或 `CRD_PRV_WEBP` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
@@ -83,8 +83,8 @@ type XhsDetailCanonicalIdentityV1 = {
 - current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 `image_scenes` 或 `CRD_PRV_WEBP`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
-- 当 captured / runtime artifact 未直接提供 `note_id`，但提供 `source_note_id` 时，current v1 必须把 trim 后的 `source_note_id` 归一化为 canonical `note_id`。
-- 若 `note_id` 与 `source_note_id` 都缺失或为空，则 current v1 detail identity 不可导出。
+- 当前仓库证据只证明 canonical `note_id` 可以被写出到兼容字段 `source_note_id`；本 FR 不把“仅凭 artifact 的 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
+- 若当前实现未来需要把 artifact-only `source_note_id` 升格为 identity derivation 依据，必须先补齐仓库内可复核证据并通过新的 spec 修订。
 
 ### 4. lookup / eligibility 行为
 

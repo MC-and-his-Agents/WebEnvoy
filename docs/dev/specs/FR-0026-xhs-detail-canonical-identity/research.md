@@ -28,7 +28,7 @@
 补充观测：
 
 - `tests/xhs-read-execution.fallback.test.ts` 已出现 `source_note_id`
-- current in-tree detail path 仍把这类 artifact 收敛回同一个 canonical `note_id`
+- 但当前仓库证据只证明 canonical `note_id` 会被写出到该兼容字段，并未证明存在仅凭 `source_note_id` 反向归一化回 canonical `note_id` 的读路径
 
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
 
@@ -58,8 +58,8 @@
 - `CRD_PRV_WEBP` 必须进入 identity
 - detail current identity 需要多字段组合
 
-当前仓库内还能支持一个附加的归一化结论：
+当前仓库内还能支持一个附加的兼容性结论：
 
-- 当 detail artifact 暴露 `source_note_id` 而未直接暴露 `note_id` 时，current v1 仍应把 `source_note_id` 归一化为 canonical `note_id`
+- `source_note_id` 当前只可被 formal 视为 canonical `note_id` 的兼容输出字段 / future evidence candidate，尚不能单独升格为 identity derivation 依据
 
 因此，本 FR 应冻结“当前不纳入”，而不是继续悬空。

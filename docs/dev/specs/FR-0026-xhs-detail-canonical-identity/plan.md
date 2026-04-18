@@ -38,7 +38,7 @@
 
 - 规约对照：
   - 对照 `src/commands/xhs-input.ts`、`src/commands/xhs-runtime.ts`，确认 current implementation 只以 `note_id` 作为 detail command input 的稳定锚点
-  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 current in-tree artifact 已观察到 `source_note_id`，并需要归一化回 canonical `note_id`
+  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 current in-tree artifact 已观察到 `source_note_id`，但当前 formal 只能把它视为兼容输出字段而不是反向 identity 归一化依据
   - 对照 `tests/content-script-handler.xhs-read.contract.test.ts`、`tests/extension.service-worker.gate-approval.suite.ts`、`tests/xhs-read-execution.fallback.test.ts`，确认 in-tree tests 没有把 `image_scenes` 写成 identity 前提
   - 对照 `FR-0024` research，确认 `image_scenes` 缺少仓库内 admission-ready 证据
 - 文档门禁：
@@ -56,7 +56,7 @@
 - 当前 formal suite 不进入实现代码 TDD。
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
-  - `source_note_id -> note_id` 的 artifact 归一化不回退
+  - `source_note_id` 继续只作为兼容输出字段 / future evidence candidate，不被误写成 current v1 identity 依据
   - `image_scenes` 不进入 `shape` / `shape_key`
   - 同 `note_id` 且 `image_scenes` 差异不触发 mismatch
   - future revision 前，`image_scenes` / `CRD_PRV_WEBP` 只留在 diagnostics / compatibility context
@@ -74,7 +74,7 @@
 
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
-- reviewer 确认 `source_note_id` 到 canonical `note_id` 的归一化规则已明确。
+- reviewer 确认 `source_note_id` 当前只属于兼容输出字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则。
 - reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` 当前只属于 non-identity context。
 - reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。

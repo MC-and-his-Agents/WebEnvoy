@@ -44,19 +44,20 @@ type CompareXhsDetailIdentityV1 = (
 - 只要 `note_id` 相同，current v1 comparison 就必须返回 `exact_match`
 - `image_scenes`、`CRD_PRV_WEBP` 差异不得单独导致 `mismatch`
 
-## 4. Current v1 normalization rule
+## 4. Current v1 compatibility note
 
 ```ts
-type NormalizeDetailArtifactToCanonicalNoteIdV1 = (
-  raw: { note_id?: unknown; source_note_id?: unknown }
-) => string | null;
+type XhsDetailCompatibilityObservationV1 = {
+  note_id?: string;
+  source_note_id?: string;
+};
 ```
 
 约束：
 
-- 若 `raw.note_id` 是 trim 后非空字符串，current v1 canonical identity 必须使用该值。
-- 若 `raw.note_id` 不可用，但 `raw.source_note_id` 是 trim 后非空字符串，current v1 canonical identity 必须把它归一化为 `note_id`。
-- 若二者都缺失或为空，current v1 canonical identity 不可导出。
+- current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
+- 当前仓库证据只证明 canonical `note_id` 可以被写出到兼容字段 `source_note_id`。
+- 本 FR 不把“仅凭 artifact 的 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
 
 ## 5. Future revision gate
 
