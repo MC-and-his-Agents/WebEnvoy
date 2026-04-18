@@ -296,6 +296,7 @@ describe("main-world bridge contract", () => {
         '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
       path: "/api/sns/web/v1/feed",
       url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+      locationHref: "https://www.xiaohongshu.com/explore/note-001",
       body: "{\"source_note_id\":\"note-001\"}",
       responseBody: { code: 0, data: { items: [{ id: "note-001" }] } }
     },
@@ -311,6 +312,9 @@ describe("main-world bridge contract", () => {
     }
   ])("captures successful real-page $label requests into the namespace/shape bucket", async (testCase) => {
     const env = createMockMainWorldEnvironment();
+    if ("locationHref" in testCase && typeof testCase.locationHref === "string") {
+      env.mockWindow.location.href = testCase.locationHref;
+    }
     installMockDomGlobals({
       mockWindow: env.mockWindow as Window & Record<string, unknown>,
       mockDocument: env.mockDocument
@@ -379,6 +383,14 @@ describe("main-world bridge contract", () => {
       | Record<string, unknown>
       | undefined;
     expect(admittedTemplate?.captured_at).toEqual(expect.any(Number));
+    if (testCase.pageContextNamespace === "xhs.detail") {
+      expect(admittedTemplate?.shape).toMatchObject({
+        command: "xhs.detail",
+        method: "POST",
+        pathname: "/api/sns/web/v1/feed",
+        note_id: "note-001"
+      });
+    }
   });
 
   it("stores synthetic WebEnvoy requests as rejected observations instead of admitted templates", async () => {
@@ -435,6 +447,7 @@ describe("main-world bridge contract", () => {
 
   it("stores non-2xx responses as rejected observations", async () => {
     const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
     installMockDomGlobals({
       mockWindow: env.mockWindow as Window & Record<string, unknown>,
       mockDocument: env.mockDocument
@@ -485,6 +498,15 @@ describe("main-world bridge contract", () => {
           }
         }
       }
+    });
+    const rejectedObservation = (result.result as Record<string, unknown>)?.rejected_observation as
+      | Record<string, unknown>
+      | undefined;
+    expect(rejectedObservation?.shape).toMatchObject({
+      command: "xhs.detail",
+      method: "POST",
+      pathname: "/api/sns/web/v1/feed",
+      note_id: "note-001"
     });
   });
 

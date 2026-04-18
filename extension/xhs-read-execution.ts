@@ -262,6 +262,28 @@ const parseUserIdFromUrl = (value: string | null): string | null => {
   }
 };
 
+const parseNoteIdFromExploreUrl = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    if (!url.pathname.startsWith("/explore/")) {
+      return null;
+    }
+    return asString(url.pathname.split("/").filter((segment) => segment.length > 0).at(-1));
+  } catch {
+    return null;
+  }
+};
+
+const createDetailShape = (noteId: string): DetailRequestShape => ({
+  command: "xhs.detail",
+  method: "POST",
+  pathname: DETAIL_ENDPOINT,
+  note_id: noteId
+});
+
 const deriveReadShapeFromCommand = (
   spec: XhsReadCommandSpec,
   params: XhsDetailParams | XhsUserHomeParams
@@ -285,16 +307,11 @@ const deriveDetailShapeFromSource = (value: unknown): DetailRequestShape | null 
   if (!record) {
     return null;
   }
-  const noteId = asString(record.note_id) ?? asString(record.source_note_id);
+  const noteId = asString(record.note_id);
   if (!noteId) {
     return null;
   }
-  return {
-    command: "xhs.detail",
-    method: "POST",
-    pathname: DETAIL_ENDPOINT,
-    note_id: noteId
-  };
+  return createDetailShape(noteId);
 };
 
 const deriveUserHomeShapeFromSource = (value: unknown): UserHomeRequestShape | null => {
@@ -330,6 +347,12 @@ const deriveReadShapeFromArtifact = (
     return spec.command === "xhs.detail"
       ? deriveDetailShapeFromSource(explicitShape)
       : deriveUserHomeShapeFromSource(explicitShape);
+  }
+  if (spec.command === "xhs.detail") {
+    const noteIdFromReferrer = parseNoteIdFromExploreUrl(resolveCapturedArtifactReferrer(record));
+    if (noteIdFromReferrer) {
+      return createDetailShape(noteIdFromReferrer);
+    }
   }
   const request = asRecord(record.request);
   if (spec.command === "xhs.detail") {

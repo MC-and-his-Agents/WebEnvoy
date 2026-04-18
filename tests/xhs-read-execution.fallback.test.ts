@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executeXhsDetail } from "../extension/xhs-detail.js";
 import { executeXhsUserHome } from "../extension/xhs-user-home.js";
-import type { XhsSearchEnvironment, XhsSearchOptions } from "../extension/xhs-search-types.js";
+import type {
+  CapturedRequestContextLookup,
+  CapturedRequestContextLookupResponse,
+  XhsSearchEnvironment,
+  XhsSearchOptions
+} from "../extension/xhs-search-types.js";
 
 const createApprovalRecord = () => ({
   approved: true,
@@ -123,19 +128,144 @@ const createAdmittedLiveReadOptions = (input: {
     ...(input.overrides ?? {})
   });
 
-const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => ({
-  now: () => 1_000,
-  randomId: () => "req-001",
-  getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=test",
-  getDocumentTitle: () => "XHS",
-  getReadyState: () => "complete",
-  getCookie: () => "a1=cookie-token",
-  getPageStateRoot: () => null,
-  readPageStateRoot: async () => null,
-  callSignature: async () => ({ "X-s": "sig", "X-t": "1710000000" }),
-  fetchJson: async () => ({ status: 200, body: { code: 0 } }),
-  ...overrides
-});
+const parseCapturedShape = (shapeKey: string): Record<string, unknown> | null => {
+  try {
+    const parsed = JSON.parse(shapeKey) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const createCapturedRequestContext = (
+  input: CapturedRequestContextLookup,
+  href: string
+): CapturedRequestContextLookupResponse | null => {
+  const shape = parseCapturedShape(input.shape_key);
+  if (!shape) {
+    return null;
+  }
+
+  if (input.page_context_namespace === "xhs.detail" && typeof shape.note_id === "string") {
+    return {
+      page_context_namespace: "xhs.detail",
+      shape_key: input.shape_key,
+      admitted_template: {
+        source_kind: "page_request",
+        transport: "fetch",
+        method: "POST",
+        path: input.path,
+        url: `https://www.xiaohongshu.com${input.path}`,
+        status: 200,
+        captured_at: 1_000,
+        page_context_namespace: "xhs.detail",
+        shape_key: input.shape_key,
+        shape,
+        referrer: href,
+        template_ready: true,
+        rejection_reason: null,
+        request_status: {
+          completion: "completed",
+          http_status: 200
+        },
+        request: {
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json;charset=utf-8"
+          },
+          body: {
+            source_note_id: shape.note_id
+          }
+        },
+        response: {
+          headers: {},
+          body: {
+            code: 0,
+            data: {
+              note: {
+                note_id: shape.note_id
+              }
+            }
+          }
+        }
+      },
+      rejected_observation: null,
+      incompatible_observation: null,
+      available_shape_keys: [input.shape_key]
+    };
+  }
+
+  if (input.page_context_namespace === "xhs.user_home" && typeof shape.user_id === "string") {
+    const userId = shape.user_id;
+    return {
+      page_context_namespace: "xhs.user_home",
+      shape_key: input.shape_key,
+      admitted_template: {
+        source_kind: "page_request",
+        transport: "fetch",
+        method: "GET",
+        path: input.path,
+        url: `https://www.xiaohongshu.com${input.path}?user_id=${encodeURIComponent(userId)}`,
+        status: 200,
+        captured_at: 1_000,
+        page_context_namespace: "xhs.user_home",
+        shape_key: input.shape_key,
+        shape,
+        referrer: href,
+        template_ready: true,
+        rejection_reason: null,
+        request_status: {
+          completion: "completed",
+          http_status: 200
+        },
+        request: {
+          headers: {
+            Accept: "application/json, text/plain, */*"
+          },
+          body: null
+        },
+        response: {
+          headers: {},
+          body: {
+            code: 0,
+            data: {
+              user: {
+                user_id: userId
+              }
+            }
+          }
+        }
+      },
+      rejected_observation: null,
+      incompatible_observation: null,
+      available_shape_keys: [input.shape_key]
+    };
+  }
+
+  return null;
+};
+
+const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => {
+  const environment: XhsSearchEnvironment = {
+    now: () => 1_000,
+    randomId: () => "req-001",
+    getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=test",
+    getDocumentTitle: () => "XHS",
+    getReadyState: () => "complete",
+    getCookie: () => "a1=cookie-token",
+    getPageStateRoot: () => null,
+    readPageStateRoot: async () => null,
+    callSignature: async () => ({ "X-s": "sig", "X-t": "1710000000" }),
+    fetchJson: async () => ({ status: 200, body: { code: 0 } }),
+    ...overrides
+  };
+  environment.readCapturedRequestContext =
+    overrides?.readCapturedRequestContext ??
+    (async (input) => createCapturedRequestContext(input, environment.getLocationHref()));
+  return environment;
+};
 
 const createFallbackExecutionContext = (runId: string) => ({
   runId,

@@ -117,6 +117,14 @@ const createDetailArtifact = (
     url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
     status: 200,
     captured_at: 1_710_000_000_000,
+    page_context_namespace: "xhs.detail",
+    shape_key: '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+    shape: {
+      command: "xhs.detail",
+      method: "POST",
+      pathname: "/api/sns/web/v1/feed",
+      note_id: "note-001"
+    },
     request: {
       headers: {
         Accept: "application/json, text/plain, */*",
@@ -272,6 +280,15 @@ describe("xhs read request-context exact-shape reuse", () => {
         fetchJson,
         readCapturedRequestContext: async () =>
           createDetailArtifact({
+            shape_key:
+              '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}',
+            shape: {
+              command: "xhs.detail",
+              method: "POST",
+              pathname: "/api/sns/web/v1/feed",
+              note_id: "note-999"
+            },
+            referrer: "https://www.xiaohongshu.com/explore/note-999",
             request: {
               headers: createDetailArtifact().request.headers,
               body: {

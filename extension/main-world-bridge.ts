@@ -168,6 +168,22 @@ const asInteger = (value: unknown): number | null => {
 const toTrimmedString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const parseNoteIdFromExploreUrl = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    if (!url.pathname.startsWith("/explore/")) {
+      return null;
+    }
+    const noteId = url.pathname.split("/").filter((segment) => segment.length > 0).at(-1) ?? null;
+    return toTrimmedString(noteId);
+  } catch {
+    return null;
+  }
+};
+
 const parseSearchShape = (value: unknown): CapturedContextShape | null => {
   const record = asRecord(value);
   if (!record) {
@@ -201,12 +217,9 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
   };
 };
 
-const parseDetailShape = (value: unknown): CapturedContextShape | null => {
+const parseDetailShape = (value: unknown, referrer: string | null): CapturedContextShape | null => {
   const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-  const noteId = toTrimmedString(record.note_id) ?? toTrimmedString(record.source_note_id);
+  const noteId = (record ? toTrimmedString(record.note_id) : null) ?? parseNoteIdFromExploreUrl(referrer);
   if (!noteId) {
     return null;
   }
@@ -249,12 +262,15 @@ const parseUserHomeShape = (url: string, value: unknown): CapturedContextShape |
   };
 };
 
-const deriveCapturedContextShape = (candidate: CapturedRequestCandidate): CapturedContextShape | null => {
+const deriveCapturedContextShape = (
+  candidate: CapturedRequestCandidate,
+  referrer: string | null
+): CapturedContextShape | null => {
   if (candidate.path === SEARCH_ENDPOINT && candidate.method === "POST") {
     return parseSearchShape(candidate.body);
   }
   if (candidate.path === DETAIL_ENDPOINT && candidate.method === "POST") {
-    return parseDetailShape(candidate.body);
+    return parseDetailShape(candidate.body, referrer);
   }
   if (candidate.path === USER_HOME_ENDPOINT && candidate.method === "GET") {
     return parseUserHomeShape(candidate.url, candidate.body);
@@ -452,7 +468,8 @@ const storeCapturedRequestContext = (
     responseBody: unknown;
   }
 ): void => {
-  const contextShape = deriveCapturedContextShape(candidate);
+  const referrer = typeof window.location?.href === "string" ? window.location.href : null;
+  const contextShape = deriveCapturedContextShape(candidate, referrer);
   if (!contextShape) {
     return;
   }
@@ -468,7 +485,7 @@ const storeCapturedRequestContext = (
     page_context_namespace: contextShape.namespace,
     shape_key: contextShape.shapeKey,
     shape: contextShape.shape,
-    referrer: typeof window.location?.href === "string" ? window.location.href : null,
+    referrer,
     template_ready: templateReady,
     rejection_reason: candidate.synthetic
       ? "synthetic_request_rejected"
