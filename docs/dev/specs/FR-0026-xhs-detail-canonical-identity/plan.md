@@ -66,7 +66,7 @@
   - `#504` 的 formal review
   - 其他不触碰 `FR-0026` 套件的 formal / implementation 事项
 - 串行 / 依赖：
-  - 替代 `#501` 的新实现 PR 必须等待 `FR-0025` 与 `FR-0026` 都通过 spec review
+  - 替代 `#501` 的新实现 PR 必须等待 `#504` / `#505` 的 formal freeze 都完成
   - `#445` closeout 必须等待新实现 PR merge 与 latest-main rerun
 
 ## 进入实现前条件

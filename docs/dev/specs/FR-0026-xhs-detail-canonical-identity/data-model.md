@@ -16,7 +16,6 @@
 
 | 字段 | 角色 |
 | --- | --- |
-| `command` | 固定为 `xhs.detail` |
 | `note_id` | current v1 唯一 canonical identity 字段 |
 
 ### 2. exclusion boundary
