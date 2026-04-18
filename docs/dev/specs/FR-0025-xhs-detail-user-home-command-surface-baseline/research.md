@@ -71,9 +71,9 @@
 
 结论：
 
-- 这些表述只能继续保留为 historical fact
-- 它们不能再作为 current main 的 command-surface blocker
-- 但它们也不等于 `#445` 已可 closeout；`#445` 仍受 live primary success 与 headers matrix 阻断
+- 这些表述与 current main 已形成 formal mismatch
+- 当前 FR 只为 `#504` 冻结 command-surface / request-context baseline
+- `FR-0005` 与 `#445` 的正式收口仍待后续专门回写；`#445` 仍受 live primary success 与 headers matrix 阻断
 
 ## 对 #505 的输入
 

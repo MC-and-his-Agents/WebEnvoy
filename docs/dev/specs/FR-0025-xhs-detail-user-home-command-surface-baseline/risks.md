@@ -9,7 +9,8 @@
   - `#445` closeout 继续在错误 blocker 上停留
 - 缓解：
   - 在本 FR 明确冻结 current public command surface
-  - 把 `FR-0005` 的旧表述降级为 dated historical fact
+  - 当前 FR 只显式记录 formal mismatch
+  - `FR-0005` 的正式回写继续留给后续专门收口
 
 ## 风险 2：在 #504 中提前冻结 detail identity
 

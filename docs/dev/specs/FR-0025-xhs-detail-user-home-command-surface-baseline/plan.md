@@ -9,7 +9,7 @@
 ### 阶段 1：baseline 冲突收敛
 
 - 产出：`spec.md`
-- 重点：把 `FR-0005` 中关于“detail/user_home 尚无公开命令面”的 dated historical fact 与 current main 实现/测试事实区分开，冻结 current public command surface
+- 重点：识别 `FR-0005` 与 current main 的 formal mismatch，同时只为 `#504` 冻结 current public command surface，不提前改判 closeout 语义
 
 ### 阶段 2：command-level contract 冻结
 
@@ -40,7 +40,7 @@
 - 规约对照：
   - 对照 `src/commands/xhs-runtime.ts`，确认 current main 已公开注册 `xhs.detail` / `xhs.user_home`
   - 对照 `src/commands/xhs-input.ts` 与相关 tests，确认 `note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`target_page`、四对象输入消费方式与 current implementation 一致
-  - 对照 `FR-0005` research/TODO，确认该 FR 只把“命令面缺失”降级为 dated historical fact，而不提前关闭 `#445`
+  - 对照 `FR-0005` research/TODO，确认当前只识别 formal mismatch，而不提前关闭 `#445` 或改判其 blocker 语义
   - 对照 `FR-0023`，确认 command-level ownership 不发明第二套授权输入
 - 文档门禁：
   - `bash scripts/docs-guard.sh`
@@ -78,7 +78,7 @@
   - `requested_execution_mode` 继续对齐 current CLI parser 接受面，并保留后续 gate/runtime rejection chain
   - canonical upstream path 下 shared gate fields 继续从 `runtime_target` / parser 派生，不回退为第二套外显输入
   - canonical upstream objects 存在时的 `request_admission_result` / `execution_audit` canonical slot ownership
-  - canonical upstream path 下 `execution_audit` 允许为 `null` 的现状兼容
+  - canonical upstream path 下 `request_admission_result` / `execution_audit` 允许为 `null` 的现状兼容
   - legacy path 下 `request_admission_result` / `execution_audit` 为 `null` 时的兼容行为
 
 ## 并行 / 串行关系
@@ -99,6 +99,6 @@
 - reviewer 确认两个命令在 canonical upstream path 下的四对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
 - reviewer 确认 canonical ability 对齐只冻结为 metadata 边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约。
 - reviewer 确认 legacy public CLI path 未被 formal 误删或误写成无效输入模型。
-- reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把 audit 产出写成强制真相。
+- reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把其产出写成强制真相。
 - reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`。
 - 后续实现 issue / PR 已明确为替代 `#501` 的新链路，而不是继续在 `#501` 上补丁。
