@@ -1,4 +1,10 @@
 import type { FingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
+import type {
+  CapturedRequestContextArtifact,
+  CapturedRequestContextLookup,
+  CapturedRequestContextLookupResponse,
+  CapturedRequestContextLookupResult
+} from "./xhs-search-types.js";
 
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
@@ -8,7 +14,8 @@ const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read";
+  | "page-state-read"
+  | "captured-request-context-read";
 
 type MainWorldFetchResult = {
   status: number;
@@ -280,6 +287,79 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
   return typeof result === "object" && result !== null && !Array.isArray(result)
     ? (result as Record<string, unknown>)
     : null;
+};
+
+const asCapturedRequestContextArtifact = (value: unknown): CapturedRequestContextArtifact | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const request = record.request;
+  const response = record.response;
+  if (
+    (record.source_kind !== "page_request" && record.source_kind !== "synthetic_request") ||
+    (record.transport !== "fetch" && record.transport !== "xhr") ||
+    (record.method !== "POST" && record.method !== "GET") ||
+    typeof record.path !== "string" ||
+    typeof record.url !== "string" ||
+    typeof record.status !== "number" ||
+    typeof record.captured_at !== "number" ||
+    typeof record.page_context_namespace !== "string" ||
+    typeof record.shape_key !== "string" ||
+    typeof record.shape !== "object" ||
+    record.shape === null ||
+    Array.isArray(record.shape) ||
+    typeof request !== "object" ||
+    request === null ||
+    Array.isArray(request) ||
+    typeof response !== "object" ||
+    response === null ||
+    Array.isArray(response)
+  ) {
+    return null;
+  }
+  return record as unknown as CapturedRequestContextArtifact;
+};
+
+const asCapturedRequestContextLookupResult = (
+  value: unknown
+): CapturedRequestContextLookupResult | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.page_context_namespace !== "string" ||
+    typeof record.shape_key !== "string" ||
+    !Array.isArray(record.available_shape_keys)
+  ) {
+    return null;
+  }
+  return {
+    page_context_namespace: record.page_context_namespace as CapturedRequestContextLookupResult["page_context_namespace"],
+    shape_key: record.shape_key,
+    admitted_template: asCapturedRequestContextArtifact(record.admitted_template),
+    rejected_observation: asCapturedRequestContextArtifact(record.rejected_observation),
+    incompatible_observation: asCapturedRequestContextArtifact(record.incompatible_observation),
+    available_shape_keys: record.available_shape_keys.filter(
+      (item): item is string => typeof item === "string"
+    )
+  };
+};
+
+export const readCapturedRequestContextViaMainWorld = async (
+  input: CapturedRequestContextLookup
+): Promise<CapturedRequestContextLookupResponse | null> => {
+  const result = await mainWorldCall<unknown>({
+    type: "captured-request-context-read",
+    payload: {
+      method: input.method,
+      path: input.path,
+      page_context_namespace: input.page_context_namespace,
+      shape_key: input.shape_key
+    }
+  });
+  return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
 };
 
 const resolveMainWorldRequestUrl = (value: string): string => {

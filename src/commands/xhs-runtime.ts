@@ -108,6 +108,12 @@ const pickGateErrorDetails = (
     "minimum_replay",
     "out_of_scope_actions",
     "execution_failure",
+    "request_context_result",
+    "request_context_lookup_state",
+    "request_context_miss_reason",
+    "request_context_shape",
+    "request_context_shape_key",
+    "captured_request_shape",
     "scope_context",
     "gate_input",
     "gate_outcome",
@@ -421,3 +427,7 @@ export const xhsCommands = (): CommandDefinition[] => [
     handler: xhsUserHome
   }
 ];
+
+export const __test__ = {
+  pickGateErrorDetails
+};

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 
 import {
+  __test__ as xhsRuntimeTest,
   buildOfficialChromeRuntimeStatusParams,
   ensureOfficialChromeRuntimeReady,
   normalizeGateOptionsForContract
@@ -897,6 +898,44 @@ describe("ensureOfficialChromeRuntimeReady", () => {
 });
 
 describe("normalizeGateOptionsForContract", () => {
+  it("keeps request-context fail-closed diagnostics in CLI detail picking", () => {
+    expect(
+      xhsRuntimeTest.pickGateErrorDetails(
+        {
+          request_context_result: "request_context_incompatible",
+          request_context_lookup_state: "incompatible",
+          request_context_miss_reason: "shape_mismatch",
+          request_context_shape: {
+            command: "xhs.detail",
+            note_id: "note-001"
+          },
+          request_context_shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
+        },
+        {
+          captured_request_shape: {
+            command: "xhs.detail",
+            note_id: "note-999"
+          }
+        }
+      )
+    ).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch",
+      request_context_shape: {
+        command: "xhs.detail",
+        note_id: "note-001"
+      },
+      request_context_shape_key:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+      captured_request_shape: {
+        command: "xhs.detail",
+        note_id: "note-999"
+      }
+    });
+  });
+
   it("keeps target_tab_id mandatory for issue_208 editor_input", () => {
     try {
       normalizeGateOptionsForContract(

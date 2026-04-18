@@ -1,9 +1,22 @@
+import {
+  CAPTURED_REQUEST_CONTEXT_PATHS,
+  DETAIL_ENDPOINT,
+  SEARCH_ENDPOINT,
+  USER_HOME_ENDPOINT,
+  WEBENVOY_SYNTHETIC_REQUEST_HEADER,
+  type CapturedRequestContextArtifact,
+  type CapturedRequestContextLookupResult,
+  type CapturedRequestContextMethod,
+  type PageContextNamespace
+} from "./xhs-search-types.js";
+
 type RecordValue = Record<string, unknown>;
 
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read";
+  | "page-state-read"
+  | "captured-request-context-read";
 
 type MainWorldRequest = {
   id: string;
@@ -34,6 +47,31 @@ type FingerprintPatchInstallContext = {
   pluginAndMimeTypes: ReturnType<typeof createPluginAndMimeTypeArrays>;
 };
 
+type CapturedRequestCandidate = {
+  transport: "fetch" | "xhr";
+  method: CapturedRequestContextMethod;
+  path: string;
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+  synthetic: boolean;
+};
+
+type CapturedContextShape = {
+  namespace: PageContextNamespace;
+  shape: RecordValue;
+  shapeKey: string;
+};
+
+type CapturedContextBucket = {
+  admittedTemplate: CapturedRequestContextArtifact | null;
+  rejectedObservation: CapturedRequestContextArtifact | null;
+};
+
+type XhrCaptureState = Omit<CapturedRequestCandidate, "synthetic"> & {
+  synthetic: boolean;
+};
+
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
@@ -44,6 +82,14 @@ let activeMainWorldRequestListener: ((event: Event) => void) | null = null;
 let activeMainWorldBootstrapListener: ((event: Event) => void) | null = null;
 const patchedAudioContextPrototypes = new WeakSet<object>();
 const audioNoiseSeedByPrototype = new WeakMap<object, number>();
+const capturedRequestContextBucketsByNamespace = new Map<
+  PageContextNamespace,
+  Map<string, CapturedContextBucket>
+>();
+const capturedRequestContextPathSet = new Set<string>(CAPTURED_REQUEST_CONTEXT_PATHS);
+const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
+const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
+const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -97,6 +143,572 @@ const asStringArray = (value: unknown): string[] =>
 
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const normalizeCapturedRequestMethod = (value: unknown): CapturedRequestContextMethod | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized === "POST" || normalized === "GET" ? normalized : null;
+};
+
+const normalizeHeaderName = (value: string): string => value.trim().toLowerCase();
+
+const asInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  return null;
+};
+
+const toTrimmedString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const parseSearchShape = (value: unknown): CapturedContextShape | null => {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const keyword = toTrimmedString(record.keyword);
+  if (!keyword) {
+    return null;
+  }
+  const page = record.page === undefined ? 1 : asInteger(record.page);
+  const pageSize = record.page_size === undefined ? 20 : asInteger(record.page_size);
+  const sort = record.sort === undefined ? "general" : toTrimmedString(record.sort);
+  const noteType = record.note_type === undefined ? 0 : asInteger(record.note_type);
+  if (page === null || pageSize === null || sort === null || noteType === null) {
+    return null;
+  }
+  const shape = {
+    command: "xhs.search",
+    method: "POST",
+    pathname: SEARCH_ENDPOINT,
+    keyword,
+    page,
+    page_size: pageSize,
+    sort,
+    note_type: noteType
+  } as const;
+  return {
+    namespace: "xhs.search",
+    shape,
+    shapeKey: JSON.stringify(shape)
+  };
+};
+
+const parseDetailShape = (value: unknown): CapturedContextShape | null => {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const noteId = toTrimmedString(record.note_id) ?? toTrimmedString(record.source_note_id);
+  if (!noteId) {
+    return null;
+  }
+  const shape = {
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+  } as const;
+  return {
+    namespace: "xhs.detail",
+    shape,
+    shapeKey: JSON.stringify(shape)
+  };
+};
+
+const parseUserHomeShape = (url: string, value: unknown): CapturedContextShape | null => {
+  const record = asRecord(value);
+  let userId = record ? toTrimmedString(record.user_id) ?? toTrimmedString(record.userId) : null;
+  if (!userId) {
+    try {
+      userId = toTrimmedString(new URL(url).searchParams.get("user_id"));
+    } catch {
+      userId = null;
+    }
+  }
+  if (!userId) {
+    return null;
+  }
+  const shape = {
+    command: "xhs.user_home",
+    method: "GET",
+    pathname: USER_HOME_ENDPOINT,
+    user_id: userId
+  } as const;
+  return {
+    namespace: "xhs.user_home",
+    shape,
+    shapeKey: JSON.stringify(shape)
+  };
+};
+
+const deriveCapturedContextShape = (candidate: CapturedRequestCandidate): CapturedContextShape | null => {
+  if (candidate.path === SEARCH_ENDPOINT && candidate.method === "POST") {
+    return parseSearchShape(candidate.body);
+  }
+  if (candidate.path === DETAIL_ENDPOINT && candidate.method === "POST") {
+    return parseDetailShape(candidate.body);
+  }
+  if (candidate.path === USER_HOME_ENDPOINT && candidate.method === "GET") {
+    return parseUserHomeShape(candidate.url, candidate.body);
+  }
+  return null;
+};
+
+const getCapturedContextNamespaceBuckets = (
+  namespace: PageContextNamespace
+): Map<string, CapturedContextBucket> => {
+  let buckets = capturedRequestContextBucketsByNamespace.get(namespace);
+  if (!buckets) {
+    buckets = new Map<string, CapturedContextBucket>();
+    capturedRequestContextBucketsByNamespace.set(namespace, buckets);
+  }
+  return buckets;
+};
+
+const getCapturedContextBucket = (
+  namespace: PageContextNamespace,
+  shapeKey: string
+): CapturedContextBucket => {
+  const buckets = getCapturedContextNamespaceBuckets(namespace);
+  let bucket = buckets.get(shapeKey);
+  if (!bucket) {
+    bucket = {
+      admittedTemplate: null,
+      rejectedObservation: null
+    };
+    buckets.set(shapeKey, bucket);
+  }
+  return bucket;
+};
+
+const parseArtifactPayloadText = (text: string): unknown => {
+  if (text.length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+};
+
+const readBodyText = async (body: unknown): Promise<string | null> => {
+  if (body === null || body === undefined) {
+    return null;
+  }
+  if (typeof body === "string") {
+    return body;
+  }
+  if (typeof URLSearchParams === "function" && body instanceof URLSearchParams) {
+    return body.toString();
+  }
+  if (typeof FormData === "function" && body instanceof FormData) {
+    const record: Record<string, string[]> = {};
+    for (const [key, value] of body.entries()) {
+      const nextValue = typeof value === "string" ? value : value.name;
+      record[key] = [...(record[key] ?? []), nextValue];
+    }
+    return JSON.stringify(record);
+  }
+  if (typeof Blob === "function" && body instanceof Blob) {
+    return await body.text();
+  }
+  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(body));
+  }
+  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(body)) {
+    return new TextDecoder().decode(body);
+  }
+  return String(body);
+};
+
+const readArtifactPayload = async (body: unknown): Promise<unknown> => {
+  const text = await readBodyText(body);
+  return text === null ? null : parseArtifactPayloadText(text);
+};
+
+const headersToRecord = (headers: unknown): Record<string, string> => {
+  const record: Record<string, string> = {};
+  const assignHeader = (name: string, value: unknown): void => {
+    if (typeof name !== "string" || typeof value !== "string") {
+      return;
+    }
+    const normalizedName = normalizeHeaderName(name);
+    if (normalizedName.length === 0) {
+      return;
+    }
+    record[normalizedName] = value;
+  };
+
+  if (typeof headers === "string") {
+    for (const line of headers.split(/\r?\n/)) {
+      const separatorIndex = line.indexOf(":");
+      if (separatorIndex <= 0) {
+        continue;
+      }
+      assignHeader(line.slice(0, separatorIndex), line.slice(separatorIndex + 1).trim());
+    }
+    return record;
+  }
+
+  if (typeof Headers === "function" && headers instanceof Headers) {
+    headers.forEach((value, name) => {
+      assignHeader(name, value);
+    });
+    return record;
+  }
+
+  if (Array.isArray(headers)) {
+    for (const entry of headers) {
+      if (Array.isArray(entry) && entry.length >= 2) {
+        assignHeader(String(entry[0]), String(entry[1]));
+      }
+    }
+    return record;
+  }
+
+  const headerRecord = asRecord(headers);
+  if (headerRecord) {
+    for (const [name, value] of Object.entries(headerRecord)) {
+      assignHeader(name, String(value));
+    }
+  }
+  return record;
+};
+
+const mergeHeaders = (base: Record<string, string>, extra: Record<string, string>): Record<string, string> => ({
+  ...base,
+  ...extra
+});
+
+const isRequestLike = (
+  value: unknown
+): value is {
+  url: string;
+  method?: string;
+  headers?: unknown;
+  clone?: () => { text: () => Promise<string> };
+} => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return typeof (value as { url?: unknown }).url === "string";
+};
+
+const resolveAbsoluteUrl = (value: string): string | null => {
+  try {
+    const baseHref =
+      typeof window.location?.href === "string" && window.location.href.length > 0
+        ? window.location.href
+        : "https://www.xiaohongshu.com/";
+    return new URL(value, baseHref).toString();
+  } catch {
+    return null;
+  }
+};
+
+const resolvePathname = (value: string): string | null => {
+  try {
+    return new URL(value).pathname || null;
+  } catch {
+    return null;
+  }
+};
+
+const isSyntheticRequest = (headers: Record<string, string>): boolean => {
+  const marker = headers[WEBENVOY_SYNTHETIC_REQUEST_HEADER];
+  if (typeof marker !== "string") {
+    return false;
+  }
+  const normalized = marker.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const shouldCaptureRequest = (path: string): boolean => capturedRequestContextPathSet.has(path);
+
+const resolveLatestBucketArtifact = (bucket: CapturedContextBucket): CapturedRequestContextArtifact | null => {
+  const candidates = [bucket.admittedTemplate, bucket.rejectedObservation].filter(
+    (item): item is CapturedRequestContextArtifact => item !== null
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+  return candidates.sort((left, right) => right.captured_at - left.captured_at)[0] ?? null;
+};
+
+const storeCapturedRequestContext = (
+  candidate: CapturedRequestCandidate,
+  input: {
+    status: number;
+    responseHeaders: Record<string, string>;
+    responseBody: unknown;
+  }
+): void => {
+  const contextShape = deriveCapturedContextShape(candidate);
+  if (!contextShape) {
+    return;
+  }
+  const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
+  const artifact: CapturedRequestContextArtifact = {
+    source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
+    transport: candidate.transport,
+    method: candidate.method,
+    path: candidate.path,
+    url: candidate.url,
+    status: input.status,
+    captured_at: Date.now(),
+    page_context_namespace: contextShape.namespace,
+    shape_key: contextShape.shapeKey,
+    shape: contextShape.shape,
+    referrer: typeof window.location?.href === "string" ? window.location.href : null,
+    template_ready: templateReady,
+    rejection_reason: candidate.synthetic
+      ? "synthetic_request_rejected"
+      : templateReady
+        ? null
+        : "failed_request_rejected",
+    request_status: {
+      completion: templateReady ? "completed" : "failed",
+      http_status: input.status
+    },
+    request: {
+      headers: candidate.headers,
+      body: candidate.body
+    },
+    response: {
+      headers: input.responseHeaders,
+      body: input.responseBody
+    }
+  };
+  const bucket = getCapturedContextBucket(contextShape.namespace, contextShape.shapeKey);
+  if (templateReady) {
+    bucket.admittedTemplate = artifact;
+    return;
+  }
+  bucket.rejectedObservation = artifact;
+};
+
+const resolveFetchCandidate = async (
+  input: unknown,
+  init?: RequestInit
+): Promise<CapturedRequestCandidate | null> => {
+  const baseHeaders = isRequestLike(input) ? headersToRecord(input.headers) : {};
+  const initHeaders = headersToRecord(init?.headers);
+  const headers = mergeHeaders(baseHeaders, initHeaders);
+  const method = normalizeCapturedRequestMethod(init?.method ?? (isRequestLike(input) ? input.method : null));
+  if (!method) {
+    return null;
+  }
+  const inputUrl =
+    typeof input === "string"
+      ? input
+      : typeof URL !== "undefined" && input instanceof URL
+        ? input.toString()
+        : isRequestLike(input)
+          ? input.url
+          : null;
+  if (!inputUrl) {
+    return null;
+  }
+  const url = resolveAbsoluteUrl(inputUrl);
+  if (!url) {
+    return null;
+  }
+  const path = resolvePathname(url);
+  if (!path || !shouldCaptureRequest(path)) {
+    return null;
+  }
+  const bodySource =
+    init?.body !== undefined
+      ? init.body
+      : isRequestLike(input) && typeof input.clone === "function"
+        ? await input.clone().text().catch(() => null)
+        : null;
+  return {
+    transport: "fetch",
+    method,
+    path,
+    url,
+    headers,
+    body: await readArtifactPayload(bodySource),
+    synthetic: isSyntheticRequest(headers)
+  };
+};
+
+const captureFetchResponse = async (
+  candidate: CapturedRequestCandidate,
+  response: Response
+): Promise<void> => {
+  const clone = response.clone();
+  const responseText = await clone.text();
+  storeCapturedRequestContext(candidate, {
+    status: response.status,
+    responseHeaders: headersToRecord(clone.headers),
+    responseBody: parseArtifactPayloadText(responseText)
+  });
+};
+
+const installFetchCapture = (): void => {
+  const originalFetch = window.fetch;
+  if (typeof originalFetch !== "function") {
+    return;
+  }
+  const existingPatched = originalFetch as typeof fetch & {
+    [FETCH_CAPTURE_PATCH_SYMBOL]?: boolean;
+  };
+  if (existingPatched[FETCH_CAPTURE_PATCH_SYMBOL] === true) {
+    return;
+  }
+
+  const patchedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const candidate = await resolveFetchCandidate(input, init);
+    const response = await originalFetch.call(window, input, init);
+    if (candidate) {
+      await captureFetchResponse(candidate, response);
+    }
+    return response;
+  };
+  Object.defineProperty(patchedFetch, FETCH_CAPTURE_PATCH_SYMBOL, {
+    configurable: false,
+    enumerable: false,
+    writable: false,
+    value: true
+  });
+  window.fetch = patchedFetch;
+};
+
+const getXhrCaptureState = (xhr: XMLHttpRequest): XhrCaptureState | null =>
+  ((xhr as XMLHttpRequest & { [XHR_CAPTURE_STATE_SYMBOL]?: XhrCaptureState | null })[
+    XHR_CAPTURE_STATE_SYMBOL
+  ] ?? null);
+
+const setXhrCaptureState = (xhr: XMLHttpRequest, state: XhrCaptureState | null): void => {
+  Object.defineProperty(xhr, XHR_CAPTURE_STATE_SYMBOL, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: state
+  });
+};
+
+type XMLHttpRequestPrototypeWithCapture = {
+  open: XMLHttpRequest["open"];
+  send: XMLHttpRequest["send"];
+  setRequestHeader: XMLHttpRequest["setRequestHeader"];
+  [XHR_CAPTURE_PATCH_SYMBOL]?: boolean;
+};
+
+const installXhrCapture = (): void => {
+  const XhrCtor = globalThis.XMLHttpRequest as
+    | ({
+        new (): XMLHttpRequest;
+        prototype: XMLHttpRequestPrototypeWithCapture;
+      })
+    | undefined;
+  if (typeof XhrCtor !== "function") {
+    return;
+  }
+  const prototype = XhrCtor.prototype as XMLHttpRequestPrototypeWithCapture;
+  if (prototype[XHR_CAPTURE_PATCH_SYMBOL] === true) {
+    return;
+  }
+  const originalOpen = prototype.open;
+  const originalSend = prototype.send;
+  const originalSetRequestHeader = prototype.setRequestHeader;
+  if (
+    typeof originalOpen !== "function" ||
+    typeof originalSend !== "function" ||
+    typeof originalSetRequestHeader !== "function"
+  ) {
+    return;
+  }
+
+  prototype.open = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    async?: boolean,
+    username?: string | null,
+    password?: string | null
+  ): void {
+    const normalizedMethod = normalizeCapturedRequestMethod(method);
+    const resolvedUrl = resolveAbsoluteUrl(String(url));
+    const resolvedPath = resolvedUrl ? resolvePathname(resolvedUrl) : null;
+    setXhrCaptureState(
+      this,
+      normalizedMethod && resolvedUrl && resolvedPath
+        ? {
+            transport: "xhr",
+            method: normalizedMethod,
+            path: resolvedPath,
+            url: resolvedUrl,
+            headers: {},
+            body: null,
+            synthetic: false
+          }
+        : null
+    );
+    originalOpen.call(this, method, url, async ?? true, username ?? null, password ?? null);
+  };
+
+  prototype.setRequestHeader = function (
+    this: XMLHttpRequest,
+    name: string,
+    value: string
+  ): void {
+    const state = getXhrCaptureState(this);
+    if (state) {
+      const normalizedName = normalizeHeaderName(name);
+      state.headers[normalizedName] = value;
+      state.synthetic = isSyntheticRequest(state.headers);
+    }
+    originalSetRequestHeader.call(this, name, value);
+  };
+
+  prototype.send = function (
+    this: XMLHttpRequest,
+    body?: Document | XMLHttpRequestBodyInit | null
+  ): void {
+    const state = getXhrCaptureState(this);
+    if (state && shouldCaptureRequest(state.path)) {
+      const requestBodyReady = readArtifactPayload(body).then((payload) => {
+        state.body = payload;
+      });
+      this.addEventListener("loadend", () => {
+        void requestBodyReady.then(() => {
+          storeCapturedRequestContext(state, {
+            status: this.status,
+            responseHeaders: headersToRecord(this.getAllResponseHeaders()),
+            responseBody: parseArtifactPayloadText(
+              typeof this.responseText === "string" ? this.responseText : ""
+            )
+          });
+        });
+      });
+    }
+    originalSend.call(this, body);
+  };
+
+  Object.defineProperty(prototype, XHR_CAPTURE_PATCH_SYMBOL, {
+    configurable: false,
+    enumerable: false,
+    writable: false,
+    value: true
+  });
+};
+
+const installCapturedRequestContextCapture = (): void => {
+  installFetchCapture();
+  installXhrCapture();
+};
 
 const createWindowEvent = (type: string, detail: unknown): Event => {
   if (typeof CustomEvent === "function") {
@@ -433,7 +1045,8 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
     !id ||
     (type !== "fingerprint-install" &&
       type !== "fingerprint-verify" &&
-      type !== "page-state-read")
+      type !== "page-state-read" &&
+      type !== "captured-request-context-read")
   ) {
     return null;
   }
@@ -480,6 +1093,70 @@ const handlePageStateReadRequest = async (request: MainWorldRequest): Promise<vo
   });
 };
 
+const resolveIncompatibleObservation = (
+  namespace: PageContextNamespace,
+  requestedShapeKey: string
+): CapturedRequestContextArtifact | null => {
+  const buckets = capturedRequestContextBucketsByNamespace.get(namespace);
+  if (!buckets) {
+    return null;
+  }
+  let latest: CapturedRequestContextArtifact | null = null;
+  for (const [shapeKey, bucket] of buckets.entries()) {
+    if (shapeKey === requestedShapeKey) {
+      continue;
+    }
+    const candidate = resolveLatestBucketArtifact(bucket);
+    if (!candidate) {
+      continue;
+    }
+    if (!latest || candidate.captured_at > latest.captured_at) {
+      latest = candidate;
+    }
+  }
+  return latest;
+};
+
+const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest): Promise<void> => {
+  const method = normalizeCapturedRequestMethod(request.payload.method);
+  const path = asString(request.payload.path);
+  const namespace = asString(request.payload.page_context_namespace) as PageContextNamespace | null;
+  const shapeKey = asString(request.payload.shape_key);
+  const result: CapturedRequestContextLookupResult | null =
+    method && path && namespace && shapeKey
+      ? (() => {
+          const buckets = capturedRequestContextBucketsByNamespace.get(namespace);
+          const exactBucket = buckets?.get(shapeKey) ?? null;
+          const availableShapeKeys = buckets ? [...buckets.keys()] : [];
+          const admittedTemplate =
+            exactBucket?.admittedTemplate &&
+            exactBucket.admittedTemplate.method === method &&
+            exactBucket.admittedTemplate.path === path
+              ? exactBucket.admittedTemplate
+              : null;
+          const rejectedObservation =
+            exactBucket?.rejectedObservation &&
+            exactBucket.rejectedObservation.method === method &&
+            exactBucket.rejectedObservation.path === path
+              ? exactBucket.rejectedObservation
+              : null;
+          return {
+            page_context_namespace: namespace,
+            shape_key: shapeKey,
+            admitted_template: admittedTemplate,
+            rejected_observation: rejectedObservation,
+            incompatible_observation: resolveIncompatibleObservation(namespace, shapeKey),
+            available_shape_keys: availableShapeKeys
+          };
+        })()
+      : null;
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result
+  });
+};
+
 const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
@@ -497,6 +1174,10 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   }
   if (request.type === "page-state-read") {
     await handlePageStateReadRequest(request);
+    return;
+  }
+  if (request.type === "captured-request-context-read") {
+    await handleCapturedRequestContextReadRequest(request);
     return;
   }
   await handleFingerprintInstallRequest(request);
@@ -630,6 +1311,7 @@ const ensureBootstrapListener = (): void => {
 };
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+installCapturedRequestContextCapture();
 if (expectedMainWorldEventChannel) {
   attachMainWorldEventChannel(expectedMainWorldEventChannel);
 } else {

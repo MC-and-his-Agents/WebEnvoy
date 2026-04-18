@@ -366,7 +366,8 @@ describe("extension service worker / signature and editor input", () => {
           {
             "Content-Type": "application/json;charset=utf-8",
             "X-s": "signed",
-            "X-t": "1700000000"
+            "X-t": "1700000000",
+            "x-webenvoy-synthetic-request": "1"
           },
           "{\"keyword\":\"露营\"}",
           7_000,
@@ -383,6 +384,165 @@ describe("extension service worker / signature and editor input", () => {
           code: 0,
           data: {
             items: [{ id: "note-001" }]
+          }
+        }
+      }
+    });
+  });
+
+  it("allows xhs.detail and xhs.user_home main-world requests through the same private rpc", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript
+      .mockResolvedValueOnce([
+        {
+          result: {
+            status: 200,
+            body: {
+              code: 0,
+              data: {
+                note: {
+                  note_id: "note-001"
+                }
+              }
+            }
+          }
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            status: 200,
+            body: {
+              code: 0,
+              data: {
+                user: {
+                  user_id: "user-001"
+                }
+              }
+            }
+          }
+        }
+      ]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let detailResponse: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/feed",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"source_note_id\":\"note-001\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/explore/note-001"
+        }
+      },
+      (message) => {
+        detailResponse = message;
+      }
+    );
+
+    let userHomeResponse: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/user/otherinfo?user_id=user-001",
+        method: "GET",
+        headers: {
+          "X-s": "signed",
+          "X-t": "1700000001"
+        },
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/user/profile/user-001"
+        }
+      },
+      (message) => {
+        userHomeResponse = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+          "POST",
+          {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1700000000",
+            "x-webenvoy-synthetic-request": "1"
+          },
+          "{\"source_note_id\":\"note-001\"}",
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+    expect(executeScript).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001",
+          "GET",
+          {
+            "X-s": "signed",
+            "X-t": "1700000001",
+            "x-webenvoy-synthetic-request": "1"
+          },
+          undefined,
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+    expect(detailResponse).toEqual({
+      ok: true,
+      result: {
+        status: 200,
+        body: {
+          code: 0,
+          data: {
+            note: {
+              note_id: "note-001"
+            }
+          }
+        }
+      }
+    });
+    expect(userHomeResponse).toEqual({
+      ok: true,
+      result: {
+        status: 200,
+        body: {
+          code: 0,
+          data: {
+            user: {
+              user_id: "user-001"
+            }
           }
         }
       }

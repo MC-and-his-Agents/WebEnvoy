@@ -55,6 +55,60 @@ export interface FetchResult {
   body: unknown;
 }
 
+export type CapturedRequestContextMethod = "POST" | "GET";
+export type PageContextNamespace = "xhs.search" | "xhs.detail" | "xhs.user_home";
+export type CapturedRequestContextRejectionReason =
+  | "synthetic_request_rejected"
+  | "failed_request_rejected";
+
+export interface CapturedRequestContextLookup {
+  method: CapturedRequestContextMethod;
+  path: string;
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+}
+
+export interface CapturedRequestContextArtifact {
+  source_kind: "page_request" | "synthetic_request";
+  transport: "fetch" | "xhr";
+  method: CapturedRequestContextMethod;
+  path: string;
+  url: string;
+  status: number;
+  captured_at: number;
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+  shape: JsonRecord;
+  referrer?: string | null;
+  template_ready?: boolean;
+  rejection_reason?: CapturedRequestContextRejectionReason | null;
+  request_status?: {
+    completion: "completed" | "failed";
+    http_status: number | null;
+  };
+  request: {
+    headers: Record<string, string>;
+    body: unknown;
+  };
+  response: {
+    headers: Record<string, string>;
+    body: unknown;
+  };
+}
+
+export interface CapturedRequestContextLookupResult {
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+  admitted_template: CapturedRequestContextArtifact | null;
+  rejected_observation: CapturedRequestContextArtifact | null;
+  incompatible_observation: CapturedRequestContextArtifact | null;
+  available_shape_keys: string[];
+}
+
+export type CapturedRequestContextLookupResponse =
+  | CapturedRequestContextLookupResult
+  | CapturedRequestContextArtifact;
+
 export interface XhsSearchEnvironment {
   now(): number;
   randomId(): string;
@@ -64,10 +118,13 @@ export interface XhsSearchEnvironment {
   getCookie(): string;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
+  readCapturedRequestContext?(
+    input: CapturedRequestContextLookup
+  ): Promise<CapturedRequestContextLookupResponse | null>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;
-    method: "POST" | "GET";
+    method: CapturedRequestContextMethod;
     headers: Record<string, string>;
     body?: string;
     timeoutMs: number;
@@ -246,3 +303,11 @@ export interface XhsExecutionContext {
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+export const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+export const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
+export const CAPTURED_REQUEST_CONTEXT_PATHS = [
+  SEARCH_ENDPOINT,
+  DETAIL_ENDPOINT,
+  USER_HOME_ENDPOINT
+] as const;
+export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
