@@ -2783,18 +2783,23 @@ const resolveCanonicalCompatibilityRefs = (input) => {
     input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null;
   const admissionAuditRef =
     input.admissionContext?.audit_admission_evidence?.audit_admission_ref ?? null;
+  const allowUpstreamFallback = input.allowUpstreamFallback !== false;
 
   return {
     approvalAdmissionRef:
       typeof admissionApprovalRef === "string" && admissionApprovalRef.length > 0
         ? admissionApprovalRef
-        : typeof upstreamApprovalRef === "string" && upstreamApprovalRef.length > 0
+        : allowUpstreamFallback &&
+            typeof upstreamApprovalRef === "string" &&
+            upstreamApprovalRef.length > 0
           ? upstreamApprovalRef
           : null,
     auditAdmissionRef:
       typeof admissionAuditRef === "string" && admissionAuditRef.length > 0
         ? admissionAuditRef
-        : typeof upstreamAuditRef === "string" && upstreamAuditRef.length > 0
+        : allowUpstreamFallback &&
+            typeof upstreamAuditRef === "string" &&
+            upstreamAuditRef.length > 0
           ? upstreamAuditRef
           : null
   };
@@ -2847,6 +2852,28 @@ const evaluateRequestAdmissionResult = (input) => {
       grantMatch = false;
     }
   }
+  const requiresCanonicalGrantAdmission =
+    state.issueScope === "issue_209" &&
+    (state.requestedExecutionMode === "live_read_limited" ||
+      state.requestedExecutionMode === "live_read_high_risk");
+  const explicitCompatibilityRefs = resolveCanonicalCompatibilityRefs({
+    upstream,
+    admissionContext: input.admissionContext,
+    allowUpstreamFallback: false
+  });
+  const hasExplicitCompatibilityEvidence =
+    explicitCompatibilityRefs.approvalAdmissionRef !== null ||
+    explicitCompatibilityRefs.auditAdmissionRef !== null;
+  const hasCanonicalAdmissionGaps =
+    input.gateReasons.includes("MANUAL_CONFIRMATION_MISSING") ||
+    input.gateReasons.includes("APPROVAL_CHECKS_INCOMPLETE") ||
+    input.gateReasons.includes("AUDIT_RECORD_MISSING");
+  const canUseCanonicalGrantCompatibilityFallback =
+    requiresCanonicalGrantAdmission && !hasCanonicalAdmissionGaps;
+
+  if (requiresCanonicalGrantAdmission && hasCanonicalAdmissionGaps && !hasExplicitCompatibilityEvidence) {
+    grantMatch = false;
+  }
 
   const anonymousIsolationVerified = input.anonymousIsolationVerified === true;
   const targetSiteLoggedIn = input.targetSiteLoggedIn === true;
@@ -2859,7 +2886,8 @@ const evaluateRequestAdmissionResult = (input) => {
       : !targetSiteLoggedIn && anonymousIsolationVerified && anonymousBindingConstraintsOk;
   const compatibilityRefs = resolveCanonicalCompatibilityRefs({
     upstream,
-    admissionContext: input.admissionContext
+    admissionContext: input.admissionContext,
+    allowUpstreamFallback: canUseCanonicalGrantCompatibilityFallback
   });
 
   const admissionDecision =

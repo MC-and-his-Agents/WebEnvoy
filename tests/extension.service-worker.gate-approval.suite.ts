@@ -674,7 +674,17 @@ describe("extension service worker / gate and approval", () => {
     );
     expect(asRecord(payload.request_admission_result)).toMatchObject({
       admission_decision: "blocked",
-      grant_match: false
+      grant_match: false,
+      derived_from: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
+    });
+    expect(asRecord(payload.execution_audit)).toMatchObject({
+      compatibility_refs: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
     });
     expect(asRecord(payload.approval_record)).toMatchObject({
       approved: false,

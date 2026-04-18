@@ -1069,8 +1069,8 @@ describe("xhs-search gate helpers", () => {
       admission_decision: "blocked",
       grant_match: false,
       derived_from: {
-        approval_admission_ref: "approval_admission_external_blocked_001",
-        audit_admission_ref: "audit_admission_external_blocked_001"
+        approval_admission_ref: null,
+        audit_admission_ref: null
       }
     });
     expect(gate.execution_audit).toMatchObject({
@@ -1597,8 +1597,8 @@ describe("xhs-search gate helpers", () => {
       admission_decision: "blocked",
       grant_match: false,
       derived_from: {
-        approval_admission_ref: "approval_admission_external_003cc",
-        audit_admission_ref: "audit_admission_external_003cc"
+        approval_admission_ref: null,
+        audit_admission_ref: null
       }
     });
     expect(gate.approval_record).toMatchObject({
@@ -1664,10 +1664,19 @@ describe("xhs-search gate helpers", () => {
     });
     expect(gate.request_admission_result).toMatchObject({
       admission_decision: "blocked",
-      effective_runtime_mode: "dry_run"
+      effective_runtime_mode: "dry_run",
+      grant_match: false,
+      derived_from: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
     });
     expect(gate.execution_audit).toMatchObject({
-      request_admission_decision: "blocked"
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
     });
   });
 
