@@ -2,7 +2,7 @@
 
 ## 结论
 
-本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity、artifact observation boundary 与 exclusion boundary。
+本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity、artifact derivation boundary 与 exclusion boundary。
 
 ## 共享对象
 
@@ -18,17 +18,17 @@
 | --- | --- |
 | `note_id` | current v1 唯一 canonical identity 字段 |
 
-### 2. artifact observation boundary
+### 2. artifact derivation boundary
 
 | 对象 | 当前 formal 状态 |
 | --- | --- |
-| `/api/sns/web/v1/feed` request body `source_note_id` | observed artifact field only; not-in-identity; not-a-standalone-identity-source |
+| `/api/sns/web/v1/feed` request body `source_note_id` | route-scoped artifact-side derivation input -> canonical `note_id`; not-in-identity baseline |
 
 约束：
 
-- 当前 formal 只确认它已被仓库观测到
+- 当前 formal 只把它冻结为 route-scoped derivation input
 - 不新增第二个 identity 字段
-- 不扩写为更广 verified transport truth、standalone derivation、placement 或 route 规则
+- 不扩写为更广 verified transport truth、placement 或 route 规则
 
 ### 3. exclusion boundary
 
