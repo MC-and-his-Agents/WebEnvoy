@@ -401,6 +401,30 @@ const withMockMainWorld = async (
         return;
       }
 
+      if (requestType === "xhs-request-context-read") {
+        const requestUrl = typeof requestPayload?.url === "string" ? requestPayload.url : "";
+        const requestMethod =
+          requestPayload?.method === "GET"
+            ? "GET"
+            : requestPayload?.method === "POST"
+              ? "POST"
+              : "POST";
+        const trackedContexts =
+          ((mockWindow as Window & Record<string, unknown>).__capturedXhsRequestContexts__ as
+            | Record<string, unknown>
+            | undefined) ?? {};
+        const key = `${requestMethod} ${new URL(requestUrl, mockWindow.location.href).pathname}`;
+        emitResult({
+          id: requestId,
+          ok: true,
+          result:
+            (typeof trackedContexts === "object" && trackedContexts !== null
+              ? (trackedContexts[key] as Record<string, unknown> | undefined)
+              : undefined) ?? null
+        });
+        return;
+      }
+
       if (requestType === "fingerprint-verify") {
         emitResult({
           id: requestId,
