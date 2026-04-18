@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 `xhs.detail` / `xhs.user_home` 的 current public command surface、caller-facing `ability` envelope、canonical command input、canonical shared-path ability metadata 对齐边界、target-page baseline，以及它们与 `FR-0023` 四个顶层对象输入和请求级结果对象之间的 command-level ownership，为后续 `#500` 实现 PR 与 `#445` closeout 提供稳定正式输入。
+冻结 `xhs.detail` / `xhs.user_home` 的 current public command surface、caller-facing `ability` envelope、canonical command input、canonical shared-path ability metadata 对齐边界、target-page baseline，以及它们与 `FR-0023` 四个顶层对象输入和请求级结果对象之间的 command-level ownership，为后续 `#500` 实现 PR 与 `#445` closeout 提供稳定正式输入；其中 legacy public CLI path 的 `ability.layer` / `ability.action` 只冻结为 envelope 存在性与枚举合法性，`L3/read` 只冻结在 canonical metadata 对齐边界。
 
 ## 分阶段拆分
 
@@ -39,7 +39,8 @@
 
 - 规约对照：
   - 对照 `src/commands/xhs-runtime.ts`，确认 current main 已公开注册 `xhs.detail` / `xhs.user_home`
-  - 对照 `src/commands/xhs-input.ts` 与相关 tests，确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`target_page`、四个顶层对象输入消费方式与 current implementation 一致
+  - 对照 `src/commands/xhs-input.ts` 与相关 tests，确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`target_page`、四个顶层对象输入消费方式与 current implementation 一致，且不把 legacy path 的 `ability.layer` / `ability.action` 误写成强制 `L3/read`
+  - 对照 `src/commands/xhs-runtime.ts` 与相关 tests，确认 `request_admission_result` / `execution_audit` 的 canonical slot 继续允许对象 / 显式 `null` / 缺失三种结果形态
   - 对照 `FR-0005` research/TODO，确认当前只识别 formal mismatch，而不提前关闭 `#445` 或改判其 blocker 语义
   - 对照 `FR-0023`，确认 command-level ownership 不发明第二套授权输入
 - 文档门禁：
@@ -73,13 +74,13 @@
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `xhs.detail` / `xhs.user_home` 的 current command surface 不回退
   - `note_id` / `user_id` 缺失时的入口失败
-  - caller-facing `ability` envelope 不回退，且非 canonical `ability.id` 不被误报为受支持公共契约
+  - caller-facing `ability` envelope 不回退，legacy path 的 `ability.layer` / `ability.action` 只保持枚举合法性校验，且非 canonical `ability.id` 不被误报为受支持公共契约
   - legacy public CLI path 下 target-page mismatch 与缺失 `target_domain` / `target_tab_id` / `requested_execution_mode` 的入口失败
   - `requested_execution_mode` 继续对齐 current CLI parser 接受面，并保留后续 gate/runtime rejection chain
   - canonical top-level `FR-0023` path 下 shared gate fields 继续从 `runtime_target` / parser 派生，不回退为第二套外显输入
   - `options.upstream_authorization_request` 兼容 mirror 路径继续保留，不被降格为 internal-only
   - canonical top-level objects 存在时的 `request_admission_result` / `execution_audit` canonical slot ownership
-  - 本 FR 不放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界
+  - 本 FR 不放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界，同时不把 current compatibility behavior 中的显式 `null` 收窄为非法
   - legacy path 下 `request_admission_result` / `execution_audit` 为 `null` 时的兼容行为
 
 ## 并行 / 串行关系
@@ -96,10 +97,10 @@
 
 - FR-0025 spec review 通过。
 - reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface。
-- reviewer 确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`explore_detail_tab` / `profile_tab`、legacy public CLI shared gate fields，以及 canonical top-level path 的派生规则都无阻断歧义。
+- reviewer 确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`explore_detail_tab` / `profile_tab`、legacy public CLI shared gate fields，以及 canonical top-level path 的派生规则都无阻断歧义，且 legacy path 未被误写成强制 `L3/read`。
 - reviewer 确认两个命令在 canonical top-level path 下的四个顶层对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
 - reviewer 确认 `options.upstream_authorization_request` 继续冻结为 current command/runtime payload 的兼容 mirror 与现有调用路径，而未被降格为 internal-only。
-- reviewer 确认本 FR 未放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界。
+- reviewer 确认本 FR 未放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界，且未把 current compatibility behavior 中的显式 `null` 收窄为非法。
 - reviewer 确认 canonical ability 对齐只冻结为 metadata 边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约。
 - reviewer 确认 legacy public CLI path 未被 formal 误删或误写成无效输入模型。
 - reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把其产出写成强制真相。

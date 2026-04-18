@@ -3,11 +3,11 @@
 ## 1. Public commands
 
 ```ts
-type CallerFacingReadAbilityEnvelope = {
+type CallerFacingAbilityEnvelope = {
   ability: {
     id: string;
-    layer: "L3";
-    action: "read";
+    layer: "L3" | "L2" | "L1";
+    action: "read" | "write" | "download";
   };
 };
 
@@ -31,7 +31,8 @@ type XhsUserHomeCommand = {
 - 两条命令都属于 current public CLI command surface。
 - 两条命令都 `requiresProfile=true`。
 - current public CLI request 仍必须显式携带 `ability.id`、`ability.layer`、`ability.action`。
-- `xhs.detail` / `xhs.user_home` 当前 caller-facing ability baseline 都要求 `ability.layer = "L3"` 且 `ability.action = "read"`。
+- current legacy public CLI path 只把 `ability.layer` / `ability.action` 冻结为“字段存在且枚举合法”的 caller-facing envelope；本契约不得把 non-`L3/read` 误写成 current parser 的通用硬阻断。
+- canonical top-level `FR-0023` object path 与 current runtime / contract output metadata 继续把两条命令对齐到 `L3/read` read-command family。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
 - current top-level `FR-0023` object path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
 - legacy public CLI path 的非 canonical `ability.id` 行为不属于本契约冻结范围；本契约不把这类输入申报为受支持的公共 CLI 契约。
@@ -62,7 +63,6 @@ type CanonicalTopLevelFr0023TargetBaseline = {
     tab_id: number;
     page: "explore_detail_tab" | "profile_tab";
   };
-  derived_requested_execution_mode: string;
 };
 ```
 
@@ -74,6 +74,7 @@ type CanonicalTopLevelFr0023TargetBaseline = {
 - `target_domain` 在 current parser truth 下仍只要求非空字符串
 - `requested_execution_mode` 继续对齐 current CLI parser 接受面；若当前命令组合在后续 gate/runtime 校验中被拒绝，本契约按 existing rejection chain 处理，而不提前收窄为 read-only allowlist
 - canonical top-level `FR-0023` object path 下，`target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
+- `requested_execution_mode` 仍是 current parser / runtime 内部派生语义，而不是 canonical top-level `FR-0023` object family 的新增正式字段
 - 归一化后的 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
 - 它不得被写成可替代四个顶层对象 ownership truth 的独立 formal object family
 - background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
@@ -106,8 +107,8 @@ type CanonicalUpstreamAuthorizationRequest = {
 
 ```ts
 type CommandLevelSummary = {
-  request_admission_result?: Record<string, unknown>;
-  execution_audit?: Record<string, unknown>;
+  request_admission_result?: Record<string, unknown> | null;
+  execution_audit?: Record<string, unknown> | null;
 };
 ```
 
@@ -115,7 +116,7 @@ type CommandLevelSummary = {
 
 - `request_admission_result` / `execution_audit` 是 canonical request-level output slot
 - 当命令消费 canonical top-level `FR-0023` object path 或 nested compatibility mirror 时，这两个字段必须继续遵循 `FR-0023` 已冻结的请求级结果契约
-- 本契约只冻结它们在 summary 或 error details 的 canonical slot / 位置约束
+- 本契约只冻结它们在 summary 或 error details 的 canonical slot / 位置约束，并保留 current compatibility behavior 中对象 / 显式 `null` / 缺失三种结果形态
 - `execution_audit` 不得进入 `observability`
 - 本契约不得放宽 `FR-0023` 对 admission / audit 结果的要求
 

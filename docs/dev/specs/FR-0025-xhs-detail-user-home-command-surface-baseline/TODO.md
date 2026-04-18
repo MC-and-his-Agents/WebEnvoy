@@ -4,7 +4,7 @@
 - [x] 建立 canonical issue 绑定 `#504`
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface
 - [ ] reviewer 确认本 FR 只记录 `FR-0005` 的 formal mismatch，而未提前改判其 blocker / closeout 语义
-- [ ] reviewer 确认 caller-facing `ability.id` / `ability.layer` / `ability.action` envelope 仍是 current public CLI baseline
+- [ ] reviewer 确认 caller-facing `ability.id` / `ability.layer` / `ability.action` envelope 仍是 current public CLI baseline，且 legacy path 未被误写成强制 `L3/read`
 - [ ] reviewer 确认 `note_id` / `user_id` 是唯一 required canonical command input
 - [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical metadata 对齐边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约
 - [ ] reviewer 确认 `explore_detail_tab` / `profile_tab` 是唯一 target-page baseline
@@ -17,6 +17,7 @@
 - [ ] reviewer 确认 legacy public CLI path 仍被保留为 current command-level input model，而未被 formal 误删
 - [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束与 current implementation 对齐
 - [ ] reviewer 确认本 FR 未放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界
+- [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的对象 / 显式 `null` / 缺失兼容形态未被 formal 误收窄
 - [ ] reviewer 确认 `execution_audit` 不进入 `observability`
 - [ ] reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`
 - [ ] reviewer 确认 PR 描述已显式填写 integration-gated 元数据：`integration_applicable=yes`、`integration_touchpoint=active`、`integration_ref=#464`

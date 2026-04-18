@@ -46,6 +46,7 @@
 约束：
 
 - 二者只保留 command-level ownership
+- current compatibility behavior 中允许对象 / 显式 `null` / 缺失三种结果形态
 - 不升级成长期资源状态或 replay/store truth
 
 ## 不属于本 FR 的对象
