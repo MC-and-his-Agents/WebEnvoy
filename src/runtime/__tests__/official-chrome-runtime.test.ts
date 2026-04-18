@@ -5,6 +5,20 @@ import {
   prepareOfficialChromeRuntime
 } from "../official-chrome-runtime.js";
 
+const buildRuntimeTakeoverEvidence = (input: {
+  mode?: "ready_attach" | "recoverable_rebind" | null;
+  attachableReadyRuntime?: boolean;
+  orphanRecoverable?: boolean;
+  observedRunId?: string;
+  runtimeContextId?: string | null;
+} = {}) => ({
+  mode: input.mode ?? null,
+  attachableReadyRuntime: input.attachableReadyRuntime ?? false,
+  orphanRecoverable: input.orphanRecoverable ?? false,
+  observedRunId: input.observedRunId ?? "observed-runtime-001",
+  runtimeContextId: input.runtimeContextId ?? null
+});
+
 describe("prepareOfficialChromeRuntime", () => {
   it("does not forward persistent extension identity into runtime.status params", () => {
     expect(
@@ -193,7 +207,12 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: false
+        lockHeld: false,
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-attach-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -272,7 +291,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("attempts attach for a recoverable disconnected ready runtime before bootstrapping", async () => {
+  it("attempts attach from pre-lock orphan recovery facts even after attach rebinding", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -285,7 +304,11 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "ready",
         transportState: "disconnected",
         lockHeld: false,
-        orphanRecoverable: true
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "recoverable_rebind",
+          orphanRecoverable: true,
+          observedRunId: "run-runtime-recoverable-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -296,8 +319,7 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: true,
-        orphanRecoverable: false
+        lockHeld: true
       });
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -308,8 +330,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "pending",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
@@ -359,6 +380,298 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("attempts attach for a ready runtime only after status proves a live transport is still available", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: false,
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-owner-001"
+        })
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "pending",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-owner-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_ready_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_attach_profile",
+          run_id: "run-runtime-owner-attach-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("still attempts attach when a ready runtime reports bootstrap failure but transport remains healthy", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "failed",
+        transportState: "ready",
+        lockHeld: false,
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-bootstrap-failed-owner-001"
+        })
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-bootstrap-failed-attach-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_failed_bootstrap_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_failed_bootstrap_attach_profile",
+          run_id: "run-runtime-bootstrap-failed-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      transportState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("does not attempt attach when status reports a failed-ready conflict as non-attachable", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: false,
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_conflicted_attach_profile",
+          run_id: "run-runtime-conflicted-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt attach when the readiness probe never verified the ready runtime", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: false,
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_unverified_attach_profile",
+          run_id: "run-runtime-unverified-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
   it("does not attach a recoverable runtime unless status proves it is orphan-recoverable", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {
@@ -370,7 +683,10 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "ready",
       transportState: "disconnected",
       lockHeld: false,
-      orphanRecoverable: false
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        orphanRecoverable: false
+      })
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -393,6 +709,63 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_non_orphan_recoverable_profile",
           run_id: "run-runtime-non-orphan-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not attach a ready runtime when the transport signal is not ready", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "not_started",
+      transportState: "not_connected",
+      lockHeld: false,
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "ready",
+      identityBindingState: "bound",
+      bootstrapState: "ready",
+      transportState: "ready",
+      lockHeld: true
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_attach_unverified_profile",
+          run_id: "run-runtime-ready-attach-unverified-001",
           command: "xhs.detail",
           params: {}
         } as never,

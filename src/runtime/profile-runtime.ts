@@ -84,6 +84,54 @@ const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean =>
   return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
 
+const hasVerifiedBootstrapAttestation = (readiness: RuntimeReadinessSnapshot): boolean => {
+  if (readiness.bootstrapState === "ready") {
+    return true;
+  }
+  if (readiness.bootstrapState !== "failed") {
+    return false;
+  }
+  const code = readiness.details?.code as string | undefined;
+  return (
+    code === undefined ||
+    code === "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH" ||
+    code === "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+  );
+};
+
+const hasVerifiedReadyRuntimeSignal = (readiness: RuntimeReadinessSnapshot): boolean =>
+  readiness.identityBindingState === "bound" &&
+  readiness.transportState === "ready" &&
+  hasVerifiedBootstrapAttestation(readiness) &&
+  ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH") &&
+  ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
+
+const canAttachReadyRuntime = (input: {
+  healthyLock: boolean;
+  profileState: ProfileState;
+  pinnedControllerPid: number | null | undefined;
+  readiness: RuntimeReadinessSnapshot;
+}): boolean =>
+  input.healthyLock &&
+  input.profileState === "ready" &&
+  Number.isInteger(input.pinnedControllerPid) &&
+  hasVerifiedReadyRuntimeSignal(input.readiness);
+
+type RuntimeTakeoverMode = "ready_attach" | "recoverable_rebind";
+
+interface RuntimeTakeoverEvidenceRecord {
+  mode: RuntimeTakeoverMode | null;
+  attachableReadyRuntime: boolean;
+  orphanRecoverable: boolean;
+  freshness: "fresh" | "stale";
+  identityBound: boolean;
+  ownerConflictFree: boolean;
+  controllerBrowserContinuity: boolean;
+  transportBootstrapViable: boolean;
+  observedRunId: string;
+  runtimeContextId: string | null;
+}
+
 interface RuntimeActionInput {
   cwd: string;
   profile: string;
@@ -897,6 +945,8 @@ export class ProfileRuntimeService {
       lockInspection,
       runtimeRunId: input.runId
     });
+    const pinnedControllerPid =
+      typeof lock?.controllerPid === "number" ? lock.controllerPid : lock?.ownerPid;
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -906,12 +956,50 @@ export class ProfileRuntimeService {
       meta,
       profileDir
     });
+    const observedReadyAttachReadiness = await this.#readObservedRuntimeReadiness({
+      runtimeInput: input,
+      lockHeld: accessState.lockHeld,
+      observedRunId: accessState.observedRunId,
+      identityPreflight,
+      profileState: accessState.profileState
+    });
     const readiness = await this.#readRuntimeReadiness({
       runtimeInput: input,
       lockHeld: accessState.lockHeld,
       observedRunId: accessState.observedRunId,
       identityPreflight,
       profileState: accessState.profileState
+    });
+    const attachableReadyRuntime = canAttachReadyRuntime({
+      healthyLock: accessState.healthyLock,
+      profileState: accessState.profileState,
+      pinnedControllerPid,
+      readiness: observedReadyAttachReadiness ?? readiness
+    });
+    const attachableRecoverableRuntime =
+      !accessState.lockHeld &&
+      (accessState.profileState === "ready" || accessState.profileState === "disconnected") &&
+      (lockInspection?.orphanRecoverable ?? false) &&
+      readiness.identityBindingState === "bound" &&
+      readiness.bootstrapState !== "stale" &&
+      readiness.transportState !== "not_connected" &&
+      readiness.runtimeReadiness === "recoverable";
+    const evidenceReadiness =
+      attachableReadyRuntime && observedReadyAttachReadiness !== null
+        ? observedReadyAttachReadiness
+        : readiness;
+    const runtimeTakeoverEvidence = this.#buildRuntimeTakeoverEvidence({
+      profile: input.profile,
+      lockHeld: accessState.lockHeld,
+      healthyLock: accessState.healthyLock,
+      controlConnected: accessState.controlConnected,
+      observedRunId: accessState.observedRunId,
+      readiness: evidenceReadiness,
+      attachableReadyRuntime,
+      orphanRecoverable: attachableRecoverableRuntime,
+      pinnedControllerPid,
+      browserPid: lockInspection?.browserPid ?? null,
+      stateRunId: lockInspection?.stateRunId ?? null
     });
 
     return {
@@ -927,7 +1015,7 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: lock?.ownerPid ?? null,
-      orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
+      runtimeTakeoverEvidence,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: meta?.updatedAt ?? null
@@ -971,19 +1059,6 @@ export class ProfileRuntimeService {
       typeof lock.controllerPid === "number"
         ? lock.controllerPid
         : lock.ownerPid;
-    const attachableReadyRuntime =
-      accessState.healthyLock &&
-      accessState.controlConnected &&
-      accessState.profileState === "ready" &&
-      Number.isInteger(pinnedControllerPid);
-    const attachableRecoverableRuntime =
-      (storedProfileState === "ready" || storedProfileState === "disconnected") &&
-      lockInspection.orphanRecoverable;
-    if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
-      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
-        retryable: true
-      });
-    }
 
     const identityPreflight = await this.#runIdentityPreflight({
       input,
@@ -1007,30 +1082,64 @@ export class ProfileRuntimeService {
       requestedExecutionMode
     });
     ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-    if (attachableRecoverableRuntime) {
-      const preAttachReadiness = await this.#readRuntimeReadiness({
-        runtimeInput: input,
-        lockHeld: false,
-        observedRunId: accessState.observedRunId,
-        identityPreflight,
-        profileState: accessState.profileState
+    const observedReadyAttachReadiness = await this.#readObservedRuntimeReadiness({
+      runtimeInput: input,
+      lockHeld: false,
+      observedRunId: accessState.observedRunId,
+      identityPreflight,
+      profileState: accessState.profileState
+    });
+    const preAttachReadiness = await this.#readRuntimeReadiness({
+      runtimeInput: input,
+      lockHeld: false,
+      observedRunId: accessState.observedRunId,
+      identityPreflight,
+      profileState: accessState.profileState
+    });
+    const attachableReadyRuntime = canAttachReadyRuntime({
+      healthyLock: accessState.healthyLock,
+      profileState: accessState.profileState,
+      pinnedControllerPid,
+      readiness: observedReadyAttachReadiness ?? preAttachReadiness
+    });
+    const attachableRecoverableRuntime =
+      (storedProfileState === "ready" || storedProfileState === "disconnected") &&
+      lockInspection.orphanRecoverable &&
+      preAttachReadiness.bootstrapState !== "stale" &&
+      preAttachReadiness.transportState !== "not_connected" &&
+      preAttachReadiness.runtimeReadiness === "recoverable";
+    const evidenceReadiness =
+      attachableReadyRuntime && observedReadyAttachReadiness !== null
+        ? observedReadyAttachReadiness
+        : preAttachReadiness;
+    const runtimeTakeoverEvidence = this.#buildRuntimeTakeoverEvidence({
+      profile: input.profile,
+      lockHeld: false,
+      healthyLock: accessState.healthyLock,
+      controlConnected: accessState.controlConnected,
+      observedRunId: accessState.observedRunId,
+      readiness: evidenceReadiness,
+      attachableReadyRuntime,
+      orphanRecoverable: attachableRecoverableRuntime,
+      pinnedControllerPid,
+      browserPid: lockInspection.browserPid,
+      stateRunId: lockInspection.stateRunId
+    });
+    if (
+      !runtimeTakeoverEvidence.attachableReadyRuntime &&
+      !runtimeTakeoverEvidence.orphanRecoverable
+    ) {
+      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
+        retryable: true
       });
-      if (
-        preAttachReadiness.bootstrapState === "stale" ||
-        preAttachReadiness.transportState === "not_connected" ||
-        preAttachReadiness.runtimeReadiness !== "recoverable"
-      ) {
-        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
-          retryable: true
-        });
-      }
     }
 
-    const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;
+    const takeoverMode = runtimeTakeoverEvidence.mode;
+    const nextOwnerPid = takeoverMode === "recoverable_rebind" ? process.pid : lock.ownerPid;
     let attachedLock = lock;
     if (
       lock.ownerRunId !== input.runId ||
-      (attachableRecoverableRuntime && lock.ownerPid !== nextOwnerPid)
+      (takeoverMode === "recoverable_rebind" && lock.ownerPid !== nextOwnerPid)
     ) {
       attachedLock = await this.#rebindActiveRuntimeOwnership({
         profileDir,
@@ -1038,7 +1147,7 @@ export class ProfileRuntimeService {
         lock,
         nextRunId: input.runId,
         nextOwnerPid,
-        orphanRecoverable: attachableRecoverableRuntime,
+        orphanRecoverable: takeoverMode === "recoverable_rebind",
         nowIso
       });
     }
@@ -1099,7 +1208,6 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: attachedLock.ownerPid,
-      orphanRecoverable: attachableRecoverableRuntime,
       recoverableSession: buildRecoverableSessionSummary(nextMeta),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: nextMeta?.updatedAt ?? null
@@ -1540,6 +1648,52 @@ export class ProfileRuntimeService {
     }
   }
 
+  #buildRuntimeTakeoverEvidence(input: {
+    profile: string;
+    lockHeld: boolean;
+    healthyLock: boolean;
+    controlConnected: boolean;
+    observedRunId: string;
+    readiness: RuntimeReadinessSnapshot;
+    attachableReadyRuntime: boolean;
+    orphanRecoverable: boolean;
+    pinnedControllerPid: number | null | undefined;
+    browserPid: number | null;
+    stateRunId: string | null;
+  }): RuntimeTakeoverEvidenceRecord {
+    const controllerBrowserContinuity =
+      Number.isInteger(input.pinnedControllerPid) &&
+      Number.isInteger(input.browserPid) &&
+      input.stateRunId === input.observedRunId;
+    const transportBootstrapViable =
+      input.readiness.transportState !== "not_connected" &&
+      input.readiness.bootstrapState !== "stale";
+    const readyAttach = !input.lockHeld && input.attachableReadyRuntime;
+    const recoverableRebind = !input.lockHeld && !readyAttach && input.orphanRecoverable;
+
+    return {
+      mode: readyAttach ? "ready_attach" : recoverableRebind ? "recoverable_rebind" : null,
+      attachableReadyRuntime: readyAttach,
+      orphanRecoverable: recoverableRebind,
+      freshness:
+        controllerBrowserContinuity && transportBootstrapViable && input.healthyLock
+          ? "fresh"
+          : "stale",
+      identityBound: input.readiness.identityBindingState === "bound",
+      ownerConflictFree:
+        input.lockHeld ||
+        recoverableRebind ||
+        (readyAttach && input.healthyLock && input.controlConnected),
+      controllerBrowserContinuity,
+      transportBootstrapViable,
+      observedRunId: input.observedRunId,
+      runtimeContextId:
+        input.observedRunId.length > 0
+          ? buildRuntimeBootstrapContextId(input.profile, input.observedRunId)
+          : null
+    };
+  }
+
   async #rebindActiveRuntimeOwnership(input: {
     profileDir: string;
     lockPath: string;
@@ -1801,6 +1955,34 @@ export class ProfileRuntimeService {
     }
 
     return this.#readPersistentRuntimeReadiness(input);
+  }
+
+  async #readObservedRuntimeReadiness(input: {
+    runtimeInput: RuntimeActionInput;
+    lockHeld: boolean;
+    observedRunId?: string;
+    identityPreflight: IdentityPreflightResult;
+    profileState: ProfileState;
+  }): Promise<RuntimeReadinessSnapshot | null> {
+    if (
+      input.lockHeld ||
+      input.identityPreflight.mode !== "official_chrome_persistent_extension" ||
+      input.identityPreflight.identityBindingState !== "bound" ||
+      !input.observedRunId ||
+      (input.profileState !== "ready" && input.profileState !== "disconnected")
+    ) {
+      return null;
+    }
+
+    return this.#readPersistentRuntimeReadiness({
+      ...input,
+      runtimeInput: {
+        ...input.runtimeInput,
+        runId: input.observedRunId
+      },
+      lockHeld: true,
+      observedRunId: undefined
+    });
   }
 
   async #readPersistentRuntimeReadiness(input: {
