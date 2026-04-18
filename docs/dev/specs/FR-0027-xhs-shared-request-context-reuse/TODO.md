@@ -1,0 +1,14 @@
+# FR-0027 TODO
+
+- [x] 建立 `FR-0027-xhs-shared-request-context-reuse` 正式套件
+- [x] 建立 canonical issue 绑定 `#508`
+- [ ] reviewer 确认 `#503/#504/#505/#508` formal owner 已无重叠或缺口
+- [ ] reviewer 确认 `page_context_namespace + shape_key` 已冻结为 shared slotting identity
+- [ ] reviewer 确认 admitted / rejected / incompatible bucket state 已冻结为 shared request-context model
+- [ ] reviewer 确认 detail/user_home canonical reuse-shape 已冻结为 `note_id` / `user_id` only
+- [ ] reviewer 确认 synthetic / failed source 不进入 admitted template
+- [ ] reviewer 确认 exact-match / freshness / fail-closed 规则已冻结
+- [ ] reviewer 确认 replacement implementation formal gate 已更新为等待 `#503/#504/#505/#508`
+- [ ] reviewer 确认 `Closing=Refs #508`、`review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
+- [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/FR-0027-xhs-shared-request-context-reuse main` 与单分支职责一致
+- [ ] spec review 通过并形成 replacement implementation 的新正式输入

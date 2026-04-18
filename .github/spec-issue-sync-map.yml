@@ -51,5 +51,7 @@ mappings:
     canonical_issue_number: 504
   - spec_path: docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md
     canonical_issue_number: 505
+  - spec_path: docs/dev/specs/FR-0027-xhs-shared-request-context-reuse/spec.md
+    canonical_issue_number: 508
   - spec_path: docs/dev/specs/FR-0028-xhs-detail-capture-note-id-derivation/spec.md
     canonical_issue_number: 510
