@@ -78,9 +78,9 @@
 
 结论：
 
-- 这些表述与 current main 已形成 formal mismatch
-- 当前 FR 只为 `#504` 冻结 command-surface / request-context baseline
-- `FR-0005` 与 `#445` 的正式收口仍待后续专门回写；`#445` 仍受 live primary success 与 headers matrix 阻断
+- 这些表述必须被降格为 fixed sample head `eca28babebe929821aa20fbb113b2f94d6ce4f49` 的 dated historical fact，不能继续充当 current main command-surface truth
+- 当前 FR 会连同同 PR 内的最小 `FR-0005` backwrite，一并把 `#504` 的 command-surface / request-context baseline 收成单一 formal truth
+- `#445` 的正式收口仍待后续 latest-main fresh rerun 与 headers matrix 证据补齐；本 FR 不改写其 live blocker 语义
 
 ## 对 #505 的输入
 

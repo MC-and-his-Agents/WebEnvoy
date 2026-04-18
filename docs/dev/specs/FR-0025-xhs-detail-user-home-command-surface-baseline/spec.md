@@ -9,7 +9,7 @@ Canonical Issue: #504
 当前仓库存在一个已经影响 blocker 收口的 formal/implementation 冲突：
 
 - current main 的实现与测试已经把 `xhs.detail` / `xhs.user_home` 作为公共 CLI command surface 对外暴露。
-- `FR-0005` 的既有 formal 文本仍保留“detail/user_home 尚无公开 CLI 命令入口”的旧口径，尚未在仓库内完成一致性回写。
+- `FR-0005` 的既有 fixed-sample 文本曾把 `detail/user_home` 缺失公开 CLI 命令入口记录为 `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49` 的 dated historical fact；在本 FR 之前，这段历史表述还没有被明确与 current main command surface 口径对齐。
 - 如果不先冻结“当前正式命令面已经存在、且这两个命令如何消费 `FR-0023` 四对象输入”的正式基线，后续 `#500` 的实现 PR、latest-main rerun 与 `#445` closeout 仍会在 command surface 是否存在、request-context baseline 是否允许被引用之间反复摇摆。
 
 因此，本 FR 的职责不是继续讨论 search request-shape，也不是提前冻结 detail identity，而是先把 current main 已存在的 detail/user_home command surface 与 request-context baseline 收成 formal contract，作为后续实现和 closeout 的稳定上游输入。
@@ -43,8 +43,8 @@ Canonical Issue: #504
 
 本 FR 必须明确：
 
-- `FR-0005` 中“detail/user_home 尚无公开 CLI 命令入口”的旧口径与 current main 存在 formal mismatch。
-- 本 FR 只为 `#504` 冻结 current command surface / request-context baseline，不单独改判 `FR-0005`、`#445` 或其 blocker 语义。
+- `FR-0005` 中关于 “detail/user_home 尚无公开 CLI 命令入口” 的表述，只能继续保留为 `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49` 的 dated historical fact，不再作为 current main command-surface truth。
+- 本 FR 连同同 PR 中对 `FR-0005` 的最小 backwrite，一起冻结 `#504` 的 current command surface / request-context baseline；这不会单独改判 `FR-0005`、`#445` 的 live evidence blocker 或 closeout 语义。
 
 ### 2. caller-facing ability envelope 与 canonical command input
 
@@ -281,7 +281,7 @@ And 必须等待 `#505` 的正式结论
 - background/extension direct path 若存在内部 auto target-tab resolution，不得被本 FR 误写为 current public CLI contract。
 - legacy path 的结果兼容行为不得被拿来放宽 `FR-0023` 已冻结的请求级结果边界。
 - `request_admission_result` / `execution_audit` 在 current compatibility behavior 中可显式为 `null`；formal 不得把该结果形态收窄为非法。
-- `FR-0005` 的相关 formal mismatch 仍待后续专门回写；本 FR 不在这里提前收口其 blocker 语义。
+- 本 PR 已完成 `FR-0005` 中 command-surface 旧口径的最小 formal 对齐；本 FR 仍不在这里提前收口 `#445` 的 live blocker 或 closeout 语义。
 
 ## 验收标准
 
@@ -291,7 +291,7 @@ And 必须等待 `#505` 的正式结论
 4. 两个命令消费 `FR-0023` 四个顶层对象输入的 command-level ownership 已冻结，且不新增第二套授权输入，同时保留了 nested `options.upstream_authorization_request` 兼容调用路径。
 5. `request_admission_result` 与 `execution_audit` 的 canonical output slot / 位置约束已冻结，且本 FR 未放宽 `FR-0023` 已冻结的结果边界。
 6. 本 FR 已显式把 detail identity 与 `image_scenes` 转交 `#505`。
-7. formal 套件足以作为 `#504` 的上游基线，但不在本 PR 内提前收口 `FR-0005` / `#445` 的 formal mismatch。
+7. formal 套件足以作为 `#504` 的单一上游基线；本 PR 只完成 command-surface formal 对齐，不提前收口 `#445` 的 live blocker 或 closeout。
 
 ## 依赖与前置条件
 

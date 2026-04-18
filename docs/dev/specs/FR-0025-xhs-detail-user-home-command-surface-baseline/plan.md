@@ -9,7 +9,7 @@
 ### 阶段 1：baseline 冲突收敛
 
 - 产出：`spec.md`
-- 重点：识别 `FR-0005` 与 current main 的 formal mismatch，同时只为 `#504` 冻结 current public command surface，不提前改判 closeout 语义
+- 重点：收敛 `FR-0005` 历史样本与 current main 的 command-surface 口径，并只为 `#504` 冻结 current public command surface，不提前改判 closeout 语义
 
 ### 阶段 2：command-level contract 冻结
 
@@ -41,7 +41,7 @@
   - 对照 `src/commands/xhs-runtime.ts`，确认 current main 已公开注册 `xhs.detail` / `xhs.user_home`
   - 对照 `src/commands/xhs-input.ts` 与相关 tests，确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`target_page`、四个顶层对象输入消费方式与 current implementation 一致，且不把 legacy path 的 `ability.layer` / `ability.action` 误写成强制 `L3/read`
   - 对照 `src/commands/xhs-runtime.ts` 与相关 tests，确认 `request_admission_result` / `execution_audit` 的 canonical slot 继续允许对象 / 显式 `null` / 缺失三种结果形态
-  - 对照 `FR-0005` research/TODO，确认当前只识别 formal mismatch，而不提前关闭 `#445` 或改判其 blocker 语义
+  - 对照 `FR-0005` research/TODO，确认当前已完成 command-surface 口径对齐，而不提前关闭 `#445` 或改判其 live blocker 语义
   - 对照 `FR-0023`，确认 command-level ownership 不发明第二套授权输入
 - 文档门禁：
   - `bash scripts/docs-guard.sh`

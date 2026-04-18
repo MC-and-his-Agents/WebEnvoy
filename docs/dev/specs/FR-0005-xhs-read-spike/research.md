@@ -595,11 +595,12 @@
 - `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`
 - Chrome 页面：`https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
 
-同时确认到的该轮样本头 command surface 事实：
+同时确认到的该轮样本头 command surface 事实（仅适用于 `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49` 这轮 fixed sample）：
 
 - 当前公开 runtime CLI 命令仅有 `runtime.help/install/uninstall/ping/start/login/status/stop/audit`
 - 当前公开 XHS CLI 命令仅有 `xhs.search`
-- `detail` / `user_home` 仍没有对应的公开 CLI 命令入口；`runtime.tabs` 虽可通过 internal bridge diagnostics path 使用，但不能替代正式 `xhs.detail` / `xhs.user_home` command surface
+- 在该轮 fixed sample head 上，`detail` / `user_home` 仍没有对应的公开 CLI 命令入口；`runtime.tabs` 虽可通过 internal bridge diagnostics path 使用，但不能替代该轮样本头的正式 `xhs.detail` / `xhs.user_home` command surface
+- current main 的 command-surface truth 已由 `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md` 另行冻结；这里保留的只是 dated historical fact
 
 #### 5.4.3 三场景 endpoint 证据更新
 
@@ -659,34 +660,35 @@
 `detail`
 
 - 本轮未获得合法 fresh rerun 样本
-- 直接原因已不再是 bundle 缺陷，而是该轮固定样本头的公开 command surface 仍未提供 `xhs.detail` 的正式 CLI 入口
+- 直接原因已不再是 bundle 缺陷，而是该轮 fixed sample head 的公开 command surface 仍未提供 `xhs.detail` 的正式 CLI 入口
 - `runtime.tabs` 等 internal bridge diagnostics path 只能证明 tab/page 诊断可达，不能替代 `detail primary api` 的正式复核路径
 - 当前维持既有结论：`fallback-only + candidate/failed`，未新增 `/api/sns/web/v1/feed` primary success 样本
 
 `user_home`
 
 - 本轮未获得合法 fresh rerun 样本
-- 直接原因同上：该轮固定样本头的公开 command surface 仍未提供 `xhs.user_home` 的正式 CLI 入口
+- 直接原因同上：该轮 fixed sample head 的公开 command surface 仍未提供 `xhs.user_home` 的正式 CLI 入口
 - 本轮没有新增 `/api/sns/web/v1/user/otherinfo` 或候选聚合端点的 primary success 样本
 - 当前维持既有结论：`fallback-only + candidate/failed`
 
 #### 5.4.4 required headers / 关键字段矩阵是否提升
 
 - `search`：未提升。`dry_run` 成功壳不包含 API request evidence；而 `live_read_high_risk` 在 background gate 即被 `risk_state=paused` 阻断，因此本轮没有新增 `required_headers_observed/candidate` 的有效提升证据。
-- `detail`：未提升。该轮固定样本头仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
-- `user_home`：未提升。该轮固定样本头仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+- `detail`：未提升。该轮 fixed sample head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+- `user_home`：未提升。该轮 fixed sample head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
 
 #### 5.4.5 本轮正式结论
 
-当前仓库内已固化的历史 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把 issue `#445` 的正式停点从“execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+当前仓库内已固化的历史 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把该轮 issue `#445` 样本头的正式停点从“execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
 
 - `#445-A` 已被该轮固定样本 fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
 - `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
 - 但 `search` 在 current formal state 下只能达到 `dry_run` 成功壳；一旦请求 `live_read_high_risk`，就会被 `risk_state=paused` 与 `ISSUE_ACTION_MATRIX_BLOCKED` 明确阻断，未形成 `primary + api + success` 样本。
-- `detail` 与 `user_home` 在该轮固定样本头上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
+- `detail` 与 `user_home` 在该轮 fixed sample head 上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
 - 因此 `search/detail/user_home` 三类场景依然没有同时达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
 - issue `#445` 的本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
-- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮固定样本头的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮 fixed sample head 的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+- current main 上 detail/user_home 的 current command surface 已由 `FR-0025` 冻结，但这不会替代 latest-main fresh rerun 所需的 live primary success 与 headers matrix 证据。
 
 #### 5.4.6 2026-04-11 PR gate refresh 参考样本与 latest-head 维护口径
 
@@ -725,7 +727,8 @@
   - `risk_state_output.current_state=paused`
 - 该组 PR gate refresh 参考样本结论：
   - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
-- `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+- `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此该组历史样本的 formal `No-Go/paused` 结论保持不变。
+- current main 的 authoritative command-surface baseline 以后续 `FR-0025` 为准；这里不再把历史 gate refresh 样本误写成 current truth。
 - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
 
 ### 5.5 2026-04-16 blocker refresh 的治理分层说明

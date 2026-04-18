@@ -3,7 +3,7 @@
 - [x] 建立 `FR-0025-xhs-detail-user-home-command-surface-baseline` 正式套件
 - [x] 建立 canonical issue 绑定 `#504`
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface
-- [ ] reviewer 确认本 FR 只记录 `FR-0005` 的 formal mismatch，而未提前改判其 blocker / closeout 语义
+- [ ] reviewer 确认本 PR 已把 `FR-0005` 的旧命令面表述对齐为 dated historical fact，而未提前改判 `#445` 的 live blocker / closeout 语义
 - [ ] reviewer 确认 caller-facing `ability.id` / `ability.layer` / `ability.action` envelope 仍是 current public CLI baseline，且 legacy path 未被误写成强制 `L3/read`
 - [ ] reviewer 确认 `note_id` / `user_id` 是唯一 required canonical command input
 - [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical metadata 对齐边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约
