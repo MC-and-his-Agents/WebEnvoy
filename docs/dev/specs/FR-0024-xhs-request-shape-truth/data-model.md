@@ -2,7 +2,7 @@
 
 ## 结论
 
-本 FR 不新增 SQLite 表、迁移、索引或新的持久化真相源。它只冻结 XHS request-context 在运行时需要共享的数据对象与 lifecycle 边界，避免 page-local captured template 漂移成第二真相源。
+本 FR 不新增 SQLite 表、迁移、索引或新的持久化真相源。它只冻结 `xhs.search` request-context 在运行时需要共享的数据对象与 lifecycle 边界，避免 page-local captured template 漂移成第二真相源。
 
 本文件定义：
 
@@ -17,6 +17,7 @@
 - 新迁移
 - 新的 replay store
 - 跨 run、跨 profile 的 request template 持久化
+- `xhs.detail` / `xhs.user_home` / `image_scenes` 的 formal 结论
 
 ## 核心对象分层
 
@@ -29,7 +30,7 @@
 
 约束：
 
-1. `RequestShape` / `RequestShapeKey` 是 request-context 复用的正式 truth。
+1. `RequestShape` / `RequestShapeKey` 是 `xhs.search` request-context 复用的正式 truth。
 2. `template_body`、`query`、`headers`、page state 都不能与它们并列成为第二套 identity truth。
 3. 若后续实现需要新增 identity 字段，必须重新过 spec review。
 
@@ -124,15 +125,18 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 
 ## second-truth 风险提示
 
-- 若实现继续用 `method + pathname`、keyword-only 或 note_id-only scope 做旁路 lookup，会重新引入第二套 identity truth。
+- 若实现继续用 `method + pathname`、keyword-only 或其他局部 scope 做旁路 lookup，会重新引入第二套 identity truth。
 - 若实现把 `shape_key` 当成跨页面全局主键，会重新引入跨页污染。
 - 若实现允许 `note_type` 以字符串和数字两种形态进入 `shape_key`，会重新引入 false miss。
 - 若实现不冻结 `limit -> page_size` 映射，会重新引入 `page_size` 来源歧义。
-- 若实现把 `template_body` 当作 fallback identity 来源，会重新引入 detail body 混用与 stale field 覆盖。
 - 若实现保留 `rejected_source` 枚举但 observation 不携带 shape-level 身份，该结果会重新退化为 route-level 误归因。
 - 若实现允许 admitted template 类型继续保留 synthetic source kind，会重新打开 synthetic 污染模板池的路径。
-- 若实现把 `xhs.detail.image_scenes` 仅凭单一样本值硬编码为常量，会把未证实的 detail 变体直接冻结进 formal contract。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
+
+## deferred scope 提醒
+
+- `xhs.detail` / `xhs.user_home` 的 request-context baseline 转入 `#504`
+- `xhs.detail.image_scenes` 是否进入 canonical identity 转入 `#505`
 
 ## 与 FR-0018 的边界提醒
 

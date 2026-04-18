@@ -1,34 +1,20 @@
-# FR-0024 契约：XHS Request Context Shape
+# FR-0024 契约：XHS Search Request Context Shape
 
 ## 1. `RequestShape`
 
-`RequestShape` 是 XHS read path request-context 的单一 canonical identity 对象。它是内部 contract，不直接声明新的 public CLI/API 输入面。
+`RequestShape` 是 XHS `xhs.search` request-context 的单一 canonical identity 对象。它是内部 contract，不直接声明新的 public CLI/API 输入面。
 
 ```ts
-type RequestShape =
-  | {
-      command: "xhs.search";
-      method: "POST";
-      pathname: "/api/sns/web/v1/search/notes";
-      keyword: string;
-      page: number;
-      page_size: number;
-      sort: string;
-      note_type: number;
-    }
-  | {
-      command: "xhs.detail";
-      method: "POST";
-      pathname: "/api/sns/web/v1/feed";
-      source_note_id: string;
-      image_scenes: string[];
-    }
-  | {
-      command: "xhs.user_home";
-      method: "GET";
-      pathname: "/api/sns/web/v1/user/otherinfo";
-      user_id: string;
-    };
+type RequestShape = {
+  command: "xhs.search";
+  method: "POST";
+  pathname: "/api/sns/web/v1/search/notes";
+  keyword: string;
+  page: number;
+  page_size: number;
+  sort: string;
+  note_type: number;
+};
 ```
 
 约束：
@@ -39,28 +25,14 @@ type RequestShape =
 - capture 阶段必须先从当前候选 request artifact 自身构造 capture-side derivation source；这个 source 不得依赖某条命令已先发出。
 - lookup / eligibility 阶段必须从 canonical command input 与 page-local candidate evidence 构造 command-side derivation source。
 - capture-side derivation source 与 command-side derivation source 最终都必须进入同一套 `deriveRequestShape()`，并产出同一个 `RequestShape` / `RequestShapeKey` 契约。
-- 对于 `xhs.search`，derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
-- 对于 `xhs.search`，`note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
-- 对于 `xhs.detail`，`image_scenes` 必须先归一为稳定的字符串数组表示后再进入 `RequestShape`。
-- 对于 `xhs.detail`，当前 baseline 必须冻结 `image_scenes` 的派生规则：它不能凭单一样本常量硬编码，而必须从当前 page-local candidate evidence 物化为稳定 shape。
-- 对于 `xhs.user_home`，当前只有 `user_id` 进入 identity；后续新增 identity 字段必须经过新的 spec review。
+- derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
+- `note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
 
 兼容映射：
 
 - 当前公开 `xhs.search` 输入 `query` 映射为 `RequestShape.keyword`
 - 当前公开 `xhs.search` 输入 `limit` 必须映射为 canonical `RequestShape.page_size`
 - 当前公开 `xhs.search` 输入 `note_type?: string | number` 映射为 `RequestShape.note_type: number`
-- 对本 FR 内部 `xhs.detail` read intent，`note_id` 映射为 `RequestShape.source_note_id`；这不构成“当前已存在公开 `xhs.detail` CLI 输入面”的声明
-- 对本 FR 内部 `xhs.user_home` read intent，`user_id` 直接映射为 `RequestShape.user_id`；这不构成“当前已存在公开 `xhs.user_home` CLI 输入面”的声明
-
-当前 baseline 的 detail 派生规则：
-
-- 对 capture 到的 detail 页面真实请求，`image_scenes` 必须直接从被捕获请求体归一后进入 `RequestShape`
-- 对当前 `xhs.detail` internal read intent（`note_id=...`），`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 page-local candidate evidence
-- `xhs.detail` 的 page-local candidate evidence 必须同时覆盖 admitted captured templates 与同 `shape_key` / 同 route bucket 可达的 rejected observations；不得把 rejected-source 路径排除在 detail shape derivation 之外
-- 当且仅当该 bucket 内存在唯一可用的 `source_note_id + image_scenes` 候选时，当前请求才允许物化出完整 `RequestShape`
-- 若不存在候选，当前请求必须返回 `template_missing`
-- 若同一 `source_note_id` 在当前 namespace 内存在多个不同 `image_scenes` 候选，不论它们来自 admitted template 还是 rejected observation，当前请求都必须返回 `incompatible`，不得凭实现猜测其一
 
 以下字段当前明确不属于 `RequestShape`：
 
@@ -121,7 +93,6 @@ type CapturedRequestTemplateRecord = {
 - `shape` 与 `shape_key` 必须在 capture 时同时写入，不允许后置推断
 - `template_headers`、`template_body`、`referrer` 只能在 exact hit 后被复用
 - `template_body` 不得在 exact miss 时被当成第二 identity truth 继续回推兼容性
-- 对于 `xhs.detail`，`template_body` 不能整体摊平覆盖 canonical body；只能在 exact hit 后复用 shape 允许的模板字段
 
 ## 4. `RejectedRequestContextObservation`
 
@@ -223,7 +194,7 @@ lookup 必须按两个阶段执行：
 - 不允许在跨页面或跨文档生命周期范围内共享 bucket
 - `incompatible` 只能来自“同 namespace、同 command + method + pathname 下存在其他 shape 候选”
 - `rejected_source` 只能来自同 namespace、同 `shape_key` 槽位下最近一次 capture admission 被拒绝的 observation
-- 不允许按 `method + pathname`、只按 keyword、只按 note_id 或其他局部字段跨 namespace 模糊查找
+- 不允许按 `method + pathname`、只按 keyword 或其他局部字段跨 namespace 模糊查找
 
 ### eligibility
 
@@ -236,9 +207,12 @@ lookup 必须按两个阶段执行：
 ### 与当前命令输入的兼容
 
 - 本 contract 不改变现有 `xhs.search` 的公开输入面
-- 本 contract 不声称当前已存在公开 `xhs.detail` / `xhs.user_home` 输入面；这里只冻结它们在 XHS request-shape 里的内部 read-intent 语义
-- 若未来需要公开 `xhs.detail` / `xhs.user_home` command surface，必须通过独立的 command-surface FR 冻结对外输入契约，并复用本 contract 已冻结的 canonical identity 规则
 - `RequestShape` 是 internal derivation object，不要求用户直接传入
+
+### deferred scope
+
+- 本 contract 不冻结 `xhs.detail` / `xhs.user_home` 的 command surface 或 request-context baseline；这些问题转入 `#504`
+- 本 contract 不冻结 `xhs.detail.image_scenes` 是否进入 canonical identity；该问题转入 `#505`
 
 ### 与 FR-0018 的边界
 

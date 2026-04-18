@@ -13,7 +13,21 @@
 - 不再把 guardian 当成问题发现器逐条追 findings。
 - 直接冻结共享 `RequestShape` / `RequestShapeKey` 模型，要求四阶段共用一份 truth。
 
-## 研究问题 2：为什么 single request-shape truth 是最小闭环修法
+## 研究问题 2：为什么当前只先冻结 `xhs.search`
+
+结论：
+
+- 当前仓库 formal baseline 里，公开 XHS CLI command surface 只有 `xhs.search`。
+- `xhs.detail` / `xhs.user_home` 的 public surface 与 internal read-intent 归属尚未被冻结，继续在 `FR-0024` 中一并 formalize 会与现有基线冲突。
+- `xhs.detail.image_scenes` 是否必须进入 canonical identity，当前也缺少足够仓库内 runtime / test / formal contract 证据支持。
+
+因此本 FR 选择：
+
+- 先把有正式基线支撑的 `xhs.search` request-shape truth 冻结下来。
+- 把 `xhs.detail` / `xhs.user_home` 转入 `#504`。
+- 把 `xhs.detail.image_scenes` 是否入 shape 转入 `#505`。
+
+## 研究问题 3：为什么 single request-shape truth 是最小闭环修法
 
 结论：
 
@@ -29,7 +43,7 @@
 - 由 `RequestShapeKey` 产出唯一 cache / lookup key
 - 由 exact shape match 决定 eligibility
 
-## 研究问题 3：为什么 exact miss 必须 fail closed
+## 研究问题 4：为什么 exact miss 必须 fail closed
 
 结论：
 
@@ -42,7 +56,7 @@
 - exact template 不存在、shape mismatch、template stale 或来源被拒绝时，当前正式规则一律 fail closed
 - explicit reacquire 如有需要，后续单独立项
 
-## 研究问题 4：为什么 captured template 不能升级成 replay/store truth
+## 研究问题 5：为什么 captured template 不能升级成 replay/store truth
 
 结论：
 
@@ -61,8 +75,8 @@
 | --- | --- | --- |
 | 第一轮 | 模板作用域过粗，只按 `method + pathname` | cache scope 没有 canonical identity |
 | 第二轮 | search 可能复用不同 query 的 `search_id` | search identity 与 reusable context 混淆 |
-| 第三轮 | stale page state 覆盖 canonical 默认值；synthetic request 污染模板；失败请求进入缓存；detail body 混用 | capture、template admission 与 canonical body ownership 不一致 |
-| 最新一轮 | 同关键词下 `page/page_size/sort/note_type` 变化时仍然 false miss；miss 后回退 synthetic path | `capture -> cache key -> lookup -> eligibility` 没有共享完整 request shape |
+| 第三轮 | stale page state 覆盖 canonical 默认值；synthetic request 污染模板；失败请求进入缓存 | capture、template admission 与 canonical 默认值规则不一致 |
+| 最新稳定一轮 | 同关键词下 `page/page_size/sort/note_type` 变化时仍然 false miss；miss 后回退 synthetic path | `capture -> cache key -> lookup -> eligibility` 没有共享完整 request shape |
 
 这条轨迹说明：
 
@@ -87,3 +101,5 @@
 - `#489/#500` 的实际 runtime 改造与表驱动实现
 - `#445` 在新实现合入后的 latest-main real-browser rerun 计划
 - `#501` 的最终 superseded 收口动作；该动作应在新实现 PR 建立后执行，而不是继续在 `#501` 上补丁
+- `#504`：`xhs.detail` / `xhs.user_home` command surface 与 request-context baseline
+- `#505`：`xhs.detail.image_scenes` 是否进入 canonical identity

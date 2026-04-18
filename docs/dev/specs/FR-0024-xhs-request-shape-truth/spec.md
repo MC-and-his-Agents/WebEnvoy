@@ -1,32 +1,23 @@
-# FR-0024 统一 XHS Request-Shape Truth
+# FR-0024 统一 XHS Request-Shape Truth（Search Only）
 
 Canonical Issue: #502
 
 ## 背景
 
-`#445` 当前仍是 closeout-only 事项，不能再承载实现修复；`#489` 与 `#500` 仍是其 live request-context blocker。围绕这两个 blocker 的实现尝试已经在 `#501` 上持续推进过多轮补丁，但 guardian 的多轮驳回呈现出同一条主线事实：
+`#445` 当前仍是 closeout-only 事项，不能承载实现修复；`#489` 与 `#500` 仍是其 live request-context blocker。围绕这两个 blocker 的实现尝试已经在 `#501` 上持续推进过多轮补丁，但 guardian 的多轮驳回稳定暴露出同一条主线事实：
 
 - 当前 XHS live read request-context 路径没有单一的“同一请求”真相源。
 - `capture -> cache key -> lookup -> eligibility` 四个阶段对“什么叫同一请求”的判断并不一致。
 - 结果不是单点缺陷，而是系统模型分裂导致的连续副作用：cross-shape overwrite、false miss、stale reuse、synthetic fallback 回流到已知高风险路径。
 
-`#501` 已经覆盖了多项局部修复，包括：
+guardian 最新稳定阻断的主线集中在 `xhs.search`：keyword 相同但 `page`、`page_size`、`sort`、`note_type` 不同的常见场景下，系统依然没有一套贯穿四个阶段的统一 request-shape truth。只要 exact template miss 之后又静默回退到 synthetic path，`GATEWAY_INVOKER_FAILED` 风险就会重新回到闭环路径里。
 
-- 不再只按 `method + pathname` 作用域缓存模板
-- search 不再复用不同 query 的 `search_id`
-- WebEnvoy 自己发出的 MAIN-world fetch 不再污染模板缓存
-- stale page state 不再覆盖 canonical 默认值
-- 非成功完成的页面请求不得进入缓存
-- detail 不再把 canonical body 与过期模板字段整包混用
-
-但 guardian 最新一轮结论仍然指向同一个根问题：对于 `xhs.search`，keyword 相同但 `page`、`page_size`、`sort`、`note_type` 不同的常见场景，系统依然没有一套贯穿四个阶段的统一 request-shape truth。只要 exact template miss 之后又静默回退到 synthetic path，`GATEWAY_INVOKER_FAILED` 风险就会重新回到闭环路径里。
-
-因此，本 FR 的职责不是继续补单点条件分支，而是把 XHS read path 的 request-shape truth 冻结为 formal contract，作为后续新实现 PR 的唯一正式输入。
+因此，本 FR 当前版本的职责不是继续在三条命令上同时补 formal wording，而是先把仓库已有公开基线支撑的 `xhs.search` request-shape truth 冻结为 formal contract，作为后续新实现 PR 的唯一正式输入。
 
 ## 目标
 
-1. 冻结一套单一的 request-shape truth，贯穿 `capture -> cache key -> lookup -> eligibility`。
-2. 冻结 `xhs.search`、`xhs.detail`、`xhs.user_home` 的 canonical request identity，消除 false overwrite 与 false miss。
+1. 冻结一套单一的 `xhs.search` request-shape truth，贯穿 `capture -> cache key -> lookup -> eligibility`。
+2. 冻结 `xhs.search` 的 canonical request identity，消除 false overwrite 与 false miss。
 3. 冻结 template 何时可捕获、何时可复用、何时必须拒绝执行的正式规则。
 4. 冻结 exact template miss 的 fail-closed 规则，禁止静默 synthetic fallback。
 5. 明确 page-local captured template 与 `FR-0018` replay/store truth 的 ownership 边界，避免第二真相源。
@@ -35,12 +26,22 @@ Canonical Issue: #502
 
 - 不在本 FR 内修改 runtime、extension、CLI 或命令实现代码。
 - 不在本 FR 内新增 public CLI/API 命令面或改变用户输入契约。
-- 本 FR 中出现的 `xhs.search` / `xhs.detail` / `xhs.user_home` 标签用于表达内部 request-shape command id / read intent；其中只有 `xhs.search` 已有公开 CLI 基线，`xhs.detail` / `xhs.user_home` 的公开 command surface 如需冻结，必须另走独立 command-surface FR。
 - 不做跨平台抽象；当前只覆盖 XHS read path。
 - 不把 page-local captured template 升格为持久化 replay/store truth。
 - 不在本 FR 内承诺 explicit reacquire 流程；如后续需要，必须独立立项并重新过 spec review。
 - 不推进 `#445` closeout、live rerun、guardian rerun 或 `#489/#500` 关闭。
 - 不继续在 `#501` 上叠加实现补丁；后续实现必须使用新的实现 PR。
+- 不在本 FR 内冻结 `xhs.detail` / `xhs.user_home` 的 command surface、request-context baseline 或 canonical identity。
+- 不在本 FR 内冻结 `xhs.detail.image_scenes` 是否进入 canonical shape；该问题转入 `#505`。
+
+## Deferred Scope
+
+以下事项已明确移出本 FR，不允许继续以隐含前提混入 `FR-0024`：
+
+- `#504`：冻结 `xhs.detail` / `xhs.user_home` command surface 与 request-context 基线。
+- `#505`：验证并冻结 `xhs.detail` canonical identity（含 `image_scenes` 是否入 shape）。
+
+`#503` 合并只表示 `xhs.search` request-shape truth 已冻结，不表示 `xhs.detail` / `xhs.user_home` 或 `image_scenes` 问题已经完成。
 
 ## 功能需求
 
@@ -69,19 +70,12 @@ Canonical Issue: #502
 
 - 公共字段：`command`、`method`、`pathname`
 - `xhs.search`：`keyword`、`page`、`page_size`、`sort`、`note_type`
-- `xhs.search` 的 `note_type` 在 canonical identity 中必须使用归一后的 integer 表示
-- `xhs.search` 的 `page_size` 必须来自命令输入 `limit` 的 canonical 映射，不得保留第二套来源语义
-- `xhs.detail`：`source_note_id`、`image_scenes`
-- `xhs.user_home`：`user_id`
 
 附加约束：
 
 - `xhs.search` 的 canonical identity 不包含 `search_id`、`X-S-Common`、trace headers 或 referrer。
 - `xhs.search` 的 `note_type` 必须在进入 `RequestShape` 前归一为 canonical integer；同一语义不得同时以字符串与数字参与 key 序列化。
 - `xhs.search.limit` 必须在 derive 阶段归一映射为 canonical `page_size`；不得让 `limit` 与 `page_size` 并存为两套输入口径。
-- `xhs.detail` 的 canonical identity 必须显式包含 `image_scenes`，避免旧 body 变体在同一 `note_id` 下被误复用。
-- `xhs.detail` 当前 baseline 必须冻结 `image_scenes` 的物化规则，但不得仅凭单一样本值硬编码默认常量；完整 shape 必须来自当前 page-local candidate evidence。
-- `xhs.user_home` 当前 canonical identity 只包含 `user_id`；若后续接口出现新的正式 query 语义，必须通过后续 spec review 扩展，不得由实现自行补字段。
 - `headers`、`referrer`、`trace`、`search_id` 属于“shape 命中后的可复用上下文字段”，不是 identity。
 
 ### 3. cache key 与 stable serialization
@@ -148,7 +142,6 @@ Canonical Issue: #502
 - `lookup` 与 `eligibility` 必须消费同一份 `RequestShape`
 - `lookup` 必须先解析当前页面现场的同路由候选 bucket，再在 bucket 内按 `shape_key` / `shape` 判定 exact hit 与不兼容候选
 - 任何 shape mismatch 都不得继续进入“部分字段沿用、其余字段重算”的混合路径
-- `detail` 不允许再把旧 body 整包摊平到当前请求上；只能在 exact hit 后复用经过 shape 约束的 canonical template fields
 - `incompatible` 只允许来自“同 page-local namespace、同 command + method + pathname，但 shape 不同”的候选记录
 - `rejected_source` 只允许来自同 namespace、同 `shape_key` 槽位下最近一次被 capture admission 拒绝的 rejected-attempt observation
 - `synthetic_request_rejected` 的 observation 必须通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出 `shape + shape_key`
@@ -240,39 +233,7 @@ When 系统在页面 B 内执行 lookup
 Then 只能读取页面 B 自己 namespace 内的候选 bucket
 And 不得复用页面 A 的模板
 
-### 场景 6：detail 的 `image_scenes` 变体不兼容时必须拒绝
-
-Given 当前请求是 `xhs.detail(source_note_id=note-001, image_scenes=[CRD_PRV_WEBP])`
-And 页面历史上只捕获过 `xhs.detail(source_note_id=note-001, image_scenes=[WB_PRV])`
-When 系统执行 lookup 与 eligibility
-Then 结果必须是 `request_context_incompatible`
-And 不得把旧 body 的其他字段整包混入当前请求
-
-### 场景 6A：detail 的当前请求必须由 page-local candidate evidence 物化 `image_scenes`
-
-Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
-And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 page-local candidate evidence
-When 系统在发起网络请求前执行 `deriveRequestShape()`
-Then 必须能从该 candidate evidence 物化出完整的 `source_note_id + image_scenes` shape
-And 不得凭单一样本常量或网络后反推来猜测当前请求 shape
-
-### 场景 6B：detail 候选存在多个 `image_scenes` 变体时必须拒绝猜测
-
-Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
-And 当前 page-local namespace 内存在多条 `source_note_id=note-001` 但 `image_scenes` 不同的 page-local candidate evidence
-When 系统执行 `deriveRequestShape()` 与 lookup
-Then 结果必须是 `request_context_incompatible`
-And 不得自行挑选其中一个 `image_scenes` 继续执行
-
-### 场景 7：user_home 只按 `user_id` 建立 canonical identity
-
-Given 当前待解析的 `xhs.user_home` internal read intent 是 `user_id=user-001`
-And 已捕获模板的 query、header 或 referrer 与当前页面不同，但 `user_id` 完全一致
-When 系统执行 lookup 与 eligibility
-Then shape 仍可判定为 exact match
-And query/header/referrer 只在 exact hit 后作为上下文字段复用
-
-### 场景 8：synthetic request 不得进入模板池
+### 场景 6：synthetic request 不得进入模板池
 
 Given WebEnvoy 为执行 live read 主动发出一条 MAIN-world synthetic request
 When request-context capture 观察到该请求
@@ -280,7 +241,7 @@ Then 该请求必须被标记为 `synthetic_request_rejected`
 And 不得写入 request-template cache
 And 只允许进入当前页面现场的 rejected-attempt diagnostics
 
-### 场景 9：失败请求不得进入模板池
+### 场景 7：失败请求不得进入模板池
 
 Given 页面发出一条真实 XHS 请求，但请求失败、中断或返回非 2xx
 When capture admission 处理该请求
@@ -288,7 +249,7 @@ Then 该请求必须被标记为 `failed_request_rejected`
 And 不得写入 request-template cache
 And 只允许进入当前页面现场的 rejected-attempt diagnostics
 
-### 场景 9A：没有可复用模板但当前 shape slot 最近一次候选被拒绝时返回 `rejected_source`
+### 场景 7A：没有可复用模板但当前 shape slot 最近一次候选被拒绝时返回 `rejected_source`
 
 Given 当前 page-local namespace 内不存在可复用 template
 And 当前页面现场与当前请求同 `shape_key` 槽位下最近一次候选请求被 capture admission 拒绝
@@ -298,7 +259,7 @@ And reason 必须是 `synthetic_request_rejected` 或 `failed_request_rejected`
 And 不得把该 observation 当成 template record 继续复用
 And 若 full shape 尚未成功导出，则该请求不得被记为 `synthetic_request_rejected`
 
-### 场景 9B：synthetic reject 必须从被拒绝请求本身导出 shape
+### 场景 7B：synthetic reject 必须从被拒绝请求本身导出 shape
 
 Given WebEnvoy 发出了一条禁止进入模板池的 synthetic request
 And request-context capture 观察到了该 synthetic request 的完整 request artifact
@@ -306,17 +267,7 @@ When 系统记录 `synthetic_request_rejected`
 Then `RejectedRequestContextObservation` 必须能从这条 synthetic request artifact 直接导出 `shape + shape_key`
 And 不得产生无 shape 的 rejected observation
 
-### 场景 9C：detail 只有 rejected observation 时仍必须能返回 `rejected_source`
-
-Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
-And 当前 page-local namespace 内不存在 admitted captured template
-And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 rejected observation
-When 系统先执行 `deriveRequestShape()` 再执行 lookup
-Then 必须能从这条 rejected observation 物化出完整 `source_note_id + image_scenes` shape
-And 最终结果必须是 `rejected_source`
-And 不得因为“没有 admitted template”而把结果错误降级为 `template_missing`
-
-### 场景 10：shape 命中但模板过旧时必须 fail closed
+### 场景 8：shape 命中但模板过旧时必须 fail closed
 
 Given 已捕获模板与当前请求 shape 完全一致
 And 该模板已超过 freshness window
@@ -325,28 +276,27 @@ Then 结果必须是 `request_context_missing`
 And miss reason 必须是 `template_stale`
 And 不得继续复用该模板
 
+### 场景 9：没有 exact template 时必须 fail closed
+
+Given 当前请求在本页面现场不存在 exact template
+And 当前页面现场也没有同 `shape_key` 的 rejected observation
+When 系统执行 lookup 与 eligibility
+Then 结果必须是 `request_context_missing`
+And miss reason 必须是 `template_missing`
+And 不得静默回退到 synthetic request path
+
 ## 异常与边界场景
 
-- 若某条真实页面请求无法导出合法 `RequestShape`，必须拒绝缓存，不能退回 path-only scope。
-- 若不同页面现场拥有相同 `shape_key`，实现也必须继续用 page-local namespace 隔离它们，不能共享模板 slot。
-- 若 `CapturedRequestTemplateRecord.shape` 与 `template_body/query` 重新导出的 shape 不一致，必须返回 `incompatible`，不得继续复用。
-- 若后续平台接口新增影响 identity 的正式字段，实现不得直接扩 shape；必须先过新的 spec review。
-- 若当前命令输入缺少构造 `RequestShape` 的必填字段，必须在命令输入校验阶段阻断，而不是让 request-context 层兜底猜值。
 - 若 `xhs.search` 省略分页/排序参数，derive 阶段必须输出 canonical 默认值，避免 page-local state 污染 identity。
 - 若 `xhs.search.note_type` 的输入形态是字符串，derive 阶段也必须先把它归一为 integer，再参与 `RequestShapeKey` 序列化。
 - 若 `xhs.search.limit` 未被冻结为 `page_size` 的唯一 canonical 来源，实现会再次引入 `page_size` 来源歧义。
+- 若某条真实页面请求无法导出合法 `RequestShape`，必须拒绝缓存，不能退回 path-only scope。
+- 若某条 synthetic request 无法导出 full shape，则只能停在更早的 `miss` / `incompatible`，不能生成无 shape 的 rejected observation。
 
 ## 验收标准
 
-1. reviewer 可以仅根据 formal suite 判断三条命令的 canonical identity、template 生命周期与 fail-closed 规则，而不需要继续围绕 guardian finding 逐条补洞。
-2. `capture -> cache key -> lookup -> eligibility` 四个阶段的 truth source 已被明确冻结为同一份 `RequestShape` / `RequestShapeKey`。
-3. `xhs.search`、`xhs.detail`、`xhs.user_home` 的 exact match / mismatch / stale / rejected_source 行为已具备正式 GWT 覆盖，且这些结果都具备 shape-level 可实现的数据来源。
-4. formal suite 已明确 page-local namespace、page-local artifact 与 `FR-0018` replay truth 的边界，不留下第二真相源。
-5. spec review 通过前，任何实现 PR 都不得声称 `#489/#500` 已解决或 `#445` 已具备 credible Go。
+`FR-0024` 当前版本达成完成，必须同时满足：
 
-## 依赖与前置条件
-
-- canonical blocker issue 已固定为 `#502`
-- `#489`、`#500` 在实现 PR 合并并完成 latest-main live rerun 前继续保持 open
-- `#445` 继续保持 closeout-only
-- `#501` 作为既有实现尝试与 review 证据来源保留，但后续实现必须另开新 PR，不再在其上叠补丁
+1. reviewer 确认 `capture -> cache key -> lookup -> eligibility` 四个阶段的 truth source 已被明确冻结为同一份 `RequestShape` / `RequestShapeKey`。
+2. `xhs.search` 的 exact match / mismatch / stale / rejected_source 行为已具备正式 GWT 覆盖，且这些结果都具备 shape-level 可实现的数据来源。
+3. `xhs.detail` / `xhs.user_home` / `xhs.detail.image_scenes` 已被显式移出本 FR，并回链到 `#504` / `#505`，不存在隐含未决范围。
