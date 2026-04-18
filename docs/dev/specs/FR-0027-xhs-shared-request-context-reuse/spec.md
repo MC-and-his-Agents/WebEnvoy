@@ -229,6 +229,7 @@ And 不得宣称 formal 输入已经齐备
 - `docs/dev/architecture/system-design/read-write.md`
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md`
 - `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md`
+- `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`
 - GitHub issue `#503`
 - GitHub issue `#504`
 - GitHub issue `#505`
