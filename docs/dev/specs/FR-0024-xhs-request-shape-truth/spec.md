@@ -250,15 +250,15 @@ And 不得把旧 body 的其他字段整包混入当前请求
 ### 场景 6A：detail 的当前请求必须由 page-local candidate evidence 物化 `image_scenes`
 
 Given 当前命令是 `xhs.detail(note_id=note-001)`
-And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 captured template
+And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 page-local candidate evidence
 When 系统在发起网络请求前执行 `deriveRequestShape()`
-Then 必须能从该 captured template 物化出完整的 `source_note_id + image_scenes` shape
+Then 必须能从该 candidate evidence 物化出完整的 `source_note_id + image_scenes` shape
 And 不得凭单一样本常量或网络后反推来猜测当前请求 shape
 
 ### 场景 6B：detail 候选存在多个 `image_scenes` 变体时必须拒绝猜测
 
 Given 当前命令是 `xhs.detail(note_id=note-001)`
-And 当前 page-local namespace 内存在多条 `source_note_id=note-001` 但 `image_scenes` 不同的 captured templates
+And 当前 page-local namespace 内存在多条 `source_note_id=note-001` 但 `image_scenes` 不同的 page-local candidate evidence
 When 系统执行 `deriveRequestShape()` 与 lookup
 Then 结果必须是 `request_context_incompatible`
 And 不得自行挑选其中一个 `image_scenes` 继续执行
@@ -304,6 +304,16 @@ And request-context capture 观察到了该 synthetic request 的完整 request 
 When 系统记录 `synthetic_request_rejected`
 Then `RejectedRequestContextObservation` 必须能从这条 synthetic request artifact 直接导出 `shape + shape_key`
 And 不得产生无 shape 的 rejected observation
+
+### 场景 9C：detail 只有 rejected observation 时仍必须能返回 `rejected_source`
+
+Given 当前命令是 `xhs.detail(note_id=note-001)`
+And 当前 page-local namespace 内不存在 admitted captured template
+And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 rejected observation
+When 系统先执行 `deriveRequestShape()` 再执行 lookup
+Then 必须能从这条 rejected observation 物化出完整 `source_note_id + image_scenes` shape
+And 最终结果必须是 `rejected_source`
+And 不得因为“没有 admitted template”而把结果错误降级为 `template_missing`
 
 ### 场景 10：shape 命中但模板过旧时必须 fail closed
 

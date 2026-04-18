@@ -59,6 +59,7 @@
 - 后续实现 PR 至少应优先补齐以下表驱动测试：
   - `xhs.search` 在 `keyword/page/page_size/sort/note_type` 维度上的 exact match / mismatch
   - `xhs.detail` 在 `source_note_id + image_scenes` 维度上的 body 兼容性
+  - `xhs.detail` 仅存在 rejected observation、没有 admitted template 时的 `rejected_source` 可达性
   - `xhs.user_home` 在 `user_id` 维度上的 exact match / mismatch
   - page-local namespace 隔离，不同页面现场即使 `shape_key` 相同也不能互相命中
   - rejected-attempt diagnostics 到 `rejected_source` 的可达路径

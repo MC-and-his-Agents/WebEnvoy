@@ -56,10 +56,11 @@ type RequestShape =
 当前 baseline 的 detail 派生规则：
 
 - 对 capture 到的 detail 页面真实请求，`image_scenes` 必须直接从被捕获请求体归一后进入 `RequestShape`
-- 对当前 `xhs.detail(note_id=...)` 请求，`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 captured templates
+- 对当前 `xhs.detail(note_id=...)` 请求，`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 page-local candidate evidence
+- `xhs.detail` 的 page-local candidate evidence 必须同时覆盖 admitted captured templates 与同 `shape_key` / 同 route bucket 可达的 rejected observations；不得把 rejected-source 路径排除在 detail shape derivation 之外
 - 当且仅当该 bucket 内存在唯一可用的 `source_note_id + image_scenes` 候选时，当前请求才允许物化出完整 `RequestShape`
 - 若不存在候选，当前请求必须返回 `template_missing`
-- 若同一 `source_note_id` 在当前 namespace 内存在多个不同 `image_scenes` 候选，当前请求必须返回 `incompatible`，不得凭实现猜测其一
+- 若同一 `source_note_id` 在当前 namespace 内存在多个不同 `image_scenes` 候选，不论它们来自 admitted template 还是 rejected observation，当前请求都必须返回 `incompatible`，不得凭实现猜测其一
 
 以下字段当前明确不属于 `RequestShape`：
 
