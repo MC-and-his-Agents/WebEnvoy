@@ -38,6 +38,7 @@
 | 对象 | 角色 | 持久化要求 |
 | --- | --- | --- |
 | `CapturedRequestTemplateRecord` | 当前页面现场可复用的 request template | 不得提升为新的持久化真相源 |
+| `RejectedRequestContextObservation` | 当前页面现场最近一次被 capture admission 拒绝的候选观察 | 不得提升为可复用 template 或长期真相源 |
 
 字段职责：
 
@@ -45,12 +46,22 @@
 | --- | --- | --- |
 | `shape` | canonical identity snapshot | 由 capture 时的 `deriveRequestShape()` 生成 |
 | `shape_key` | cache / lookup 唯一键 | 由 `shape` 稳定序列化得到 |
+| `page_context_namespace` | 页面现场命名空间 | 用于隔离不同文档生命周期、tab 或等价页面现场 |
 | `template_headers` | exact hit 后可复用上下文 | 不参与 identity |
 | `template_body` | exact hit 后可复用上下文 | 不得成为第二 identity truth |
 | `referrer` | exact hit 后可复用上下文 | 不参与 identity |
 | `captured_at` | freshness 判断输入 | 超过 freshness window 后必须判 stale |
 | `source_kind` | 来源判定 | 必须能区分真实页面请求与 WebEnvoy synthetic request |
 | `request_status` | 成功完成判定 | 只允许成功完成的 2xx 请求进入缓存 |
+
+`RejectedRequestContextObservation` 字段职责：
+
+| 字段 | 角色 | 说明 |
+| --- | --- | --- |
+| `page_context_namespace` | 页面现场命名空间 | 只在当前页面现场有效 |
+| `command/method/pathname` | 路由诊断锚点 | 只用于解释当前为什么没有可复用模板 |
+| `rejection_reason` | 结构化拒绝原因 | 只允许 `synthetic_request_rejected` / `failed_request_rejected` |
+| `observed_at` | 最近观测时间 | 用于返回最近一次 rejected-source 解释 |
 
 ### 3. lookup result 视图
 
@@ -64,17 +75,30 @@
 2. 它不应被提升为长期健康视图或 replay eligibility 视图。
 3. 若实现需要写日志或诊断记录，必须明确它只是 run-scoped result，而不是长期状态表。
 
+### 4. page-local namespace
+
+request-context cache 的有效存储身份必须是 `page_context_namespace + shape_key`。
+
+约束：
+
+1. `shape_key` 不是跨页面全局主键。
+2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
+3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
+4. `rejected_source` 只能来自同 namespace 内的 `RejectedRequestContextObservation`。
+
 ## 生命周期
 
 ### 创建
 
 - 只在当前页面真实请求成功完成后创建 `CapturedRequestTemplateRecord`
-- 创建时必须同步写入 `shape` 与 `shape_key`
+- 创建时必须同步写入 `page_context_namespace`、`shape` 与 `shape_key`
+- 只在 capture admission 明确拒绝时创建 `RejectedRequestContextObservation`
 
 ### 覆盖
 
-- 只允许相同 `shape_key` 的更新覆盖旧记录
-- 不同 shape 不得共享同一个 cache slot
+- 只允许同一 `page_context_namespace` 下、相同 `shape_key` 的更新覆盖旧记录
+- 不同 namespace 不得共享同一个 cache slot
+- 同一 namespace 下、不同 shape 的候选必须并存于同路由 bucket，而不是互相覆盖成 path-only slot
 
 ### 失效
 
@@ -89,13 +113,16 @@
 ### 持久化边界
 
 - `CapturedRequestTemplateRecord` 不能写入 SQLite 作为长期真相源
+- `RejectedRequestContextObservation` 也不能写入 SQLite 作为长期真相源
 - 它不能被直接映射为 `FR-0018` 的 replay snapshot
-- 它只能属于当前页面现场的 runtime cache；即使实现暂时把它跨模块传递，也不能改变其 page-local ownership
+- 它们只能属于当前页面现场的 runtime cache / diagnostics；即使实现暂时把它跨模块传递，也不能改变其 page-local ownership
 
 ## second-truth 风险提示
 
 - 若实现继续用 `method + pathname`、keyword-only 或 note_id-only scope 做旁路 lookup，会重新引入第二套 identity truth。
+- 若实现把 `shape_key` 当成跨页面全局主键，会重新引入跨页污染。
 - 若实现把 `template_body` 当作 fallback identity 来源，会重新引入 detail body 混用与 stale field 覆盖。
+- 若实现保留 `rejected_source` 枚举但没有 page-local rejected observation 数据来源，该结果会再次变成不可达分支。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
 
 ## 与 FR-0018 的边界提醒

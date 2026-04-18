@@ -80,10 +80,12 @@ Canonical Issue: #502
 
 约束：
 
-- `RequestShapeKey` 是 capture、cache、lookup 的唯一键。
+- `RequestShapeKey` 是 canonical shape 的稳定键，但不是跨页面全局缓存身份。
 - 稳定序列化只能消费 `RequestShape`，不得把 raw body、header 顺序、query 排列、referrer 或 trace 直接混入 key。
 - 相同 `RequestShape` 必须产生相同 key；不同 `RequestShape` 必须产生不同 key。
 - shape key 的生成规则一旦冻结，后续实现不得在 lookup 或 eligibility 阶段绕过它改走 path-scope、query-only scope 或其他局部启发式。
+- 有效的缓存身份必须显式包含 page-local / document-local namespace；因此实现上的 store identity 必须是 `page_context_namespace + shape_key`。
+- 不同页面现场即使拥有相同 `shape_key`，也不得共享模板 slot。
 
 ### 4. captured template 的准入规则
 
@@ -101,12 +103,13 @@ Canonical Issue: #502
 - WebEnvoy 发出的 MAIN-world fetch 必须被识别为 `synthetic_request_rejected`
 - 失败请求、超时请求、中断请求、非 2xx 请求必须被识别为 `failed_request_rejected`
 - 不允许把“抓到过请求”直接等价成“可复用模板”
+- 被 capture admission 拒绝的候选请求只允许进入 page-local rejected-attempt diagnostics，不允许进入 template cache
 
 ### 5. lookup 与 eligibility 规则
 
 系统必须冻结以下 template 复用规则：
 
-- lookup 只允许基于 `RequestShapeKey`
+- lookup 只允许在当前 page-local namespace 内进行
 - eligibility 只允许 `exact shape match`
 - exact match 之后仍必须通过 freshness gate
 - 不存在“模糊匹配后局部复用”
@@ -130,8 +133,11 @@ Canonical Issue: #502
 补充约束：
 
 - `lookup` 与 `eligibility` 必须消费同一份 `RequestShape`
+- `lookup` 必须先解析当前页面现场的同路由候选 bucket，再在 bucket 内按 `shape_key` / `shape` 判定 exact hit 与不兼容候选
 - 任何 shape mismatch 都不得继续进入“部分字段沿用、其余字段重算”的混合路径
 - `detail` 不允许再把旧 body 整包摊平到当前请求上；只能在 exact hit 后复用经过 shape 约束的 canonical template fields
+- `incompatible` 只允许来自“同 page-local namespace、同 command + method + pathname，但 shape 不同”的候选记录
+- `rejected_source` 只允许来自同 namespace 下最近一次被 capture admission 拒绝的 rejected-attempt observation
 
 ### 6. fail-closed miss 规则
 
@@ -152,7 +158,17 @@ freshness 从本 FR 起进入正式规则：
 - stale template 不得复用，即使它与当前 shape 完全一致
 - freshness gate 的存在是正式契约；具体窗口值属于后续实现配置，但 lookup 与 eligibility 必须共享同一 freshness policy
 
-### 8. 与 FR-0018 的 ownership 边界
+### 8. page-local namespace 与 rejected diagnostics
+
+从本 FR 起，request-template cache 的 ownership 必须显式绑定到 page-local / document-local namespace。
+
+约束：
+
+- namespace 必须至少隔离当前文档生命周期或等价页面现场
+- cache 覆盖规则必须发生在同一 namespace 内，不得跨页面覆盖
+- rejected source 只允许保留为同 namespace 内的最近 rejected-attempt diagnostics，不得升级为可复用模板
+
+### 9. 与 FR-0018 的 ownership 边界
 
 `CapturedRequestTemplateRecord` 明确是 page-local runtime artifact，不是 `FR-0018` 意义上的 replay/store truth。
 
@@ -202,6 +218,14 @@ Then 结果必须是 `hit`
 And 允许复用 template headers、template body、referrer 与 trace 上下文字段
 And `search_id` 只能在 exact shape hit 后作为上下文字段复用
 
+### 场景 5A：不同页面现场即使 shape 相同也不得共享模板 slot
+
+Given 页面 A 与页面 B 都捕获到了相同 `RequestShapeKey` 的 XHS 请求
+And 两者属于不同 page-local namespace
+When 系统在页面 B 内执行 lookup
+Then 只能读取页面 B 自己 namespace 内的候选 bucket
+And 不得复用页面 A 的模板
+
 ### 场景 6：detail 的 `image_scenes` 变体不兼容时必须拒绝
 
 Given 当前请求是 `xhs.detail(source_note_id=note-001, image_scenes=[CRD_PRV_WEBP])`
@@ -224,6 +248,7 @@ Given WebEnvoy 为执行 live read 主动发出一条 MAIN-world synthetic reque
 When request-context capture 观察到该请求
 Then 该请求必须被标记为 `synthetic_request_rejected`
 And 不得写入 request-template cache
+And 只允许进入当前页面现场的 rejected-attempt diagnostics
 
 ### 场景 9：失败请求不得进入模板池
 
@@ -231,6 +256,16 @@ Given 页面发出一条真实 XHS 请求，但请求失败、中断或返回非
 When capture admission 处理该请求
 Then 该请求必须被标记为 `failed_request_rejected`
 And 不得写入 request-template cache
+And 只允许进入当前页面现场的 rejected-attempt diagnostics
+
+### 场景 9A：没有可复用模板但当前页面现场最近一次候选被拒绝时返回 `rejected_source`
+
+Given 当前 page-local namespace 内不存在可复用 template
+And 当前页面现场最近一次同路由候选请求被 capture admission 拒绝
+When 系统执行 lookup
+Then 结果必须是 `rejected_source`
+And reason 必须是 `synthetic_request_rejected` 或 `failed_request_rejected`
+And 不得把该 observation 当成 template record 继续复用
 
 ### 场景 10：shape 命中但模板过旧时必须 fail closed
 
@@ -244,6 +279,7 @@ And 不得继续复用该模板
 ## 异常与边界场景
 
 - 若某条真实页面请求无法导出合法 `RequestShape`，必须拒绝缓存，不能退回 path-only scope。
+- 若不同页面现场拥有相同 `shape_key`，实现也必须继续用 page-local namespace 隔离它们，不能共享模板 slot。
 - 若 `CapturedRequestTemplateRecord.shape` 与 `template_body/query` 重新导出的 shape 不一致，必须返回 `incompatible`，不得继续复用。
 - 若后续平台接口新增影响 identity 的正式字段，实现不得直接扩 shape；必须先过新的 spec review。
 - 若当前命令输入缺少构造 `RequestShape` 的必填字段，必须在命令输入校验阶段阻断，而不是让 request-context 层兜底猜值。
@@ -253,8 +289,8 @@ And 不得继续复用该模板
 
 1. reviewer 可以仅根据 formal suite 判断三条命令的 canonical identity、template 生命周期与 fail-closed 规则，而不需要继续围绕 guardian finding 逐条补洞。
 2. `capture -> cache key -> lookup -> eligibility` 四个阶段的 truth source 已被明确冻结为同一份 `RequestShape` / `RequestShapeKey`。
-3. `xhs.search`、`xhs.detail`、`xhs.user_home` 的 exact match / mismatch / stale / rejected_source 行为已具备正式 GWT 覆盖。
-4. formal suite 已明确 page-local artifact 与 `FR-0018` replay truth 的边界，不留下第二真相源。
+3. `xhs.search`、`xhs.detail`、`xhs.user_home` 的 exact match / mismatch / stale / rejected_source 行为已具备正式 GWT 覆盖，且这些结果都具备可实现的数据来源。
+4. formal suite 已明确 page-local namespace、page-local artifact 与 `FR-0018` replay truth 的边界，不留下第二真相源。
 5. spec review 通过前，任何实现 PR 都不得声称 `#489/#500` 已解决或 `#445` 已具备 credible Go。
 
 ## 依赖与前置条件

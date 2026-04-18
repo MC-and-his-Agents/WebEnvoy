@@ -60,6 +60,8 @@
   - `xhs.search` 在 `keyword/page/page_size/sort/note_type` 维度上的 exact match / mismatch
   - `xhs.detail` 在 `source_note_id + image_scenes` 维度上的 body 兼容性
   - `xhs.user_home` 在 `user_id` 维度上的 exact match / mismatch
+  - page-local namespace 隔离，不同页面现场即使 `shape_key` 相同也不能互相命中
+  - rejected-attempt diagnostics 到 `rejected_source` 的可达路径
   - synthetic request 污染、failed request 污染、freshness miss、fail-closed 行为
   - `RequestShapeKey` 稳定序列化与 lookup/eligibility 共用同一 truth
 
@@ -78,9 +80,11 @@
 
 - FR-0024 spec review 通过。
 - reviewer 确认 `capture -> cache key -> lookup -> eligibility` 四阶段共享同一份 `RequestShape` truth。
+- reviewer 确认有效缓存身份显式包含 page-local namespace，而不是把裸 `shape_key` 当成跨页面全局主键。
 - reviewer 确认 `xhs.search` canonical identity 至少覆盖 `keyword/page/page_size/sort/note_type`。
 - reviewer 确认 `xhs.detail` canonical identity 显式包含 `image_scenes`，不再允许 body 整包混用。
 - reviewer 确认 `xhs.user_home` 当前 identity 只包含 `user_id`，且 query/header 变体不会被误写成 identity。
 - reviewer 确认 exact template miss 的正式规则是 fail closed，而不是 silent synthetic fallback。
+- reviewer 确认 `incompatible` 与 `rejected_source` 都具有可实现的数据来源，而不是不可达分支。
 - reviewer 确认 page-local captured template 与 `FR-0018` replay truth 的 ownership 边界无阻断歧义。
 - 后续实现 issue / PR 已明确为新的实现链路，而不是回到 `#501` 继续叠补丁。
