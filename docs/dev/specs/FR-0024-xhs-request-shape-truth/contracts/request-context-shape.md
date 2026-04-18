@@ -2,7 +2,7 @@
 
 ## 1. `RequestShape`
 
-`RequestShape` 是 XHS read path request-context 的单一 canonical identity 对象。它是内部 contract，不改变现有 public CLI/API 输入面。
+`RequestShape` 是 XHS read path request-context 的单一 canonical identity 对象。它是内部 contract，不直接声明新的 public CLI/API 输入面。
 
 ```ts
 type RequestShape =
@@ -47,16 +47,16 @@ type RequestShape =
 
 兼容映射：
 
-- 现有 `xhs.search` 命令输入 `query` 映射为 `RequestShape.keyword`
-- 现有 `xhs.search` 命令输入 `limit` 必须映射为 canonical `RequestShape.page_size`
-- 现有 `xhs.search` 命令输入 `note_type?: string | number` 映射为 `RequestShape.note_type: number`
-- 现有 `xhs.detail` 命令输入 `note_id` 映射为 `RequestShape.source_note_id`
-- 现有 `xhs.user_home` 命令输入 `user_id` 直接映射为 `RequestShape.user_id`
+- 当前公开 `xhs.search` 输入 `query` 映射为 `RequestShape.keyword`
+- 当前公开 `xhs.search` 输入 `limit` 必须映射为 canonical `RequestShape.page_size`
+- 当前公开 `xhs.search` 输入 `note_type?: string | number` 映射为 `RequestShape.note_type: number`
+- 对本 FR 内部 `xhs.detail` read intent，`note_id` 映射为 `RequestShape.source_note_id`；这不构成“当前已存在公开 `xhs.detail` CLI 输入面”的声明
+- 对本 FR 内部 `xhs.user_home` read intent，`user_id` 直接映射为 `RequestShape.user_id`；这不构成“当前已存在公开 `xhs.user_home` CLI 输入面”的声明
 
 当前 baseline 的 detail 派生规则：
 
 - 对 capture 到的 detail 页面真实请求，`image_scenes` 必须直接从被捕获请求体归一后进入 `RequestShape`
-- 对当前 `xhs.detail(note_id=...)` 请求，`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 page-local candidate evidence
+- 对当前 `xhs.detail` internal read intent（`note_id=...`），`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 page-local candidate evidence
 - `xhs.detail` 的 page-local candidate evidence 必须同时覆盖 admitted captured templates 与同 `shape_key` / 同 route bucket 可达的 rejected observations；不得把 rejected-source 路径排除在 detail shape derivation 之外
 - 当且仅当该 bucket 内存在唯一可用的 `source_note_id + image_scenes` 候选时，当前请求才允许物化出完整 `RequestShape`
 - 若不存在候选，当前请求必须返回 `template_missing`
@@ -235,7 +235,9 @@ lookup 必须按两个阶段执行：
 
 ### 与当前命令输入的兼容
 
-- 本 contract 不改变现有 `xhs.search/query`、`xhs.detail/note_id`、`xhs.user_home/user_id` 输入面
+- 本 contract 不改变现有 `xhs.search` 的公开输入面
+- 本 contract 不声称当前已存在公开 `xhs.detail` / `xhs.user_home` 输入面；这里只冻结它们在 XHS request-shape 里的内部 read-intent 语义
+- 若未来需要公开 `xhs.detail` / `xhs.user_home` command surface，必须通过独立的 command-surface FR 冻结对外输入契约，并复用本 contract 已冻结的 canonical identity 规则
 - `RequestShape` 是 internal derivation object，不要求用户直接传入
 
 ### 与 FR-0018 的边界

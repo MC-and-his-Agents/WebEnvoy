@@ -35,6 +35,7 @@ Canonical Issue: #502
 
 - 不在本 FR 内修改 runtime、extension、CLI 或命令实现代码。
 - 不在本 FR 内新增 public CLI/API 命令面或改变用户输入契约。
+- 本 FR 中出现的 `xhs.search` / `xhs.detail` / `xhs.user_home` 标签用于表达内部 request-shape command id / read intent；其中只有 `xhs.search` 已有公开 CLI 基线，`xhs.detail` / `xhs.user_home` 的公开 command surface 如需冻结，必须另走独立 command-surface FR。
 - 不做跨平台抽象；当前只覆盖 XHS read path。
 - 不把 page-local captured template 升格为持久化 replay/store truth。
 - 不在本 FR 内承诺 explicit reacquire 流程；如后续需要，必须独立立项并重新过 spec review。
@@ -249,7 +250,7 @@ And 不得把旧 body 的其他字段整包混入当前请求
 
 ### 场景 6A：detail 的当前请求必须由 page-local candidate evidence 物化 `image_scenes`
 
-Given 当前命令是 `xhs.detail(note_id=note-001)`
+Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
 And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 page-local candidate evidence
 When 系统在发起网络请求前执行 `deriveRequestShape()`
 Then 必须能从该 candidate evidence 物化出完整的 `source_note_id + image_scenes` shape
@@ -257,7 +258,7 @@ And 不得凭单一样本常量或网络后反推来猜测当前请求 shape
 
 ### 场景 6B：detail 候选存在多个 `image_scenes` 变体时必须拒绝猜测
 
-Given 当前命令是 `xhs.detail(note_id=note-001)`
+Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
 And 当前 page-local namespace 内存在多条 `source_note_id=note-001` 但 `image_scenes` 不同的 page-local candidate evidence
 When 系统执行 `deriveRequestShape()` 与 lookup
 Then 结果必须是 `request_context_incompatible`
@@ -265,7 +266,7 @@ And 不得自行挑选其中一个 `image_scenes` 继续执行
 
 ### 场景 7：user_home 只按 `user_id` 建立 canonical identity
 
-Given 当前请求是 `xhs.user_home(user_id=user-001)`
+Given 当前待解析的 `xhs.user_home` internal read intent 是 `user_id=user-001`
 And 已捕获模板的 query、header 或 referrer 与当前页面不同，但 `user_id` 完全一致
 When 系统执行 lookup 与 eligibility
 Then shape 仍可判定为 exact match
@@ -307,7 +308,7 @@ And 不得产生无 shape 的 rejected observation
 
 ### 场景 9C：detail 只有 rejected observation 时仍必须能返回 `rejected_source`
 
-Given 当前命令是 `xhs.detail(note_id=note-001)`
+Given 当前待解析的 `xhs.detail` internal read intent 是 `note_id=note-001`
 And 当前 page-local namespace 内不存在 admitted captured template
 And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 rejected observation
 When 系统先执行 `deriveRequestShape()` 再执行 lookup
