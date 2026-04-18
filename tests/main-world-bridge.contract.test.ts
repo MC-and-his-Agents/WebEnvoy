@@ -17,6 +17,8 @@ const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve();
 };
 
+const SEARCH_PAGE_NAMESPACE = "https://www.xiaohongshu.com/search_result?keyword=contract";
+
 const createMockMainWorldEnvironment = () => {
   const listeners = new Map<string, MockEventListener[]>();
   const added: Array<{ type: string; listener: MockEventListener }> = [];
@@ -53,7 +55,7 @@ const createMockMainWorldEnvironment = () => {
       return await fetchHandler(input, init);
     }),
     location: {
-      href: "https://www.xiaohongshu.com/search_result?keyword=contract"
+      href: SEARCH_PAGE_NAMESPACE
     },
     navigator: {}
   };
@@ -120,7 +122,7 @@ const readCapturedContext = async (input: {
   requestListener: MockEventListener;
   method: "POST" | "GET";
   path: string;
-  pageContextNamespace: "xhs.search" | "xhs.detail" | "xhs.user_home";
+  pageContextNamespace: string;
   shapeKey: string;
 }): Promise<Record<string, unknown>> => {
   input.requestListener({
@@ -280,7 +282,7 @@ describe("main-world bridge contract", () => {
     {
       label: "search notes",
       method: "POST" as const,
-      pageContextNamespace: "xhs.search" as const,
+      pageContextNamespace: SEARCH_PAGE_NAMESPACE,
       shapeKey:
         '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"露营","page":1,"page_size":20,"sort":"general","note_type":0}',
       path: "/api/sns/web/v1/search/notes",
@@ -291,7 +293,7 @@ describe("main-world bridge contract", () => {
     {
       label: "detail feed",
       method: "POST" as const,
-      pageContextNamespace: "xhs.detail" as const,
+      pageContextNamespace: "https://www.xiaohongshu.com/explore/note-001",
       shapeKey:
         '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
       path: "/api/sns/web/v1/feed",
@@ -303,11 +305,12 @@ describe("main-world bridge contract", () => {
     {
       label: "user home",
       method: "GET" as const,
-      pageContextNamespace: "xhs.user_home" as const,
+      pageContextNamespace: "https://www.xiaohongshu.com/user/profile/user-001",
       shapeKey:
         '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
       path: "/api/sns/web/v1/user/otherinfo",
       url: "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001",
+      locationHref: "https://www.xiaohongshu.com/user/profile/user-001",
       responseBody: { code: 0, data: { user_id: "user-001" } }
     }
   ])("captures successful real-page $label requests into the namespace/shape bucket", async (testCase) => {
@@ -383,7 +386,7 @@ describe("main-world bridge contract", () => {
       | Record<string, unknown>
       | undefined;
     expect(admittedTemplate?.captured_at).toEqual(expect.any(Number));
-    if (testCase.pageContextNamespace === "xhs.detail") {
+    if (testCase.label === "detail feed") {
       expect(admittedTemplate?.shape).toMatchObject({
         command: "xhs.detail",
         method: "POST",
@@ -428,7 +431,7 @@ describe("main-world bridge contract", () => {
       requestListener: channel.requestListener,
       method: "POST",
       path: "/api/sns/web/v1/search/notes",
-      pageContextNamespace: "xhs.search",
+      pageContextNamespace: SEARCH_PAGE_NAMESPACE,
       shapeKey:
         '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"露营","page":1,"page_size":20,"sort":"general","note_type":0}'
     });
@@ -480,7 +483,7 @@ describe("main-world bridge contract", () => {
       requestListener: channel.requestListener,
       method: "POST",
       path: "/api/sns/web/v1/feed",
-      pageContextNamespace: "xhs.detail",
+      pageContextNamespace: "https://www.xiaohongshu.com/explore/note-001",
       shapeKey:
         '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
     });
@@ -554,7 +557,7 @@ describe("main-world bridge contract", () => {
       requestListener: channel.requestListener,
       method: "POST",
       path: "/api/sns/web/v1/search/notes",
-      pageContextNamespace: "xhs.search",
+      pageContextNamespace: SEARCH_PAGE_NAMESPACE,
       shapeKey:
         '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"露营","page":1,"page_size":20,"sort":"general","note_type":0}'
     });
@@ -565,7 +568,7 @@ describe("main-world bridge contract", () => {
       requestListener: channel.requestListener,
       method: "POST",
       path: "/api/sns/web/v1/search/notes",
-      pageContextNamespace: "xhs.search",
+      pageContextNamespace: SEARCH_PAGE_NAMESPACE,
       shapeKey:
         '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"骑行","page":1,"page_size":20,"sort":"general","note_type":0}'
     });

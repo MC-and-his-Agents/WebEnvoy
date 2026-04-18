@@ -1,13 +1,15 @@
-import type {
-  CapturedRequestContextArtifact,
-  CapturedRequestContextLookupResponse,
-  JsonRecord,
-  SearchExecutionResult,
-  XhsExecutionContext,
-  XhsSearchEnvironment,
-  XhsSearchOptions
+import {
+  type CapturedRequestContextArtifact,
+  type CapturedRequestContextLookupResponse,
+  createPageContextNamespace,
+  DETAIL_ENDPOINT,
+  type JsonRecord,
+  type SearchExecutionResult,
+  type XhsExecutionContext,
+  type XhsSearchEnvironment,
+  type XhsSearchOptions,
+  USER_HOME_ENDPOINT
 } from "./xhs-search-types.js";
-import { DETAIL_ENDPOINT, USER_HOME_ENDPOINT } from "./xhs-search-types.js";
 import { createAuditRecord, resolveGate } from "./xhs-search-gate.js";
 import {
   containsCookie,
@@ -1374,7 +1376,7 @@ const executeXhsRead = async (
         .readCapturedRequestContext({
           method: spec.method,
           path: spec.endpoint,
-          page_context_namespace: spec.command,
+          page_context_namespace: createPageContextNamespace(env.getLocationHref()),
           shape_key: serializeReadShape(expectedShape)
         })
         .catch(() => null)

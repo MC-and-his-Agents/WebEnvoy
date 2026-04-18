@@ -148,9 +148,9 @@ const createCapturedRequestContext = (
     return null;
   }
 
-  if (input.page_context_namespace === "xhs.detail" && typeof shape.note_id === "string") {
+  if (shape.command === "xhs.detail" && typeof shape.note_id === "string") {
     return {
-      page_context_namespace: "xhs.detail",
+      page_context_namespace: input.page_context_namespace,
       shape_key: input.shape_key,
       admitted_template: {
         source_kind: "page_request",
@@ -160,7 +160,7 @@ const createCapturedRequestContext = (
         url: `https://www.xiaohongshu.com${input.path}`,
         status: 200,
         captured_at: 1_000,
-        page_context_namespace: "xhs.detail",
+        page_context_namespace: input.page_context_namespace,
         shape_key: input.shape_key,
         shape,
         referrer: href,
@@ -197,10 +197,10 @@ const createCapturedRequestContext = (
     };
   }
 
-  if (input.page_context_namespace === "xhs.user_home" && typeof shape.user_id === "string") {
+  if (shape.command === "xhs.user_home" && typeof shape.user_id === "string") {
     const userId = shape.user_id;
     return {
-      page_context_namespace: "xhs.user_home",
+      page_context_namespace: input.page_context_namespace,
       shape_key: input.shape_key,
       admitted_template: {
         source_kind: "page_request",
@@ -210,7 +210,7 @@ const createCapturedRequestContext = (
         url: `https://www.xiaohongshu.com${input.path}?user_id=${encodeURIComponent(userId)}`,
         status: 200,
         captured_at: 1_000,
-        page_context_namespace: "xhs.user_home",
+        page_context_namespace: input.page_context_namespace,
         shape_key: input.shape_key,
         shape,
         referrer: href,

@@ -1,6 +1,7 @@
 import {
   type CapturedRequestContextArtifact,
   type CapturedRequestContextLookupResponse,
+  createPageContextNamespace,
   type JsonRecord,
   type SearchExecutionResult,
   type XhsExecutionContext,
@@ -730,7 +731,7 @@ export const executeXhsSearch = async (
         .readCapturedRequestContext({
           method: "POST",
           path: SEARCH_ENDPOINT,
-          page_context_namespace: "xhs.search",
+          page_context_namespace: createPageContextNamespace(env.getLocationHref()),
           shape_key: serializeSearchShape(expectedShape)
         })
         .catch(() => null)

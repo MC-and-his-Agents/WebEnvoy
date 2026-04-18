@@ -4,7 +4,9 @@ import {
   SEARCH_ENDPOINT,
   USER_HOME_ENDPOINT,
   WEBENVOY_SYNTHETIC_REQUEST_HEADER,
+  createPageContextNamespace,
   type CapturedRequestContextArtifact,
+  type CapturedRequestContextCommand,
   type CapturedRequestContextLookupResult,
   type CapturedRequestContextMethod,
   type PageContextNamespace
@@ -58,7 +60,12 @@ type CapturedRequestCandidate = {
 };
 
 type CapturedContextShape = {
-  namespace: PageContextNamespace;
+  routeScope: {
+    command: CapturedRequestContextCommand;
+    method: CapturedRequestContextMethod;
+    pathname: string;
+  };
+  routeScopeKey: string;
   shape: RecordValue;
   shapeKey: string;
 };
@@ -67,6 +74,8 @@ type CapturedContextBucket = {
   admittedTemplate: CapturedRequestContextArtifact | null;
   rejectedObservation: CapturedRequestContextArtifact | null;
 };
+
+type CapturedContextNamespaceBuckets = Map<string, Map<string, CapturedContextBucket>>;
 
 type XhrCaptureState = Omit<CapturedRequestCandidate, "synthetic"> & {
   synthetic: boolean;
@@ -84,7 +93,7 @@ const patchedAudioContextPrototypes = new WeakSet<object>();
 const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 const capturedRequestContextBucketsByNamespace = new Map<
   PageContextNamespace,
-  Map<string, CapturedContextBucket>
+  CapturedContextNamespaceBuckets
 >();
 const capturedRequestContextPathSet = new Set<string>(CAPTURED_REQUEST_CONTEXT_PATHS);
 const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
@@ -152,6 +161,11 @@ const normalizeCapturedRequestMethod = (value: unknown): CapturedRequestContextM
   return normalized === "POST" || normalized === "GET" ? normalized : null;
 };
 
+const isCapturedRequestContextCommand = (
+  value: unknown
+): value is CapturedRequestContextCommand =>
+  value === "xhs.search" || value === "xhs.detail" || value === "xhs.user_home";
+
 const normalizeHeaderName = (value: string): string => value.trim().toLowerCase();
 
 const asInteger = (value: unknown): number | null => {
@@ -184,6 +198,20 @@ const parseNoteIdFromExploreUrl = (value: string | null): string | null => {
   }
 };
 
+const createCapturedContextRouteScope = (
+  command: CapturedRequestContextCommand,
+  method: CapturedRequestContextMethod,
+  pathname: string
+): CapturedContextShape["routeScope"] => ({
+  command,
+  method,
+  pathname
+});
+
+const serializeCapturedContextRouteScope = (
+  scope: CapturedContextShape["routeScope"]
+): string => JSON.stringify(scope);
+
 const parseSearchShape = (value: unknown): CapturedContextShape | null => {
   const record = asRecord(value);
   if (!record) {
@@ -211,7 +239,10 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
     note_type: noteType
   } as const;
   return {
-    namespace: "xhs.search",
+    routeScope: createCapturedContextRouteScope("xhs.search", "POST", SEARCH_ENDPOINT),
+    routeScopeKey: serializeCapturedContextRouteScope(
+      createCapturedContextRouteScope("xhs.search", "POST", SEARCH_ENDPOINT)
+    ),
     shape,
     shapeKey: JSON.stringify(shape)
   };
@@ -230,7 +261,10 @@ const parseDetailShape = (value: unknown, referrer: string | null): CapturedCont
     note_id: noteId
   } as const;
   return {
-    namespace: "xhs.detail",
+    routeScope: createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT),
+    routeScopeKey: serializeCapturedContextRouteScope(
+      createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT)
+    ),
     shape,
     shapeKey: JSON.stringify(shape)
   };
@@ -256,7 +290,10 @@ const parseUserHomeShape = (url: string, value: unknown): CapturedContextShape |
     user_id: userId
   } as const;
   return {
-    namespace: "xhs.user_home",
+    routeScope: createCapturedContextRouteScope("xhs.user_home", "GET", USER_HOME_ENDPOINT),
+    routeScopeKey: serializeCapturedContextRouteScope(
+      createCapturedContextRouteScope("xhs.user_home", "GET", USER_HOME_ENDPOINT)
+    ),
     shape,
     shapeKey: JSON.stringify(shape)
   };
@@ -280,27 +317,41 @@ const deriveCapturedContextShape = (
 
 const getCapturedContextNamespaceBuckets = (
   namespace: PageContextNamespace
-): Map<string, CapturedContextBucket> => {
-  let buckets = capturedRequestContextBucketsByNamespace.get(namespace);
-  if (!buckets) {
-    buckets = new Map<string, CapturedContextBucket>();
-    capturedRequestContextBucketsByNamespace.set(namespace, buckets);
+): CapturedContextNamespaceBuckets => {
+  let namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
+  if (!namespaceBuckets) {
+    namespaceBuckets = new Map<string, Map<string, CapturedContextBucket>>();
+    capturedRequestContextBucketsByNamespace.set(namespace, namespaceBuckets);
   }
-  return buckets;
+  return namespaceBuckets;
+};
+
+const getCapturedContextRouteBucket = (
+  namespace: PageContextNamespace,
+  routeScopeKey: string
+): Map<string, CapturedContextBucket> => {
+  const namespaceBuckets = getCapturedContextNamespaceBuckets(namespace);
+  let routeBucket = namespaceBuckets.get(routeScopeKey);
+  if (!routeBucket) {
+    routeBucket = new Map<string, CapturedContextBucket>();
+    namespaceBuckets.set(routeScopeKey, routeBucket);
+  }
+  return routeBucket;
 };
 
 const getCapturedContextBucket = (
   namespace: PageContextNamespace,
+  routeScopeKey: string,
   shapeKey: string
 ): CapturedContextBucket => {
-  const buckets = getCapturedContextNamespaceBuckets(namespace);
-  let bucket = buckets.get(shapeKey);
+  const routeBucket = getCapturedContextRouteBucket(namespace, routeScopeKey);
+  let bucket = routeBucket.get(shapeKey);
   if (!bucket) {
     bucket = {
       admittedTemplate: null,
       rejectedObservation: null
     };
-    buckets.set(shapeKey, bucket);
+    routeBucket.set(shapeKey, bucket);
   }
   return bucket;
 };
@@ -460,6 +511,31 @@ const resolveLatestBucketArtifact = (bucket: CapturedContextBucket): CapturedReq
   return candidates.sort((left, right) => right.captured_at - left.captured_at)[0] ?? null;
 };
 
+const resolveRouteScopeKeyFromLookup = (
+  method: CapturedRequestContextMethod,
+  path: string,
+  shapeKey: string
+): string | null => {
+  try {
+    const parsed = JSON.parse(shapeKey) as unknown;
+    const record = asRecord(parsed);
+    if (!record) {
+      return null;
+    }
+    const command = record.command;
+    const pathname = toTrimmedString(record.pathname);
+    const shapeMethod = normalizeCapturedRequestMethod(record.method);
+    if (!isCapturedRequestContextCommand(command) || pathname !== path || shapeMethod !== method) {
+      return null;
+    }
+    return serializeCapturedContextRouteScope(
+      createCapturedContextRouteScope(command, method, path)
+    );
+  } catch {
+    return null;
+  }
+};
+
 const storeCapturedRequestContext = (
   candidate: CapturedRequestCandidate,
   input: {
@@ -473,6 +549,7 @@ const storeCapturedRequestContext = (
   if (!contextShape) {
     return;
   }
+  const pageContextNamespace = createPageContextNamespace(referrer ?? "about:blank");
   const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
   const artifact: CapturedRequestContextArtifact = {
     source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
@@ -482,7 +559,7 @@ const storeCapturedRequestContext = (
     url: candidate.url,
     status: input.status,
     captured_at: Date.now(),
-    page_context_namespace: contextShape.namespace,
+    page_context_namespace: pageContextNamespace,
     shape_key: contextShape.shapeKey,
     shape: contextShape.shape,
     referrer,
@@ -505,7 +582,11 @@ const storeCapturedRequestContext = (
       body: input.responseBody
     }
   };
-  const bucket = getCapturedContextBucket(contextShape.namespace, contextShape.shapeKey);
+  const bucket = getCapturedContextBucket(
+    pageContextNamespace,
+    contextShape.routeScopeKey,
+    contextShape.shapeKey
+  );
   if (templateReady) {
     bucket.admittedTemplate = artifact;
     return;
@@ -1111,15 +1192,11 @@ const handlePageStateReadRequest = async (request: MainWorldRequest): Promise<vo
 };
 
 const resolveIncompatibleObservation = (
-  namespace: PageContextNamespace,
+  routeBucket: Map<string, CapturedContextBucket>,
   requestedShapeKey: string
 ): CapturedRequestContextArtifact | null => {
-  const buckets = capturedRequestContextBucketsByNamespace.get(namespace);
-  if (!buckets) {
-    return null;
-  }
   let latest: CapturedRequestContextArtifact | null = null;
-  for (const [shapeKey, bucket] of buckets.entries()) {
+  for (const [shapeKey, bucket] of routeBucket.entries()) {
     if (shapeKey === requestedShapeKey) {
       continue;
     }
@@ -1139,12 +1216,14 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
   const path = asString(request.payload.path);
   const namespace = asString(request.payload.page_context_namespace) as PageContextNamespace | null;
   const shapeKey = asString(request.payload.shape_key);
+  const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
   const result: CapturedRequestContextLookupResult | null =
-    method && path && namespace && shapeKey
+    method && path && namespace && shapeKey && routeScopeKey
       ? (() => {
-          const buckets = capturedRequestContextBucketsByNamespace.get(namespace);
-          const exactBucket = buckets?.get(shapeKey) ?? null;
-          const availableShapeKeys = buckets ? [...buckets.keys()] : [];
+          const namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
+          const routeBucket = namespaceBuckets?.get(routeScopeKey) ?? null;
+          const exactBucket = routeBucket?.get(shapeKey) ?? null;
+          const availableShapeKeys = routeBucket ? [...routeBucket.keys()] : [];
           const admittedTemplate =
             exactBucket?.admittedTemplate &&
             exactBucket.admittedTemplate.method === method &&
@@ -1162,7 +1241,9 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
             shape_key: shapeKey,
             admitted_template: admittedTemplate,
             rejected_observation: rejectedObservation,
-            incompatible_observation: resolveIncompatibleObservation(namespace, shapeKey),
+            incompatible_observation: routeBucket
+              ? resolveIncompatibleObservation(routeBucket, shapeKey)
+              : null,
             available_shape_keys: availableShapeKeys
           };
         })()

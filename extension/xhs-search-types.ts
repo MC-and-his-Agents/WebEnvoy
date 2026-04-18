@@ -56,7 +56,8 @@ export interface FetchResult {
 }
 
 export type CapturedRequestContextMethod = "POST" | "GET";
-export type PageContextNamespace = "xhs.search" | "xhs.detail" | "xhs.user_home";
+export type CapturedRequestContextCommand = "xhs.search" | "xhs.detail" | "xhs.user_home";
+export type PageContextNamespace = string;
 export type CapturedRequestContextRejectionReason =
   | "synthetic_request_rejected"
   | "failed_request_rejected";
@@ -311,3 +312,8 @@ export const CAPTURED_REQUEST_CONTEXT_PATHS = [
   USER_HOME_ENDPOINT
 ] as const;
 export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+
+export const createPageContextNamespace = (href: string): PageContextNamespace => {
+  const normalized = href.trim();
+  return normalized.length > 0 ? normalized : "about:blank";
+};
