@@ -5,6 +5,7 @@
 - [ ] reviewer 确认 `RequestShape` 是 `capture -> cache key -> lookup -> eligibility` 的唯一 truth
 - [ ] reviewer 确认有效缓存身份显式包含 `page_context_namespace + shape_key`
 - [ ] reviewer 确认 `xhs.search` canonical identity 至少覆盖 `keyword/page/page_size/sort/note_type`
+- [ ] reviewer 确认 `limit -> page_size` 已冻结为唯一 canonical 映射
 - [ ] reviewer 确认 `note_type` 在进入 `RequestShapeKey` 前先归一为 canonical integer
 - [ ] reviewer 确认 `xhs.detail` canonical identity 包含 `source_note_id + image_scenes`
 - [ ] reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结、可前置导出，且未把未证实样本硬编码成默认常量
@@ -12,6 +13,7 @@
 - [ ] reviewer 确认 headers/referrer/trace/search_id 只属于 exact hit 后的可复用上下文字段，不属于 identity
 - [ ] reviewer 确认 template 只有在真实页面请求、成功完成、非 synthetic request 时才允许进入缓存
 - [ ] reviewer 确认 `incompatible` 与 `rejected_source` 都具备 shape-level、可实现的数据来源
+- [ ] reviewer 确认 admitted template canonical type 已移除 synthetic source kind
 - [ ] reviewer 确认 stale template 必须返回结构化 miss，不得继续复用
 - [ ] reviewer 确认 miss / mismatch 的正式规则是 fail closed，不得静默退回 synthetic path
 - [ ] reviewer 确认 `CapturedRequestTemplateRecord` 是 page-local runtime artifact，不是 `FR-0018` replay/store truth

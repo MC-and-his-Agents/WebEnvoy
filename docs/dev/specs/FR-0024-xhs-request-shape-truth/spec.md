@@ -65,6 +65,7 @@ Canonical Issue: #502
 - 公共字段：`command`、`method`、`pathname`
 - `xhs.search`：`keyword`、`page`、`page_size`、`sort`、`note_type`
 - `xhs.search` 的 `note_type` 在 canonical identity 中必须使用归一后的 integer 表示
+- `xhs.search` 的 `page_size` 必须来自命令输入 `limit` 的 canonical 映射，不得保留第二套来源语义
 - `xhs.detail`：`source_note_id`、`image_scenes`
 - `xhs.user_home`：`user_id`
 
@@ -72,6 +73,7 @@ Canonical Issue: #502
 
 - `xhs.search` 的 canonical identity 不包含 `search_id`、`X-S-Common`、trace headers 或 referrer。
 - `xhs.search` 的 `note_type` 必须在进入 `RequestShape` 前归一为 canonical integer；同一语义不得同时以字符串与数字参与 key 序列化。
+- `xhs.search.limit` 必须在 derive 阶段归一映射为 canonical `page_size`；不得让 `limit` 与 `page_size` 并存为两套输入口径。
 - `xhs.detail` 的 canonical identity 必须显式包含 `image_scenes`，避免旧 body 变体在同一 `note_id` 下被误复用。
 - `xhs.detail` 当前 baseline 必须冻结 `image_scenes` 的物化规则，但不得仅凭单一样本值硬编码默认常量；完整 shape 必须来自当前 page-local candidate evidence。
 - `xhs.user_home` 当前 canonical identity 只包含 `user_id`；若后续接口出现新的正式 query 语义，必须通过后续 spec review 扩展，不得由实现自行补字段。
@@ -107,6 +109,7 @@ Canonical Issue: #502
 - 失败请求、超时请求、中断请求、非 2xx 请求必须被识别为 `failed_request_rejected`
 - 不允许把“抓到过请求”直接等价成“可复用模板”
 - 被 capture admission 拒绝的候选请求只允许进入 page-local rejected-attempt diagnostics，不允许进入 template cache
+- admitted template record 的 canonical 类型不得保留任何 synthetic source kind
 
 ### 5. lookup 与 eligibility 规则
 
@@ -141,7 +144,7 @@ Canonical Issue: #502
 - `detail` 不允许再把旧 body 整包摊平到当前请求上；只能在 exact hit 后复用经过 shape 约束的 canonical template fields
 - `incompatible` 只允许来自“同 page-local namespace、同 command + method + pathname，但 shape 不同”的候选记录
 - `rejected_source` 只允许来自同 namespace、同 `shape_key` 下最近一次被 capture admission 拒绝的 rejected-attempt observation
-- `synthetic_request_rejected` 只有在 full shape 已成功导出后才允许产生；未能先导出 shape 的请求，不得被记录为 synthetic reject
+- `synthetic_request_rejected` 的 observation 必须通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出 `shape + shape_key`
 
 ### 6. fail-closed miss 规则
 
@@ -288,6 +291,14 @@ And reason 必须是 `synthetic_request_rejected` 或 `failed_request_rejected`
 And 不得把该 observation 当成 template record 继续复用
 And 若 full shape 尚未成功导出，则该请求不得被记为 `synthetic_request_rejected`
 
+### 场景 9B：synthetic reject 必须从被拒绝请求本身导出 shape
+
+Given WebEnvoy 发出了一条禁止进入模板池的 synthetic request
+And request-context capture 观察到了该 synthetic request 的完整 request artifact
+When 系统记录 `synthetic_request_rejected`
+Then `RejectedRequestContextObservation` 必须能从这条 synthetic request artifact 直接导出 `shape + shape_key`
+And 不得产生无 shape 的 rejected observation
+
 ### 场景 10：shape 命中但模板过旧时必须 fail closed
 
 Given 已捕获模板与当前请求 shape 完全一致
@@ -306,6 +317,7 @@ And 不得继续复用该模板
 - 若当前命令输入缺少构造 `RequestShape` 的必填字段，必须在命令输入校验阶段阻断，而不是让 request-context 层兜底猜值。
 - 若 `xhs.search` 省略分页/排序参数，derive 阶段必须输出 canonical 默认值，避免 page-local state 污染 identity。
 - 若 `xhs.search.note_type` 的输入形态是字符串，derive 阶段也必须先把它归一为 integer，再参与 `RequestShapeKey` 序列化。
+- 若 `xhs.search.limit` 未被冻结为 `page_size` 的唯一 canonical 来源，实现会再次引入 `page_size` 来源歧义。
 
 ## 验收标准
 

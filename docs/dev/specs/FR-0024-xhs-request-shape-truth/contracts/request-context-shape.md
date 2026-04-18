@@ -44,6 +44,7 @@ type RequestShape =
 兼容映射：
 
 - 现有 `xhs.search` 命令输入 `query` 映射为 `RequestShape.keyword`
+- 现有 `xhs.search` 命令输入 `limit` 必须映射为 canonical `RequestShape.page_size`
 - 现有 `xhs.search` 命令输入 `note_type?: string | number` 映射为 `RequestShape.note_type: number`
 - 现有 `xhs.detail` 命令输入 `note_id` 映射为 `RequestShape.source_note_id`
 - 现有 `xhs.user_home` 命令输入 `user_id` 直接映射为 `RequestShape.user_id`
@@ -100,7 +101,7 @@ type CapturedRequestTemplateRecord = {
   template_body: Record<string, unknown> | null;
   referrer: string | null;
   captured_at: number;
-  source_kind: "page_request" | "webenvoy_synthetic_request";
+  source_kind: "page_request";
   request_status: {
     completion: "completed";
     http_status: number;
@@ -137,7 +138,7 @@ type RejectedRequestContextObservation = {
 - `RejectedRequestContextObservation` 必须在 capture admission 拒绝时保留当时已导出的 `shape` 与 `shape_key`
 - 它只能作为 page-local 诊断来源，不得被当成可复用模板
 - `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
-- `synthetic_request_rejected` 只有在 full `RequestShape` 已成功导出后才允许写入；若 shape 尚未物化，系统必须提前返回 `miss` 或 `incompatible`，而不是生成无 shape 的 synthetic reject
+- `synthetic_request_rejected` 的 `shape` 与 `shape_key` 可以通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出；不得生成无 shape 的 synthetic reject 记录
 
 ## 5. `TemplateLookupResult`
 

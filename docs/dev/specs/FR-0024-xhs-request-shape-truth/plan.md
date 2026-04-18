@@ -82,11 +82,13 @@
 - reviewer 确认 `capture -> cache key -> lookup -> eligibility` 四阶段共享同一份 `RequestShape` truth。
 - reviewer 确认有效缓存身份显式包含 page-local namespace，而不是把裸 `shape_key` 当成跨页面全局主键。
 - reviewer 确认 `xhs.search` canonical identity 至少覆盖 `keyword/page/page_size/sort/note_type`。
+- reviewer 确认 `limit -> page_size` 的 canonical 映射已冻结，不存在第二套 page-size 来源口径。
 - reviewer 确认 `note_type` 在进入 `RequestShapeKey` 前已冻结为单一 canonical integer 表示。
 - reviewer 确认 `xhs.detail` canonical identity 显式包含 `image_scenes`，不再允许 body 整包混用。
 - reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结，但没有把未证实的单一样本值硬编码成默认常量。
 - reviewer 确认 `xhs.user_home` 当前 identity 只包含 `user_id`，且 query/header 变体不会被误写成 identity。
 - reviewer 确认 exact template miss 的正式规则是 fail closed，而不是 silent synthetic fallback。
 - reviewer 确认 `incompatible` 与 `rejected_source` 都具有 shape-level、可实现的数据来源，而不是不可达分支。
+- reviewer 确认 admitted template canonical type 已排除 synthetic source kind，不会把 synthetic request 重新写回模板池。
 - reviewer 确认 page-local captured template 与 `FR-0018` replay truth 的 ownership 边界无阻断歧义。
 - 后续实现 issue / PR 已明确为新的实现链路，而不是回到 `#501` 继续叠补丁。

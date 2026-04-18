@@ -52,7 +52,7 @@
 | `referrer` | exact hit 后可复用上下文 | 不参与 identity |
 | `captured_at` | freshness 判断输入 | 超过 freshness window 后必须判 stale |
 | `source_kind` | 来源判定 | 必须能区分真实页面请求与 WebEnvoy synthetic request |
-| `request_status` | 成功完成判定 | 只允许成功完成的 2xx 请求进入缓存 |
+| `request_status` | 成功完成判定 | 只允许成功完成的 2xx 页面真实请求进入缓存 |
 
 `RejectedRequestContextObservation` 字段职责：
 
@@ -87,6 +87,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
 4. `rejected_source` 只能来自同 namespace、同 `shape_key` 内的 `RejectedRequestContextObservation`。
 5. `synthetic_request_rejected` observation 只允许在 full shape 已成功导出后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
+6. synthetic request 自身永远不得作为 `CapturedRequestTemplateRecord.source_kind` 进入 admitted template 类型。
 
 ## 生命周期
 
@@ -124,8 +125,10 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 若实现继续用 `method + pathname`、keyword-only 或 note_id-only scope 做旁路 lookup，会重新引入第二套 identity truth。
 - 若实现把 `shape_key` 当成跨页面全局主键，会重新引入跨页污染。
 - 若实现允许 `note_type` 以字符串和数字两种形态进入 `shape_key`，会重新引入 false miss。
+- 若实现不冻结 `limit -> page_size` 映射，会重新引入 `page_size` 来源歧义。
 - 若实现把 `template_body` 当作 fallback identity 来源，会重新引入 detail body 混用与 stale field 覆盖。
 - 若实现保留 `rejected_source` 枚举但 observation 不携带 shape-level 身份，该结果会重新退化为 route-level 误归因。
+- 若实现允许 admitted template 类型继续保留 synthetic source kind，会重新打开 synthetic 污染模板池的路径。
 - 若实现把 `xhs.detail.image_scenes` 仅凭单一样本值硬编码为常量，会把未证实的 detail 变体直接冻结进 formal contract。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
 
