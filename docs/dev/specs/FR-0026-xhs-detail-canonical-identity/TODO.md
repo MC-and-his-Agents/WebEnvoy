@@ -6,7 +6,7 @@
 - [ ] reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
 - [ ] reviewer 确认本 FR 未把 `image_scenes` 的 placement 写成 current v1 formal truth
-- [ ] reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth
+- [ ] reviewer 确认本 FR 未把 identity 之外的 detail matching 语义预先冻结为 formal truth
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
 - [ ] reviewer 确认 future identity expansion 必须等待新的 spec 修订
 - [ ] reviewer 确认 `Closing=Refs #505`、`review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
@@ -18,5 +18,5 @@
 - 当前阶段只冻结 current v1 detail identity，不承诺实现代码。
 - 后续实现应优先消费本 FR 冻结的：
   - `note_id` only identity
-  - `image_scenes` not-in-shape 结论
+  - `image_scenes` not-in-identity 结论
   - future revision 准入条件

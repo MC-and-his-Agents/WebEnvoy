@@ -12,7 +12,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 
 - `note_id` 是 current v1 唯一被本 FR 正式冻结的 canonical identity anchor 字段。
 - `note_id` 必须为 trim 后非空字符串。
-- 本 FR 不定义完整 detail request shape、`shape_key`、lookup key 或 eligibility tuple。
+- 本 FR 不定义 identity 之外的 detail matching 语义。
 
 ## 2. Non-identity boundary
 
@@ -38,7 +38,7 @@ type ExcludeImageScenesFromIdentityV1 = (
 约束：
 
 - `image_scenes` 差异不得单独导致新的 identity discriminator
-- 本 FR 不把完整 detail shape 或 comparison tuple 冻结成 formal truth
+- 本 FR 不把 identity 之外的 comparison semantics 冻结成 formal truth
 
 ## 4. Current v1 artifact boundary
 

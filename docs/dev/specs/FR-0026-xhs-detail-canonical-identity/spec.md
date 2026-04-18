@@ -4,7 +4,7 @@ Canonical Issue: #505
 
 ## 背景
 
-`#503 / FR-0024` 已把 `xhs.search` request-shape truth 冻结为 search-only formal contract，并显式把 `xhs.detail` canonical identity（尤其是 `image_scenes` 是否进入 shape）转交 `#505`。`#504` 则继续冻结 detail/user_home command surface 与 request-context baseline，但不处理 detail identity。
+`#503 / FR-0024` 已把 `xhs.search` request-shape truth 冻结为 search-only formal contract，并显式把 `xhs.detail` canonical identity（尤其是 `image_scenes` 是否进入 canonical identity）转交 `#505`。`#504` 则继续冻结 detail/user_home command surface 与 request-context baseline，但不处理 detail identity。
 
 当前 GitHub 与仓库证据已经稳定收敛出一个最小结论：
 
@@ -49,7 +49,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 
 - `note_id` 是 current v1 唯一被本 FR 正式冻结的 canonical identity anchor 字段。
 - `note_id` 必须是 trim 后非空字符串。
-- 本 FR 不定义完整 detail request shape、route metadata、lookup key、`shape_key` 或 eligibility tuple。
+- 本 FR 不定义 identity 之外的 detail matching 语义。
 
 ### 2. current v1 non-identity boundary
 
@@ -162,7 +162,7 @@ And 必须等待新的 spec 修订
 
 1. current v1 `xhs.detail` canonical identity anchor 已冻结为 `note_id` only。
 2. `image_scenes` 已冻结为 not-in-identity，且未被扩写成 placement 或其他非 identity shape 真相。
-3. 本 FR 未把完整 detail request shape、lookup、eligibility 或 `shape_key` 写成 de facto formal truth。
+3. 本 FR 未把 identity 之外的 detail matching 语义写成 de facto formal truth。
 4. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity。
 5. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。
 

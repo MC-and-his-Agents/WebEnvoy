@@ -29,7 +29,7 @@
 
 - 本 FR 只冻结这些候选字段当前不得进入 current v1 identity
 - 本 FR 不冻结这些字段的 placement、输出位置或其他非 identity shape
-- 不得参与 `shape` / `shape_key` / eligibility
+- 不得参与 identity derivation
 
 ## 不属于本 FR 的对象
 

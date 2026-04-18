@@ -75,5 +75,5 @@
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
 - reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则。
 - reviewer 确认 `image_scenes` 当前只被冻结为 not-in-identity，而未被扩写成 placement 或非 identity shape 真相。
-- reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth。
+- reviewer 确认本 FR 未把 identity 之外的 detail matching 语义预先冻结为 formal truth。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。

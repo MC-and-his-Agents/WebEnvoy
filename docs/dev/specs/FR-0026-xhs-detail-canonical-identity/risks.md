@@ -3,7 +3,7 @@
 ## 风险 1：过早把 image_scenes 写成正式 identity
 
 - 表现：
-  - 后续实现 PR 直接把 `image_scenes` 写入 `shape` / `shape_key`
+  - 后续实现 PR 直接把 `image_scenes` 写入 identity derivation
 - 影响：
   - 把未验证字段写成正式真相
   - 新实现可能围绕错误 identity 收敛
@@ -36,7 +36,7 @@
   - 后续实现 PR 把 `source_note_id` 或 `image_scenes` 直接写成 current v1 formal truth
 - 影响：
   - detail canonical identity 被错误扩张
-  - `#505` 再次偏离“note_id only + image_scenes not-in-shape”的主结论
+  - `#505` 再次偏离“note_id only + image_scenes not-in-identity”的主结论
 - 缓解：
   - 当前 FR 只冻结 `note_id` only identity 与 `image_scenes` not-in-identity
   - 明确 `source_note_id` 的 verified transport truth、normalization 与 placement 仍待未来证据和新 spec 修订
