@@ -27,8 +27,8 @@
 
 补充观测：
 
-- `tests/xhs-read-execution.fallback.test.ts` 已出现 `source_note_id`
-- 但当前仓库证据只证明 canonical `note_id` 会被写出到该兼容字段，并未证明存在仅凭 `source_note_id` 反向归一化回 canonical `note_id` 的读路径
+- `tests/xhs-read-execution.fallback.test.ts` 已出现 `source_note_id` 下游请求 payload 字段
+- 但当前仓库证据只证明 canonical `note_id` 会被写入该 transport 字段，并未证明存在仅凭 `source_note_id` 反向归一化回 canonical `note_id` 的读路径
 
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
 
@@ -58,6 +58,6 @@
 
 当前仓库内还能支持一个附加的兼容性结论：
 
-- `source_note_id` 当前只可被 formal 视为 canonical `note_id` 的兼容输出字段 / future evidence candidate，尚不能单独升格为 identity derivation 依据
+- `source_note_id` 当前只可被 formal 视为 canonical `note_id` 的下游请求 payload 字段 / future evidence candidate，尚不能单独升格为 identity derivation 依据
 
 因此，本 FR 应冻结“当前不纳入”，而不是继续悬空。

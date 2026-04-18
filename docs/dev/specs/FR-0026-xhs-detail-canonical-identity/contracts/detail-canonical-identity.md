@@ -42,11 +42,10 @@ type ExcludeImageScenesFromIdentityV1 = (
 - `image_scenes` 差异不得单独导致新的 identity discriminator
 - 本 FR 不把完整 detail shape 或 comparison tuple 冻结成 formal truth
 
-## 4. Current v1 compatibility note
+## 4. Current v1 downstream transport note
 
 ```ts
-type XhsDetailCompatibilityObservationV1 = {
-  note_id?: string;
+type XhsDetailDownstreamTransportFieldV1 = {
   source_note_id?: string;
 };
 ```
@@ -54,8 +53,8 @@ type XhsDetailCompatibilityObservationV1 = {
 约束：
 
 - current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
-- 当前仓库证据只证明 canonical `note_id` 可以被写出到兼容字段 `source_note_id`。
-- 本 FR 不把“仅凭 artifact 的 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
+- 当前仓库证据只证明 canonical `note_id` 可以被写入下游请求 payload 字段 `source_note_id`。
+- 本 FR 不把“仅凭 transport 字段 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
 
 ## 5. Future revision gate
 
