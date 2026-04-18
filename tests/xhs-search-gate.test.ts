@@ -1069,8 +1069,8 @@ describe("xhs-search gate helpers", () => {
       admission_decision: "blocked",
       grant_match: false,
       derived_from: {
-        approval_admission_ref: "approval_admission_external_blocked_001",
-        audit_admission_ref: "audit_admission_external_blocked_001"
+        approval_admission_ref: null,
+        audit_admission_ref: null
       }
     });
     expect(gate.execution_audit).toMatchObject({
@@ -1486,11 +1486,11 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
-  it("fails closed when canonical grant omits granted_at even if requested_at is present", () => {
+  it("allows canonical live-read when grant omits granted_at but refs and requested_at are present", () => {
     const runId = "run-extension-execution-audit-003cb";
     const requestId = "req-execution-audit-003cb";
     const sessionId = "session-extension-execution-audit-003cb";
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       runId,
       "execution-audit-003cb"
     );
@@ -1528,6 +1528,63 @@ describe("xhs-search gate helpers", () => {
 
     expect(gate.gate_outcome).toMatchObject({
       decision_id: decisionId,
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(gate.approval_record).toMatchObject({
+      approval_id: approvalId,
+      decision_id: decisionId,
+      approved_at: "2026-04-16T09:00:00.000Z"
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "allowed"
+    });
+  });
+
+  it("keeps legacy live-read blockers when requested_at fallback exists but canonical grant scope does not match", () => {
+    const runId = "run-extension-execution-audit-003cc";
+    const requestId = "req-execution-audit-003cc";
+    const sessionId = "session-extension-execution-audit-003cc";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003cc"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        allowedDomains: ["creator.xiaohongshu.com"],
+        approvalRefs: ["approval_admission_external_003cc"],
+        auditRefs: ["audit_admission_external_003cc"],
+        resourceStateSnapshot: "active",
+        requestedAt: "2026-04-16T09:00:00.000Z",
+        grantedAt: null
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
       gate_decision: "blocked",
       effective_execution_mode: "dry_run",
       gate_reasons: expect.arrayContaining([
@@ -1536,9 +1593,18 @@ describe("xhs-search gate helpers", () => {
         "AUDIT_RECORD_MISSING"
       ])
     });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      grant_match: false,
+      derived_from: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
+    });
     expect(gate.approval_record).toMatchObject({
-      approval_id: null,
-      decision_id: decisionId
+      approved: false,
+      approver: null,
+      approved_at: null
     });
   });
 
@@ -1546,7 +1612,7 @@ describe("xhs-search gate helpers", () => {
     const runId = "run-extension-execution-audit-003d";
     const requestId = "req-execution-audit-003d";
     const sessionId = "session-extension-execution-audit-003d";
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       runId,
       "execution-audit-003d"
     );
@@ -1595,6 +1661,22 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record).toMatchObject({
       approval_id: null,
       decision_id: decisionId
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      effective_runtime_mode: "dry_run",
+      grant_match: false,
+      derived_from: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
     });
   });
 

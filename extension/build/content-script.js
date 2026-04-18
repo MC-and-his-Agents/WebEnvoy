@@ -1678,7 +1678,22 @@ const hasExplicitAdmissionEvidence = (admissionContext) => {
 };
 
 const resolveCanonicalGrantApprovedAt = (input) =>
-  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at) ??
+  asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at);
+
+const projectRiskStateFromGrantSnapshot = (value) => {
+  const normalized = asString(value);
+  if (normalized === "active") {
+    return "allowed";
+  }
+  if (normalized === "cool_down") {
+    return "limited";
+  }
+  if (normalized === "paused") {
+    return "paused";
+  }
+  return null;
+};
 
 const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
@@ -1690,6 +1705,36 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const resourceBindingRef = asString(resourceBinding?.binding_ref);
   const authorizationGrantRef = asString(authorizationGrant?.grant_ref);
   const runtimeTargetRef = asString(runtimeTarget?.target_ref);
+  const approvalRefs = asStringArray(authorizationGrant?.approval_refs);
+  const auditRefs = asStringArray(authorizationGrant?.audit_refs);
+  const grantActionName = asString(actionRequest?.action_name);
+  const grantActionType = asString(actionRequest?.action_category);
+  const grantResourceKind = asString(resourceBinding?.resource_kind);
+  const grantProfileRef = asString(resourceBinding?.profile_ref);
+  const grantBindingConstraints = asRecord(resourceBinding?.binding_constraints);
+  const bindingScope = asRecord(authorizationGrant?.binding_scope);
+  const targetScope = asRecord(authorizationGrant?.target_scope);
+  const allowedActions = asStringArray(authorizationGrant?.allowed_actions);
+  const grantDomain = asString(runtimeTarget?.domain);
+  const grantPage = asString(runtimeTarget?.page);
+  const grantTabId = asInteger(runtimeTarget?.tab_id);
+  const projectedRiskState = projectRiskStateFromGrantSnapshot(
+    authorizationGrant?.resource_state_snapshot
+  );
+  const supportsRequestedMode =
+    input.state?.requestedExecutionMode === "live_read_high_risk"
+      ? projectedRiskState === "allowed"
+      : input.state?.requestedExecutionMode === "live_read_limited"
+        ? projectedRiskState === "limited" || projectedRiskState === "allowed"
+        : false;
+  const grantHasExecutableBinding =
+    grantResourceKind === "profile_session"
+      ? grantProfileRef !== null
+      : grantResourceKind === "anonymous_context"
+        ? grantProfileRef === null &&
+          grantBindingConstraints?.anonymous_required === true &&
+          grantBindingConstraints?.reuse_logged_in_context_forbidden === true
+        : false;
 
   return (
     liveRequirements.length > 0 &&
@@ -1706,8 +1751,22 @@ const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
     authorizationGrantRef !== null &&
     runtimeTargetRef !== null &&
     resolveCanonicalGrantApprovedAt(input) !== null &&
-    asStringArray(authorizationGrant.approval_refs).length > 0 &&
-    asStringArray(authorizationGrant.audit_refs).length > 0
+    approvalRefs.length > 0 &&
+    auditRefs.length > 0 &&
+    grantActionName !== null &&
+    grantActionType === input.state?.actionType &&
+    grantResourceKind !== null &&
+    grantHasExecutableBinding &&
+    grantDomain === input.targetDomain &&
+    grantPage === input.targetPage &&
+    grantTabId === input.targetTabId &&
+    supportsRequestedMode &&
+    allowedActions.includes(grantActionName) &&
+    asStringArray(bindingScope?.allowed_resource_kinds).includes(grantResourceKind) &&
+    (grantResourceKind !== "profile_session" ||
+      asStringArray(bindingScope?.allowed_profile_refs).includes(grantProfileRef ?? "")) &&
+    asStringArray(targetScope?.allowed_domains).includes(grantDomain ?? "") &&
+    asStringArray(targetScope?.allowed_pages).includes(grantPage ?? "")
   );
 };
 
@@ -2724,18 +2783,23 @@ const resolveCanonicalCompatibilityRefs = (input) => {
     input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null;
   const admissionAuditRef =
     input.admissionContext?.audit_admission_evidence?.audit_admission_ref ?? null;
+  const allowUpstreamFallback = input.allowUpstreamFallback !== false;
 
   return {
     approvalAdmissionRef:
       typeof admissionApprovalRef === "string" && admissionApprovalRef.length > 0
         ? admissionApprovalRef
-        : typeof upstreamApprovalRef === "string" && upstreamApprovalRef.length > 0
+        : allowUpstreamFallback &&
+            typeof upstreamApprovalRef === "string" &&
+            upstreamApprovalRef.length > 0
           ? upstreamApprovalRef
           : null,
     auditAdmissionRef:
       typeof admissionAuditRef === "string" && admissionAuditRef.length > 0
         ? admissionAuditRef
-        : typeof upstreamAuditRef === "string" && upstreamAuditRef.length > 0
+        : allowUpstreamFallback &&
+            typeof upstreamAuditRef === "string" &&
+            upstreamAuditRef.length > 0
           ? upstreamAuditRef
           : null
   };
@@ -2788,6 +2852,28 @@ const evaluateRequestAdmissionResult = (input) => {
       grantMatch = false;
     }
   }
+  const requiresCanonicalGrantAdmission =
+    state.issueScope === "issue_209" &&
+    (state.requestedExecutionMode === "live_read_limited" ||
+      state.requestedExecutionMode === "live_read_high_risk");
+  const explicitCompatibilityRefs = resolveCanonicalCompatibilityRefs({
+    upstream,
+    admissionContext: input.admissionContext,
+    allowUpstreamFallback: false
+  });
+  const hasExplicitCompatibilityEvidence =
+    explicitCompatibilityRefs.approvalAdmissionRef !== null ||
+    explicitCompatibilityRefs.auditAdmissionRef !== null;
+  const hasCanonicalAdmissionGaps =
+    input.gateReasons.includes("MANUAL_CONFIRMATION_MISSING") ||
+    input.gateReasons.includes("APPROVAL_CHECKS_INCOMPLETE") ||
+    input.gateReasons.includes("AUDIT_RECORD_MISSING");
+  const canUseCanonicalGrantCompatibilityFallback =
+    requiresCanonicalGrantAdmission && !hasCanonicalAdmissionGaps;
+
+  if (requiresCanonicalGrantAdmission && hasCanonicalAdmissionGaps && !hasExplicitCompatibilityEvidence) {
+    grantMatch = false;
+  }
 
   const anonymousIsolationVerified = input.anonymousIsolationVerified === true;
   const targetSiteLoggedIn = input.targetSiteLoggedIn === true;
@@ -2800,7 +2886,8 @@ const evaluateRequestAdmissionResult = (input) => {
       : !targetSiteLoggedIn && anonymousIsolationVerified && anonymousBindingConstraintsOk;
   const compatibilityRefs = resolveCanonicalCompatibilityRefs({
     upstream,
-    admissionContext: input.admissionContext
+    admissionContext: input.admissionContext,
+    allowUpstreamFallback: canUseCanonicalGrantCompatibilityFallback
   });
 
   const admissionDecision =
