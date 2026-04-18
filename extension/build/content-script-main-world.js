@@ -187,6 +187,38 @@ export const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+export const readCapturedXhsRequestContextViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "xhs-request-context-read",
+        payload: {
+            url: input.url,
+            method: input.method
+        }
+    });
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
+        return null;
+    }
+    const record = result;
+    const headers = typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
+        ? Object.fromEntries(Object.entries(record.headers).filter((entry) => typeof entry[1] === "string"))
+        : {};
+    const capturedAt = typeof record.captured_at === "number" && Number.isFinite(record.captured_at)
+        ? Math.trunc(record.captured_at)
+        : null;
+    const url = typeof record.url === "string" ? record.url : null;
+    const method = record.method === "GET" ? "GET" : record.method === "POST" ? "POST" : null;
+    if (!url || !method || capturedAt === null) {
+        return null;
+    }
+    return {
+        url,
+        method,
+        headers,
+        body: typeof record.body === "string" ? record.body : null,
+        referrer: typeof record.referrer === "string" ? record.referrer : null,
+        captured_at: capturedAt
+    };
+};
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
         ? globalThis.location.href

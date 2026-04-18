@@ -13,7 +13,11 @@ const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
 const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
-const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
+const XHS_MAIN_WORLD_REQUEST_PATHS = new Set([
+    "/api/sns/web/v1/search/notes",
+    "/api/sns/web/v1/feed",
+    "/api/sns/web/v1/user/otherinfo"
+]);
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"];
 const editorInputSelectors = [
@@ -3773,7 +3777,7 @@ class ChromeBackgroundBridge {
             !parsedRequestUrl ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname) ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedRequestUrl.hostname) ||
-            parsedRequestUrl.pathname !== XHS_SEARCH_REQUEST_PATH) {
+            !XHS_MAIN_WORLD_REQUEST_PATHS.has(parsedRequestUrl.pathname)) {
             sendResponse({
                 ok: false,
                 error: {

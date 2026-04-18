@@ -5,6 +5,14 @@ const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
 let activeMainWorldBootstrapListener = null;
+const XHS_REQUEST_CONTEXT_PATHS = new Set([
+    "/api/sns/web/v1/search/notes",
+    "/api/sns/web/v1/feed",
+    "/api/sns/web/v1/user/otherinfo"
+]);
+const capturedXhsRequestContexts = new Map();
+const xhrRequestMetadata = new WeakMap();
+let xhsRequestCaptureInstalled = false;
 const patchedAudioContextPrototypes = new WeakSet();
 const audioNoiseSeedByPrototype = new WeakMap();
 const DEFAULT_PLUGIN_DESCRIPTORS = [
@@ -50,6 +58,150 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+const normalizeTrackedXhsRequest = (inputUrl, inputMethod) => {
+    try {
+        const resolvedUrl = new URL(inputUrl, mainWindow.location?.href ?? "https://www.xiaohongshu.com/");
+        if (!XHS_REQUEST_CONTEXT_PATHS.has(resolvedUrl.pathname)) {
+            return null;
+        }
+        const method = inputMethod.toUpperCase() === "GET" ? "GET" : "POST";
+        return {
+            key: `${method} ${resolvedUrl.pathname}`,
+            url: resolvedUrl.toString(),
+            method
+        };
+    }
+    catch {
+        return null;
+    }
+};
+const normalizeHeaderEntries = (headers) => {
+    const normalized = {};
+    for (const [key, value] of headers) {
+        if (typeof key !== "string" || typeof value !== "string") {
+            continue;
+        }
+        const trimmedKey = key.trim();
+        const trimmedValue = value.trim();
+        if (trimmedKey.length === 0 || trimmedValue.length === 0) {
+            continue;
+        }
+        normalized[trimmedKey] = trimmedValue;
+    }
+    return normalized;
+};
+const resolveFetchHeaders = (input) => {
+    if (typeof Headers === "function" && input instanceof Headers) {
+        return normalizeHeaderEntries(input.entries());
+    }
+    if (Array.isArray(input)) {
+        return normalizeHeaderEntries(input.filter((entry) => Array.isArray(entry) &&
+            entry.length >= 2 &&
+            typeof entry[0] === "string" &&
+            typeof entry[1] === "string"));
+    }
+    const record = asRecord(input);
+    if (!record) {
+        return {};
+    }
+    return normalizeHeaderEntries(Object.entries(record).filter((entry) => typeof entry[1] === "string"));
+};
+const resolveRequestBodyString = (value) => {
+    if (typeof value === "string") {
+        return value;
+    }
+    if (typeof URLSearchParams === "function" && value instanceof URLSearchParams) {
+        return value.toString();
+    }
+    return null;
+};
+const rememberCapturedXhsRequestContext = (input) => {
+    const tracked = normalizeTrackedXhsRequest(input.url, input.method);
+    if (!tracked) {
+        return;
+    }
+    capturedXhsRequestContexts.set(tracked.key, {
+        url: tracked.url,
+        method: tracked.method,
+        headers: { ...input.headers },
+        body: input.body,
+        referrer: input.referrer,
+        captured_at: Date.now()
+    });
+};
+const installXhsRequestCapture = () => {
+    if (xhsRequestCaptureInstalled) {
+        return;
+    }
+    xhsRequestCaptureInstalled = true;
+    const originalFetch = mainWindow.fetch?.bind(mainWindow);
+    if (originalFetch) {
+        mainWindow.fetch = async (input, init) => {
+            let requestUrl = "";
+            let method = "GET";
+            let headers = {};
+            let body = null;
+            if (typeof Request === "function" && input instanceof Request) {
+                requestUrl = input.url;
+                method = init?.method ?? input.method ?? method;
+                headers = {
+                    ...resolveFetchHeaders(input.headers),
+                    ...resolveFetchHeaders(init?.headers)
+                };
+                body = resolveRequestBodyString(init?.body);
+            }
+            else {
+                requestUrl = String(input);
+                method = init?.method ?? method;
+                headers = resolveFetchHeaders(init?.headers);
+                body = resolveRequestBodyString(init?.body);
+            }
+            rememberCapturedXhsRequestContext({
+                url: requestUrl,
+                method: method.toUpperCase() === "GET" ? "GET" : "POST",
+                headers,
+                body,
+                referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
+            });
+            return await originalFetch(input, init);
+        };
+    }
+    const xhrPrototype = mainWindow.XMLHttpRequest?.prototype;
+    if (!xhrPrototype) {
+        return;
+    }
+    const originalOpen = xhrPrototype.open;
+    const originalSetRequestHeader = xhrPrototype.setRequestHeader;
+    const originalSend = xhrPrototype.send;
+    xhrPrototype.open = function (method, url, ...rest) {
+        xhrRequestMetadata.set(this, {
+            url: String(url),
+            method: method.toUpperCase() === "GET" ? "GET" : "POST",
+            headers: {}
+        });
+        originalOpen.call(this, method, url, ...rest);
+    };
+    xhrPrototype.setRequestHeader = function (key, value) {
+        const metadata = xhrRequestMetadata.get(this);
+        if (metadata && key.trim().length > 0 && value.trim().length > 0) {
+            metadata.headers[key.trim()] = value.trim();
+        }
+        originalSetRequestHeader.call(this, key, value);
+    };
+    xhrPrototype.send = function (body) {
+        const metadata = xhrRequestMetadata.get(this);
+        if (metadata) {
+            rememberCapturedXhsRequestContext({
+                url: metadata.url,
+                method: metadata.method,
+                headers: metadata.headers,
+                body: resolveRequestBodyString(body),
+                referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
+            });
+        }
+        originalSend.call(this, body);
+    };
+};
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {
         return new CustomEvent(type, { detail });
@@ -315,7 +467,8 @@ const parseMainWorldRequest = (event) => {
     if (!id ||
         (type !== "fingerprint-install" &&
             type !== "fingerprint-verify" &&
-            type !== "page-state-read")) {
+            type !== "page-state-read" &&
+            type !== "xhs-request-context-read")) {
         return null;
     }
     return {
@@ -353,6 +506,24 @@ const handlePageStateReadRequest = async (request) => {
         result: initialState ?? null
     });
 };
+const handleXhsRequestContextReadRequest = async (request) => {
+    const requestUrl = asString(request.payload.url);
+    const requestMethod = asString(request.payload.method);
+    if (!requestUrl || !requestMethod) {
+        await emitMainWorldResult({
+            id: request.id,
+            ok: true,
+            result: null
+        });
+        return;
+    }
+    const tracked = normalizeTrackedXhsRequest(requestUrl, requestMethod);
+    await emitMainWorldResult({
+        id: request.id,
+        ok: true,
+        result: tracked ? capturedXhsRequestContexts.get(tracked.key) ?? null : null
+    });
+};
 const handleFingerprintInstallRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
@@ -369,6 +540,10 @@ const handleRequest = async (request) => {
     }
     if (request.type === "page-state-read") {
         await handlePageStateReadRequest(request);
+        return;
+    }
+    if (request.type === "xhs-request-context-read") {
+        await handleXhsRequestContextReadRequest(request);
         return;
     }
     await handleFingerprintInstallRequest(request);
@@ -488,3 +663,4 @@ if (expectedMainWorldEventChannel) {
 else {
     ensureBootstrapListener();
 }
+installXhsRequestCapture();

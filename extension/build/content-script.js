@@ -4769,6 +4769,28 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveCapturedRequestHeaders = (value) => {
+    if (!value) {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(value).filter((entry) => typeof entry[1] === "string"));
+};
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const parseCapturedJsonBody = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        return asRecord(JSON.parse(value));
+    }
+    catch {
+        return null;
+    }
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5022,6 +5044,23 @@ const executeXhsSearch = async (input, env) => {
         sort: input.params.sort ?? "general",
         note_type: input.params.note_type ?? 0
     };
+    const capturedRequestContext = env.readCapturedRequestContext
+        ? await env.readCapturedRequestContext({
+            url: SEARCH_ENDPOINT,
+            method: "POST"
+        }).catch(() => null)
+        : null;
+    const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
+    if (capturedPayload) {
+        payload.page = input.params.page ?? capturedPayload.page ?? payload.page;
+        payload.page_size = input.params.limit ?? capturedPayload.page_size ?? payload.page_size;
+        payload.search_id =
+            input.params.search_id ??
+                asString(capturedPayload.search_id) ??
+                (typeof payload.search_id === "string" ? payload.search_id : env.randomId());
+        payload.sort = input.params.sort ?? capturedPayload.sort ?? payload.sort;
+        payload.note_type = input.params.note_type ?? capturedPayload.note_type ?? payload.note_type;
+    }
     let signature;
     try {
         signature = await env.callSignature(SEARCH_ENDPOINT, payload);
@@ -5051,14 +5090,17 @@ const executeXhsSearch = async (input, env) => {
             summary: "页面签名入口不可用"
         }), gate, auditRecord), gate.execution_audit);
     }
+    const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
     const headers = {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=utf-8",
+        Accept: getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
+        "Content-Type": getCapturedHeader(capturedHeaders, "Content-Type") ?? "application/json;charset=utf-8",
         "X-s": String(signature["X-s"]),
         "X-t": String(signature["X-t"]),
-        "X-S-Common": resolveXsCommon(input.options.x_s_common),
-        "x-b3-traceid": env.randomId().replace(/-/g, ""),
-        "x-xray-traceid": env.randomId().replace(/-/g, "")
+        "X-S-Common": input.options.x_s_common ??
+            getCapturedHeader(capturedHeaders, "X-S-Common") ??
+            resolveXsCommon(undefined),
+        "x-b3-traceid": getCapturedHeader(capturedHeaders, "x-b3-traceid") ?? env.randomId().replace(/-/g, ""),
+        "x-xray-traceid": getCapturedHeader(capturedHeaders, "x-xray-traceid") ?? env.randomId().replace(/-/g, "")
     };
     let response;
     try {
@@ -5068,7 +5110,7 @@ const executeXhsSearch = async (input, env) => {
             headers,
             body: JSON.stringify(payload),
             pageContextRequest: true,
-            referrer: env.getLocationHref(),
+            referrer: capturedRequestContext?.referrer ?? env.getLocationHref(),
             referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
@@ -5214,7 +5256,29 @@ const READ_COMMAND_SPECS = {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const resolveCapturedRequestHeaders = (value) => {
+    if (!value) {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(value).filter((entry) => typeof entry[1] === "string"));
+};
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const parseCapturedJsonBody = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        return asRecord(JSON.parse(value));
+    }
+    catch {
+        return null;
+    }
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5719,8 +5783,9 @@ const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) =>
         summary: mapped.message
     }), gate, auditRecord), gate?.execution_audit ?? null);
 };
-const buildHeaders = (env, options, signature) => ({
-    Accept: "application/json, text/plain, */*",
+const buildHeaders = (env, options, signature, capturedHeaders) => ({
+    Accept: getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "Accept") ??
+        "application/json, text/plain, */*",
     ...(options.target_domain === "www.xiaohongshu.com" || options.target_domain === undefined
         ? {}
         : {}),
@@ -5728,18 +5793,36 @@ const buildHeaders = (env, options, signature) => ({
         ? {
             "X-s": String(signature["X-s"]),
             "X-t": String(signature["X-t"]),
-            "X-S-Common": resolveXsCommon(options.x_s_common),
-            "x-b3-traceid": env.randomId().replace(/-/g, ""),
-            "x-xray-traceid": env.randomId().replace(/-/g, "")
+            "X-S-Common": options.x_s_common ??
+                getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "X-S-Common") ??
+                resolveXsCommon(undefined),
+            "x-b3-traceid": getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "x-b3-traceid") ??
+                env.randomId().replace(/-/g, ""),
+            "x-xray-traceid": getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "x-xray-traceid") ??
+                env.randomId().replace(/-/g, "")
         }
         : {}),
-    "Content-Type": "application/json;charset=utf-8"
+    "Content-Type": getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "Content-Type") ??
+        "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
-    const payload = spec.buildPayload(input.params, env);
+    const capturedRequestContext = env.readCapturedRequestContext
+        ? await env.readCapturedRequestContext({
+            url: spec.buildUrl(input.params),
+            method: spec.method
+        }).catch(() => null)
+        : null;
+    const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
+    const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
+    const payload = spec.command === "xhs.detail" && capturedPayload
+        ? {
+            ...capturedPayload,
+            source_note_id: input.params.note_id
+        }
+        : spec.buildPayload(input.params, env);
     const resolvePageStateRoot = async () => {
         const mainWorldState = typeof env.readPageStateRoot === "function"
             ? await env.readPageStateRoot().catch(() => null)
@@ -5887,8 +5970,11 @@ const executeXhsRead = async (input, spec, env) => {
         response = await env.fetchJson({
             url: spec.buildUrl(input.params),
             method: spec.method,
-            headers: buildHeaders(env, input.options, signature),
+            headers: buildHeaders(env, input.options, signature, capturedHeaders),
             ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+            pageContextRequest: true,
+            referrer: capturedRequestContext?.referrer ?? env.getLocationHref(),
+            referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
                 : 30_000
@@ -6714,6 +6800,38 @@ const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+const readCapturedXhsRequestContextViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "xhs-request-context-read",
+        payload: {
+            url: input.url,
+            method: input.method
+        }
+    });
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
+        return null;
+    }
+    const record = result;
+    const headers = typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
+        ? Object.fromEntries(Object.entries(record.headers).filter((entry) => typeof entry[1] === "string"))
+        : {};
+    const capturedAt = typeof record.captured_at === "number" && Number.isFinite(record.captured_at)
+        ? Math.trunc(record.captured_at)
+        : null;
+    const url = typeof record.url === "string" ? record.url : null;
+    const method = record.method === "GET" ? "GET" : record.method === "POST" ? "POST" : null;
+    if (!url || !method || capturedAt === null) {
+        return null;
+    }
+    return {
+        url,
+        method,
+        headers,
+        body: typeof record.body === "string" ? record.body : null,
+        referrer: typeof record.referrer === "string" ? record.referrer : null,
+        captured_at: capturedAt
+    };
+};
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
         ? globalThis.location.href
@@ -7161,6 +7279,10 @@ const createBrowserEnvironment = () => ({
     getCookie: () => document.cookie,
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readCapturedRequestContext: async (input) => await readCapturedXhsRequestContextViaMainWorld({
+        url: input.url,
+        method: input.method
+    }).catch(() => null),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {

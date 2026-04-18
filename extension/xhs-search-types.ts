@@ -2,6 +2,7 @@ import type {
   EditorInputFocusAttestation,
   EditorInputValidationResult
 } from "./xhs-editor-input.js";
+import type { CapturedXhsRequestContext } from "./content-script-main-world.js";
 import type { ExecutionMode, IssueActionMatrixEntry, IssueScope, RiskState, WriteActionMatrixDecisionsOutput, WriteInteractionTier } from "../shared/risk-state.js";
 
 export type JsonRecord = Record<string, unknown>;
@@ -64,6 +65,10 @@ export interface XhsSearchEnvironment {
   getCookie(): string;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
+  readCapturedRequestContext?(input: {
+    url: string;
+    method: "POST" | "GET";
+  }): Promise<CapturedXhsRequestContext | null>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;

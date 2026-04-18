@@ -3,7 +3,8 @@ type RecordValue = Record<string, unknown>;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read";
+  | "page-state-read"
+  | "xhs-request-context-read";
 
 type MainWorldRequest = {
   id: string;
@@ -42,6 +43,31 @@ declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
 let activeMainWorldRequestListener: ((event: Event) => void) | null = null;
 let activeMainWorldBootstrapListener: ((event: Event) => void) | null = null;
+const XHS_REQUEST_CONTEXT_PATHS = new Set([
+  "/api/sns/web/v1/search/notes",
+  "/api/sns/web/v1/feed",
+  "/api/sns/web/v1/user/otherinfo"
+]);
+const capturedXhsRequestContexts = new Map<
+  string,
+  {
+    url: string;
+    method: "POST" | "GET";
+    headers: Record<string, string>;
+    body: string | null;
+    referrer: string | null;
+    captured_at: number;
+  }
+>();
+const xhrRequestMetadata = new WeakMap<
+  XMLHttpRequest,
+  {
+    url: string;
+    method: "POST" | "GET";
+    headers: Record<string, string>;
+  }
+>();
+let xhsRequestCaptureInstalled = false;
 const patchedAudioContextPrototypes = new WeakSet<object>();
 const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
@@ -97,6 +123,183 @@ const asStringArray = (value: unknown): string[] =>
 
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const normalizeTrackedXhsRequest = (
+  inputUrl: string,
+  inputMethod: string
+): { key: string; url: string; method: "POST" | "GET" } | null => {
+  try {
+    const resolvedUrl = new URL(inputUrl, mainWindow.location?.href ?? "https://www.xiaohongshu.com/");
+    if (!XHS_REQUEST_CONTEXT_PATHS.has(resolvedUrl.pathname)) {
+      return null;
+    }
+    const method = inputMethod.toUpperCase() === "GET" ? "GET" : "POST";
+    return {
+      key: `${method} ${resolvedUrl.pathname}`,
+      url: resolvedUrl.toString(),
+      method
+    };
+  } catch {
+    return null;
+  }
+};
+
+const normalizeHeaderEntries = (headers: Iterable<[string, string]>): Record<string, string> => {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of headers) {
+    if (typeof key !== "string" || typeof value !== "string") {
+      continue;
+    }
+    const trimmedKey = key.trim();
+    const trimmedValue = value.trim();
+    if (trimmedKey.length === 0 || trimmedValue.length === 0) {
+      continue;
+    }
+    normalized[trimmedKey] = trimmedValue;
+  }
+  return normalized;
+};
+
+const resolveFetchHeaders = (input: unknown): Record<string, string> => {
+  if (typeof Headers === "function" && input instanceof Headers) {
+    return normalizeHeaderEntries(input.entries());
+  }
+  if (Array.isArray(input)) {
+    return normalizeHeaderEntries(
+      input.filter((entry): entry is [string, string] =>
+        Array.isArray(entry) &&
+        entry.length >= 2 &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string"
+      )
+    );
+  }
+  const record = asRecord(input);
+  if (!record) {
+    return {};
+  }
+  return normalizeHeaderEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+};
+
+const resolveRequestBodyString = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof URLSearchParams === "function" && value instanceof URLSearchParams) {
+    return value.toString();
+  }
+  return null;
+};
+
+const rememberCapturedXhsRequestContext = (input: {
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body: string | null;
+  referrer: string | null;
+}): void => {
+  const tracked = normalizeTrackedXhsRequest(input.url, input.method);
+  if (!tracked) {
+    return;
+  }
+  capturedXhsRequestContexts.set(tracked.key, {
+    url: tracked.url,
+    method: tracked.method,
+    headers: { ...input.headers },
+    body: input.body,
+    referrer: input.referrer,
+    captured_at: Date.now()
+  });
+};
+
+const installXhsRequestCapture = (): void => {
+  if (xhsRequestCaptureInstalled) {
+    return;
+  }
+  xhsRequestCaptureInstalled = true;
+
+  const originalFetch = mainWindow.fetch?.bind(mainWindow);
+  if (originalFetch) {
+    mainWindow.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      let requestUrl = "";
+      let method = "GET";
+      let headers: Record<string, string> = {};
+      let body: string | null = null;
+
+      if (typeof Request === "function" && input instanceof Request) {
+        requestUrl = input.url;
+        method = init?.method ?? input.method ?? method;
+        headers = {
+          ...resolveFetchHeaders(input.headers),
+          ...resolveFetchHeaders(init?.headers)
+        };
+        body = resolveRequestBodyString(init?.body);
+      } else {
+        requestUrl = String(input);
+        method = init?.method ?? method;
+        headers = resolveFetchHeaders(init?.headers);
+        body = resolveRequestBodyString(init?.body);
+      }
+
+      rememberCapturedXhsRequestContext({
+        url: requestUrl,
+        method: method.toUpperCase() === "GET" ? "GET" : "POST",
+        headers,
+        body,
+        referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
+      });
+
+      return await originalFetch(input, init);
+    };
+  }
+
+  const xhrPrototype = mainWindow.XMLHttpRequest?.prototype;
+  if (!xhrPrototype) {
+    return;
+  }
+
+  const originalOpen = xhrPrototype.open;
+  const originalSetRequestHeader = xhrPrototype.setRequestHeader;
+  const originalSend = xhrPrototype.send;
+
+  xhrPrototype.open = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    ...rest: unknown[]
+  ): void {
+    xhrRequestMetadata.set(this, {
+      url: String(url),
+      method: method.toUpperCase() === "GET" ? "GET" : "POST",
+      headers: {}
+    });
+    (originalOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
+  };
+
+  xhrPrototype.setRequestHeader = function (this: XMLHttpRequest, key: string, value: string): void {
+    const metadata = xhrRequestMetadata.get(this);
+    if (metadata && key.trim().length > 0 && value.trim().length > 0) {
+      metadata.headers[key.trim()] = value.trim();
+    }
+    originalSetRequestHeader.call(this, key, value);
+  };
+
+  xhrPrototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null): void {
+    const metadata = xhrRequestMetadata.get(this);
+    if (metadata) {
+      rememberCapturedXhsRequestContext({
+        url: metadata.url,
+        method: metadata.method,
+        headers: metadata.headers,
+        body: resolveRequestBodyString(body),
+        referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
+      });
+    }
+    originalSend.call(this, body);
+  };
+};
 
 const createWindowEvent = (type: string, detail: unknown): Event => {
   if (typeof CustomEvent === "function") {
@@ -433,7 +636,8 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
     !id ||
     (type !== "fingerprint-install" &&
       type !== "fingerprint-verify" &&
-      type !== "page-state-read")
+      type !== "page-state-read" &&
+      type !== "xhs-request-context-read")
   ) {
     return null;
   }
@@ -480,6 +684,26 @@ const handlePageStateReadRequest = async (request: MainWorldRequest): Promise<vo
   });
 };
 
+const handleXhsRequestContextReadRequest = async (request: MainWorldRequest): Promise<void> => {
+  const requestUrl = asString(request.payload.url);
+  const requestMethod = asString(request.payload.method);
+  if (!requestUrl || !requestMethod) {
+    await emitMainWorldResult({
+      id: request.id,
+      ok: true,
+      result: null
+    });
+    return;
+  }
+
+  const tracked = normalizeTrackedXhsRequest(requestUrl, requestMethod);
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result: tracked ? capturedXhsRequestContexts.get(tracked.key) ?? null : null
+  });
+};
+
 const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
@@ -497,6 +721,10 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   }
   if (request.type === "page-state-read") {
     await handlePageStateReadRequest(request);
+    return;
+  }
+  if (request.type === "xhs-request-context-read") {
+    await handleXhsRequestContextReadRequest(request);
     return;
   }
   await handleFingerprintInstallRequest(request);
@@ -635,3 +863,4 @@ if (expectedMainWorldEventChannel) {
 } else {
   ensureBootstrapListener();
 }
+installXhsRequestCapture();

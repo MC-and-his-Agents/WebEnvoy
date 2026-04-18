@@ -389,6 +389,145 @@ describe("extension service worker / signature and editor input", () => {
     });
   });
 
+  it("allows detail/user xhs main-world requests through the same MAIN world rpc path", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript
+      .mockResolvedValueOnce([
+        {
+          result: {
+            status: 200,
+            body: {
+              code: 0,
+              data: {
+                items: [{ note_card: { noteId: "note-001" } }]
+              }
+            }
+          }
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            status: 200,
+            body: {
+              code: 0,
+              data: {
+                user: { userId: "user-001" }
+              }
+            }
+          }
+        }
+      ]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let detailResponse: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/feed",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"source_note_id\":\"note-001\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/explore/note-001"
+        }
+      },
+      (message) => {
+        detailResponse = message;
+      }
+    );
+
+    let userResponse: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/user/otherinfo?user_id=user-001",
+        method: "GET",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "X-s": "signed",
+          "X-t": "1700000001"
+        },
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 33,
+          url: "https://www.xiaohongshu.com/user/profile/user-001"
+        }
+      },
+      (message) => {
+        userResponse = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+          "POST",
+          {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1700000000"
+          },
+          "{\"source_note_id\":\"note-001\"}",
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+    expect(executeScript).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target: { tabId: 33 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001",
+          "GET",
+          {
+            Accept: "application/json, text/plain, */*",
+            "X-s": "signed",
+            "X-t": "1700000001"
+          },
+          undefined,
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+    expect(detailResponse).toMatchObject({
+      ok: true,
+      result: {
+        status: 200
+      }
+    });
+    expect(userResponse).toMatchObject({
+      ok: true,
+      result: {
+        status: 200
+      }
+    });
+  });
+
   it("preserves AbortError metadata when xhs main-world request executeScript times out", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);

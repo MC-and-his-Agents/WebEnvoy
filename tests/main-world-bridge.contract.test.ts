@@ -204,4 +204,84 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("captures recent xhs request context from main-world fetch and exposes it through the event channel", async () => {
+    const { added, dispatched, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    (mockWindow as typeof mockWindow & { location?: { href: string }; fetch?: typeof fetch }).location = {
+      href: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51"
+    };
+    (mockWindow as typeof mockWindow & { fetch?: typeof fetch }).fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+    );
+
+    (globalThis as { window?: unknown }).window = mockWindow;
+    (globalThis as { document?: unknown }).document = mockDocument;
+    (globalThis as { CustomEvent?: unknown }).CustomEvent = class MockCustomEvent<T> {
+      readonly type: string;
+      readonly detail: T;
+
+      constructor(type: string, init: { detail: T }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    };
+
+    const { resolveMainWorldEventNamesForSecret } = await import("../extension/content-script-handler.js");
+    await import("../extension/main-world-bridge.js");
+
+    const bootstrapListener = added.find((entry) => entry.type === "__mw_bootstrap__")?.listener;
+    const secretChannel = resolveMainWorldEventNamesForSecret("contract-secret-003");
+    bootstrapListener?.({
+      type: "__mw_bootstrap__",
+      detail: {
+        request_event: secretChannel.requestEvent,
+        result_event: secretChannel.resultEvent
+      }
+    } as unknown as Event);
+
+    await (mockWindow as typeof mockWindow & { fetch: typeof fetch }).fetch(
+      "/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-S-Common": "{\"page\":\"search\"}"
+        },
+        body: "{\"keyword\":\"AI\",\"search_id\":\"search-ctx-001\"}"
+      }
+    );
+
+    const requestListener = added.find((entry) => entry.type === secretChannel.requestEvent)?.listener;
+    requestListener?.({
+      type: secretChannel.requestEvent,
+      detail: {
+        id: "request-context-001",
+        type: "xhs-request-context-read",
+        payload: {
+          url: "/api/sns/web/v1/search/notes",
+          method: "POST"
+        }
+      }
+    } as unknown as Event);
+
+    const resultEvents = dispatched.filter((entry) => entry.type === secretChannel.resultEvent);
+    expect(resultEvents.at(-1)?.detail).toMatchObject({
+      id: "request-context-001",
+      ok: true,
+      result: {
+        url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-S-Common": "{\"page\":\"search\"}"
+        },
+        body: "{\"keyword\":\"AI\",\"search_id\":\"search-ctx-001\"}",
+        referrer: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51"
+      }
+    });
+  });
+
 });

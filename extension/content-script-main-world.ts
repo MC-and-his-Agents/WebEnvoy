@@ -8,11 +8,21 @@ const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read";
+  | "page-state-read"
+  | "xhs-request-context-read";
 
 type MainWorldFetchResult = {
   status: number;
   body: unknown;
+};
+
+export type CapturedXhsRequestContext = {
+  url: string;
+  method: "POST" | "GET";
+  headers: Record<string, string>;
+  body: string | null;
+  referrer: string | null;
+  captured_at: number;
 };
 
 type XhsMainWorldRequestMessage = {
@@ -280,6 +290,50 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
   return typeof result === "object" && result !== null && !Array.isArray(result)
     ? (result as Record<string, unknown>)
     : null;
+};
+
+export const readCapturedXhsRequestContextViaMainWorld = async (input: {
+  url: string;
+  method: "POST" | "GET";
+}): Promise<CapturedXhsRequestContext | null> => {
+  const result = await mainWorldCall<unknown>({
+    type: "xhs-request-context-read",
+    payload: {
+      url: input.url,
+      method: input.method
+    }
+  });
+  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+    return null;
+  }
+
+  const record = result as Record<string, unknown>;
+  const headers =
+    typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
+      ? Object.fromEntries(
+          Object.entries(record.headers as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string"
+          )
+        )
+      : {};
+  const capturedAt =
+    typeof record.captured_at === "number" && Number.isFinite(record.captured_at)
+      ? Math.trunc(record.captured_at)
+      : null;
+  const url = typeof record.url === "string" ? record.url : null;
+  const method = record.method === "GET" ? "GET" : record.method === "POST" ? "POST" : null;
+  if (!url || !method || capturedAt === null) {
+    return null;
+  }
+
+  return {
+    url,
+    method,
+    headers,
+    body: typeof record.body === "string" ? record.body : null,
+    referrer: typeof record.referrer === "string" ? record.referrer : null,
+    captured_at: capturedAt
+  };
 };
 
 const resolveMainWorldRequestUrl = (value: string): string => {

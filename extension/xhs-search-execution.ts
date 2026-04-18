@@ -29,6 +29,41 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const resolveCapturedRequestHeaders = (
+  value: Record<string, string> | null | undefined
+): Record<string, string> => {
+  if (!value) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+};
+
+const getCapturedHeader = (
+  headers: Record<string, string>,
+  key: string
+): string | null => {
+  const matchedEntry = Object.entries(headers).find(
+    ([candidate]) => candidate.toLowerCase() === key.toLowerCase()
+  );
+  return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+
+const parseCapturedJsonBody = (value: string | null): JsonRecord | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+};
+
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
   executionAudit: JsonRecord | null
@@ -352,6 +387,23 @@ export const executeXhsSearch = async (
     sort: input.params.sort ?? "general",
     note_type: input.params.note_type ?? 0
   };
+  const capturedRequestContext = env.readCapturedRequestContext
+    ? await env.readCapturedRequestContext({
+        url: SEARCH_ENDPOINT,
+        method: "POST"
+      }).catch(() => null)
+    : null;
+  const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
+  if (capturedPayload) {
+    payload.page = input.params.page ?? capturedPayload.page ?? payload.page;
+    payload.page_size = input.params.limit ?? capturedPayload.page_size ?? payload.page_size;
+    payload.search_id =
+      input.params.search_id ??
+      asString(capturedPayload.search_id) ??
+      (typeof payload.search_id === "string" ? payload.search_id : env.randomId());
+    payload.sort = input.params.sort ?? capturedPayload.sort ?? payload.sort;
+    payload.note_type = input.params.note_type ?? capturedPayload.note_type ?? payload.note_type;
+  }
 
   let signature: { "X-s": string; "X-t": string | number };
   try {
@@ -393,14 +445,22 @@ export const executeXhsSearch = async (
     );
   }
 
+  const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
   const headers: Record<string, string> = {
-    Accept: "application/json, text/plain, */*",
-    "Content-Type": "application/json;charset=utf-8",
+    Accept:
+      getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
+    "Content-Type":
+      getCapturedHeader(capturedHeaders, "Content-Type") ?? "application/json;charset=utf-8",
     "X-s": String(signature["X-s"]),
     "X-t": String(signature["X-t"]),
-    "X-S-Common": resolveXsCommon(input.options.x_s_common),
-    "x-b3-traceid": env.randomId().replace(/-/g, ""),
-    "x-xray-traceid": env.randomId().replace(/-/g, "")
+    "X-S-Common":
+      input.options.x_s_common ??
+      getCapturedHeader(capturedHeaders, "X-S-Common") ??
+      resolveXsCommon(undefined),
+    "x-b3-traceid":
+      getCapturedHeader(capturedHeaders, "x-b3-traceid") ?? env.randomId().replace(/-/g, ""),
+    "x-xray-traceid":
+      getCapturedHeader(capturedHeaders, "x-xray-traceid") ?? env.randomId().replace(/-/g, "")
   };
 
   let response: { status: number; body: unknown };
@@ -411,7 +471,7 @@ export const executeXhsSearch = async (
       headers,
       body: JSON.stringify(payload),
       pageContextRequest: true,
-      referrer: env.getLocationHref(),
+      referrer: capturedRequestContext?.referrer ?? env.getLocationHref(),
       referrerPolicy: "strict-origin-when-cross-origin",
       timeoutMs:
         typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)

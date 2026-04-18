@@ -20,6 +20,7 @@ import {
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readCapturedXhsRequestContextViaMainWorld,
   readPageStateViaMainWorld,
   requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
@@ -222,6 +223,11 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getCookie: () => document.cookie,
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   readPageStateRoot: async () => await readPageStateViaMainWorld(),
+  readCapturedRequestContext: async (input) =>
+    await readCapturedXhsRequestContextViaMainWorld({
+      url: input.url,
+      method: input.method
+    }).catch(() => null),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]

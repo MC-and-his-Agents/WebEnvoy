@@ -98,7 +98,42 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
 const asArray = (value: unknown): unknown[] | null => (Array.isArray(value) ? value : null);
+
+const resolveCapturedRequestHeaders = (
+  value: Record<string, string> | null | undefined
+): Record<string, string> => {
+  if (!value) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+};
+
+const getCapturedHeader = (
+  headers: Record<string, string>,
+  key: string
+): string | null => {
+  const matchedEntry = Object.entries(headers).find(
+    ([candidate]) => candidate.toLowerCase() === key.toLowerCase()
+  );
+  return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+
+const parseCapturedJsonBody = (value: string | null): JsonRecord | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+};
 
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
@@ -759,9 +794,12 @@ const resolveSimulatedResult = (
 const buildHeaders = (
   env: XhsSearchEnvironment,
   options: XhsSearchOptions,
-  signature: { "X-s": string; "X-t": string | number }
+  signature: { "X-s": string; "X-t": string | number },
+  capturedHeaders?: Record<string, string> | null
 ): Record<string, string> => ({
-  Accept: "application/json, text/plain, */*",
+  Accept:
+    getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "Accept") ??
+    "application/json, text/plain, */*",
   ...(options.target_domain === "www.xiaohongshu.com" || options.target_domain === undefined
     ? {}
     : {}),
@@ -769,12 +807,21 @@ const buildHeaders = (
     ? {
         "X-s": String(signature["X-s"]),
         "X-t": String(signature["X-t"]),
-        "X-S-Common": resolveXsCommon(options.x_s_common),
-        "x-b3-traceid": env.randomId().replace(/-/g, ""),
-        "x-xray-traceid": env.randomId().replace(/-/g, "")
+        "X-S-Common":
+          options.x_s_common ??
+          getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "X-S-Common") ??
+          resolveXsCommon(undefined),
+        "x-b3-traceid":
+          getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "x-b3-traceid") ??
+          env.randomId().replace(/-/g, ""),
+        "x-xray-traceid":
+          getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "x-xray-traceid") ??
+          env.randomId().replace(/-/g, "")
       }
     : {}),
-  "Content-Type": "application/json;charset=utf-8"
+  "Content-Type":
+    getCapturedHeader(resolveCapturedRequestHeaders(capturedHeaders), "Content-Type") ??
+    "application/json;charset=utf-8"
 });
 
 const executeXhsRead = async (
@@ -785,7 +832,21 @@ const executeXhsRead = async (
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
-  const payload = spec.buildPayload(input.params, env);
+  const capturedRequestContext = env.readCapturedRequestContext
+    ? await env.readCapturedRequestContext({
+        url: spec.buildUrl(input.params),
+        method: spec.method
+      }).catch(() => null)
+    : null;
+  const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
+  const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
+  const payload: JsonRecord =
+    spec.command === "xhs.detail" && capturedPayload
+      ? {
+          ...capturedPayload,
+          source_note_id: (input.params as XhsDetailParams).note_id
+        }
+      : spec.buildPayload(input.params, env);
   const resolvePageStateRoot = async (): Promise<JsonRecord | null> => {
     const mainWorldState =
       typeof env.readPageStateRoot === "function"
@@ -975,8 +1036,11 @@ const executeXhsRead = async (
     response = await env.fetchJson({
       url: spec.buildUrl(input.params),
       method: spec.method,
-      headers: buildHeaders(env, input.options, signature),
+      headers: buildHeaders(env, input.options, signature, capturedHeaders),
       ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+      pageContextRequest: true,
+      referrer: capturedRequestContext?.referrer ?? env.getLocationHref(),
+      referrerPolicy: "strict-origin-when-cross-origin",
       timeoutMs:
         typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
           ? Math.max(1, Math.floor(input.options.timeout_ms))
