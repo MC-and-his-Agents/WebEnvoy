@@ -2,14 +2,14 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，并把当前已观测到的 `source_note_id` 收敛为“route-scoped artifact-side derivation input，但不进入 frozen identity baseline”的窄边界，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，并把当前已观测到的 `source_note_id` 收敛为“已观测到但未 formalize 的请求侧字段”，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
 ### 阶段 1：仓库内证据收敛
 
 - 产出：`research.md`
-- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、当前 observed `source_note_id` 只足够被 formalize 为 route-scoped artifact-side derivation input、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
+- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、当前 observed `source_note_id` 仍不足以被 formalize 为 transport alias 或 artifact-side derivation input、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
 
 ### 阶段 2：identity contract 冻结
 
@@ -38,7 +38,7 @@
 
 - 规约对照：
   - 对照 `src/commands/xhs-input.ts`、`src/commands/xhs-runtime.ts`，确认 current implementation 只以 `note_id` 作为 detail command input 的稳定锚点
-  - 对照 `extension/xhs-read-execution.ts` 与 `tests/xhs-read-execution.fallback.test.ts`，确认当前足以把 `source_note_id` 收窄 formalize 为当前已观测到的 detail request artifact family 内的 derivation input，但仍不足以扩写为更广 transport truth
+  - 对照 `extension/xhs-read-execution.ts` 与 `tests/xhs-read-execution.fallback.test.ts`，确认当前只能观察到 `source_note_id` 的 request-side 存在性，但仍不足以把它 formalize 为 transport alias、artifact-side derivation input 或更广 transport truth
   - 对照 `tests/content-script-handler.xhs-read.contract.test.ts`、`tests/extension.service-worker.gate-approval.suite.ts`、`tests/xhs-read-execution.fallback.test.ts`，确认 in-tree tests 没有把 `image_scenes` 写成 identity 前提
   - 对照 `FR-0024` research，确认 `image_scenes` 缺少仓库内 admission-ready 证据
 - 文档门禁：
@@ -56,7 +56,7 @@
 - 当前 formal suite 不进入实现代码 TDD。
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
-  - `source_note_id` 继续不进入 frozen identity baseline，但允许在当前已观测到的 detail request artifact family 内导出 canonical `note_id`
+  - `source_note_id` 继续不进入 frozen identity baseline，且不得被无 spec 依据地提升为 alias/derivation 语义
   - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
   - future revision 前，不得把 `image_scenes` 的 placement 或其他非目标语义误写成 current v1 formal truth
 
@@ -73,8 +73,8 @@
 
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
-- reviewer 确认 `source_note_id` 已被收敛为 route-scoped artifact-side derivation input，且未被提升为 frozen identity baseline、第二个 identity 字段或更广 transport truth。
+- reviewer 确认 `source_note_id` 仍只是已观测到的请求侧字段，未被提升为 frozen identity baseline、transport alias、artifact-side derivation input 或更广 transport truth。
 - reviewer 确认 `image_scenes` 当前已被冻结为 not-in-identity。
 - reviewer 确认本 FR 未把 `image_scenes` 的 placement 或其他非目标语义扩写成 current v1 formal truth。
 - reviewer 确认本 FR 未把 compatibility、rejected-source matching、template reuse 等 identity 之外的 detail matching 语义预先冻结为 formal truth。
-- reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。
+- reviewer 确认 future identity expansion 或 request/artifact alias freeze 必须等待新的仓库内证据和新的 spec 修订。

@@ -40,16 +40,15 @@ type ExcludeImageScenesFromIdentityV1 = (
 
 - `image_scenes` 差异不得单独导致新的 identity discriminator
 - 本 FR 不把 identity 之外的 comparison semantics 冻结成 formal truth
-## 4. Current v1 artifact derivation boundary
+## 4. Observed request/artifact non-freeze boundary
 
 约束：
 
 - current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
-- 对当前已观测到的 `/api/sns/web/v1/feed` detail request artifact，request body 中 trim 后非空的 `source_note_id` 可以 route-scoped 地导出 canonical `note_id`。
-- 上述 derivation 只适用于当前已观测到的 detail request artifact family，不冻结更广 verified transport truth、其他 placement 或其他 route 上的 normalization 规则。
-- `source_note_id` 不新增第二个 identity 字段，也不进入 frozen identity baseline。
+- 当前已观测到的 `source_note_id` 不新增第二个 identity 字段，也不进入 frozen identity baseline。
+- 本 FR 不把 `source_note_id` 冻结为 transport alias、artifact-side derivation input、normalization 规则或更广 verified transport truth。
 - 其他 request/artifact 字段不在本 FR scope。
-- 若未来需要 formalize 更广的 request/artifact normalization 或 artifact-side identity derivation，必须基于新的仓库证据和新的 spec 修订。
+- 若未来需要 formalize request/artifact alias、normalization 或 artifact-side identity derivation，必须基于新的仓库证据和新的 spec 修订。
 
 ## 5. Future revision gate
 
