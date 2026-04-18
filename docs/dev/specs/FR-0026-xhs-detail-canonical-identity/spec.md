@@ -13,15 +13,15 @@ Canonical Issue: #505
 - 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
-因此，本 FR 的职责不是继续寻找额外字段，也不是替 `#504` 定义完整 detail request shape，而是先把 current v1 可被仓库内证据支撑的最小 identity anchor 冻结为 formal contract：`xhs.detail` 当前只有 `note_id` 被 formal 认可为 canonical identity anchor，`image_scenes` 不进入该 identity anchor，也不参与 current v1 的 detail compatibility / rejected-source / template reuse 判定。
+因此，本 FR 的职责不是继续寻找额外字段，也不是替 `#504` 定义完整 detail request shape，而是先把 current v1 可被仓库内证据支撑的最小 identity anchor 冻结为 formal contract：`xhs.detail` 当前只有 `note_id` 被 formal 认可为 canonical identity anchor；对当前已观测到的 `/api/sns/web/v1/feed` detail request artifact，只允许把 request-body `source_note_id` 归一为同一个 canonical `note_id`；`image_scenes` 不进入该 identity anchor。
 
 ## 目标
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
 2. 冻结 `image_scenes` 当前不进入 canonical identity anchor。
-3. 冻结 `image_scenes` 当前不参与 current v1 detail compatibility、rejected-source matching 或 template reuse。
-4. 明确 `source_note_id` 当前仍不进入 formal identity truth。
-5. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity 或兼容性判定。
+3. 冻结当前已观测 detail request artifact 上的 `source_note_id -> note_id` 窄归一化规则。
+4. 明确 `source_note_id` 只作为 current observed transport alias 参与 canonical `note_id` 归一，不新增第二个 identity 字段。
+5. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 6. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
 
 ## 非目标
@@ -53,20 +53,20 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - `note_id` 必须是 trim 后非空字符串。
 - 本 FR 不定义 identity 之外的 detail matching 语义。
 
-### 2. current v1 non-identity and compatibility boundary
+### 2. current v1 non-identity boundary
 
 系统必须冻结以下 current v1 结论：
 
 - `image_scenes` 不进入 canonical identity
 
 - current v1 formal 只回答“它不进入 canonical identity”
-- `image_scenes` 当前不得参与 current v1 detail compatibility、rejected-source matching 或 template reuse
 - 当前仓库未验证稳定的 diagnostics / compatibility field shape；本 FR 不冻结其 placement 或输出位置
 - `image_scenes` 不得作为 canonical identity anchor 的组成部分或额外 identity discriminator
+- 本 FR 不定义 detail compatibility、rejected-source matching、template reuse 或其他 request-context 语义；这些行为仍由 `#504` / 后续实现链路负责
 
 ### 3. identity derivation baseline
 
-系统必须冻结：只要 command-side input 能够稳定提供 `note_id`，就可以构成 current v1 detail identity anchor；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
+系统必须冻结：只要 command-side input 能够稳定提供 `note_id`，就可以构成 current v1 detail identity anchor；对当前已观测到的 `/api/sns/web/v1/feed` detail request artifact，request body 中的 `source_note_id` 归一后也必须映射回同一个 canonical `note_id`；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
 
 约束：
 
@@ -74,8 +74,9 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - current v1 detail identity anchor 的导出前提只绑定 `note_id`，不绑定 `image_scenes`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
-- 当前仓库虽已观测到 `source_note_id` 请求侧字段，但本 FR 不把 request-artifact normalization 或 verified transport truth 写成 current v1 identity 契约。
-- 除 canonical `note_id` 之外，本 FR 不把 `source_note_id` 写成 current v1 identity derivation truth。
+- 对当前已观测到的 `/api/sns/web/v1/feed` request artifact，若 request body `source_note_id` 为 trim 后非空字符串，则 canonical identity 中的 `note_id` 必须使用该值。
+- 上述 `source_note_id -> note_id` 只是一条 current observed transport alias 归一化规则，不新增第二个 identity 字段，也不扩张为其他 route / placement 的 formal truth。
+- 除 canonical `note_id` 之外，本 FR 不把 `source_note_id` 写成独立的 current v1 identity 字段。
 
 ### 4. identity exclusion 行为
 
@@ -83,7 +84,6 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 
 - 仅因 `image_scenes` 不同，不得把它提升为额外 identity discriminator。
 - `image_scenes` 缺失、为空、未观测到或值不同，不得单独被 formal 认定为 canonical identity 变化。
-- `image_scenes` 缺失、为空、未观测到或值不同，不得单独导致 current v1 detail compatibility 失败、rejected-source 命中变化或 template reuse 决策变化。
 
 补充约束：
 
@@ -100,7 +100,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - 四对象输入 ownership
 - request-context behavior
 
-本 FR 只回答 detail identity 问题，不把这些行为写成 de facto request-context spec。
+本 FR 只回答 detail identity 问题，不把这些行为写成 de facto request-context spec；因此本 FR 不能被解读为 compatibility、rejected-source matching 或 template reuse 的独立 formal owner。
 
 ### 6. 未来扩 identity 的准入条件
 
@@ -140,20 +140,19 @@ When 系统判断当前 formal 是否允许把 `image_scenes` 加入 identity
 Then 当前 formal 结果必须是不允许
 And 不得仅因 `image_scenes` 差异认定 identity anchor 改变
 
-### 场景 4：image_scenes 不驱动 compatibility 或 template reuse
+### 场景 4：captured detail request artifact 的 source_note_id 映射回 canonical note_id
 
-Given 两条 detail request、rejected observation 或 template 的 `note_id` 相同
-And 它们的 `image_scenes` 不同、缺失或一方不存在
-When 系统判断 current v1 是否允许用 `image_scenes` 驱动 compatibility、rejected-source matching 或 template reuse
-Then 当前 formal 结果必须是不允许
-And 不得仅因 `image_scenes` 差异改变这些 current v1 判定
+Given 当前已观测到 `/api/sns/web/v1/feed` detail request artifact
+And request body 中存在 trim 后非空的 `source_note_id`
+When 系统导出 current v1 detail canonical identity
+Then canonical identity 中的 `note_id` 必须映射为同一个 trim 后的 `source_note_id`
+And 本 FR 不得把它扩写为第二个独立 identity 字段
 
 ### 场景 5：image_scenes 只能作为 non-identity candidate
 
 Given detail runtime 或 test 现场观测到了 `image_scenes`
 When 系统记录当前 v1 contract
 Then 当前 formal 只能确认它不进入 canonical identity
-And 只能确认它当前不参与 compatibility、rejected-source matching 或 template reuse
 And 不得把它的 diagnostics / compatibility placement 写成 current v1 formal truth
 
 ### 场景 6：未来扩 identity 必须重新过 spec review
@@ -167,18 +166,18 @@ And 必须等待新的 spec 修订
 
 - `note_id` 缺失时，当前 detail identity anchor 不可导出；这是 command input 问题，不是 `image_scenes` 问题。
 - `image_scenes` 缺失、为空或值不稳定时，当前 formal 结论仍必须保持 `note_id`-only identity。
-- `image_scenes` 差异不得在 current v1 中单独驱动 compatibility、rejected-source matching 或 template reuse；若 future evidence 证明当前规则不足，必须走新 spec 修订。
-- `source_note_id` 当前不构成已冻结的 identity truth；如未来要 formalize，必须基于新的仓库证据和新的 spec 修订。
+- 对当前已观测到的 `/api/sns/web/v1/feed` request artifact，`source_note_id` 只被允许作为 current v1 canonical `note_id` 的 transport alias；如未来要 formalize 为更广义 transport truth，必须基于新的仓库证据和新的 spec 修订。
 - 若未来仓库证据证明 `note_id` 单独使用会产生错误复用，本 FR 不阻止未来修订，但在修订完成前 current implementation 仍必须遵守 current v1 结论。
 - `image_scenes` 不入 identity 不等于禁止记录该字段；只是不允许它驱动 current v1 canonical identity anchor。
 
 ## 验收标准
 
 1. current v1 `xhs.detail` canonical identity anchor 已冻结为 `note_id` only。
-2. `image_scenes` 已冻结为 not-in-identity，且已明确不参与 current v1 detail compatibility、rejected-source matching 或 template reuse。
-3. 本 FR 未把 diagnostics / compatibility placement、shape、shape_key、eligibility 等非目标语义写成 de facto formal truth。
-4. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity 或兼容性判定。
-5. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。
+2. 当前已观测到的 `/api/sns/web/v1/feed` request artifact 已冻结为 `source_note_id -> canonical note_id` 的窄归一化规则，且未被扩写为第二个 identity 字段或更广 transport truth。
+3. `image_scenes` 已冻结为 not-in-identity。
+4. 本 FR 未把 diagnostics / compatibility placement、shape、shape_key、eligibility 等非目标语义写成 de facto formal truth。
+5. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity。
+6. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。
 
 ## 依赖与前置条件
 

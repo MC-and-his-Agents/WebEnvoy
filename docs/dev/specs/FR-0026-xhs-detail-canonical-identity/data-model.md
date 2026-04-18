@@ -2,7 +2,7 @@
 
 ## 结论
 
-本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity 与 exclusion boundary。
+本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity、artifact-to-identity normalization boundary 与 exclusion boundary。
 
 ## 共享对象
 
@@ -18,16 +18,27 @@
 | --- | --- |
 | `note_id` | current v1 唯一 canonical identity 字段 |
 
-### 2. exclusion boundary
+### 2. artifact-to-identity normalization boundary
+
+| 对象 | 当前 formal 状态 |
+| --- | --- |
+| `/api/sns/web/v1/feed` request body `source_note_id` | current observed transport alias -> canonical `note_id` |
+
+约束：
+
+- 上述 mapping 只适用于当前已观测到的 detail request artifact
+- 不新增第二个 identity 字段
+- 不扩写为更广 verified transport truth、placement 或 route 规则
+
+### 3. exclusion boundary
 
 | 候选字段 | 当前 formal 状态 |
 | --- | --- |
-| `image_scenes` | not-in-identity; not-in-current-v1-compatibility |
+| `image_scenes` | not-in-identity |
 
 约束：
 
 - 本 FR 只冻结这些候选字段当前不得进入 current v1 identity
-- 本 FR 只冻结 `image_scenes` 当前不得驱动 current v1 detail compatibility、rejected-source matching 或 template reuse
 - 本 FR 不冻结这些字段的 placement、输出位置或其他非 identity shape
 - 不得参与 identity derivation
 
@@ -37,5 +48,6 @@
 - target-page baseline
 - 四对象输入 ownership
 - detail/user_home request-context baseline
+- compatibility、rejected-source matching、template reuse 等 request-context 行为
 
 这些对象属于 `#504`，不在本 FR 重新定义。
