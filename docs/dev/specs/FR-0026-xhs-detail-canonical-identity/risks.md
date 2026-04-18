@@ -9,7 +9,7 @@
   - 新实现可能围绕错误 identity 收敛
 - 缓解：
   - 当前 FR 明确冻结 `note_id` only identity
-  - 明确 `image_scenes` 只属于 non-identity context
+  - 明确 `image_scenes` 当前只被冻结为 not-in-identity，不扩写 placement 或其他非 identity shape
 
 ## 风险 2：把“当前不纳入”误解成“永远不纳入”
 
@@ -30,13 +30,13 @@
   - 当前 FR 只回答 identity
   - `#504` 继续负责 command surface 与 request-context baseline
 
-## 风险 4：把 source_note_id transport alias 误扩张成第二 identity
+## 风险 4：把 request/artifact 字段误冻结成 current v1 formal truth
 
 - 表现：
-  - 后续实现 PR 把 `source_note_id` 当成独立 identity 字段，或把未验证的 artifact-only normalization 一并写入 formal
+  - 后续实现 PR 把 `source_note_id`、`image_scenes` 或其他 request/artifact 字段直接写成 current v1 formal truth
 - 影响：
   - detail canonical identity 被错误扩张
   - `#505` 再次偏离“note_id only + image_scenes not-in-shape”的主结论
 - 缓解：
-  - 当前 FR 只冻结 verified detail request transport 上的窄 alias
-  - 明确该 alias 不新增第二 identity 字段，也不代表更宽的 artifact-only normalization
+  - 当前 FR 只冻结 `note_id` only identity 与 `image_scenes` not-in-identity
+  - 明确 request/artifact 字段的 verified transport truth、normalization 与 placement 仍待未来证据和新 spec 修订

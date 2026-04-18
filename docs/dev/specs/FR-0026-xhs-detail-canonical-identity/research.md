@@ -15,7 +15,7 @@
 - `src/runtime/native-messaging/loopback-runtime.ts`
   - detail loopback 也只以 `note_id` 作为 data-ref 锚点
 - `extension/xhs-read-execution.ts`
-  - detail 请求当前把 canonical `note_id` 写入 `/api/sns/web/v1/feed` POST body 的 `source_note_id`
+  - detail 请求当前会组装 `source_note_id` 请求侧字段
 
 ### 2. in-tree tests 只把 note_id 当作 detail 输入与匹配锚点
 
@@ -30,8 +30,8 @@
 补充观测：
 
 - `tests/xhs-read-execution.fallback.test.ts` 已验证 `/api/sns/web/v1/feed` POST body 使用 `source_note_id`
-- 上述 runtime + test 证据足以支持一条窄规则：在已验证属于 current `xhs.detail` request family 的 request transport 上，`source_note_id` 承载 canonical `note_id`
-- 但当前仓库证据仍不足以支持更宽的 artifact-only normalization 规则；formal 不应把未验证的其他字段或未验证路由写成 identity derivation truth
+- 但当前仓库仍缺少 page-native / captured detail traffic 证据去证明该字段已足够被 formalize 为 verified request transport truth
+- formal 也不应把未验证的其他字段或未验证路由写成 identity derivation truth
 
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
 
@@ -59,9 +59,8 @@
 - `image_scenes` 必须进入 identity
 - detail current identity 需要多字段组合
 
-当前仓库内还能支持一个附加的 request transport 结论：
+当前仓库内还只能支持一个更窄的边界结论：
 
-- 在已验证属于 current `xhs.detail` request family 的 `/api/sns/web/v1/feed` POST body 上，`source_note_id` 当前可被 formal 视为 canonical `note_id` 的 request-side carrier
-- 该结论不把 `source_note_id` 升格为独立 identity 字段，也不支持更宽的 artifact-only normalization
+- `source_note_id` 等 request/artifact 字段当前还不足以被 formalize 为 current v1 identity truth
 
-因此，本 FR 应冻结“当前不纳入”，而不是继续悬空。
+因此，本 FR 应冻结“当前不纳入 identity”，而不是继续悬空。

@@ -2,7 +2,7 @@
 
 ## 结论
 
-本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity 与 non-identity context 的边界。
+本 FR 不新增 SQLite 表、迁移或新的持久化真相源。它只冻结 current v1 `xhs.detail` identity 与 exclusion boundary。
 
 ## 共享对象
 
@@ -19,15 +19,16 @@
 | `command` | 固定为 `xhs.detail` |
 | `note_id` | current v1 唯一 canonical identity 字段 |
 
-### 2. non-identity context
+### 2. exclusion boundary
 
-| 字段 | 角色 |
+| 候选字段 | 当前 formal 状态 |
 | --- | --- |
-| `image_scenes` | diagnostics / compatibility context |
+| `image_scenes` | not-in-identity |
 
 约束：
 
-- 这些字段都不得进入 current v1 identity
+- 本 FR 只冻结这些候选字段当前不得进入 current v1 identity
+- 本 FR 不冻结这些字段的 placement、输出位置或其他非 identity shape
 - 不得参与 `shape` / `shape_key` / eligibility
 
 ## 不属于本 FR 的对象
