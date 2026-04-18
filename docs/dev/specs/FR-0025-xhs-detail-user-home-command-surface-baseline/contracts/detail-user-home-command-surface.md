@@ -64,7 +64,7 @@ type XhsUserHomeTargetBaseline = {
 
 ## 3. FR-0023 ownership
 
-两条命令只消费以下 canonical upstream input：
+当 canonical `upstream_authorization_request` 存在时，两条命令继续消费以下 canonical upstream input：
 
 ```ts
 type CanonicalUpstreamAuthorizationRequest = {
@@ -80,7 +80,8 @@ type CanonicalUpstreamAuthorizationRequest = {
 - `xhs.detail` 对应 `action_request.action_name = "xhs.read_note_detail"`
 - `xhs.user_home` 对应 `action_request.action_name = "xhs.read_user_home"`
 - `runtime_target.page` 必须分别与 `explore_detail_tab` / `profile_tab` 对齐
-- 不允许新增第二套授权输入
+- canonical upstream path 不允许新增第二套授权输入
+- legacy public CLI path 仍是 current command-level input model 的一部分，不因本契约而被废弃
 
 ## 4. Request-level result ownership
 

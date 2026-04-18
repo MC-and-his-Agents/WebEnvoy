@@ -86,7 +86,8 @@
 - FR-0025 spec review 通过。
 - reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface。
 - reviewer 确认 `note_id` / `user_id`、`explore_detail_tab` / `profile_tab`、legacy public CLI shared gate fields，以及 canonical upstream path 的派生规则都无阻断歧义。
-- reviewer 确认两个命令的四对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
+- reviewer 确认两个命令在 canonical upstream path 下的四对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
+- reviewer 确认 legacy public CLI path 未被 formal 误删或误写成无效输入模型。
 - reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把 audit 产出写成强制真相。
 - reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`。
 - 后续实现 issue / PR 已明确为替代 `#501` 的新链路，而不是继续在 `#501` 上补丁。

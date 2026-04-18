@@ -98,7 +98,7 @@ Canonical Issue: #504
 
 ### 5. FR-0023 四对象输入 ownership
 
-系统必须冻结：`xhs.detail` 与 `xhs.user_home` 的 command-level ownership 只消费 `FR-0023` 已冻结的四个外部对象：
+系统必须冻结：当 canonical `upstream_authorization_request` 存在时，`xhs.detail` 与 `xhs.user_home` 的 command-level ownership 继续消费 `FR-0023` 已冻结的四个外部对象：
 
 1. `action_request`
 2. `resource_binding`
@@ -107,11 +107,12 @@ Canonical Issue: #504
 
 约束：
 
-- 这两个命令不得新增第二套上游授权输入。
+- 这两个命令在 canonical upstream path 下不得新增第二套上游授权输入。
 - `action_request.action_name` 必须分别与 `xhs.read_note_detail`、`xhs.read_user_home` 对齐。
 - `runtime_target.page` 必须分别与 `explore_detail_tab`、`profile_tab` 对齐。
 - `resource_binding` 与 `authorization_grant` 的校验继续复用 `FR-0023` 已冻结的匿名 / profile-session 边界。
-- 本 FR 只冻结 command-level ownership，不改写 `FR-0023` 对四对象的 schema 定义。
+- legacy public CLI path 仍是 current command-level input model 的一部分；本 FR 不把四对象 path 误写成唯一输入模型。
+- 本 FR 只冻结 canonical upstream path 的 command-level ownership，不改写 `FR-0023` 对四对象的 schema 定义。
 
 ### 6. request-level results ownership
 

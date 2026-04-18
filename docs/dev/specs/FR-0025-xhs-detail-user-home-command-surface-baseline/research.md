@@ -54,6 +54,11 @@
 - `tests/content-script-handler.xhs-read.contract.test.ts`
   - canonical upstream path 下已存在 `request_admission_result` 为 allowed 但 `execution_audit` 仍为 `null` 的 current behavior
 
+结论补充：
+
+- canonical upstream path 的四对象 ownership 已存在，但它不是 detail/user_home 唯一的 command-level input model
+- legacy public CLI path 在 current main 上仍然存在，formal 只能把四对象 ownership 限定为“当 canonical upstream request 存在时”的规则
+
 ### 5. 与 FR-0005 的 formal 冲突
 
 - `docs/dev/specs/FR-0005-xhs-read-spike/research.md`

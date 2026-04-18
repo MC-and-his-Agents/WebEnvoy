@@ -9,7 +9,8 @@
 - [ ] reviewer 确认 legacy public CLI request-context 仍要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
 - [ ] reviewer 确认 canonical `upstream_authorization_request` path 继续从 `runtime_target` / current parser 行为派生 shared gate fields，而不是新增第二套外显输入
 - [ ] reviewer 确认 background/extension direct path 的内部 auto target-tab resolution 未被误冻结为公共 CLI 契约
-- [ ] reviewer 确认两条命令只消费 `FR-0023` 四对象输入，不新增第二套授权输入
+- [ ] reviewer 确认 canonical upstream path 下两条命令继续消费 `FR-0023` 四对象输入，不新增第二套授权输入
+- [ ] reviewer 确认 legacy public CLI path 仍被保留为 current command-level input model，而未被 formal 误删
 - [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束与 current implementation 对齐
 - [ ] reviewer 确认 canonical upstream path 下 `execution_audit` 允许为 `null`，formal 未误写为强制产出
 - [ ] reviewer 确认 `execution_audit` 不进入 `observability`
