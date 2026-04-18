@@ -25,6 +25,11 @@
 
 这些测试都稳定围绕 `note_id` 展开，没有把 `image_scenes` 作为 identity 前提。
 
+补充观测：
+
+- `tests/xhs-read-execution.fallback.test.ts` 已出现 `source_note_id`
+- current in-tree detail path 仍把这类 artifact 收敛回同一个 canonical `note_id`
+
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
 
 在 current repo 中检索：
@@ -52,5 +57,9 @@
 - `image_scenes` 必须进入 identity
 - `CRD_PRV_WEBP` 必须进入 identity
 - detail current identity 需要多字段组合
+
+当前仓库内还能支持一个附加的归一化结论：
+
+- 当 detail artifact 暴露 `source_note_id` 而未直接暴露 `note_id` 时，current v1 仍应把 `source_note_id` 归一化为 canonical `note_id`
 
 因此，本 FR 应冻结“当前不纳入”，而不是继续悬空。
