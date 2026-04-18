@@ -35,7 +35,10 @@ type RequestShape =
 
 - `RequestShape` 必须由共享的 `deriveRequestShape()` 产生。
 - `capture`、`cache key`、`lookup`、`eligibility` 必须全部消费同一个 `RequestShape`。
-- `deriveRequestShape()` 的输入必须是 canonical command input 加上当前正在被评估的 request artifact；该 artifact 可以是页面真实请求，或 capture admission 明确拒绝的 synthetic request artifact。
+- `deriveRequestShape()` 必须只保留一套共享归一逻辑，不允许为 capture 与 lookup 各自定义第二套 shape 规则。
+- capture 阶段必须先从当前候选 request artifact 自身构造 capture-side derivation source；这个 source 不得依赖某条命令已先发出。
+- lookup / eligibility 阶段必须从 canonical command input 与 page-local candidate evidence 构造 command-side derivation source。
+- capture-side derivation source 与 command-side derivation source 最终都必须进入同一套 `deriveRequestShape()`，并产出同一个 `RequestShape` / `RequestShapeKey` 契约。
 - 对于 `xhs.search`，derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
 - 对于 `xhs.search`，`note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
 - 对于 `xhs.detail`，`image_scenes` 必须先归一为稳定的字符串数组表示后再进入 `RequestShape`。
@@ -121,7 +124,7 @@ type CapturedRequestTemplateRecord = {
 
 ## 4. `RejectedRequestContextObservation`
 
-`RejectedRequestContextObservation` 表达“当前页面现场最近一次被 capture admission 拒绝的候选请求”。它不是 template record，也不会进入可复用模板池，但它为 `rejected_source` 结果提供可达的数据来源。
+`RejectedRequestContextObservation` 表达“当前页面现场某个 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选请求”。它不是 template record，也不会进入可复用模板池，但它为 `rejected_source` 结果提供可达的数据来源。
 
 ```ts
 type RejectedRequestContextObservation = {
@@ -138,6 +141,7 @@ type RejectedRequestContextObservation = {
 - 只有在 capture admission 明确拒绝某条候选请求时，才允许写入 `RejectedRequestContextObservation`
 - `RejectedRequestContextObservation` 必须在 capture admission 拒绝时保留当时已导出的 `shape` 与 `shape_key`
 - 它只能作为 page-local 诊断来源，不得被当成可复用模板
+- observation 的有效保留键必须是 `page_context_namespace + shape_key`；不同 shape 的 rejection 不得互相覆盖
 - `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
 - `synthetic_request_rejected` 的 `shape` 与 `shape_key` 可以通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出；不得生成无 shape 的 synthetic reject 记录
 
@@ -176,7 +180,7 @@ type TemplateLookupResult =
 - `miss` 只表示当前 page-local namespace 内不存在任何同路由候选，也不存在可消费的 rejected observation
 - `incompatible` 表示当前 page-local namespace 内存在同 command + method + pathname 的候选记录，但没有任何记录与当前 `RequestShape` 完全一致
 - `stale` 表示 shape 命中，但 freshness gate 失败
-- `rejected_source` 表示当前页面现场存在最近一次被 capture admission 拒绝的候选观察，且当前没有可复用模板
+- `rejected_source` 表示当前页面现场存在当前 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选观察，且当前没有可复用模板
 
 ## 6. `RequestContextMissReason`
 
@@ -199,7 +203,7 @@ type RequestContextMissReason =
 
 ### capture
 
-- capture admission 必须先对当前候选 request artifact 运行 `deriveRequestShape()`
+- capture admission 必须先从当前候选 request artifact 构造 capture-side derivation source，再运行共享的 `deriveRequestShape()`
 - 无法导出 `RequestShape` 时，必须拒绝缓存
 - synthetic request、失败请求、非 2xx 请求必须拒绝缓存
 - synthetic request 在被 capture admission 拒绝时，允许复用同一套 `deriveRequestShape()` 产出 `RejectedRequestContextObservation`
@@ -217,7 +221,7 @@ lookup 必须按两个阶段执行：
 - 不允许绕过 `page_context_namespace`
 - 不允许在跨页面或跨文档生命周期范围内共享 bucket
 - `incompatible` 只能来自“同 namespace、同 command + method + pathname 下存在其他 shape 候选”
-- `rejected_source` 只能来自同 namespace 下最近一次 capture admission 被拒绝的 observation
+- `rejected_source` 只能来自同 namespace、同 `shape_key` 槽位下最近一次 capture admission 被拒绝的 observation
 - 不允许按 `method + pathname`、只按 keyword、只按 note_id 或其他局部字段跨 namespace 模糊查找
 
 ### eligibility

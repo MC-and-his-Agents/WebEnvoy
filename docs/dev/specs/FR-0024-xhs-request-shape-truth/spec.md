@@ -55,7 +55,10 @@ Canonical Issue: #502
 约束：
 
 - 不允许各阶段分别定义自己的“同一请求”规则。
-- `RequestShape` 必须从 canonical command input 与当前正在被 capture / lookup / reject 评估的 request artifact 共同可推导的字段产生，而不是从临时 header、trace 或页面局部状态猜测。
+- 共享 truth 必须表现为同一套 `deriveRequestShape()` 归一逻辑；允许存在不同阶段的 derivation-source producer，但不允许存在第二套 shape 规则。
+- capture 阶段必须先从当前候选 request artifact 自身构造 capture-side derivation source；这个 producer 不得依赖“某条命令已先发出”。
+- lookup / eligibility 阶段必须从 canonical command input 与 page-local candidate evidence 构造 command-side derivation source。
+- 上述两类 derivation source 最终都必须进入同一套 `deriveRequestShape()`，并产出同一个 `RequestShape` / `RequestShapeKey` 契约。
 - 对 admitted template 而言，合法 artifact 仍然只允许是真实页面请求；synthetic request 只能用于 rejected observation 的 shape-level 诊断，不得借此放宽 template admission。
 - `xhs.search` 的默认值必须在 derive 阶段被显式归一，不能由 stale page state、旧模板字段或 fallback 分支隐式补入。
 
@@ -112,6 +115,7 @@ Canonical Issue: #502
 - 被 capture admission 拒绝的候选请求只允许进入 page-local rejected-attempt diagnostics，不允许进入 template cache
 - admitted template record 的 canonical 类型不得保留任何 synthetic source kind
 - synthetic request 在被拒绝时允许先走同一套 `deriveRequestShape()` 导出 `shape + shape_key`，但该导出结果只能写入 rejected-attempt diagnostics，不能提升为 admitted template
+- rejected-attempt diagnostics 的有效存储身份也必须按 `page_context_namespace + shape_key` 分槽；不同 shape 的 rejected observation 不得互相覆盖
 
 ### 5. lookup 与 eligibility 规则
 
@@ -145,7 +149,7 @@ Canonical Issue: #502
 - 任何 shape mismatch 都不得继续进入“部分字段沿用、其余字段重算”的混合路径
 - `detail` 不允许再把旧 body 整包摊平到当前请求上；只能在 exact hit 后复用经过 shape 约束的 canonical template fields
 - `incompatible` 只允许来自“同 page-local namespace、同 command + method + pathname，但 shape 不同”的候选记录
-- `rejected_source` 只允许来自同 namespace、同 `shape_key` 下最近一次被 capture admission 拒绝的 rejected-attempt observation
+- `rejected_source` 只允许来自同 namespace、同 `shape_key` 槽位下最近一次被 capture admission 拒绝的 rejected-attempt observation
 - `synthetic_request_rejected` 的 observation 必须通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出 `shape + shape_key`
 
 ### 6. fail-closed miss 规则
@@ -283,10 +287,10 @@ Then 该请求必须被标记为 `failed_request_rejected`
 And 不得写入 request-template cache
 And 只允许进入当前页面现场的 rejected-attempt diagnostics
 
-### 场景 9A：没有可复用模板但当前页面现场最近一次候选被拒绝时返回 `rejected_source`
+### 场景 9A：没有可复用模板但当前 shape slot 最近一次候选被拒绝时返回 `rejected_source`
 
 Given 当前 page-local namespace 内不存在可复用 template
-And 当前页面现场最近一次与当前请求同 `shape_key` 的候选请求被 capture admission 拒绝
+And 当前页面现场与当前请求同 `shape_key` 槽位下最近一次候选请求被 capture admission 拒绝
 When 系统执行 lookup
 Then 结果必须是 `rejected_source`
 And reason 必须是 `synthetic_request_rejected` 或 `failed_request_rejected`

@@ -38,13 +38,13 @@
 | 对象 | 角色 | 持久化要求 |
 | --- | --- | --- |
 | `CapturedRequestTemplateRecord` | 当前页面现场可复用的 request template | 不得提升为新的持久化真相源 |
-| `RejectedRequestContextObservation` | 当前页面现场最近一次被 capture admission 拒绝的候选观察 | 不得提升为可复用 template 或长期真相源 |
+| `RejectedRequestContextObservation` | 当前页面现场某个 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选观察 | 不得提升为可复用 template 或长期真相源 |
 
 字段职责：
 
 | 字段 | 角色 | 说明 |
 | --- | --- | --- |
-| `shape` | canonical identity snapshot | 由 capture / reject 评估时的 `deriveRequestShape()` 生成 |
+| `shape` | canonical identity snapshot | 由 capture-side 或 command-side producer 进入共享 `deriveRequestShape()` 后生成 |
 | `shape_key` | cache / lookup 唯一键 | 由 `shape` 稳定序列化得到；其中 `note_type` 必须先归一为 integer |
 | `page_context_namespace` | 页面现场命名空间 | 用于隔离不同文档生命周期、tab 或等价页面现场 |
 | `template_headers` | exact hit 后可复用上下文 | 不参与 identity |
@@ -60,9 +60,9 @@
 | --- | --- | --- |
 | `page_context_namespace` | 页面现场命名空间 | 只在当前页面现场有效 |
 | `shape` | shape-level 诊断锚点 | 记录 capture admission 拒绝时已导出的 canonical shape |
-| `shape_key` | shape-level 诊断键 | 只允许与当前请求同 `shape_key` 的 observation 命中 |
+| `shape_key` | shape-level 诊断键 | 同时也是 rejected observation 的分槽键；只允许与当前请求同 `shape_key` 的 observation 命中 |
 | `rejection_reason` | 结构化拒绝原因 | 只允许 `synthetic_request_rejected` / `failed_request_rejected` |
-| `observed_at` | 最近观测时间 | 用于返回最近一次 rejected-source 解释 |
+| `observed_at` | 最近观测时间 | 用于返回同一 shape slot 最近一次 rejected-source 解释 |
 
 ### 3. lookup result 视图
 
@@ -85,7 +85,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 1. `shape_key` 不是跨页面全局主键。
 2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
 3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
-4. `rejected_source` 只能来自同 namespace、同 `shape_key` 内的 `RejectedRequestContextObservation`。
+4. `rejected_source` 只能来自同 namespace、同 `shape_key` 槽位内的 `RejectedRequestContextObservation`。
 5. `synthetic_request_rejected` observation 只允许在同一套 `deriveRequestShape()` 已对该 synthetic request artifact 成功导出 full shape 后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
 6. synthetic request 自身永远不得作为 `CapturedRequestTemplateRecord.source_kind` 进入 admitted template 类型。
 
@@ -96,12 +96,14 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 只在当前页面真实请求成功完成后创建 `CapturedRequestTemplateRecord`
 - 创建时必须同步写入 `page_context_namespace`、`shape` 与 `shape_key`
 - 只在 capture admission 明确拒绝时创建 `RejectedRequestContextObservation`
+- 创建 rejected observation 前，必须先从候选 request artifact 构造 capture-side derivation source，并进入共享 `deriveRequestShape()`
 
 ### 覆盖
 
 - 只允许同一 `page_context_namespace` 下、相同 `shape_key` 的更新覆盖旧记录
 - 不同 namespace 不得共享同一个 cache slot
 - 同一 namespace 下、不同 shape 的候选必须并存于同路由 bucket，而不是互相覆盖成 path-only slot
+- rejected observation 也只允许同一 `page_context_namespace` 下、相同 `shape_key` 的更新覆盖旧记录；不同 `shape_key` 的拒绝诊断必须并存
 
 ### 失效
 
