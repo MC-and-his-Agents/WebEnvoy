@@ -273,7 +273,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("attempts attach for a recoverable disconnected ready runtime before bootstrapping", async () => {
+  it("attempts attach from pre-lock orphan-recovery facts even when attach clears top-level orphanRecoverable", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({

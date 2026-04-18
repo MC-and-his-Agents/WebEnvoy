@@ -2485,7 +2485,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
+  it("attaches a recoverable runtime and clears top-level orphanRecoverable after ownership is rebound", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -2643,7 +2643,8 @@ describe("profile-runtime identity preflight", () => {
       browserState: "ready",
       lockHeld: true,
       transportState: "ready",
-      runtimeReadiness: "ready"
+      runtimeReadiness: "ready",
+      orphanRecoverable: false
     });
 
     const nextLockRaw = await readFile(lockPath, "utf8");
@@ -2677,7 +2678,8 @@ describe("profile-runtime identity preflight", () => {
       profileState: "ready",
       lockHeld: true,
       transportState: "ready",
-      runtimeReadiness: "ready"
+      runtimeReadiness: "ready",
+      orphanRecoverable: false
     });
   });
 

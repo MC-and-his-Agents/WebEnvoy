@@ -1055,17 +1055,23 @@ export class ProfileRuntimeService {
       preAttachReadiness.bootstrapState !== "stale" &&
       preAttachReadiness.transportState !== "not_connected" &&
       preAttachReadiness.runtimeReadiness === "recoverable";
+    const takeoverMode =
+      attachableReadyRuntime
+        ? "ready_attach"
+        : attachableRecoverableRuntime
+          ? "recoverable_rebind"
+          : null;
     if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
       throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
         retryable: true
       });
     }
 
-    const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;
+    const nextOwnerPid = takeoverMode === "recoverable_rebind" ? process.pid : lock.ownerPid;
     let attachedLock = lock;
     if (
       lock.ownerRunId !== input.runId ||
-      (attachableRecoverableRuntime && lock.ownerPid !== nextOwnerPid)
+      (takeoverMode === "recoverable_rebind" && lock.ownerPid !== nextOwnerPid)
     ) {
       attachedLock = await this.#rebindActiveRuntimeOwnership({
         profileDir,
@@ -1073,7 +1079,7 @@ export class ProfileRuntimeService {
         lock,
         nextRunId: input.runId,
         nextOwnerPid,
-        orphanRecoverable: attachableRecoverableRuntime,
+        orphanRecoverable: takeoverMode === "recoverable_rebind",
         nowIso
       });
     }
@@ -1134,7 +1140,7 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: attachedLock.ownerPid,
-      orphanRecoverable: attachableRecoverableRuntime,
+      orphanRecoverable: false,
       recoverableSession: buildRecoverableSessionSummary(nextMeta),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: nextMeta?.updatedAt ?? null

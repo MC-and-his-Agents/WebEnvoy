@@ -323,8 +323,8 @@ export const prepareOfficialChromeRuntime = async (input: {
     typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
   let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
-  let orphanRecoverable = status.orphanRecoverable === true;
-  let attachableReadyRuntime = status.attachableReadyRuntime === true;
+  const preLockOrphanRecoverable = status.orphanRecoverable === true;
+  const preLockAttachableReadyRuntime = status.attachableReadyRuntime === true;
 
   const syncRuntimeStatus = (nextStatus: JsonObject): void => {
     status = nextStatus;
@@ -340,8 +340,6 @@ export const prepareOfficialChromeRuntime = async (input: {
       typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
     transportState =
       typeof status.transportState === "string" ? status.transportState : "not_connected";
-    orphanRecoverable = status.orphanRecoverable === true;
-    attachableReadyRuntime = status.attachableReadyRuntime === true;
   };
 
   const buildBaseDetails = () => ({
@@ -360,9 +358,9 @@ export const prepareOfficialChromeRuntime = async (input: {
     !lockHeld &&
     identityBindingState === "bound" &&
     bootstrapState !== "stale" &&
-    (attachableReadyRuntime ||
+    (preLockAttachableReadyRuntime ||
       (runtimeReadiness === "recoverable" &&
-        orphanRecoverable &&
+        preLockOrphanRecoverable &&
         (profileState === "disconnected" || profileState === "ready")));
 
   if (shouldAttemptAttach) {
