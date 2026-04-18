@@ -5,6 +5,7 @@
 - [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
 - [ ] reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
+- [ ] reviewer 确认 `image_scenes` 当前不参与 current v1 detail compatibility、rejected-source matching 或 template reuse
 - [ ] reviewer 确认本 FR 未把 `image_scenes` 的 placement 写成 current v1 formal truth
 - [ ] reviewer 确认本 FR 未把 identity 之外的 detail matching 语义预先冻结为 formal truth
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
@@ -19,4 +20,5 @@
 - 后续实现应优先消费本 FR 冻结的：
   - `note_id` only identity
   - `image_scenes` not-in-identity 结论
+  - `image_scenes` not-in-current-v1-compatibility / rejected-source / template reuse 结论
   - future revision 准入条件

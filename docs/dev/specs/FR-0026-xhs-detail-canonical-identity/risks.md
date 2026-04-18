@@ -4,12 +4,13 @@
 
 - 表现：
   - 后续实现 PR 直接把 `image_scenes` 写入 identity derivation
+  - 后续实现 PR 虽保留 `note_id` only identity，但仍让 `image_scenes` 驱动 compatibility、rejected-source matching 或 template reuse
 - 影响：
   - 把未验证字段写成正式真相
   - 新实现可能围绕错误 identity 收敛
 - 缓解：
   - 当前 FR 明确冻结 `note_id` only identity
-  - 明确 `image_scenes` 当前只被冻结为 not-in-identity，不扩写 placement 或其他非 identity shape
+  - 明确 `image_scenes` 当前只被冻结为 not-in-identity，且不参与 current v1 compatibility 判定，不扩写 placement 或其他非目标语义
 
 ## 风险 2：把“当前不纳入”误解成“永远不纳入”
 
@@ -34,9 +35,10 @@
 
 - 表现：
   - 后续实现 PR 把 `source_note_id` 或 `image_scenes` 直接写成 current v1 formal truth
+  - 后续实现 PR 用 `image_scenes` 差异驱动 rejected-source 匹配或 template reuse，再反向把该行为解释成 `#505` 已默许
 - 影响：
   - detail canonical identity 被错误扩张
   - `#505` 再次偏离“note_id only + image_scenes not-in-identity”的主结论
 - 缓解：
-  - 当前 FR 只冻结 `note_id` only identity 与 `image_scenes` not-in-identity
+  - 当前 FR 只冻结 `note_id` only identity，以及 `image_scenes` not-in-identity / not-in-current-v1-compatibility
   - 明确 `source_note_id` 的 verified transport truth、normalization 与 placement 仍待未来证据和新 spec 修订

@@ -14,7 +14,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - `note_id` 必须为 trim 后非空字符串。
 - 本 FR 不定义 identity 之外的 detail matching 语义。
 
-## 2. Non-identity boundary
+## 2. Non-identity and compatibility boundary
 
 ```ts
 type XhsDetailNonIdentityBoundaryV1 = "no_additional_detail_identity_fields_frozen";
@@ -23,10 +23,11 @@ type XhsDetailNonIdentityBoundaryV1 = "no_additional_detail_identity_fields_froz
 约束：
 
 - current v1 formal 只冻结：`image_scenes` 当前不是 canonical identity 的组成部分。
+- `image_scenes` 当前不得参与 current v1 detail compatibility、rejected-source matching 或 template reuse。
 - 本 FR 不冻结这些字段的 diagnostics / compatibility placement、输出位置或具体 shape。
 - 它们不得进入 canonical identity anchor，也不得成为额外 identity discriminator。
 
-## 3. Current v1 exclusion rule
+## 3. Current v1 exclusion and compatibility rule
 
 ```ts
 type ExcludeImageScenesFromIdentityV1 = (
@@ -38,6 +39,7 @@ type ExcludeImageScenesFromIdentityV1 = (
 约束：
 
 - `image_scenes` 差异不得单独导致新的 identity discriminator
+- `image_scenes` 差异不得单独导致 current v1 detail compatibility、rejected-source matching 或 template reuse 判定变化
 - 本 FR 不把 identity 之外的 comparison semantics 冻结成 formal truth
 
 ## 4. Current v1 artifact boundary

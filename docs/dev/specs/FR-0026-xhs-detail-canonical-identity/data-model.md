@@ -22,11 +22,12 @@
 
 | 候选字段 | 当前 formal 状态 |
 | --- | --- |
-| `image_scenes` | not-in-identity |
+| `image_scenes` | not-in-identity; not-in-current-v1-compatibility |
 
 约束：
 
 - 本 FR 只冻结这些候选字段当前不得进入 current v1 identity
+- 本 FR 只冻结 `image_scenes` 当前不得驱动 current v1 detail compatibility、rejected-source matching 或 template reuse
 - 本 FR 不冻结这些字段的 placement、输出位置或其他非 identity shape
 - 不得参与 identity derivation
 

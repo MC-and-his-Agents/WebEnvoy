@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，并保留 `source_note_id` 仍未 formalize 的边界，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，且不参与 current v1 detail compatibility、rejected-source matching 或 template reuse，并保留 `source_note_id` 仍未 formalize 的边界，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
@@ -19,7 +19,7 @@
 ### 阶段 3：风险与准入条件收口
 
 - 产出：`risks.md`、`TODO.md`
-- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity，并明确 future spec revision 的准入条件
+- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity 或兼容性判定，并明确 future spec revision 的准入条件
 
 ### 阶段 4：spec review PR 准备
 
@@ -58,7 +58,8 @@
   - `note_id` only identity 不回退
   - `source_note_id` 继续不进入 current v1 formal identity truth
   - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
-  - future revision 前，不得把 `image_scenes` 的 placement 或非 identity shape 误写成 current v1 formal truth
+  - `image_scenes` 不参与 current v1 detail compatibility、rejected-source matching 或 template reuse
+  - future revision 前，不得把 `image_scenes` 的 placement 或其他非目标语义误写成 current v1 formal truth
 
 ## 并行 / 串行关系
 
@@ -74,6 +75,7 @@
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
 - reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则。
-- reviewer 确认 `image_scenes` 当前只被冻结为 not-in-identity，而未被扩写成 placement 或非 identity shape 真相。
+- reviewer 确认 `image_scenes` 当前已被冻结为 not-in-identity，且不参与 current v1 detail compatibility、rejected-source matching 或 template reuse。
+- reviewer 确认本 FR 未把 `image_scenes` 的 placement 或其他非目标语义扩写成 current v1 formal truth。
 - reviewer 确认本 FR 未把 identity 之外的 detail matching 语义预先冻结为 formal truth。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。
