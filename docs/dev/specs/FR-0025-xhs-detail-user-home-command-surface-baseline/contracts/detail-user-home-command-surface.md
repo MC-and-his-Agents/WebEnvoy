@@ -38,13 +38,17 @@ type XhsUserHomeCommand = {
 
 ```ts
 type XhsDetailTargetBaseline = {
+  target_domain: "www.xiaohongshu.com";
   target_page: "explore_detail_tab";
   target_tab_id: number;
+  requested_execution_mode: string;
 };
 
 type XhsUserHomeTargetBaseline = {
+  target_domain: "www.xiaohongshu.com";
   target_page: "profile_tab";
   target_tab_id: number;
+  requested_execution_mode: string;
 };
 ```
 
@@ -52,7 +56,9 @@ type XhsUserHomeTargetBaseline = {
 
 - `xhs.detail` 只允许 `explore_detail_tab`
 - `xhs.user_home` 只允许 `profile_tab`
-- public CLI contract 下，`target_tab_id` / canonical `runtime_target.tab_id` 必须显式提供
+- public CLI contract 下，`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 这组 shared gate fields 都必须显式提供
+- `target_domain` 继续对齐 current XHS read domain baseline
+- `requested_execution_mode` 继续对齐 current CLI 支持的 XHS read execution modes
 - background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
 
 ## 3. FR-0023 ownership

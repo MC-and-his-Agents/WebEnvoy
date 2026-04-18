@@ -74,9 +74,11 @@ Canonical Issue: #504
 
 约束：
 
+- 在 public CLI command path 中，shared gate fields `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 都必须显式提供；缺失时必须按 invalid args 处理。
+- `target_domain` 必须继续对齐 current XHS read domain baseline，不得在本 FR 中被放宽为任意域。
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `xhs.user_home` 在 target-page 不为 `profile_tab` 时，必须按 invalid-args / blocked 输入处理。
-- 在 public CLI command path 中，`target_tab_id`（或 canonical `runtime_target.tab_id`）必须显式提供；缺失时必须按 invalid args 处理。
+- `requested_execution_mode` 必须继续对齐 current CLI 支持的 XHS read execution modes，不得在本 FR 中被放宽或另起一套模式定义。
 - current background/extension direct path 中可能存在基于页面语义的内部 target-tab resolution，但该行为尚未进入 current public CLI 输入契约，不属于本 FR 冻结范围。
 - 本 FR 冻结的是 public CLI request-context baseline，而不是 background/extension 内部自动选 tab 行为。
 
@@ -195,7 +197,14 @@ When `target_tab_id` 缺失
 Then public CLI contract 必须把该输入视为 invalid args
 And 本 FR 不得把内部 auto pinning 写成公共 CLI 基线
 
-### 场景 9：canonical upstream objects 被命令面消费后保留请求级结果
+### 场景 9：public CLI 缺失 shared gate fields 时不能被冻结为合法输入
+
+Given 调用方通过 public CLI path 发起 `xhs.detail` 或 `xhs.user_home`
+When `target_domain` 或 `requested_execution_mode` 缺失
+Then public CLI contract 必须把该输入视为 invalid args
+And 本 FR 不得把缺失 shared gate fields 的输入冻结为合法 request-context baseline
+
+### 场景 10：canonical upstream objects 被命令面消费后保留请求级结果
 
 Given 调用方为 `xhs.detail` 或 `xhs.user_home` 提供 canonical `upstream_authorization_request`
 When 命令完成 summary 或 error details 映射
@@ -203,7 +212,7 @@ Then 若 current implementation 产出了 `request_admission_result` 或 `execut
 And `execution_audit` 不得出现在 `observability`
 And 本 FR 不把 `execution_audit` 的必然产出写成 formal truth
 
-### 场景 10：#505 之前不得把 image_scenes 写成 detail identity
+### 场景 11：#505 之前不得把 image_scenes 写成 detail identity
 
 Given `#504` 只冻结 command surface 与 request-context baseline
 When 后续实现 PR 消费本 FR
@@ -214,7 +223,7 @@ And 必须等待 `#505` 的正式结论
 
 - `xhs.detail` 缺失 `note_id` 时，必须在命令入口层失败，不得发出空 detail 请求。
 - `xhs.user_home` 缺失 `user_id` 时，必须在命令入口层失败，不得发出空 profile 请求。
-- `target_page` 越界、`runtime_target.page` 越界或 `target_tab_id` / `runtime_target.tab_id` 缺失时，必须返回结构化 invalid-args 结果。
+- `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 这组 shared gate fields 任一缺失时，public CLI path 都必须返回结构化 invalid-args 结果。
 - background/extension direct path 若存在内部 auto target-tab resolution，不得被本 FR 误写为 current public CLI contract。
 - legacy path 下允许 `request_admission_result` 与 `execution_audit` 为 `null`，但不得把 `null` 误解释为“命令面不存在”。
 - canonical upstream path 下 `execution_audit` 仍可能为 `null`；这代表当前实现尚未为该场景产出 audit，不代表 command surface 缺失。
@@ -224,7 +233,7 @@ And 必须等待 `#505` 的正式结论
 
 1. `xhs.detail` / `xhs.user_home` 已被正式冻结为 current public CLI command surface。
 2. 两个命令的 canonical command input 已冻结为 `note_id` / `user_id`。
-3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`，且 public CLI request-context 仍要求显式 target tab。
+3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`，且 public CLI request-context 仍要求显式 shared gate fields。
 4. 两个命令消费 `FR-0023` 四对象输入的 command-level ownership 已冻结，且不新增第二套授权输入。
 5. `request_admission_result` 与 `execution_audit` 的 canonical output slot / 位置约束已与 current implementation 对齐，而非强制每次都产出 audit。
 6. 本 FR 已显式把 detail identity 与 `image_scenes` 转交 `#505`。
