@@ -23,17 +23,23 @@
   - `parseUserHomeInputForContract()` 要求 `user_id`
   - `xhs.note.detail.v1` 只允许 `explore_detail_tab`
   - `xhs.user.home.v1` 只允许 `profile_tab`
+  - `normalizeGateOptionsForContract()` 在 public CLI contract 下要求显式 `target_tab_id` / `runtime_target.tab_id`
 
 ### 3. current tests 已证明 command surface 与 unified read path 存在
 
 - `tests/content-script-handler.xhs-read.contract.test.ts`
   - `xhs.detail` / `xhs.user_home` 通过 unified read execution path
 - `tests/extension.service-worker.gate-approval.suite.ts`
-  - 缺失 `target_tab_id` 时，detail/user_home 会按各自页面语义自动 pin
+  - 存在 background/extension direct path 的 tab resolution 行为
 - `src/commands/__tests__/xhs.test.ts`
   - wrong target-page 会被 reject
 - `tests/extension.contract.test.ts`
   - bundled classic module 和 live-read path 都已覆盖 detail/user_home
+
+结论补充：
+
+- 上述 background/extension direct path 行为不能直接提升为 public CLI 输入契约。
+- 当前 formal freeze 只能冻结 public CLI 已明确暴露的输入边界：`target_tab_id` / `runtime_target.tab_id` 仍需显式提供。
 
 ### 4. current implementation 已消费 FR-0023 四对象输入
 

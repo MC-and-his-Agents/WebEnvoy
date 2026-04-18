@@ -14,7 +14,7 @@
 ### 阶段 2：command-level contract 冻结
 
 - 产出：`contracts/detail-user-home-command-surface.md`
-- 重点：冻结 `note_id` / `user_id`、`explore_detail_tab` / `profile_tab`、auto target-tab pinning baseline，以及四对象输入 ownership
+- 重点：冻结 `note_id` / `user_id`、`explore_detail_tab` / `profile_tab`、public CLI request-context baseline，以及四对象输入 ownership
 
 ### 阶段 3：风险与研究边界收口
 
@@ -49,7 +49,14 @@
   - `git diff --check`
 - PR 校验：
   - `Closing=Refs #504`
+  - `integration_check.integration_applicable=no`
+  - `integration_check.integration_ref=none`
   - `gate_applicability.review_lane=formal_spec_review_pr`
+  - `gate_applicability.governance_context_issue_ref=null`
+  - `gate_applicability.governance_scope_targets=[]`
+  - `gate_applicability.in_scope=false`
+  - `gate_applicability.trigger_reasons=[]`
+  - `gate_applicability.n_a_allowed=true`
   - `live_evidence_record=N/A`
 
 ## TDD 范围
@@ -58,7 +65,7 @@
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `xhs.detail` / `xhs.user_home` 的 current command surface 不回退
   - `note_id` / `user_id` 缺失时的入口失败
-  - target-page mismatch 与 auto target-tab resolution
+  - target-page mismatch 与缺失 `target_tab_id` / `runtime_target.tab_id` 的入口失败
   - canonical upstream objects 存在时的 `request_admission_result` / `execution_audit` ownership
   - legacy path 下 `request_admission_result` / `execution_audit` 为 `null` 时的兼容行为
 

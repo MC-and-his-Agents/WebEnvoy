@@ -39,10 +39,12 @@ type XhsUserHomeCommand = {
 ```ts
 type XhsDetailTargetBaseline = {
   target_page: "explore_detail_tab";
+  target_tab_id: number;
 };
 
 type XhsUserHomeTargetBaseline = {
   target_page: "profile_tab";
+  target_tab_id: number;
 };
 ```
 
@@ -50,7 +52,8 @@ type XhsUserHomeTargetBaseline = {
 
 - `xhs.detail` 只允许 `explore_detail_tab`
 - `xhs.user_home` 只允许 `profile_tab`
-- `target_tab_id` 可为空；为空时允许按 current baseline 执行 auto target-tab pinning
+- public CLI contract 下，`target_tab_id` / canonical `runtime_target.tab_id` 必须显式提供
+- background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
 
 ## 3. FR-0023 ownership
 

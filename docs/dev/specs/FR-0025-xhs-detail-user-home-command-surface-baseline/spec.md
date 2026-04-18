@@ -17,7 +17,7 @@ Canonical Issue: #504
 ## 目标
 
 1. 冻结 `xhs.detail` 与 `xhs.user_home` 已属于 current main 公共 CLI command surface 的正式结论。
-2. 冻结两个命令的 canonical command input、target-page baseline 与 target-tab baseline。
+2. 冻结两个命令的 canonical command input、target-page baseline 与 public CLI request-context baseline。
 3. 冻结两个命令如何消费 `FR-0023` 的 `action_request/resource_binding/authorization_grant/runtime_target` 四对象。
 4. 冻结 `request_admission_result` 与 `execution_audit` 在这两个命令上的 command-level ownership，并与 current implementation 对齐。
 5. 显式声明 detail identity 不在本 FR 冻结，`image_scenes` 继续转交 `#505`。
@@ -65,7 +65,7 @@ Canonical Issue: #504
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
 - 本 FR 只冻结 command input，不冻结 detail request identity 的附加字段。
 
-### 3. target-page 与 request-context baseline
+### 3. target-page 与 public CLI request-context baseline
 
 系统必须冻结以下 target-page baseline：
 
@@ -76,9 +76,9 @@ Canonical Issue: #504
 
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `xhs.user_home` 在 target-page 不为 `profile_tab` 时，必须按 invalid-args / blocked 输入处理。
-- 若 `target_tab_id` 缺失，当前实现允许基于命令语义与页面 URL 进行 auto target-tab pinning；这是 current request-context baseline 的一部分，而不是未来事项。
-- `xhs.detail` 的 auto target-tab pinning 只能落到与当前 `note_id` 对应的 detail tab。
-- `xhs.user_home` 的 auto target-tab pinning 只能落到与当前 `user_id` 对应的 profile tab。
+- 在 public CLI command path 中，`target_tab_id`（或 canonical `runtime_target.tab_id`）必须显式提供；缺失时必须按 invalid args 处理。
+- current background/extension direct path 中可能存在基于页面语义的内部 target-tab resolution，但该行为尚未进入 current public CLI 输入契约，不属于本 FR 冻结范围。
+- 本 FR 冻结的是 public CLI request-context baseline，而不是 background/extension 内部自动选 tab 行为。
 
 ### 4. unified read execution path baseline
 
@@ -179,21 +179,19 @@ When `runtime_target.page` 或 legacy `target_page` 不等于 `profile_tab`
 Then 系统必须返回 blocked 或 invalid args
 And 不得把该请求落到其他 page baseline
 
-### 场景 7：detail 可在缺失 target_tab_id 时自动 pin 到 detail tab
+### 场景 7：detail 缺失 target_tab_id 时不能被冻结为公共 CLI 合法输入
 
 Given 调用方发起 `xhs.detail`
-And 当前浏览器现场存在与目标 `note_id` 匹配的 detail tab
 When `target_tab_id` 缺失
-Then 系统可以自动将请求 pin 到该 detail tab
-And 该行为属于 current request-context baseline
+Then public CLI contract 必须把该输入视为 invalid args
+And 本 FR 不得把内部 auto pinning 写成公共 CLI 基线
 
-### 场景 8：user_home 可在缺失 target_tab_id 时自动 pin 到 profile tab
+### 场景 8：user_home 缺失 target_tab_id 时不能被冻结为公共 CLI 合法输入
 
 Given 调用方发起 `xhs.user_home`
-And 当前浏览器现场存在与目标 `user_id` 匹配的 profile tab
 When `target_tab_id` 缺失
-Then 系统可以自动将请求 pin 到该 profile tab
-And 该行为属于 current request-context baseline
+Then public CLI contract 必须把该输入视为 invalid args
+And 本 FR 不得把内部 auto pinning 写成公共 CLI 基线
 
 ### 场景 9：canonical upstream objects 被命令面消费后保留请求级结果
 
@@ -213,7 +211,8 @@ And 必须等待 `#505` 的正式结论
 
 - `xhs.detail` 缺失 `note_id` 时，必须在命令入口层失败，不得发出空 detail 请求。
 - `xhs.user_home` 缺失 `user_id` 时，必须在命令入口层失败，不得发出空 profile 请求。
-- `target_page` 越界、`runtime_target.page` 越界或 auto target-tab resolution 失败时，必须返回结构化 blocked / invalid-args 结果。
+- `target_page` 越界、`runtime_target.page` 越界或 `target_tab_id` / `runtime_target.tab_id` 缺失时，必须返回结构化 invalid-args 结果。
+- background/extension direct path 若存在内部 auto target-tab resolution，不得被本 FR 误写为 current public CLI contract。
 - legacy path 下允许 `request_admission_result` 与 `execution_audit` 为 `null`，但不得把 `null` 误解释为“命令面不存在”。
 - 若当前 formal 文档仍引用“detail/user_home 尚无公开命令面”的历史表述，后续 closeout 必须按 dated historical fact 处理，不得回退为 current blocker。
 
@@ -221,7 +220,7 @@ And 必须等待 `#505` 的正式结论
 
 1. `xhs.detail` / `xhs.user_home` 已被正式冻结为 current public CLI command surface。
 2. 两个命令的 canonical command input 已冻结为 `note_id` / `user_id`。
-3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`。
+3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`，且 public CLI request-context 仍要求显式 target tab。
 4. 两个命令消费 `FR-0023` 四对象输入的 command-level ownership 已冻结，且不新增第二套授权输入。
 5. `request_admission_result` 与 `execution_audit` 的 command-level ownership 已与 current implementation 对齐。
 6. 本 FR 已显式把 detail identity 与 `image_scenes` 转交 `#505`。
