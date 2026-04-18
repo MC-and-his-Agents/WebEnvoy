@@ -9,7 +9,7 @@ Canonical Issue: #505
 当前 GitHub 与仓库证据已经稳定收敛出一个最小结论：
 
 - current main 上，`xhs.detail` 的 command input、runtime、bridge、contract test 和 fallback test 都稳定围绕 `note_id` 运转。
-- current main 证据已出现 `source_note_id` 下游请求 payload 字段，但当前仓库证据只证明 canonical `note_id` 会被写入该 transport 字段，尚未证明存在反向 identity 归一化读路径。
+- current main 证据已出现 `source_note_id` 下游请求 payload 字段，并能证明它是 current `xhs.detail` request family 中 canonical `note_id` 的 request-side carrier。
 - 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
@@ -19,7 +19,7 @@ Canonical Issue: #505
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
 2. 冻结 `image_scenes` 当前不进入 canonical identity anchor。
-3. 冻结这些字段在 current v1 中只允许作为 non-identity diagnostics / compatibility context。
+3. 冻结 `image_scenes` 在 current v1 中只允许作为 non-identity diagnostics / compatibility context，并冻结 `source_note_id` 只作为当前 detail request family 的 request-side transport alias。
 4. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 5. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
 
@@ -68,7 +68,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - canonical identity anchor 的组成部分
 - 额外 identity discriminator
 
-### 3. identity derivation baseline
+### 3. identity derivation baseline 与 request transport alias
 
 系统必须冻结：只要 command-side input 能够稳定提供 `note_id`，就可以构成 current v1 detail identity anchor；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
 
@@ -78,8 +78,9 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - current v1 detail identity anchor 的导出前提只绑定 `note_id`，不绑定 `image_scenes`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
-- 当前仓库证据只证明 canonical `note_id` 可以被写入下游请求 payload 字段 `source_note_id`；本 FR 不把“仅凭该 transport 字段反向归一化回 canonical `note_id`”写成 current v1 formal truth。
-- 若当前实现未来需要把 transport-only `source_note_id` 升格为 identity derivation 依据，必须先补齐仓库内可复核证据并通过新的 spec 修订。
+- 对已验证属于 current `xhs.detail` request family 的 `/api/sns/web/v1/feed` POST body，transport 字段 `source_note_id` 继续作为 canonical `note_id` 的 request-side carrier。
+- 上述 transport alias 只用于把 command-side `note_id` 与同一 detail request family 的捕获请求对齐；它不新增第二 identity 字段，也不改变 current v1 canonical identity 仍为 `note_id` only。
+- 除上述已验证的 request transport alias 外，本 FR 不把其他 artifact-only 字段写成 current v1 identity derivation truth。
 
 ### 4. identity exclusion 行为
 
@@ -150,7 +151,15 @@ When 系统记录当前 v1 contract
 Then 这些字段只能进入 diagnostics / compatibility context
 And 不得进入 canonical identity anchor
 
-### 场景 5：未来扩 identity 必须重新过 spec review
+### 场景 5：source_note_id 只能作为 verified detail request transport alias
+
+Given 当前请求已被验证属于 `xhs.detail` request family
+And 捕获到的 `/api/sns/web/v1/feed` POST body 包含 `source_note_id`
+When 系统把命令输入与该请求 transport 对齐
+Then `source_note_id` 只能承载同一 canonical `note_id`
+And 不得因此新增第二个 identity 字段
+
+### 场景 6：未来扩 identity 必须重新过 spec review
 
 Given 后续实现或 guardian 提出把 `image_scenes` 纳入 detail identity
 When 当前仓库仍缺少 admission-ready runtime / test / artifact evidence
@@ -161,6 +170,7 @@ And 必须等待新的 spec 修订
 
 - `note_id` 缺失时，当前 detail identity anchor 不可导出；这是 command input 问题，不是 `image_scenes` 问题。
 - `image_scenes` 缺失、为空或值不稳定时，当前 formal 结论仍必须保持 `note_id`-only identity。
+- `source_note_id` 当前只在已验证的 detail request transport 上承载 canonical `note_id`；它不单独扩张 identity，也不替代 route verification。
 - 若未来仓库证据证明 `note_id` 单独使用会产生错误复用，本 FR 不阻止未来修订，但在修订完成前 current implementation 仍必须遵守 current v1 结论。
 - `image_scenes` 不入 identity 不等于禁止记录该字段；只是不允许它驱动 current v1 canonical identity anchor。
 

@@ -2,14 +2,14 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，并明确 `image_scenes` 当前只属于 non-identity diagnostics / compatibility context，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前只属于 non-identity diagnostics / compatibility context，并补齐 `source_note_id` 作为当前 detail request family transport alias 的窄规则，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
 ### 阶段 1：仓库内证据收敛
 
 - 产出：`research.md`
-- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、`source_note_id` 只是下游请求 payload 字段、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
+- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、`source_note_id` 在 verified detail request transport 上承载 canonical `note_id`、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
 
 ### 阶段 2：identity contract 冻结
 
@@ -38,7 +38,7 @@
 
 - 规约对照：
   - 对照 `src/commands/xhs-input.ts`、`src/commands/xhs-runtime.ts`，确认 current implementation 只以 `note_id` 作为 detail command input 的稳定锚点
-  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 current in-tree evidence 已观察到 `source_note_id` 下游请求 payload 字段，但当前 formal 只能把它视为 transport 字段而不是反向 identity 归一化依据
+  - 对照 `extension/xhs-read-execution.ts` 与 `tests/xhs-read-execution.fallback.test.ts`，确认 current in-tree evidence 已证明 `source_note_id` 是 verified detail request transport 上 canonical `note_id` 的 carrier，而不是第二 identity 字段
   - 对照 `tests/content-script-handler.xhs-read.contract.test.ts`、`tests/extension.service-worker.gate-approval.suite.ts`、`tests/xhs-read-execution.fallback.test.ts`，确认 in-tree tests 没有把 `image_scenes` 写成 identity 前提
   - 对照 `FR-0024` research，确认 `image_scenes` 缺少仓库内 admission-ready 证据
 - 文档门禁：
@@ -56,7 +56,7 @@
 - 当前 formal suite 不进入实现代码 TDD。
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
-  - `source_note_id` 继续只作为下游请求 payload 字段 / future evidence candidate，不被误写成 current v1 identity 依据
+  - `source_note_id` 继续只作为 verified detail request transport alias，不被误写成第二 identity 字段或更宽的 artifact-only normalization
   - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
   - future revision 前，`image_scenes` 只留在 diagnostics / compatibility context
 
@@ -73,7 +73,7 @@
 
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
-- reviewer 确认 `source_note_id` 当前只属于下游请求 payload 字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则。
+- reviewer 确认 `source_note_id` 当前只属于 verified detail request transport alias，formal 未误写成第二 identity 字段或更宽的 artifact-only normalization。
 - reviewer 确认 `image_scenes` 当前只属于 non-identity context。
 - reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。

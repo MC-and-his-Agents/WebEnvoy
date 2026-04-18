@@ -3,7 +3,7 @@
 - [x] 建立 `FR-0026-xhs-detail-canonical-identity` 正式套件
 - [x] 建立 canonical issue 绑定 `#505`
 - [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
-- [ ] reviewer 确认 `source_note_id` 当前只属于兼容输出字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则
+- [ ] reviewer 确认 `source_note_id` 当前只属于 verified detail request transport alias，formal 未误写成第二 identity 字段或更宽的 artifact-only normalization
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
 - [ ] reviewer 确认这些字段只属于 diagnostics / compatibility context
 - [ ] reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth
@@ -18,5 +18,6 @@
 - 当前阶段只冻结 current v1 detail identity，不承诺实现代码。
 - 后续实现应优先消费本 FR 冻结的：
   - `note_id` only identity
+  - verified detail request transport 上 `source_note_id` 承载 canonical `note_id`
   - `image_scenes` not-in-shape 结论
   - future revision 准入条件

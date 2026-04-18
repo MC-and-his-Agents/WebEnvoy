@@ -29,3 +29,14 @@
 - 缓解：
   - 当前 FR 只回答 identity
   - `#504` 继续负责 command surface 与 request-context baseline
+
+## 风险 4：把 source_note_id transport alias 误扩张成第二 identity
+
+- 表现：
+  - 后续实现 PR 把 `source_note_id` 当成独立 identity 字段，或把未验证的 artifact-only normalization 一并写入 formal
+- 影响：
+  - detail canonical identity 被错误扩张
+  - `#505` 再次偏离“note_id only + image_scenes not-in-shape”的主结论
+- 缓解：
+  - 当前 FR 只冻结 verified detail request transport 上的窄 alias
+  - 明确该 alias 不新增第二 identity 字段，也不代表更宽的 artifact-only normalization

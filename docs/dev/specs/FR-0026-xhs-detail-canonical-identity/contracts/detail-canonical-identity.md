@@ -42,19 +42,25 @@ type ExcludeImageScenesFromIdentityV1 = (
 - `image_scenes` 差异不得单独导致新的 identity discriminator
 - 本 FR 不把完整 detail shape 或 comparison tuple 冻结成 formal truth
 
-## 4. Current v1 downstream transport note
+## 4. Current v1 request transport alias
 
 ```ts
-type XhsDetailDownstreamTransportFieldV1 = {
-  source_note_id?: string;
+type XhsDetailRequestTransportAliasV1 = {
+  endpoint: "/api/sns/web/v1/feed";
+  method: "POST";
+  body: {
+    source_note_id?: string;
+  };
 };
 ```
 
 约束：
 
 - current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
-- 当前仓库证据只证明 canonical `note_id` 可以被写入下游请求 payload 字段 `source_note_id`。
-- 本 FR 不把“仅凭 transport 字段 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
+- 对已验证属于 current `xhs.detail` request family 的 `/api/sns/web/v1/feed` POST body，`source_note_id` 承载 canonical `note_id`。
+- 上述 transport alias 只用于把 command-side `note_id` 与同一 detail request family 的捕获请求对齐。
+- 它不新增第二 identity 字段，也不改变 current v1 canonical identity 仍为 `note_id` only。
+- 除该 verified request transport alias 外，本 FR 不冻结其他 artifact-only normalization 规则。
 
 ## 5. Future revision gate
 
