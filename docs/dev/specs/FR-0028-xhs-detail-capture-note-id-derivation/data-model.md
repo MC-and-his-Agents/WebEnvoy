@@ -27,8 +27,7 @@ matcher boundary：
 - direct roots 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`。
 - 只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。
 - `body.data.note` 与 `body.data.items[*].note_card` 已被 in-tree tests 直接覆盖。
-- `body.data.items[*]` 的 target-missing failure 也已证明 direct-item candidate inspection 属于 current matcher truth。
-- 其他 bare-body root、self root、direct entry 与递归 nested path 虽然当前测试覆盖较弱，但仍属于 current main observable matcher boundary。
+- `.items[*]` direct-item candidate inspection、metadata exclusion 与其他 bare-body root / self root / direct entry / 递归 nested path 以 current main 实现作为直接 observable truth 来源；当前 tests 不单独证明这些分支的全部语义。
 
 ### 2. candidate-only observation
 

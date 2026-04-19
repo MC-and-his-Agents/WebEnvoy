@@ -12,7 +12,7 @@ Canonical Issue: #510
 
 - current implementation 与 in-tree tests 的 command-side canonical truth 仍只围绕 `note_id` 运转。
 - detail API candidate route 目前可见的 request-side 参数形态是 `source_note_id`，但 `FR-0005` 与 `FR-0026` 已明确这仍只是 candidate / failed / synthetic 层级事实，不足以单独冻结成 admitted canonical mapping。
-- current implementation 已经存在一条可观察、且必须由本 FR 承接 owner 的 response-side truth：`getDetailResponseCandidates()` 会先取 `body.data ?? body` 作为 response root，再从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。现有 tests 已直接覆盖 `body.data.note` 成功与 `body.data.items[*].note_card` 成功；target-missing / metadata-only rejection 场景只作为辅助校验。`.items[*]` candidate inspection、metadata exclusion 与其余分支仍以 current main implementation 作为直接 observable truth 来源，不能被本 FR 收窄掉。
+- current implementation 已经存在一条可观察、且必须由本 FR 承接 owner 的 response-side truth：`getDetailResponseCandidates()` 会先取 `body.data ?? body` 作为 response root，再从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。现有 tests 已直接覆盖 `body.data.note` 成功与 `body.data.items[*].note_card` 成功；`.items[*]` candidate inspection、metadata exclusion 与其余分支仍以 current main implementation 作为直接 observable truth 来源，不能被本 FR 收窄掉。
 
 因此，本 FR 的职责不是重写 `#505` 的 identity-only 结论，也不是提前冻结 `#508` 负责的 shared reuse semantics，而是补齐这条缺失的 formal owner：冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation 规则，明确 admitted template 可接受的 derivation source，明确 rejected / incompatible observation 可保留的 candidate 边界，并把 replacement implementation 的 detail formal gate 收口到可执行状态。
 

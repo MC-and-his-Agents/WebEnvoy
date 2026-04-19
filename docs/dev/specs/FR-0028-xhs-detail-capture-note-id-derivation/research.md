@@ -10,7 +10,6 @@
 - `tests/xhs-read-execution.fallback.test.ts` 已覆盖：
   - `body.data.note` 命中目标 `note_id` 时成功
   - wrapped detail payload `body.data.items[*].note_card` 命中目标 `note_id` 时成功
-  - `body.data.items[*]` target-missing failure 与 metadata-only rejection 场景可作为辅助校验，但它们本身不单独证明 `.items[*]` / metadata 分支的全部语义
 
 ### candidate
 
@@ -58,7 +57,7 @@
 
 结论与影响：
 
-- 当前实现不接受 metadata-only note id 作为 detail success evidence；这一点以 current main 实现为直接来源，现有 tests 只提供辅助 rejection 场景。
+- 当前实现不接受 metadata-only note id 作为 detail success evidence；这一点以 current main 实现为直接来源。
 - 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
 - 对 response root 与 self root 的 admitted source，formal 必须与 current matcher 一致：先取 `body.data ?? body` 作为 response root；当顶层 `body.data` 为 nullish 时回退到顶层 `body`；只有当选中的 root 本身满足 detail-shaped self root marker 时，`self` 才允许 admitted。
@@ -80,7 +79,7 @@
 
 - `docs/dev/specs/FR-0005-xhs-read-spike/research.md`
 - `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`
-- 当前 replacement implementation 分支中的 detail capture candidate 逻辑
+- `extension/xhs-read-execution.ts`
 
 结论与影响：
 
