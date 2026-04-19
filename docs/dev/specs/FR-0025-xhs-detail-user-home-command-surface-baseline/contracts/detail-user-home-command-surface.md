@@ -135,4 +135,4 @@ type CommandLevelSummary = {
 - successor detail implementation path 的 shared request-context minimal invariants
 - successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation truth
 
-其中 `xhs.detail` canonical identity baseline 由 `#505` 冻结；shared request-context minimal invariants 与 successor implementation shared gate 由 `#508` 承接；detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate）由 `#510` 承接。successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate。
+其中 `xhs.detail` canonical identity baseline 由 `#505` 冻结；shared request-context minimal invariants 与 successor implementation shared gate 由 `#508` 承接；`#510` 继续只作为 successor detail implementation path 的 required detail-path gate 引用，本契约不在此重述其 owning suite scope。successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate。
