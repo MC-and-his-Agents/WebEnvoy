@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation：把 admitted template 可接受的 derivation source 收口为 response-side detail note candidate record，把 `source_note_id` / referrer / metadata-only note field 限定为 candidate-only observation，并把 replacement implementation 的 detail formal gate 明确绑定到本 FR。
+冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation：把 admitted template 可接受的 derivation source 收口为 response-side detail response candidate record，把 `source_note_id` / referrer / metadata-only note field 限定为 candidate-only observation，并把 replacement implementation 的 detail formal gate 明确绑定到本 FR。
 
 ## 分阶段拆分
 
@@ -41,13 +41,14 @@
   - `git diff --check`
   - `git status --short`
 - 纯度校验：
-  - 只允许新增 `docs/dev/specs/FR-0028-xhs-detail-capture-note-id-derivation/**`
+  - 以 `docs/dev/specs/FR-0028-xhs-detail-capture-note-id-derivation/**` 为主
+  - 若为保持已 merge formal suite 的 prerequisite tree 与 canonical gate 一致，允许最小范围回写 `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/**`
 
 ## TDD 范围
 
 - 当前 formal suite 不进入实现代码 TDD。
 - replacement implementation 在消费本 FR 后，至少应补齐以下测试矩阵：
-  - admitted template 只接受 response-side detail note candidate record 的 canonical `note_id` derivation
+  - admitted template 只接受 response-side detail response candidate record 的 canonical `note_id` derivation
   - metadata-only note id 不得构成 admitted success evidence
   - `source_note_id` / referrer 只能停留在 candidate-only observation
   - detail path implementation-ready gate 必须消费 `FR-0025`、`FR-0026`、`#508` 与本 FR
