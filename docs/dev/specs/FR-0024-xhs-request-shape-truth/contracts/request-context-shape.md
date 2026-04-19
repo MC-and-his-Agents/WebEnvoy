@@ -99,18 +99,35 @@ type CapturedRequestTemplateRecord = {
 `RejectedRequestContextObservation` 表达“当前页面现场某个 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选请求”。它不是 template record，也不会进入可复用模板池，但它为 `rejected_source` 结果提供可达的数据来源。
 
 ```ts
-type RejectedRequestContextObservation = {
+type SyntheticRejectedRequestContextObservation = {
   page_context_namespace: string;
   shape: RequestShape;
   shape_key: RequestShapeKey;
-  source_kind: "page_request" | "synthetic_request";
-  rejection_reason: "synthetic_request_rejected" | "failed_request_rejected";
+  source_kind: "synthetic_request";
+  rejection_reason: "synthetic_request_rejected";
   observed_at: number;
   request_status: {
     completion: "completed" | "failed";
     http_status: number | null;
   };
 };
+
+type FailedPageRequestRejectedObservation = {
+  page_context_namespace: string;
+  shape: RequestShape;
+  shape_key: RequestShapeKey;
+  source_kind: "page_request";
+  rejection_reason: "failed_request_rejected";
+  observed_at: number;
+  request_status: {
+    completion: "completed" | "failed";
+    http_status: number | null;
+  };
+};
+
+type RejectedRequestContextObservation =
+  | SyntheticRejectedRequestContextObservation
+  | FailedPageRequestRejectedObservation;
 ```
 
 约束：
@@ -121,6 +138,9 @@ type RejectedRequestContextObservation = {
 - observation 的有效保留键必须是 `page_context_namespace + shape_key`；不同 shape 的 rejection 不得互相覆盖
 - `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
 - `synthetic_request_rejected` 的 `shape` 与 `shape_key` 可以通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出；不得生成无 shape 的 synthetic reject 记录
+- `synthetic_request_rejected` 必须固定配对 `source_kind="synthetic_request"`；不得与 `source_kind="page_request"` 组合
+- `failed_request_rejected` 必须固定配对 `source_kind="page_request"`；不得与 `source_kind="synthetic_request"` 组合
+- `failed_request_rejected` 的 `request_status` 不得是 success-only 2xx 完成态；若 `completion="completed"`，`http_status` 必须是 `null` 或非 2xx
 - `source_kind` 与 `request_status` 只是 search-side compatibility backwrite 所需的最小结构字段，不表示本 FR 开始拥有跨命令 shared observation owner
 
 ## 5. `RouteBucketIncompatibleObservation`

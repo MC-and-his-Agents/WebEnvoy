@@ -19,7 +19,7 @@
 - [ ] reviewer 确认 miss / mismatch 的正式规则是 fail closed，不得静默退回 synthetic path
 - [ ] reviewer 确认 `CapturedRequestTemplateRecord` 是 page-local runtime artifact，不是 `FR-0018` replay/store truth
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` / detail rejected-source defer-fix 仍不属于本轮范围
-- [ ] reviewer 确认 `Closing=Fixes #512`、`gate_applicability.review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
+- [ ] reviewer 确认 `Closing=Refs #512`、`gate_applicability.review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
 - [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/issue-512-fr0024-compat-backwrite main` 与单分支职责一致
 - [ ] `#512` merge 后 refresh `#509` rerun guardian，不再重复打 FR-0024 schema/backwrite finding
 

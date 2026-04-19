@@ -68,6 +68,12 @@
 | `observed_at` | 最近观测时间 | 用于返回同一 shape slot 最近一次 rejected-source 解释 |
 | `request_status` | 候选完成态 | 兼容 shared contract 的最小 backwrite 字段；不得替代 shape-slot 分槽规则 |
 
+组合约束：
+
+- `synthetic_request_rejected` 只能与 `source_kind="synthetic_request"` 组合
+- `failed_request_rejected` 只能与 `source_kind="page_request"` 组合
+- `failed_request_rejected` 的 `request_status` 不得是 success-only 2xx 完成态
+
 `RouteBucketIncompatibleObservation` 字段职责：
 
 | 字段 | 角色 | 说明 |

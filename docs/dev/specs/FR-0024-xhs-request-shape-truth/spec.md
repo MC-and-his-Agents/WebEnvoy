@@ -114,6 +114,8 @@ guardian 最新稳定阻断的主线集中在 `xhs.search`：keyword 相同但 `
 - admitted template record 的 canonical 类型不得保留任何 synthetic source kind
 - synthetic request 在被拒绝时允许先走同一套 `deriveRequestShape()` 导出 `shape + shape_key`，但该导出结果只能写入 rejected-attempt diagnostics，不能提升为 admitted template
 - rejected-attempt diagnostics 的有效存储身份也必须按 `page_context_namespace + shape_key` 分槽；不同 shape 的 rejected observation 不得互相覆盖
+- `synthetic_request_rejected` 必须固定配对 `source_kind="synthetic_request"`
+- `failed_request_rejected` 必须固定配对 `source_kind="page_request"`，且 `request_status` 不得是 success-only 2xx 完成态
 
 ### 5. route-bucket incompatible diagnostics
 

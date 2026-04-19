@@ -44,7 +44,7 @@
   - `bash scripts/check-pr-purity.sh docs/issue-512-fr0024-compat-backwrite main`
   - `git diff --check`
 - PR 校验：
-  - `Closing` 使用 `Fixes #512`
+  - `Closing` 使用 `Refs #512`
   - `Refs #502 #508 #509 #510`
   - `gate_applicability.review_lane=formal_spec_review_pr`
   - `live_evidence_record=N/A`
