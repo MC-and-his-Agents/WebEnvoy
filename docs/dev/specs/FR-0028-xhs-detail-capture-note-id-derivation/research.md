@@ -129,5 +129,5 @@
 
 未解决问题 / 失效条件 / 后续动作：
 
-- `#502` 的 shared parent truth 需要显式把 `#510` 纳入 formal dependency tree。
+- `#502` 的 shared parent truth 必须持续显式把 `#510` 纳入 formal dependency tree，不得在后续编辑中回摆。
 - `#508` 的 issue truth 需要继续保持“shared reuse semantics owner”，不得回摆为 detail derivation owner。

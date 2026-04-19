@@ -67,23 +67,26 @@
   - 降级：只保留 candidate scope 与 identifier field 的最小冻结
   - 回滚：撤回额外 schema 字段，恢复到最小 derivation contract
 
-## 风险 4：shared parent truth 未把 #510 纳入 formal dependency tree
+## 风险 4：shared parent truth 再次漂移出 `#510` prerequisite tree
 
 - 表现：
-  - `#502` 仍被理解成只等 `#503/#504/#505/#508` 就能进入 replacement implementation
+  - reviewer 仍可能把 `#509` 误判为 replacement implementation 的最后 formal blocker
+  - `#502` / `#508` / `#510` 的 issue body 或 comment 若重新失配，parent truth 会再次看起来像只等 `#503/#504/#505/#508`
 - 触发条件：
-  - formal PR 已经建立，但 GitHub issue truth 仍停留在旧依赖树
+  - formal PR 已经建立，但 GitHub issue truth 没有持续保持同一 prerequisite tree
 - 后果：
   - implementation PR 可能在 detail derivation owner 未冻结前被错误推进
   - `#501` superseded / successor 语义再次失真
 - 缓解：
-  - 在 `#502` / `#508` comment 中显式写入 `#510`
+  - 在 `#502` / `#508` 的 issue body 与 comment 中都显式写入 `#510`
+  - 在 `#510` issue meta 中显式回链 `Parent: #502`
   - 在 `#509` / `#511` PR 描述中都回链 `#502`
 - 观察信号：
-  - `#502` comment 仍未出现 `#510`
+  - `#502` / `#508` issue body 重新只剩 `#503/#504/#505/#508`
+  - `#510` issue meta 不再显式指向 `Parent: #502`
   - reviewer 把 `#509` 当成 replacement implementation 的最后 formal blocker
 - 剩余风险：
-  - issue body 的旧文本仍可能暂时滞后于 comment truth，需要 merge 后继续 closeout comment 收口
+  - issue body 与 comment truth 仍可能在后续编辑中再次漂移，需要 merge 前后持续复核 GitHub truth
 - stop-ship / 降级 / 回滚：
   - stop-ship：若 parent truth 仍遗漏 `#510`，replacement implementation 不进入 ready 状态
   - 降级：保持实现 blocked，仅继续 formal 收口
