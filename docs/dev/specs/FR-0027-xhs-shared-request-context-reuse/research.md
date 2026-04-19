@@ -25,14 +25,13 @@
 - 明确把 route bucket identity 与 shape slot identity 拆开冻结
 - 不允许再把 `route_scope` 写成与 `shape_key` 并列的第二套 shape slot identity
 
-## 研究问题 2：为什么 detail referrer 派生 `note_id` 只能收窄到 `explore_detail_tab -> /explore/<note_id>`
+## 研究问题 2：为什么当前还不能冻结 detail referrer / transport 派生 `note_id`
 
 结论：
 
 - `#504 / FR-0025` 已冻结：`xhs.detail` 的唯一 target-page baseline 是 `explore_detail_tab`。
-- 当前仓库内可以支撑的最窄 page-local 恢复路径，是在 detail 页现场从 `/explore/<note_id>` referrer 恢复 `note_id`。
-- 这个规则的作用只是避免把 `source_note_id` 升格为 admitted canonical derivation input，同时让 detail reuse-shape 继续保持 `note_id` only。
-- 当前仓库没有证据支持更宽的 referrer 推断，也没有证据支持把 `source_note_id`、其他 transport alias 或其他页面路径升格为 formal truth。
+- 但 current repo main 上仍缺少 admission-ready 的仓库内证据，去证明 `/explore/<note_id>` referrer 恢复规则已经可以被 formalize 为 admitted canonical derivation truth。
+- 当前仓库更没有证据支持把 `source_note_id`、其他 transport alias 或其他页面路径升格为 formal truth。
 
 仓库内依据：
 
@@ -44,28 +43,23 @@
 - `src/commands/xhs-input.ts`
   - `xhs.detail` 在非 `explore_detail_tab` 时直接拒绝
 
-### 2. 当前 in-repo runtime / tests 已把 referrer 作为 detail request-context 上下文的一部分
+### 2. 当前 repo main 上缺少 admission-ready derivation evidence
 
 - `extension/xhs-read-execution.ts`
-  - request-context 命中后会读取 captured artifact 的 `referrer`
+  - detail 请求仍以 canonical `note_id` 作为命令输入与 runtime data-ref 锚点
+  - 但现有代码与测试没有形成足够的 formal 证据，证明 referrer 恢复规则已经可以升格为 admitted derivation truth
 - `tests/xhs-read-execution.fallback.test.ts`
-  - detail admitted template 保留 `referrer`
-  - detail request body 仍只把 `source_note_id` 保留在 transport/request 侧
-- `tests/xhs-read-request-context.test.ts`
-  - detail artifact 的 canonical shape 保持 `note_id` only
-  - artifact `referrer` 明确是 `https://www.xiaohongshu.com/explore/<note_id>`
-  - `image_scenes` 与 `source_note_id` 都不进入 detail shape
-- `tests/main-world-bridge.contract.test.ts`
-  - current candidate implementation 已有以 detail 页现场配合 `/api/sns/web/v1/feed` body 做 note 归一的 contract evidence
+  - 能证明 detail current request transport 仍围绕 `source_note_id`
+  - 但不能证明 `/explore/<note_id>` referrer 恢复已经成为 admission-ready formal rule
 
-### 3. 当前仓库仍缺少更宽推断的 formal 证据
+### 3. 当前仓库仍缺少 derivation formal 化所需证据
 
 - 没有证据支持把 `source_note_id` 冻结为 admitted canonical derivation input
-- 没有证据支持把任意 referrer、其他 pathname 或跨页面 transport alias 冻结为 formal truth
+- 没有证据支持把 `/explore/<note_id>` referrer 恢复冻结为 current formal truth
+- 没有证据支持把任意其他 referrer、pathname 或跨页面 transport alias 冻结为 formal truth
 
 因此本 FR 选择：
 
-- detail capture admission 只允许两种来源：
-  - 已经 canonical 的 `note_id`
-  - `explore_detail_tab` 下 `/explore/<note_id>` referrer 恢复出的 page-local `note_id`
-- 其他 transport / referrer 推断一律不在本 FR 内 formalize
+- 当前 formal contract 只承认 canonical `note_id`
+- detail referrer / transport derivation 继续保持 deferred
+- 如未来要把 `/explore/<note_id>` referrer 恢复规则升格为 formal truth，必须先补足仓库内 latest-main runtime / test 证据，再单独修订

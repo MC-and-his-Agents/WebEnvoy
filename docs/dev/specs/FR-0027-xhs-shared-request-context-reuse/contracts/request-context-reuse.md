@@ -49,7 +49,7 @@ type XhsUserHomeReuseShapeV1 = {
 约束：
 
 - `xhs.detail` reuse-shape 不包含 `source_note_id` 或 `image_scenes`。
-- detail capture admission 只允许使用 canonical `note_id` 或在 `explore_detail_tab` 下由当前 detail 页 referrer 恢复出的 `note_id`。
+- 当前 formal contract 只承认 canonical `note_id`；detail referrer / transport derivation 继续保持 deferred。
 - `xhs.user_home` reuse-shape 最终只保留 canonical `user_id`。
 
 ## 3. Bucket state
@@ -60,23 +60,28 @@ type SharedRequestStatusV1 = {
   http_status: number | null;
 };
 
-type SharedCapturedArtifactStateV1 = {
+type SharedAdmittedTemplateStateV1 = {
   captured_at: number;
+  source_kind: "page_request";
+  request_status: SharedRequestStatusV1;
+};
+
+type SharedRejectedObservationStateV1 = {
+  observed_at: number;
   source_kind: "page_request" | "synthetic_request";
-  template_ready: boolean | null;
   rejection_reason: "synthetic_request_rejected" | "failed_request_rejected" | null;
   request_status: SharedRequestStatusV1;
 };
 
 type CapturedRequestContextShapeSlotV1 = {
-  admitted_template: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
-  rejected_observation: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
+  admitted_template: (SharedAdmittedTemplateStateV1 & Record<string, unknown>) | null;
+  rejected_observation: (SharedRejectedObservationStateV1 & Record<string, unknown>) | null;
 };
 
 type CapturedRequestContextRouteBucketV1 = {
   page_context_namespace: RequestContextRouteBucketIdV1["page_context_namespace"];
   route_scope: RequestContextRouteBucketIdV1["route_scope"];
-  incompatible_observation: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
+  incompatible_observation: (SharedRejectedObservationStateV1 & Record<string, unknown>) | null;
   available_shape_keys: string[];
 };
 ```
@@ -87,7 +92,8 @@ type CapturedRequestContextRouteBucketV1 = {
 - `rejected_observation` 只承载 synthetic / failed / rejected candidate。
 - `incompatible_observation` 只承载同 namespace / 同 route bucket 下最近一次 sibling-shape mismatch candidate。
 - `incompatible_observation` 不得进入 shape-keyed slot。
-- `captured_at` 是 freshness gate 的必需字段。
+- `captured_at` 是 admitted template freshness gate 的必需字段。
+- `observed_at` 是 rejected / incompatible observation 的必需字段；不得与 `FR-0024` 的 `RejectedRequestContextObservation` 时间语义冲突。
 - `source_kind`、`rejection_reason` 与 `request_status` 是 rejected-source 语义的必需字段。
 
 ## 4. Gate rule

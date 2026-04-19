@@ -52,7 +52,8 @@
 - `admitted_template` 与 `rejected_observation` 只存在于同一 namespace / route bucket / shape slot 下。
 - `incompatible_observation` 只存在于同一 namespace / route bucket 下。
 - synthetic / failed source 不得进入 `admitted_template`。
-- `captured_at` 是三类 observation 的最小 freshness 字段。
+- `captured_at` 是 `admitted_template` 的最小 freshness 字段。
+- `observed_at` 是 `rejected_observation` / `incompatible_observation` 的最小 observation 时间字段，需与 `FR-0024` 对齐。
 - `source_kind`、`rejection_reason` 与 `request_status` 是 `rejected_observation` / `incompatible_observation` 的最小 rejected-source 诊断字段。
 - `available_shape_keys` 只反映当前 namespace / route bucket 内可诊断 shape，不构成跨 namespace 共享键。
 
@@ -67,4 +68,4 @@
 
 - search-only canonical shape 继续由 `FR-0024` 承载。
 - detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape、artifact-side derivation source 和 slotting 语义。
-- detail referrer 派生 `note_id` 只允许收窄到 `explore_detail_tab -> /explore/<note_id>` 的 page-local 恢复路径，并由 `research.md` 承接证据。
+- detail referrer / transport 派生 `note_id` 当前仍保持 deferred；`research.md` 只承接“为什么现在还不能 formalize”。
