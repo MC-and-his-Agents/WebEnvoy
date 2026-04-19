@@ -116,8 +116,9 @@ Canonical Issue: #508
 - `incompatible_observation` 只代表同 namespace、同 route family 但 canonical shape 不一致的最近候选。
 - 任何 synthetic / failed source 都不得进入 `admitted_template`。
 - `admitted_template` 至少必须携带 `captured_at`，作为 freshness gate 的时间输入。
+- `admitted_template` 至少必须携带 `request_status.completion="completed"` 与非空 2xx `request_status.http_status`，不得把 failed / non-2xx candidate 误记为 admitted template。
 - `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，以对齐 `FR-0024` 已冻结的 rejected-source observation 时间语义。
-- `rejected_observation` 与 `incompatible_observation` 至少都必须携带 `source_kind`、`rejection_reason` 与 `request_status`，以支持 rejected-source 语义与最近一次 sibling-shape 诊断。
+- `rejected_observation` 与 `incompatible_observation` 至少都必须携带 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义与最近一次 sibling-shape 诊断。
 - route bucket 必须保留 `available_shape_keys`，以支持 sibling-shape incompatibility 诊断。
 
 ### 6. capture admission
@@ -137,6 +138,8 @@ Canonical Issue: #508
 - capture admission 拒绝不得被等价成 template hit
 - rejected observation 也必须按当前 namespace 的 route bucket + `shape_key` 分槽
 - detail capture admission 在 shape 可导出前，不得把 `source_note_id`、referrer 或其他 transport alias 升格成 admitted canonical derivation input
+- shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
+- route-bucket `incompatible_observation` 必须携带非空 `rejection_reason=shape_mismatch`
 
 ### 7. lookup / eligibility / fail-closed
 
@@ -243,12 +246,13 @@ And 不得宣称 formal 输入已经齐备
 - shape 命中但模板过旧时，结果必须是 `stale`，而不是 `hit`。
 - rejected observation 允许保留最近一次可诊断 candidate，但不得升级为 admitted template。
 - `incompatible_observation` 必须停留在 route bucket 层，不得被错误塞回 shape-keyed slot。
+- shape-slot `rejected_observation` 的 `rejection_reason` 不得为 `null` 或缺失。
 
 ## 验收标准
 
 1. `xhs.detail` / `xhs.user_home` 已进入与 `xhs.search` 同构的 shared request-context reuse model。
 2. page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的层级关系已冻结。
-3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template。
+3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template，admitted template 仅承载 completed 2xx 成功态。
 4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side additional derivation rule 继续保持 deferred。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
 6. replacement implementation 的 formal gate 已明确包含 `#508`，不再误写成只等 `#504/#505`。

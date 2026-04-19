@@ -53,8 +53,9 @@
 - `incompatible_observation` 只存在于同一 namespace / route bucket 下。
 - synthetic / failed source 不得进入 `admitted_template`。
 - `captured_at` 是 `admitted_template` 的最小 freshness 字段。
+- `admitted_template.request_status` 必须固定为 `completion="completed"` 且 `http_status` 为非空 2xx。
 - `observed_at` 是 `rejected_observation` / `incompatible_observation` 的最小 observation 时间字段，需与 `FR-0024` 对齐。
-- `source_kind`、`rejection_reason` 与 `request_status` 是 `rejected_observation` / `incompatible_observation` 的最小 rejected-source 诊断字段。
+- `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status` 是 `rejected_observation` / `incompatible_observation` 的最小 rejected-source 诊断字段。
 - `available_shape_keys` 只反映当前 namespace / route bucket 内可诊断 shape，不构成跨 namespace 共享键。
 
 ### 4. read-family canonical shape

@@ -41,6 +41,7 @@
   - 对照 `FR-0025`，确认 command surface / request-context baseline 继续由 `#504` 承载
   - 对照 `#505` 当前 issue truth，确认 detail identity 继续独立于 shared reuse semantics
   - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source / detail `note_id` derivation 语义已成为必须 formalize 的输入
+  - 对照 guardian latest findings，确认 admitted template 已被收紧为 completed 2xx success-only，且 shape-slot rejected observation 强制携带非空 machine-readable `rejection_reason`
   - 对照 `research.md`，确认 detail referrer / transport derivation 仍保持 deferred，不被误写成 current formal truth
 - 文档门禁：
   - `bash scripts/docs-guard.sh`
@@ -58,6 +59,7 @@
 - 后续 replacement implementation 至少应补齐以下测试矩阵：
   - detail/user_home 的 page-local namespace、route bucket 与 shape slotting
   - admitted / rejected / incompatible bucket state 分层与最小结构字段
+  - admitted template success-only request-status 约束与 rejected observation 非空 `rejection_reason`
   - synthetic / failed source 不进入 admitted template
   - detail capture-side `note_id` derivation 不回退到 `source_note_id`
   - exact-match / freshness / fail-closed diagnostics
