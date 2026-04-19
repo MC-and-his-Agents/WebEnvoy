@@ -62,12 +62,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
     | "data.items[*]"
     | "data.notes[*]"
     | "data";
-  response_candidate_path:
-    | "self"
-    | "note"
-    | "note_card"
-    | "current_note"
-    | "item";
+  response_candidate_path: string;
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
 };
@@ -87,13 +82,10 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `data.items[*]`
   - `data.notes[*]`
   - `data`
-- `response_candidate_path` 用于记录 admitted detail note record 相对其 scope root 的命中路径；current v1 允许：
-  - `self`
-  - `note`
-  - `note_card`
-  - `current_note`
-  - `item`
-- 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card` 这类嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
+- `response_candidate_path` 用于记录 admitted detail note record 相对其 scope root 的完整命中路径，必须保留 multi-hop nested path，而不能只收窄为末级字段名。
+- 当 scope root 本身就是 admitted detail note candidate record 时，`response_candidate_path` 使用 `self`。
+- current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合，例如 `note_card`、`note.note_card`、`item.note_card`。
+- 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card`、`data.note_card.note` 等嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
 - 当 `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，它只表示 `data` 本身就是 detail note record；wrapper-shaped `data` 容器仍必须通过其嵌套 note record path 判定，不能把 wrapper 自身的 id 升格为 admitted source。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response note record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。

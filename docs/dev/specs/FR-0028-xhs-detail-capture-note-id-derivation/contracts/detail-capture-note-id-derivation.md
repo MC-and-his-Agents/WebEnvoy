@@ -15,7 +15,7 @@
   - 只允许在 `xhs.detail` admitted canonical `note_id` derivation 这一个边界内使用
   - 若未来要把 `source_note_id`、referrer 或 metadata-only field 升格为 admitted source，必须通过新的 spec 修订，而不是静默扩写本契约
 
-## 2. 输入与状态返回
+## 2. 输入边界
 
 ### 输入对象
 
@@ -31,7 +31,7 @@ type XhsDetailCaptureDerivationInputV1 = {
     | "data.items[*]"
     | "data.notes[*]"
     | "data";
-  response_candidate_path?: "self" | "note" | "note_card" | "current_note" | "item";
+  response_candidate_path?: string;
   response_note_candidate?: Record<string, unknown> | null;
   request_candidate?: {
     source_note_id?: string | null;
@@ -45,34 +45,17 @@ type XhsDetailCaptureDerivationInputV1 = {
 
 - `command_note_id` 必填，且必须为 trim 后非空字符串；空值输入不能进入 admitted derivation。
 - `response_candidate_scope` 仅在 `response_note_candidate` 存在时有效；空值表示当前没有 admitted-grade response candidate。
-- `response_candidate_path` 记录 admitted note record 相对 scope root 的命中路径；例如 `data.items[*].note_card` 对应 `response_candidate_scope="data.items[*]"` 且 `response_candidate_path="note_card"`。
+- `response_candidate_path` 记录 admitted note record 相对 scope root 的完整命中路径；例如 `data.items[*].note_card` 对应 `response_candidate_scope="data.items[*]"` 且 `response_candidate_path="note_card"`，而 `data.note_card.note` 对应 `response_candidate_scope="data.note_card"` 且 `response_candidate_path="note"`。
+- `response_candidate_path` 在存在时必须为 trim 后非空字符串；当 scope root 本身就是 admitted note record 时，使用 `self`。
+- current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合，不能被 formal 收窄为单跳枚举。
 - `response_note_candidate` 为空时，当前输入最多只能导出 candidate-only evidence。
 - `request_candidate` 与 `response_metadata_candidate` 都是可选的说明性输入；它们不能单独生成 admitted truth。
 
-### 状态返回
+未冻结边界：
 
-```ts
-type XhsDetailCaptureDerivationResultV1 =
-  | {
-      status: "admitted";
-      source: XhsDetailAdmittedCanonicalNoteIdSourceV1;
-    }
-  | {
-      status: "candidate_only";
-      candidate_sources: XhsDetailCandidateOnlyDerivationSourceV1[];
-      failure_reason:
-        | "response_note_record_missing"
-        | "response_note_id_mismatch"
-        | "response_identifier_missing"
-        | "metadata_only_note_id";
-    };
-```
-
-状态约束：
-
-- `status=admitted` 时，必须返回单一 admitted source；不得同时携带 candidate-only source 作为裁决输入。
-- `status=candidate_only` 时，必须显式提供 machine-readable `failure_reason`；不得把失败留在自由文本。
-- current v1 没有 `status=incompatible` 的独立 derivation 返回；candidate-only source 后续如何落入 rejected / incompatible observation，由 `#508 / FR-0027` 冻结。
+- current main 尚未对外暴露独立的 structured derivation result object；因此本契约不冻结 `XhsDetailCaptureDerivationResultV1`、`status` 枚举、`failure_reason` 字段或其他派生状态返回对象。
+- current v1 在该边界内只冻结 admitted source 的最小 shape，以及 candidate-only derivation source 的类别边界。
+- candidate-only source 如何被上层 capture admission 记录为 rejected / incompatible observation，继续由 `#508 / FR-0027` 冻结；本契约不越权定义该状态机返回对象。
 
 ## 3. Admitted canonical derivation source
 
@@ -88,7 +71,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
     | "data.items[*]"
     | "data.notes[*]"
     | "data";
-  response_candidate_path: "self" | "note" | "note_card" | "current_note" | "item";
+  response_candidate_path: string;
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
 };
@@ -100,7 +83,9 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 detail note candidate record 上时成立。
 - `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，只允许用于 `data` 本身已经是 detail note record 的情形；wrapper-shaped `data` 容器必须保持 candidate-only。
-- `response_candidate_path` 明确保留嵌套命中路径，因此 `data.items[*].note_card`、`data.notes[*].note_card` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
+- `response_candidate_path` 必须保留相对 scope root 的完整命中路径，不能把 multi-hop nested path 压缩成末级字段名。
+- current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合。
+- 因此，`data.items[*].note_card`、`data.notes[*].note_card`、`data.note_card.note` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response note record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 
 ## 4. Candidate-only derivation source
@@ -145,34 +130,25 @@ type XhsDetailResponseFieldStatusV1 =
 
 ## 6. 最小示例
 
-### admitted
+### admitted source
 
 ```json
 {
-  "status": "admitted",
-  "source": {
-    "source_kind": "response_note_record",
-    "response_candidate_scope": "data.items[*]",
-    "response_candidate_path": "note_card",
-    "identifier_field": "note_id",
-    "derived_note_id": "66f0c8ab000000001d012345"
-  }
+  "source_kind": "response_note_record",
+  "response_candidate_scope": "data.items[*]",
+  "response_candidate_path": "note_card",
+  "identifier_field": "note_id",
+  "derived_note_id": "66f0c8ab000000001d012345"
 }
 ```
 
-### candidate_only
+### candidate-only source
 
 ```json
 {
-  "status": "candidate_only",
-  "candidate_sources": [
-    {
-      "source_kind": "request_field",
-      "field_name": "source_note_id",
-      "candidate_note_id": "66f0c8ab000000001d012345"
-    }
-  ],
-  "failure_reason": "response_note_record_missing"
+  "source_kind": "request_field",
+  "field_name": "source_note_id",
+  "candidate_note_id": "66f0c8ab000000001d012345"
 }
 ```
 
