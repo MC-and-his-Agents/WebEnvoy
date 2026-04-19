@@ -2,8 +2,10 @@
 
 - [ ] reviewer 确认 current v1 `xhs.detail` capture-side canonical `note_id` derivation` 已被独立 formal freeze
 - [ ] reviewer 确认 admitted derivation source 只允许 response-side detail note candidate record 上的 `note_id` / `noteId` / `id`
-- [ ] reviewer 确认 current matcher 已接受的 detail response candidate root / path family 已冻结到 `body.data` detail-shaped self root、`data.note`、`data.note_card`、`data.note_card_list[*]`、`data.current_note`、`data.item`、`data.items[*]`、`data.notes[*]` 及其递归 `.note` / `.note_card` / `.current_note` / `.item`
+- [ ] reviewer 确认 current matcher 已接受的 detail response candidate root / path family 已冻结到 `body.data` 优先 / `body` fallback、detail-shaped self root、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]` 及其递归 `.note` / `.note_card` / `.current_note` / `.item`
+- [ ] reviewer 确认 bare-body detail roots，例如 `body.note`、`body.note_card`、`body.items[*]`，已明确进入 formal matcher boundary，而不是仅被隐含在 `body` fallback 文案中
 - [ ] reviewer 确认 metadata-only note id 不构成 admitted success evidence
+- [ ] reviewer 确认 `body.data.items[*].note_card` 等已被 tests 接纳的 wrapped payload 已进入 formal matcher boundary，而不是继续留成 implementation detail
 - [ ] reviewer 确认 wrapper note-id-like field 只在 matcher-unaccepted wrapper / record 上属于 candidate-only，不把 matcher 已接受的 wrapper-shaped candidate record 误降级
 - [ ] reviewer 确认 `source_note_id` 与 referrer 仍只属于 candidate-only observation，不进入 admitted canonical truth
 - [ ] reviewer 确认本 FR 未与 `FR-0025` 的 command surface baseline 冲突

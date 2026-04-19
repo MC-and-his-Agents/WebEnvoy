@@ -4,9 +4,12 @@
 
 ### admission_ready
 
+- `extension/xhs-read-execution.ts` 当前 detail matcher 会在 response `body.data` 存在时优先以 `body.data` 为 root，否则回退到对象形态的 `body`。
+- current matcher 只从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并且只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。
 - `extension/xhs-read-execution.ts` 当前成功判定 detail 响应时，只认可 current matcher 已接受的 detail response candidate record 上的 `note_id` / `noteId` / `id`。
 - `tests/xhs-read-execution.fallback.test.ts` 已覆盖：
   - response-side detail response candidate 命中目标 `note_id` 时成功
+  - wrapped detail payload `body.data.items[*].note_card` 命中目标 `note_id` 时成功
   - metadata-only `current_note_id` 单独出现时失败
 
 ### candidate
@@ -58,8 +61,9 @@
 - 当前实现不接受 metadata-only note id 作为 detail success evidence。
 - 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
-- 对 `body` / `data` 自身的 admitted source，formal 必须与 current matcher 一致：只有当顶层 `body.data` 本身已被 `getDetailResponseCandidates()` 作为 detail-shaped self root 接受时，`self` 才允许 admitted。
-- current matcher 的 admitted candidate 边界不是抽象的“任意 nested root”，而是可枚举的 root / path family：`body.data.note`、`body.data.note_card`、`body.data.note_card_list[*]`、`body.data.current_note`、`body.data.item`、`body.data.items[*]`、`body.data.notes[*]`，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
+- 对 response root 与 self root 的 admitted source，formal 必须与 current matcher 一致：先选 `body.data`，仅在 response `body` 不存在对象形态的 `data` 时才回退到对象形态的 `body`；只有当选中的 root 本身满足 detail-shaped self root marker 时，`self` 才允许 admitted。
+- current matcher 的 admitted candidate 边界不是抽象的“任意 nested root”，而是可枚举的 response root / path family：`body.data` 优先 / `body` fallback、detail-shaped self root、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
+- 因此，current main 仍接受的 bare-body detail roots，例如 `body.note`、`body.note_card`、`body.items[*]`，也必须进入 formal matcher boundary，而不能只被隐含在 `body` fallback 文案里。
 - 因此，wrapper exclusion 的正确边界只能是“current matcher 未接受的 wrapper / record”；若 wrapper-shaped root 已被 matcher 接受，它仍属于 admitted source scope。
 
 未解决问题 / 失效条件 / 后续动作：
