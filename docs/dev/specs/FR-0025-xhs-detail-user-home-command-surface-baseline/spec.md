@@ -287,7 +287,8 @@ And canonical ownership truth 仍必须以四个顶层对象为准
 Given `#504` 只冻结 command surface 与 request-context baseline
 When 后续实现 PR 消费本 FR
 Then 不得据此把 `image_scenes`、`CRD_PRV_WEBP` 或 media-scene 字段写成 detail identity
-And 必须等待 `#505` 的正式结论
+And 必须先消费 `#505` 的正式结论
+And 对 successor detail implementation path 仍必须继续等待 `#508 + #510` 两条 open formal gate
 
 ## 异常与边界场景
 
@@ -324,4 +325,4 @@ And 必须等待 `#505` 的正式结论
 - `docs/dev/specs/FR-0005-xhs-read-spike/TODO.md`
 - `docs/dev/specs/FR-0023-upstream-authorization-request-admission-contract/spec.md`
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md`
-- GitHub issues `#445`、`#500`、`#502`、`#504`、`#505`
+- GitHub issues `#445`、`#500`、`#502`、`#504`、`#505`、`#508`、`#510`
