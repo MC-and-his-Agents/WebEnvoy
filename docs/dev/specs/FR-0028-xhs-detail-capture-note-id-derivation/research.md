@@ -4,9 +4,9 @@
 
 ### admission_ready
 
-- `extension/xhs-read-execution.ts` 当前成功判定 detail 响应时，只认可 detail note candidate record 上的 `note_id` / `noteId` / `id`。
+- `extension/xhs-read-execution.ts` 当前成功判定 detail 响应时，只认可 current matcher 已接受的 detail response candidate record 上的 `note_id` / `noteId` / `id`。
 - `tests/xhs-read-execution.fallback.test.ts` 已覆盖：
-  - response-side detail note candidate 命中目标 `note_id` 时成功
+  - response-side detail response candidate 命中目标 `note_id` 时成功
   - metadata-only `current_note_id` 单独出现时失败
 
 ### candidate
@@ -56,9 +56,9 @@
 结论与影响：
 
 - 当前实现不接受 metadata-only note id 作为 detail success evidence。
-- 只有当 response payload 中出现 detail note candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
-- 本 FR 可以把 response-side detail note candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
-- 对 `data` 自身的 admitted source，formal 需要继续收紧为“只有当 `data` 本身就是 detail note record 时才允许 `self` admitted”；wrapper-shaped `data` 容器仍必须走嵌套 path。
+- 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
+- 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
+- 对 `body` / `data` 自身的 admitted source，formal 必须与 current matcher 一致：只有当顶层 root 本身已被 `getDetailResponseCandidates()` 接受为 detail response candidate record 时，`self` 才允许 admitted。
 
 未解决问题 / 失效条件 / 后续动作：
 
