@@ -49,17 +49,20 @@
 
 - 表现：
   - 因为当前实现会扫描多个 response scope，就把完整 response shape 写成 rigid schema
+  - 或反过来仍把 `body.data ?? body` 的真实 root 选择、wrapped candidate path 全部留成 implementation detail，导致 admitted matcher boundary 继续失焦
 - 触发条件：
   - 把实现扫描路径直接复制成 formal payload schema
 - 后果：
   - formal 契约超出当前证据
   - 后续实现被不必要地锁死
 - 缓解：
-  - 只冻结 note-id derivation 所需的最小 scope 与 identifier field
+  - 只冻结 note-id derivation 所需的最小 response root / candidate entry / nested key 边界与 identifier field
+  - 显式把“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”、detail-shaped self root 与 `body.data.items[*].note_card` 收入口径
   - 不冻结额外 payload 字段
 - 观察信号：
   - contract / spec 出现大量 detail response payload 字段枚举
   - review 发现 formal 文本要求实现保留完整 response schema
+  - guardian / review 继续指出 wrapper/candidate matcher boundary 仍未正式冻结
 - 剩余风险：
   - current tests 仍然依赖 detail candidate record 的 shape 线索；后续实现需继续把 shape 判定保持在最小范围
 - stop-ship / 降级 / 回滚：

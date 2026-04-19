@@ -12,7 +12,7 @@ Canonical Issue: #510
 
 - current implementation 与 in-tree tests 的 command-side canonical truth 仍只围绕 `note_id` 运转。
 - detail API candidate route 目前可见的 request-side 参数形态是 `source_note_id`，但 `FR-0005` 与 `FR-0026` 已明确这仍只是 candidate / failed / synthetic 层级事实，不足以单独冻结成 admitted canonical mapping。
-- current implementation 已经存在一条更窄、但可被 tests 支撑的 response-side truth：detail 请求返回成功时，matcher 会在 `body.data` 存在时优先以 `body.data` 作为 response root，否则回退到对象形态的 `body`；随后只在 current matcher 已接受的 candidate entry 边界内寻找 detail response candidate record。metadata-only note id 不构成 success evidence，而 wrapper-shaped response root / record 只要仍被 current matcher 接受，就不能因“wrapper”身份被自动排除；当前已被 tests 接纳的 wrapped payload 至少包括 `body.data.items[*].note_card`。
+- current implementation 已经存在一条更窄、但可被 tests 支撑的 response-side truth：detail 请求返回成功时，matcher 会先取 `body.data ?? body` 作为 response root；因此只有在顶层 `body.data` 缺失时才会回看 `body`，若 `body.data` 已存在但不是对象则不会再次退回 `body`；随后只在 current matcher 已接受的 candidate entry 边界内寻找 detail response candidate record。metadata-only note id 不构成 success evidence，而 wrapper-shaped response root / record 只要仍被 current matcher 接受，就不能因“wrapper”身份被自动排除；当前已被 tests 接纳的 wrapped payload 至少包括 `body.data.items[*].note_card`。
 
 因此，本 FR 的职责不是重写 `#505` 的 identity-only 结论，也不是提前冻结 `#508` 负责的 shared reuse semantics，而是补齐这条缺失的 formal owner：冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation 规则，明确 admitted template 可接受的 derivation source，明确 rejected / incompatible observation 可保留的 candidate 边界，并把 replacement implementation 的 detail formal gate 收口到可执行状态。
 
@@ -78,7 +78,7 @@ type XhsDetailResponseCandidateRecordBoundaryV1 = {
 - `derived_note_id` 必须是 trim 后非空字符串。
 - 只有当该 response candidate record 的 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才允许进入 admitted template path。
 - current v1 admitted response candidate record 的 matcher 边界必须冻结到以下 response-root / entry family：
-  - response root 只允许 `body.data`；仅当 response `body` 不存在对象形态的 `data` 时，才允许回退到对象形态的 `body`
+  - response root 只允许 `body.data` 或 `body`；root 选择固定为先取 `body.data ?? body`，仅当顶层 `body.data` 缺失时才允许回看 `body`，若 `body.data` 已存在但不是对象则不得再次退回 `body`
   - 选中的 response root 自身仅在满足 `self_when_detail_shape_present` 时可作为 admitted self root；其 marker 只允许 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`
   - direct entry 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`
   - 仅允许从上述已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`
@@ -164,7 +164,7 @@ type XhsDetailCandidateOnlyDerivationSourceV1 =
 - response-side detail response candidate record 上的 `note_id` / `noteId` / `id`，是 current v1 admitted canonical `note_id` derivation 的唯一 formal 来源。
 - 该 admitted truth 只在“这些字段出现在 current matcher 已接受的 detail response candidate record 上”时成立。
 - 如果相同字段只出现在 metadata、route echo，或出现在 current matcher 未接受的 wrapper / record 上，则当前只能视为 candidate-only observation，不得直接进入 admitted template。
-- current matcher 已接受的 detail response candidate record 边界，必须至少覆盖 `body.data` 优先 / `body` fallback 的 response root 选择、`self_when_detail_shape_present` 自身入 admitted scope、`body.note` / `body.data.note`、`body.note_card` / `body.data.note_card`、`body.note_card_list[*]` / `body.data.note_card_list[*]`、`body.current_note` / `body.data.current_note`、`body.item` / `body.data.item`、`body.items[*]` / `body.data.items[*]`、`body.notes[*]` / `body.data.notes[*]` 这些 direct entry，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
+- current matcher 已接受的 detail response candidate record 边界，必须至少覆盖“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”的 response root 选择、`self_when_detail_shape_present` 自身入 admitted scope、`body.note` / `body.data.note`、`body.note_card` / `body.data.note_card`、`body.note_card_list[*]` / `body.data.note_card_list[*]`、`body.current_note` / `body.data.current_note`、`body.item` / `body.data.item`、`body.items[*]` / `body.data.items[*]`、`body.notes[*]` / `body.data.notes[*]` 这些 direct entry，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
 - 因此，wrapper note-id-like field 的排除边界是“matcher-unaccepted wrapper / record”，而不是所有 wrapper-shaped response root。
 
 补充约束：
@@ -253,7 +253,7 @@ And 不得把 detail capture-side canonical `note_id` derivation 留给实现侧
 ## 验收标准
 
 1. current v1 `xhs.detail` capture-side canonical `note_id` derivation 已被独立 formal freeze。
-2. admitted matcher boundary 已冻结为 `body.data` 优先 / `body` fallback、`self_when_detail_shape_present`、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]` 与递归 `.note` / `.note_card` / `.current_note` / `.item`。
+2. admitted matcher boundary 已冻结为“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”、`self_when_detail_shape_present`、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]` 与递归 `.note` / `.note_card` / `.current_note` / `.item`。
 3. admitted template 的 derivation source 已收敛为 response-side detail response candidate record 上的 `note_id` / `noteId` / `id`。
 4. `source_note_id`、referrer、metadata-only note field 的 current formal 地位已明确限制为 candidate-only，不与 `#505` 的 identity-only 结论冲突。
 5. 本 FR 未越权冻结 `shape_key`、lookup slotting、route eligibility、exact-match / freshness 或其他 shared reuse semantics。
