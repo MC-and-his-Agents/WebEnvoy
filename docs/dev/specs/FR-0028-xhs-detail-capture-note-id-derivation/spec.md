@@ -54,6 +54,7 @@ Canonical Issue: #510
 type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   source_kind: "response_note_record";
   response_candidate_scope:
+    | "body"
     | "data.note"
     | "data.note_card"
     | "data.note_card_list[*]"
@@ -74,6 +75,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - `derived_note_id` 必须是 trim 后非空字符串。
 - 只有当该 response candidate record 的 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才允许进入 admitted template path。
 - response candidate scope 允许来自：
+  - `body`
   - `data.note`
   - `data.note_card`
   - `data.note_card_list[*]`
@@ -86,6 +88,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - 当 scope root 本身就是 admitted detail note candidate record 时，`response_candidate_path` 使用 `self`。
 - current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合，例如 `note_card`、`note.note_card`、`item.note_card`。
 - 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card`、`data.note_card.note` 等嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
+- 当 `response_candidate_scope="body"` 且 `response_candidate_path="self"` 时，它表示顶层 `body` 自身已经通过 current detail matcher 的 data-shape gate，并且本身就是 admitted detail candidate root。
 - 当 `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，它只表示 `body.data` 自身已经通过 current detail matcher 的 data-shape gate，并且本身就是 admitted detail candidate root；仅有匹配的 `note_id` / `noteId` / `id` 但未通过这条 gate 的 wrapper-shaped `data` 仍不得被视为 admitted source。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response note record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
