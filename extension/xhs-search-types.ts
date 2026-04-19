@@ -60,7 +60,8 @@ export type CapturedRequestContextCommand = "xhs.search" | "xhs.detail" | "xhs.u
 export type PageContextNamespace = string;
 export type CapturedRequestContextRejectionReason =
   | "synthetic_request_rejected"
-  | "failed_request_rejected";
+  | "failed_request_rejected"
+  | "shape_mismatch";
 
 export interface CapturedRequestContextLookup {
   method: CapturedRequestContextMethod;

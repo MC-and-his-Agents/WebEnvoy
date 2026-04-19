@@ -165,7 +165,6 @@ const createCapturedRequestContext = (
         shape,
         referrer: href,
         template_ready: true,
-        rejection_reason: null,
         request_status: {
           completion: "completed",
           http_status: 200
@@ -215,7 +214,6 @@ const createCapturedRequestContext = (
         shape,
         referrer: href,
         template_ready: true,
-        rejection_reason: null,
         request_status: {
           completion: "completed",
           http_status: 200

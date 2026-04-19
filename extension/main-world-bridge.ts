@@ -182,22 +182,6 @@ const asInteger = (value: unknown): number | null => {
 const toTrimmedString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const parseNoteIdFromExploreUrl = (value: string | null): string | null => {
-  if (!value) {
-    return null;
-  }
-  try {
-    const url = new URL(value, "https://www.xiaohongshu.com");
-    if (!url.pathname.startsWith("/explore/")) {
-      return null;
-    }
-    const noteId = url.pathname.split("/").filter((segment) => segment.length > 0).at(-1) ?? null;
-    return toTrimmedString(noteId);
-  } catch {
-    return null;
-  }
-};
-
 const createCapturedContextRouteScope = (
   command: CapturedRequestContextCommand,
   method: CapturedRequestContextMethod,
@@ -248,9 +232,37 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
   };
 };
 
-const parseDetailShape = (value: unknown, referrer: string | null): CapturedContextShape | null => {
+const resolveDetailResponseNoteId = (value: unknown): string | null => {
   const record = asRecord(value);
-  const noteId = (record ? toTrimmedString(record.note_id) : null) ?? parseNoteIdFromExploreUrl(referrer);
+  if (!record) {
+    return null;
+  }
+  const data = asRecord(record.data);
+  const note = asRecord(data?.note);
+  const items = Array.isArray(data?.items) ? data.items : null;
+  const firstItem = items ? asRecord(items[0]) : null;
+  const metadata = asRecord(data?.metadata);
+  return (
+    toTrimmedString(record.note_id) ??
+    toTrimmedString(data?.note_id) ??
+    toTrimmedString(note?.note_id) ??
+    toTrimmedString(note?.id) ??
+    toTrimmedString(firstItem?.note_id) ??
+    toTrimmedString(firstItem?.id) ??
+    toTrimmedString(metadata?.current_note_id)
+  );
+};
+
+const parseDetailShape = (
+  requestBody: unknown,
+  responseBody: unknown,
+  templateReady: boolean
+): CapturedContextShape | null => {
+  const record = asRecord(requestBody);
+  const noteId =
+    (record ? toTrimmedString(record.note_id) : null) ??
+    resolveDetailResponseNoteId(responseBody) ??
+    (!templateReady && record ? toTrimmedString(record.source_note_id) : null);
   if (!noteId) {
     return null;
   }
@@ -301,13 +313,16 @@ const parseUserHomeShape = (url: string, value: unknown): CapturedContextShape |
 
 const deriveCapturedContextShape = (
   candidate: CapturedRequestCandidate,
-  referrer: string | null
+  input: {
+    responseBody: unknown;
+    templateReady: boolean;
+  }
 ): CapturedContextShape | null => {
   if (candidate.path === SEARCH_ENDPOINT && candidate.method === "POST") {
     return parseSearchShape(candidate.body);
   }
   if (candidate.path === DETAIL_ENDPOINT && candidate.method === "POST") {
-    return parseDetailShape(candidate.body, referrer);
+    return parseDetailShape(candidate.body, input.responseBody, input.templateReady);
   }
   if (candidate.path === USER_HOME_ENDPOINT && candidate.method === "GET") {
     return parseUserHomeShape(candidate.url, candidate.body);
@@ -550,12 +565,15 @@ const storeCapturedRequestContext = (
   }
 ): void => {
   const referrer = typeof window.location?.href === "string" ? window.location.href : null;
-  const contextShape = deriveCapturedContextShape(candidate, referrer);
+  const pageContextNamespace = createPageContextNamespace(referrer ?? "about:blank");
+  const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
+  const contextShape = deriveCapturedContextShape(candidate, {
+    responseBody: input.responseBody,
+    templateReady
+  });
   if (!contextShape) {
     return;
   }
-  const pageContextNamespace = createPageContextNamespace(referrer ?? "about:blank");
-  const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
   const artifact: CapturedRequestContextArtifact = {
     source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
     transport: candidate.transport,
@@ -570,11 +588,11 @@ const storeCapturedRequestContext = (
     shape: contextShape.shape,
     referrer,
     template_ready: templateReady,
-    rejection_reason: candidate.synthetic
-      ? "synthetic_request_rejected"
-      : templateReady
-        ? null
-        : "failed_request_rejected",
+    ...(candidate.synthetic
+      ? { rejection_reason: "synthetic_request_rejected" as const }
+      : !templateReady
+        ? { rejection_reason: "failed_request_rejected" as const }
+        : {}),
     request_status: {
       completion: templateReady ? "completed" : "failed",
       http_status: input.status
@@ -1220,7 +1238,12 @@ const resolveIncompatibleObservation = (
       latest = candidate;
     }
   }
-  return latest;
+  return latest
+    ? {
+        ...latest,
+        rejection_reason: "shape_mismatch"
+      }
+    : null;
 };
 
 const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest): Promise<void> => {

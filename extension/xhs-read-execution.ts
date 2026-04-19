@@ -264,19 +264,25 @@ const parseUserIdFromUrl = (value: string | null): string | null => {
   }
 };
 
-const parseNoteIdFromExploreUrl = (value: string | null): string | null => {
-  if (!value) {
+const resolveDetailResponseNoteId = (value: unknown): string | null => {
+  const record = asRecord(value);
+  if (!record) {
     return null;
   }
-  try {
-    const url = new URL(value, "https://www.xiaohongshu.com");
-    if (!url.pathname.startsWith("/explore/")) {
-      return null;
-    }
-    return asString(url.pathname.split("/").filter((segment) => segment.length > 0).at(-1));
-  } catch {
-    return null;
-  }
+  const data = asRecord(record.data);
+  const note = asRecord(data?.note);
+  const items = asArray(data?.items);
+  const firstItem = items ? asRecord(items[0]) : null;
+  const metadata = asRecord(data?.metadata);
+  return (
+    asString(record.note_id) ??
+    asString(data?.note_id) ??
+    asString(note?.note_id) ??
+    asString(note?.id) ??
+    asString(firstItem?.note_id) ??
+    asString(firstItem?.id) ??
+    asString(metadata?.current_note_id)
+  );
 };
 
 const createDetailShape = (noteId: string): DetailRequestShape => ({
@@ -351,9 +357,10 @@ const deriveReadShapeFromArtifact = (
       : deriveUserHomeShapeFromSource(explicitShape);
   }
   if (spec.command === "xhs.detail") {
-    const noteIdFromReferrer = parseNoteIdFromExploreUrl(resolveCapturedArtifactReferrer(record));
-    if (noteIdFromReferrer) {
-      return createDetailShape(noteIdFromReferrer);
+    const response = asRecord(record.response);
+    const noteIdFromResponse = resolveDetailResponseNoteId(response?.body);
+    if (noteIdFromResponse) {
+      return createDetailShape(noteIdFromResponse);
     }
   }
   const request = asRecord(record.request);
