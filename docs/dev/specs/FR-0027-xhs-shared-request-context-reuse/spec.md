@@ -141,6 +141,7 @@ Canonical Issue: #508
 - shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
 - route-bucket `incompatible_observation` 必须携带 `incompatibility_reason=shape_mismatch`
 - synthetic / failed / non-2xx candidate 不得写入 route-bucket `incompatible_observation`
+- route bucket 的 `available_shape_keys` 仍必须保留 rejected-only sibling shape；即使当前没有 success-only `incompatible_observation`，lookup 也必须继续得出 `shape_mismatch` 的 fail-closed 结果
 
 ### 7. lookup / eligibility / fail-closed
 
@@ -173,6 +174,7 @@ Canonical Issue: #508
 - 不允许 silent synthetic fallback。
 - 不允许“部分字段命中后局部复用、其余字段重算”的混合路径。
 - `request_context_missing` / `request_context_incompatible` 的结构化诊断必须继续保留 machine-readable reason。
+- 当 route bucket 只存在 failed / synthetic / non-2xx sibling shape 时，lookup 必须返回 `miss(reason="shape_mismatch")` 并继续映射到 `request_context_incompatible`；不得伪造 success-only `incompatible_observation`，也不得把该路径压扁成 `template_missing`
 
 ### 8. replacement implementation formal gate
 
@@ -233,6 +235,17 @@ Then 结果必须是 `incompatible`
 And `request_context_miss_reason` 必须保留 `shape_mismatch`
 And 不得继续进入 synthetic fallback
 And 最近不兼容候选必须记录在 route bucket 层，而不是当前 shape slot
+
+### 场景 5A：rejected-only sibling shape 也必须保留 `shape_mismatch`
+
+Given 当前 namespace 下不存在 exact shape template
+And 当前 shape slot 下也不存在 `rejected_observation`
+And 当前 route bucket 只存在 failed / synthetic / non-2xx sibling shape
+When 系统执行 lookup / eligibility
+Then 结果必须继续 fail closed
+And `request_context_miss_reason` 必须保留 `shape_mismatch`
+And 不得伪造 success-only `incompatible_observation`
+And 不得把该路径压扁成 `template_missing`
 
 ### 场景 6：replacement implementation 不能只靠 #508 进入实现
 

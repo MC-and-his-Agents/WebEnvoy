@@ -117,6 +117,7 @@ type CapturedRequestContextRouteBucketV1 = {
 - `rejected_observation` 与 `incompatible_observation` 都必须携带 `observed_at`。
 - shape-slot `rejected_observation` 必须显式携带 `shape`、`shape_key`、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`；其 `rejection_reason` 只允许 `synthetic_request_rejected` / `failed_request_rejected`。
 - route-bucket `incompatible_observation` 必须显式携带 `shape`、`shape_key`、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`；synthetic / failed / non-2xx candidate 不得进入 incompatible bucket。
+- route bucket 的 `available_shape_keys` 仍必须覆盖 rejected-only sibling shape；即使当前没有 success-only `incompatible_observation`，lookup 也必须能继续得出 `shape_mismatch` 的 fail-closed 结论。
 
 ## 4. Gate rule
 
