@@ -136,7 +136,7 @@ Canonical Issue: #508
 - synthetic request 只能进入 `rejected_observation`
 - failed / non-2xx request 只能进入 `rejected_observation`
 - capture admission 拒绝不得被等价成 template hit
-- rejected observation 也必须按当前 namespace 的 route bucket + `shape_key` 分槽
+- rejected observation 也必须按当前 `page_context_namespace + shape_key` 分槽
 - detail capture-side canonical `note_id` derivation 当前不在本 FR 冻结；admitted detail capture path 必须等待 `#510`
 - shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
 - route-bucket `incompatible_observation` 必须携带 `incompatibility_reason=shape_mismatch`

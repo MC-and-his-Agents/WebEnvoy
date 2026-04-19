@@ -24,12 +24,12 @@
 ### 阶段 4：spec review PR 准备
 
 - 产出：spec-only Draft PR、纯度门禁记录、PR 结构化元数据
-- 重点：确保 PR 只承载 `FR-0027` formal suite 与 issue-sync map，不混实现代码
+- 重点：确保 PR 以 `FR-0027` formal suite 为主，并且只在 review 明确允许的范围内回写 `FR-0024` search-only machine contract / data-model 兼容项；不混实现代码
 
 ## 实现约束
 
 - 不修改 runtime、extension、CLI 或测试实现代码。
-- 不重写 `FR-0024` search-only formal truth。
+- 不重写 `FR-0024` search-only formal truth的 owner；如需回写，只允许最小兼容性 backwrite，且不得把 `FR-0024` 扩写成跨命令 owner。
 - 不重写 `FR-0025` command surface / request-context baseline。
 - 不重写 `#505` 的 detail identity-only formal freeze。
 - 不在本 PR 中混入 `#489/#500` 实现修复、`#445` closeout 或 latest-main rerun。
