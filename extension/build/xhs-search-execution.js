@@ -188,6 +188,16 @@ const resolveSearchRequestContext = (artifact, expectedShape, now) => {
                 shape: deriveSearchShapeFromArtifact(incompatibleObservation)
             };
         }
+        const availableShapeKeys = Array.isArray(lookupRecord.available_shape_keys)
+            ? lookupRecord.available_shape_keys.filter((item) => typeof item === "string")
+            : [];
+        if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
+            return {
+                state: "incompatible",
+                reason: "shape_mismatch",
+                shape: null
+            };
+        }
         return {
             state: "miss",
             reason: "template_missing"

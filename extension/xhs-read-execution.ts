@@ -269,20 +269,13 @@ const resolveDetailResponseNoteId = (value: unknown): string | null => {
   if (!record) {
     return null;
   }
-  const data = asRecord(record.data);
-  const note = asRecord(data?.note);
-  const items = asArray(data?.items);
-  const firstItem = items ? asRecord(items[0]) : null;
-  const metadata = asRecord(data?.metadata);
-  return (
-    asString(record.note_id) ??
-    asString(data?.note_id) ??
-    asString(note?.note_id) ??
-    asString(note?.id) ??
-    asString(firstItem?.note_id) ??
-    asString(firstItem?.id) ??
-    asString(metadata?.current_note_id)
-  );
+  for (const candidate of getDetailResponseCandidates(record)) {
+    const candidateNoteId = asString(candidate.note_id) ?? asString(candidate.id);
+    if (candidateNoteId) {
+      return candidateNoteId;
+    }
+  }
+  return null;
 };
 
 const createDetailShape = (noteId: string): DetailRequestShape => ({
@@ -433,6 +426,16 @@ const resolveReadRequestContext = (
         state: "incompatible",
         reason: "shape_mismatch",
         shape: deriveReadShapeFromArtifact(spec, incompatibleObservation)
+      };
+    }
+    const availableShapeKeys = Array.isArray(lookupRecord.available_shape_keys)
+      ? lookupRecord.available_shape_keys.filter((item): item is string => typeof item === "string")
+      : [];
+    if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
+      return {
+        state: "incompatible",
+        reason: "shape_mismatch",
+        shape: null
       };
     }
     return {

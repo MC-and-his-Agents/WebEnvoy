@@ -574,6 +574,130 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("admits wrapped detail success candidates when the accepted note_id is nested under note_card", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            items: [
+              {
+                note_card: {
+                  note_id: "note-001"
+                }
+              }
+            ]
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)("https://www.xiaohongshu.com/api/sns/web/v1/feed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"source_note_id\":\"note-001\"}"
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
+      shapeKey:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request"
+        },
+        rejected_observation: null
+      }
+    });
+  });
+
+  it("does not admit detail templates when the target note_id exists only in metadata wrappers", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            items: [
+              {
+                note_card: {
+                  note_id: "different-note"
+                }
+              }
+            ],
+            metadata: {
+              current_note_id: "note-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)("https://www.xiaohongshu.com/api/sns/web/v1/feed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"source_note_id\":\"note-001\"}"
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
+      shapeKey:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null
+      }
+    });
+  });
+
   it("keeps same-path search shapes in separate buckets", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({

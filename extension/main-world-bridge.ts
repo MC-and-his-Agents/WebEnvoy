@@ -233,25 +233,118 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
   };
 };
 
+const collectArtifactRecordCandidates = (value: unknown): RecordValue[] => {
+  const direct = asRecord(value);
+  if (direct) {
+    return [direct];
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => asRecord(entry)).filter((entry): entry is RecordValue => entry !== null);
+  }
+  return [];
+};
+
+const collectNestedArtifactRecordCandidates = (
+  value: unknown,
+  nestedKeys: readonly string[],
+  seen = new Set<RecordValue>()
+): RecordValue[] => {
+  const directCandidates = collectArtifactRecordCandidates(value);
+  const nestedCandidates: RecordValue[] = [];
+
+  for (const candidate of directCandidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    nestedCandidates.push(candidate);
+    for (const key of nestedKeys) {
+      nestedCandidates.push(...collectNestedArtifactRecordCandidates(candidate[key], nestedKeys, seen));
+    }
+  }
+
+  return nestedCandidates;
+};
+
+const hasDetailArtifactDataShape = (record: RecordValue): boolean =>
+  [
+    "title",
+    "desc",
+    "user",
+    "interact_info",
+    "image_list",
+    "video_info",
+    "note_card",
+    "note_card_list"
+  ].some((key) => key in record);
+
+const getAcceptedDetailResponseCandidates = (body: unknown): RecordValue[] => {
+  const responseRecord = asRecord(body);
+  const data = responseRecord?.data ?? body;
+  const dataRecord = asRecord(data);
+  if (!dataRecord) {
+    return [];
+  }
+
+  return [
+    ...collectNestedArtifactRecordCandidates(dataRecord.note, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.note_card, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.note_card_list, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.current_note, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.item, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.items, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...collectNestedArtifactRecordCandidates(dataRecord.notes, [
+      "note",
+      "note_card",
+      "current_note",
+      "item"
+    ]),
+    ...(hasDetailArtifactDataShape(dataRecord) ? [dataRecord] : [])
+  ];
+};
+
 const resolveDetailResponseNoteId = (value: unknown): string | null => {
   const record = asRecord(value);
   if (!record) {
     return null;
   }
-  const data = asRecord(record.data);
-  const note = asRecord(data?.note);
-  const items = Array.isArray(data?.items) ? data.items : null;
-  const firstItem = items ? asRecord(items[0]) : null;
-  const metadata = asRecord(data?.metadata);
-  return (
-    toTrimmedString(record.note_id) ??
-    toTrimmedString(data?.note_id) ??
-    toTrimmedString(note?.note_id) ??
-    toTrimmedString(note?.id) ??
-    toTrimmedString(firstItem?.note_id) ??
-    toTrimmedString(firstItem?.id) ??
-    toTrimmedString(metadata?.current_note_id)
-  );
+  for (const candidate of getAcceptedDetailResponseCandidates(record)) {
+    const candidateNoteId = toTrimmedString(candidate.note_id) ?? toTrimmedString(candidate.id);
+    if (candidateNoteId) {
+      return candidateNoteId;
+    }
+  }
+  return null;
 };
 
 const parseDetailShape = (

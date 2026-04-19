@@ -298,6 +298,48 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("keeps shape_mismatch when only sibling rejected search shapes exist in the route bucket", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI"
+        },
+        options: createLiveReadOptions("run-search-rejected-sibling-001"),
+        executionContext: createExecutionContext("run-search-rejected-sibling-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "search-page",
+          shape_key:
+            '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"AI","page":1,"page_size":20,"sort":"general","note_type":0}',
+          admitted_template: null,
+          rejected_observation: null,
+          incompatible_observation: null,
+          available_shape_keys: [
+            '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"AI","page":2,"page_size":20,"sort":"general","note_type":0}'
+          ]
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("fails closed on stale exact-shape context", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
