@@ -7,13 +7,18 @@ import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRisk
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, buildIssue209PostGateArtifacts, collectXhsCommandGateReasons, evaluateXhsGate, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsGateApprovalId, resolveXhsGateDecisionId, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
+import { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER } from "./xhs-search-types.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
 const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
-const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
+const XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST = new Set([
+    SEARCH_ENDPOINT,
+    DETAIL_ENDPOINT,
+    USER_HOME_ENDPOINT
+]);
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"];
 const editorInputSelectors = [
@@ -31,6 +36,10 @@ const readTimeoutMs = (value) => {
     }
     return Math.floor(value);
 };
+const withSyntheticMainWorldRequestHeader = (headers) => ({
+    ...headers,
+    [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
+});
 const hashMainWorldBridgeProbeSecret = (value) => {
     let hash = 0x811c9dc5;
     for (let index = 0; index < value.length; index += 1) {
@@ -3773,7 +3782,7 @@ class ChromeBackgroundBridge {
             !parsedRequestUrl ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname) ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedRequestUrl.hostname) ||
-            parsedRequestUrl.pathname !== XHS_SEARCH_REQUEST_PATH) {
+            !XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST.has(parsedRequestUrl.pathname)) {
             sendResponse({
                 ok: false,
                 error: {
@@ -3787,7 +3796,7 @@ class ChromeBackgroundBridge {
             const result = await this.#executeXhsRequestInMainWorld(tabId, {
                 url: parsedRequestUrl.toString(),
                 method: message.method,
-                headers: message.headers,
+                headers: withSyntheticMainWorldRequestHeader(message.headers),
                 ...(typeof message.body === "string" ? { body: message.body } : {}),
                 timeoutMs: readTimeoutMs(message.timeout_ms) ?? 5_000,
                 ...(typeof message.referrer === "string" ? { referrer: message.referrer } : {}),

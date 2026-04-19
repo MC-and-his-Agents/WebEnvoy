@@ -4141,6 +4141,18 @@ return { XHS_ALLOWED_DOMAINS, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN, buildIssue209Po
 })();
 const __webenvoy_module_xhs_search_types = (() => {
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
+const CAPTURED_REQUEST_CONTEXT_PATHS = [
+    SEARCH_ENDPOINT,
+    DETAIL_ENDPOINT,
+    USER_HOME_ENDPOINT
+];
+const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+const createPageContextNamespace = (href) => {
+    const normalized = href.trim();
+    return normalized.length > 0 ? normalized : "about:blank";
+};
 return { SEARCH_ENDPOINT };
 })();
 const __webenvoy_module_xhs_search_telemetry = (() => {
@@ -4769,6 +4781,272 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
+const parseJsonRecord = (value) => {
+    if (typeof value === "string") {
+        try {
+            return asRecord(JSON.parse(value));
+        }
+        catch {
+            return null;
+        }
+    }
+    return asRecord(value);
+};
+const normalizeCapturedHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(record).filter((entry) => typeof entry[1] === "string"));
+};
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const deriveSearchShapeFromSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const keyword = asString(record.keyword);
+    if (!keyword) {
+        return null;
+    }
+    const page = record.page === undefined ? 1 : asInteger(record.page);
+    const pageSize = record.page_size === undefined ? 20 : asInteger(record.page_size);
+    const sort = record.sort === undefined ? "general" : asString(record.sort);
+    const noteType = record.note_type === undefined ? 0 : asInteger(record.note_type);
+    if (page === null || pageSize === null || sort === null || noteType === null) {
+        return null;
+    }
+    return {
+        command: "xhs.search",
+        method: "POST",
+        pathname: SEARCH_ENDPOINT,
+        keyword,
+        page,
+        page_size: pageSize,
+        sort,
+        note_type: noteType
+    };
+};
+const deriveSearchShapeFromCommand = (params) => ({
+    command: "xhs.search",
+    method: "POST",
+    pathname: SEARCH_ENDPOINT,
+    keyword: params.query,
+    page: params.page ?? 1,
+    page_size: params.limit ?? 20,
+    sort: params.sort ?? "general",
+    note_type: asInteger(params.note_type) ?? 0
+});
+const deriveSearchShapeFromArtifact = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const explicitShape = deriveSearchShapeFromSource(record.shape);
+    if (explicitShape) {
+        return explicitShape;
+    }
+    const request = asRecord(record.request);
+    const requestShape = deriveSearchShapeFromSource(request?.body);
+    if (requestShape) {
+        return requestShape;
+    }
+    return deriveSearchShapeFromSource(record.template_body);
+};
+const serializeSearchShape = (shape) => JSON.stringify({
+    command: shape.command,
+    method: shape.method,
+    pathname: shape.pathname,
+    keyword: shape.keyword,
+    page: shape.page,
+    page_size: shape.page_size,
+    sort: shape.sort,
+    note_type: shape.note_type
+});
+const resolveCapturedArtifactHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    const request = asRecord(record.request);
+    return normalizeCapturedHeaders(record.template_headers ?? request?.headers);
+};
+const resolveCapturedArtifactSearchId = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const explicitTemplateBody = parseJsonRecord(record.template_body);
+    const request = asRecord(record.request);
+    const requestBody = parseJsonRecord(request?.body);
+    return (asString(record.search_id) ??
+        asString(explicitTemplateBody?.search_id) ??
+        asString(requestBody?.search_id) ??
+        null);
+};
+const resolveCapturedArtifactReferrer = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    return asString(record.referrer);
+};
+const resolveCapturedArtifactStatus = (value) => {
+    const record = asRecord(value);
+    const requestStatus = asRecord(record?.request_status);
+    const sourceKind = asString(record?.source_kind);
+    const httpStatus = asInteger(requestStatus?.http_status) ?? asInteger(record?.status);
+    const completion = asString(requestStatus?.completion);
+    const templateReady = typeof record?.template_ready === "boolean" ? record.template_ready : null;
+    const explicitReason = asString(record?.rejection_reason);
+    const rejectionReason = explicitReason === "synthetic_request_rejected" || explicitReason === "failed_request_rejected"
+        ? explicitReason
+        : sourceKind !== null && sourceKind !== "page_request"
+            ? "synthetic_request_rejected"
+            : (completion !== null && completion !== "completed") ||
+                (httpStatus !== null && (httpStatus < 200 || httpStatus >= 300))
+                ? "failed_request_rejected"
+                : templateReady === false
+                    ? "failed_request_rejected"
+                    : null;
+    return {
+        sourceKind,
+        httpStatus,
+        templateReady,
+        rejectionReason
+    };
+};
+const resolveSearchRequestContext = (artifact, expectedShape, now) => {
+    if (!artifact) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const lookupRecord = asRecord(artifact);
+    if (lookupRecord &&
+        ("admitted_template" in lookupRecord ||
+            "rejected_observation" in lookupRecord ||
+            "incompatible_observation" in lookupRecord)) {
+        const admittedTemplate = asRecord(lookupRecord.admitted_template);
+        if (admittedTemplate) {
+            return resolveSearchRequestContext(admittedTemplate, expectedShape, now);
+        }
+        const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+        if (rejectedObservation) {
+            const shape = deriveSearchShapeFromArtifact(rejectedObservation);
+            const status = resolveCapturedArtifactStatus(rejectedObservation);
+            return {
+                state: "rejected_source",
+                reason: status.rejectionReason ?? "failed_request_rejected",
+                shape: shape ?? expectedShape
+            };
+        }
+        const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
+        if (incompatibleObservation) {
+            return {
+                state: "incompatible",
+                reason: "shape_mismatch",
+                shape: deriveSearchShapeFromArtifact(incompatibleObservation)
+            };
+        }
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const derivedShape = deriveSearchShapeFromArtifact(artifact);
+    if (!derivedShape) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    if (serializeSearchShape(derivedShape) !== serializeSearchShape(expectedShape)) {
+        return {
+            state: "incompatible",
+            reason: "shape_mismatch",
+            shape: derivedShape
+        };
+    }
+    const status = resolveCapturedArtifactStatus(artifact);
+    if (status.rejectionReason) {
+        return {
+            state: "rejected_source",
+            reason: status.rejectionReason,
+            shape: derivedShape
+        };
+    }
+    const capturedAt = asInteger(asRecord(artifact)?.captured_at);
+    if (capturedAt === null || now - capturedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+        return {
+            state: "stale",
+            reason: "template_stale",
+            shape: derivedShape
+        };
+    }
+    return {
+        state: "hit",
+        shape: derivedShape,
+        headers: resolveCapturedArtifactHeaders(artifact),
+        searchId: resolveCapturedArtifactSearchId(artifact),
+        referrer: resolveCapturedArtifactReferrer(artifact)
+    };
+};
+const failClosedForRequestContext = (input, env) => {
+    const isIncompatible = input.lookupResult.state === "incompatible";
+    const resultKind = isIncompatible ? "request_context_incompatible" : "request_context_missing";
+    const message = isIncompatible
+        ? "当前页面现场不存在与 xhs.search 完全一致的请求上下文"
+        : "当前页面现场缺少可复用的 xhs.search 请求上下文";
+    const reasonCode = isIncompatible ? "REQUEST_CONTEXT_INCOMPATIBLE" : "REQUEST_CONTEXT_MISSING";
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: reasonCode,
+        request_context_result: resultKind,
+        request_context_lookup_state: input.lookupResult.state,
+        request_context_miss_reason: input.lookupResult.reason,
+        request_context_shape: input.expectedShape,
+        request_context_shape_key: serializeSearchShape(input.expectedShape),
+        ...("shape" in input.lookupResult && input.lookupResult.shape
+            ? { captured_request_shape: input.lookupResult.shape }
+            : {})
+    }, createObservability({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        failureReason: input.lookupResult.reason,
+        includeKeyRequest: false,
+        failureSite: {
+            stage: "execution",
+            component: "page",
+            target: "captured_request_context",
+            summary: input.lookupResult.reason
+        }
+    }), createDiagnosis({
+        reason: input.lookupResult.reason,
+        summary: message,
+        category: "page_changed"
+    }), input.gate, input.auditRecord), input.gate.execution_audit);
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5014,13 +5292,34 @@ const executeXhsSearch = async (input, env) => {
             summary: "登录态缺失，无法执行 xhs.search"
         }), gate, auditRecord), gate.execution_audit);
     }
+    const expectedShape = deriveSearchShapeFromCommand(input.params);
+    const capturedRequestContext = env.readCapturedRequestContext
+        ? await env
+            .readCapturedRequestContext({
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            shape_key: serializeSearchShape(expectedShape)
+        })
+            .catch(() => null)
+        : null;
+    const requestContextResult = resolveSearchRequestContext(capturedRequestContext, expectedShape, env.now());
+    if (requestContextResult.state !== "hit") {
+        return failClosedForRequestContext({
+            abilityId: input.abilityId,
+            expectedShape,
+            lookupResult: requestContextResult,
+            gate,
+            auditRecord
+        }, env);
+    }
     const payload = {
-        keyword: input.params.query,
-        page: input.params.page ?? 1,
-        page_size: input.params.limit ?? 20,
-        search_id: input.params.search_id ?? env.randomId(),
-        sort: input.params.sort ?? "general",
-        note_type: input.params.note_type ?? 0
+        keyword: expectedShape.keyword,
+        page: expectedShape.page,
+        page_size: expectedShape.page_size,
+        search_id: input.params.search_id ?? requestContextResult.searchId ?? env.randomId(),
+        sort: expectedShape.sort,
+        note_type: expectedShape.note_type
     };
     let signature;
     try {
@@ -5052,13 +5351,18 @@ const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const headers = {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=utf-8",
+        Accept: getCapturedHeader(requestContextResult.headers, "Accept") ?? "application/json, text/plain, */*",
+        "Content-Type": getCapturedHeader(requestContextResult.headers, "Content-Type") ??
+            "application/json;charset=utf-8",
         "X-s": String(signature["X-s"]),
         "X-t": String(signature["X-t"]),
-        "X-S-Common": resolveXsCommon(input.options.x_s_common),
-        "x-b3-traceid": env.randomId().replace(/-/g, ""),
-        "x-xray-traceid": env.randomId().replace(/-/g, "")
+        "X-S-Common": input.options.x_s_common ??
+            getCapturedHeader(requestContextResult.headers, "X-S-Common") ??
+            resolveXsCommon(undefined),
+        "x-b3-traceid": getCapturedHeader(requestContextResult.headers, "x-b3-traceid") ??
+            env.randomId().replace(/-/g, ""),
+        "x-xray-traceid": getCapturedHeader(requestContextResult.headers, "x-xray-traceid") ??
+            env.randomId().replace(/-/g, "")
     };
     let response;
     try {
@@ -5068,7 +5372,7 @@ const executeXhsSearch = async (input, env) => {
             headers,
             body: JSON.stringify(payload),
             pageContextRequest: true,
-            referrer: env.getLocationHref(),
+            referrer: requestContextResult.referrer ?? env.getLocationHref(),
             referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
@@ -5179,9 +5483,10 @@ const {
   resolveRiskStateOutput,
   resolveXsCommon
 } = __webenvoy_module_xhs_search_telemetry;
+const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const XHS_DETAIL_SPEC = {
     command: "xhs.detail",
-    endpoint: "/api/sns/web/v1/feed",
+    endpoint: DETAIL_ENDPOINT,
     method: "POST",
     pageKind: "detail",
     requestClass: "xhs.detail",
@@ -5189,14 +5494,14 @@ const XHS_DETAIL_SPEC = {
         source_note_id: params.note_id
     }),
     buildUrl: () => "/api/sns/web/v1/feed",
-    buildSignatureUri: () => "/api/sns/web/v1/feed",
+    buildSignatureUri: () => DETAIL_ENDPOINT,
     buildDataRef: (params) => ({
         note_id: params.note_id
     })
 };
 const XHS_USER_HOME_SPEC = {
     command: "xhs.user_home",
-    endpoint: "/api/sns/web/v1/user/otherinfo",
+    endpoint: USER_HOME_ENDPOINT,
     method: "GET",
     pageKind: "user_home",
     requestClass: "xhs.user_home",
@@ -5215,6 +5520,315 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
+const parseJsonRecord = (value) => {
+    if (typeof value === "string") {
+        try {
+            return asRecord(JSON.parse(value));
+        }
+        catch {
+            return null;
+        }
+    }
+    return asRecord(value);
+};
+const normalizeCapturedHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(record).filter((entry) => typeof entry[1] === "string"));
+};
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const resolveCapturedArtifactHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    const request = asRecord(record.request);
+    return normalizeCapturedHeaders(record.template_headers ?? request?.headers);
+};
+const resolveCapturedArtifactReferrer = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    return asString(record.referrer);
+};
+const resolveCapturedArtifactStatus = (value) => {
+    const record = asRecord(value);
+    const requestStatus = asRecord(record?.request_status);
+    const sourceKind = asString(record?.source_kind);
+    const httpStatus = asInteger(requestStatus?.http_status) ?? asInteger(record?.status);
+    const completion = asString(requestStatus?.completion);
+    const templateReady = typeof record?.template_ready === "boolean" ? record.template_ready : null;
+    const explicitReason = asString(record?.rejection_reason);
+    const rejectionReason = explicitReason === "synthetic_request_rejected" || explicitReason === "failed_request_rejected"
+        ? explicitReason
+        : sourceKind !== null && sourceKind !== "page_request"
+            ? "synthetic_request_rejected"
+            : (completion !== null && completion !== "completed") ||
+                (httpStatus !== null && (httpStatus < 200 || httpStatus >= 300))
+                ? "failed_request_rejected"
+                : templateReady === false
+                    ? "failed_request_rejected"
+                    : null;
+    return {
+        sourceKind,
+        httpStatus,
+        templateReady,
+        rejectionReason
+    };
+};
+const parseUserIdFromUrl = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return asString(url.searchParams.get("user_id"));
+    }
+    catch {
+        return null;
+    }
+};
+const resolveDetailResponseNoteId = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const data = asRecord(record.data);
+    const note = asRecord(data?.note);
+    const items = asArray(data?.items);
+    const firstItem = items ? asRecord(items[0]) : null;
+    const metadata = asRecord(data?.metadata);
+    return (asString(record.note_id) ??
+        asString(data?.note_id) ??
+        asString(note?.note_id) ??
+        asString(note?.id) ??
+        asString(firstItem?.note_id) ??
+        asString(firstItem?.id) ??
+        asString(metadata?.current_note_id));
+};
+const createDetailShape = (noteId) => ({
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+});
+const deriveReadShapeFromCommand = (spec, params) => spec.command === "xhs.detail"
+    ? {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: DETAIL_ENDPOINT,
+        note_id: params.note_id
+    }
+    : {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: params.user_id
+    };
+const deriveDetailShapeFromSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const noteId = asString(record.note_id);
+    if (!noteId) {
+        return null;
+    }
+    return createDetailShape(noteId);
+};
+const deriveUserHomeShapeFromSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const userId = asString(record.user_id) ?? asString(record.userId) ?? parseUserIdFromUrl(asString(record.url));
+    if (!userId) {
+        return null;
+    }
+    return {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: userId
+    };
+};
+const deriveReadShapeFromArtifact = (spec, artifact) => {
+    if (!artifact) {
+        return null;
+    }
+    const record = asRecord(artifact);
+    if (!record) {
+        return null;
+    }
+    const explicitShape = parseJsonRecord(record.shape);
+    if (explicitShape) {
+        return spec.command === "xhs.detail"
+            ? deriveDetailShapeFromSource(explicitShape)
+            : deriveUserHomeShapeFromSource(explicitShape);
+    }
+    if (spec.command === "xhs.detail") {
+        const response = asRecord(record.response);
+        const noteIdFromResponse = resolveDetailResponseNoteId(response?.body);
+        if (noteIdFromResponse) {
+            return createDetailShape(noteIdFromResponse);
+        }
+    }
+    const request = asRecord(record.request);
+    if (spec.command === "xhs.detail") {
+        return deriveDetailShapeFromSource(request?.body);
+    }
+    const urlShape = deriveUserHomeShapeFromSource({ url: asString(record.url) });
+    if (urlShape) {
+        return urlShape;
+    }
+    return deriveUserHomeShapeFromSource(request?.body);
+};
+const serializeReadShape = (shape) => shape.command === "xhs.detail"
+    ? JSON.stringify({
+        command: shape.command,
+        method: shape.method,
+        pathname: shape.pathname,
+        note_id: shape.note_id
+    })
+    : JSON.stringify({
+        command: shape.command,
+        method: shape.method,
+        pathname: shape.pathname,
+        user_id: shape.user_id
+    });
+const resolveReadRequestContext = (spec, artifact, expectedShape, now) => {
+    if (!artifact) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const lookupRecord = asRecord(artifact);
+    if (lookupRecord &&
+        ("admitted_template" in lookupRecord ||
+            "rejected_observation" in lookupRecord ||
+            "incompatible_observation" in lookupRecord)) {
+        const admittedTemplate = asRecord(lookupRecord.admitted_template);
+        if (admittedTemplate) {
+            return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now);
+        }
+        const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+        if (rejectedObservation) {
+            const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation);
+            const status = resolveCapturedArtifactStatus(rejectedObservation);
+            return {
+                state: "rejected_source",
+                reason: status.rejectionReason ?? "failed_request_rejected",
+                shape: derivedShape ?? expectedShape
+            };
+        }
+        const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
+        if (incompatibleObservation) {
+            return {
+                state: "incompatible",
+                reason: "shape_mismatch",
+                shape: deriveReadShapeFromArtifact(spec, incompatibleObservation)
+            };
+        }
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const derivedShape = deriveReadShapeFromArtifact(spec, artifact);
+    if (!derivedShape) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    if (serializeReadShape(derivedShape) !== serializeReadShape(expectedShape)) {
+        return {
+            state: "incompatible",
+            reason: "shape_mismatch",
+            shape: derivedShape
+        };
+    }
+    const status = resolveCapturedArtifactStatus(artifact);
+    if (status.rejectionReason) {
+        return {
+            state: "rejected_source",
+            reason: status.rejectionReason,
+            shape: derivedShape
+        };
+    }
+    const capturedAt = asInteger(asRecord(artifact)?.captured_at);
+    if (capturedAt === null || now - capturedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+        return {
+            state: "stale",
+            reason: "template_stale",
+            shape: derivedShape
+        };
+    }
+    return {
+        state: "hit",
+        shape: derivedShape,
+        headers: resolveCapturedArtifactHeaders(artifact),
+        referrer: resolveCapturedArtifactReferrer(artifact)
+    };
+};
+const failClosedForRequestContext = (input, env) => {
+    const isIncompatible = input.lookupResult.state === "incompatible";
+    const resultKind = isIncompatible ? "request_context_incompatible" : "request_context_missing";
+    const message = isIncompatible
+        ? `当前页面现场不存在与 ${input.spec.command} 完全一致的请求上下文`
+        : `当前页面现场缺少可复用的 ${input.spec.command} 请求上下文`;
+    const reasonCode = isIncompatible ? "REQUEST_CONTEXT_INCOMPATIBLE" : "REQUEST_CONTEXT_MISSING";
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: reasonCode,
+        request_context_result: resultKind,
+        request_context_lookup_state: input.lookupResult.state,
+        request_context_miss_reason: input.lookupResult.reason,
+        request_context_shape: input.expectedShape,
+        request_context_shape_key: serializeReadShape(input.expectedShape),
+        ...("shape" in input.lookupResult && input.lookupResult.shape
+            ? { captured_request_shape: input.lookupResult.shape }
+            : {})
+    }, createReadObservability({
+        spec: input.spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        failureReason: input.lookupResult.reason,
+        includeKeyRequest: false,
+        failureSite: {
+            stage: "execution",
+            component: "page",
+            target: "captured_request_context",
+            summary: input.lookupResult.reason
+        }
+    }), createReadDiagnosis(input.spec, {
+        reason: input.lookupResult.reason,
+        summary: message,
+        category: "page_changed"
+    }), input.gate, input.auditRecord), input.gate.execution_audit);
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5719,8 +6333,8 @@ const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) =>
         summary: mapped.message
     }), gate, auditRecord), gate?.execution_audit ?? null);
 };
-const buildHeaders = (env, options, signature) => ({
-    Accept: "application/json, text/plain, */*",
+const buildHeaders = (env, options, signature, capturedHeaders) => ({
+    Accept: getCapturedHeader(capturedHeaders ?? {}, "Accept") ?? "application/json, text/plain, */*",
     ...(options.target_domain === "www.xiaohongshu.com" || options.target_domain === undefined
         ? {}
         : {}),
@@ -5728,12 +6342,16 @@ const buildHeaders = (env, options, signature) => ({
         ? {
             "X-s": String(signature["X-s"]),
             "X-t": String(signature["X-t"]),
-            "X-S-Common": resolveXsCommon(options.x_s_common),
-            "x-b3-traceid": env.randomId().replace(/-/g, ""),
-            "x-xray-traceid": env.randomId().replace(/-/g, "")
+            "X-S-Common": options.x_s_common ??
+                getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+                resolveXsCommon(undefined),
+            "x-b3-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
+                env.randomId().replace(/-/g, ""),
+            "x-xray-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-xray-traceid") ??
+                env.randomId().replace(/-/g, "")
         }
         : {}),
-    "Content-Type": "application/json;charset=utf-8"
+    "Content-Type": getCapturedHeader(capturedHeaders ?? {}, "Content-Type") ?? "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
@@ -5844,6 +6462,28 @@ const executeXhsRead = async (input, spec, env) => {
             summary: `登录态缺失，无法执行 ${spec.command}`
         }), gate, auditRecord), gate.execution_audit);
     }
+    const expectedShape = deriveReadShapeFromCommand(spec, input.params);
+    const capturedRequestContext = env.readCapturedRequestContext
+        ? await env
+            .readCapturedRequestContext({
+            method: spec.method,
+            path: spec.endpoint,
+            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            shape_key: serializeReadShape(expectedShape)
+        })
+            .catch(() => null)
+        : null;
+    const requestContextResult = resolveReadRequestContext(spec, capturedRequestContext, expectedShape, env.now());
+    if (requestContextResult.state !== "hit") {
+        return failClosedForRequestContext({
+            abilityId: input.abilityId,
+            spec,
+            expectedShape,
+            lookupResult: requestContextResult,
+            gate,
+            auditRecord
+        }, env);
+    }
     let signature;
     try {
         signature = await env.callSignature(spec.buildSignatureUri(input.params), payload);
@@ -5887,8 +6527,11 @@ const executeXhsRead = async (input, spec, env) => {
         response = await env.fetchJson({
             url: spec.buildUrl(input.params),
             method: spec.method,
-            headers: buildHeaders(env, input.options, signature),
+            headers: buildHeaders(env, input.options, signature, requestContextResult.headers),
             ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+            pageContextRequest: true,
+            referrer: requestContextResult.referrer ?? env.getLocationHref(),
+            referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
                 : 30_000
@@ -6714,6 +7357,66 @@ const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+const asCapturedRequestContextArtifact = (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+    const record = value;
+    const request = record.request;
+    const response = record.response;
+    if ((record.source_kind !== "page_request" && record.source_kind !== "synthetic_request") ||
+        (record.transport !== "fetch" && record.transport !== "xhr") ||
+        (record.method !== "POST" && record.method !== "GET") ||
+        typeof record.path !== "string" ||
+        typeof record.url !== "string" ||
+        typeof record.status !== "number" ||
+        typeof record.captured_at !== "number" ||
+        typeof record.page_context_namespace !== "string" ||
+        typeof record.shape_key !== "string" ||
+        typeof record.shape !== "object" ||
+        record.shape === null ||
+        Array.isArray(record.shape) ||
+        typeof request !== "object" ||
+        request === null ||
+        Array.isArray(request) ||
+        typeof response !== "object" ||
+        response === null ||
+        Array.isArray(response)) {
+        return null;
+    }
+    return record;
+};
+const asCapturedRequestContextLookupResult = (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+    const record = value;
+    if (typeof record.page_context_namespace !== "string" ||
+        typeof record.shape_key !== "string" ||
+        !Array.isArray(record.available_shape_keys)) {
+        return null;
+    }
+    return {
+        page_context_namespace: record.page_context_namespace,
+        shape_key: record.shape_key,
+        admitted_template: asCapturedRequestContextArtifact(record.admitted_template),
+        rejected_observation: asCapturedRequestContextArtifact(record.rejected_observation),
+        incompatible_observation: asCapturedRequestContextArtifact(record.incompatible_observation),
+        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string")
+    };
+};
+const readCapturedRequestContextViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "captured-request-context-read",
+        payload: {
+            method: input.method,
+            path: input.path,
+            page_context_namespace: input.page_context_namespace,
+            shape_key: input.shape_key
+        }
+    });
+    return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+};
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
         ? globalThis.location.href
@@ -7161,6 +7864,7 @@ const createBrowserEnvironment = () => ({
     getCookie: () => document.cookie,
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {

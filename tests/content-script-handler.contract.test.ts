@@ -10,6 +10,7 @@ import {
   resolveFingerprintContextForContract,
   resolveMainWorldEventNamesForSecret
 } from "../extension/content-script-handler.js";
+import { createPageContextNamespace } from "../extension/xhs-search-types.js";
 
 interface MockEvent {
   type: string;
@@ -23,6 +24,74 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const createCapturedSearchContextHit = () => {
+  const href = "https://www.xiaohongshu.com/search_result?keyword=test";
+  const pageContextNamespace = createPageContextNamespace(href);
+  const capturedAt = Date.now();
+  const shapeKey = JSON.stringify({
+    command: "xhs.search",
+    method: "POST",
+    pathname: "/api/sns/web/v1/search/notes",
+    keyword: "露营",
+    page: 1,
+    page_size: 20,
+    sort: "general",
+    note_type: 0
+  });
+  return {
+    source_kind: "page_request",
+    transport: "fetch",
+    method: "POST",
+    path: "/api/sns/web/v1/search/notes",
+    url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+    status: 200,
+    captured_at: capturedAt,
+    page_context_namespace: pageContextNamespace,
+    request_status: {
+      completion: "completed",
+      http_status: 200
+    },
+    shape: {
+      command: "xhs.search",
+      method: "POST",
+      pathname: "/api/sns/web/v1/search/notes",
+      keyword: "露营",
+      page: 1,
+      page_size: 20,
+      sort: "general",
+      note_type: 0
+    },
+    shape_key: shapeKey,
+    referrer: href,
+    request: {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json;charset=utf-8",
+        "X-S-Common": "{\"searchId\":\"captured-search-id\"}",
+        "x-b3-traceid": "trace-b3-captured",
+        "x-xray-traceid": "trace-xray-captured"
+      },
+      body: {
+        keyword: "露营",
+        page: 1,
+        page_size: 20,
+        search_id: "captured-search-id",
+        sort: "general",
+        note_type: 0
+      }
+    },
+    response: {
+      headers: {},
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }
+  };
+};
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -398,6 +467,18 @@ const withMockMainWorld = async (
               message: error instanceof Error ? error.message : String(error)
             });
           });
+        return;
+      }
+
+      if (requestType === "captured-request-context-read") {
+        const lookupHandler = (mockWindow as Window & Record<string, unknown>)
+          .__capturedRequestContextLookupHandler__;
+        const lookupResult =
+          typeof lookupHandler === "function"
+            ? lookupHandler(requestPayload)
+            : (mockWindow as Window & Record<string, unknown>)
+                .__capturedRequestContextLookupResult__;
+        emitResult({ id: requestId, ok: true, result: lookupResult ?? null });
         return;
       }
 
@@ -1200,10 +1281,12 @@ describe("content-script handler contract", () => {
     });
   });
 
-  it("does not trust forged main-world xhs-sign success by request id only", async () => {
+  it("does not let a forged main-world result bypass extension signature failure after request-context hit", async () => {
     await withMockMainWorld(async ({ mockWindow, mainWorldResultEvent }) => {
       const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
+      (mockWindow as Window & Record<string, unknown>).__disableExtensionXhsSign__ = true;
+      (mockWindow as Window & Record<string, unknown>).__capturedRequestContextLookupResult__ =
+        createCapturedSearchContextHit();
       (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
 
       (globalThis as { fetch?: typeof fetch }).fetch = async () =>
@@ -1339,6 +1422,8 @@ describe("content-script handler contract", () => {
         );
       });
       (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ = mainWorldFetch;
+      (mockWindow as Window & Record<string, unknown>).__capturedRequestContextLookupResult__ =
+        createCapturedSearchContextHit();
       (globalThis as { fetch?: typeof fetch }).fetch = async () => {
         throw new Error("content script fetch should not be used for live xhs.search");
       };

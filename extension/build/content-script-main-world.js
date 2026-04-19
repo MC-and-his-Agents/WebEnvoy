@@ -187,6 +187,66 @@ export const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+const asCapturedRequestContextArtifact = (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+    const record = value;
+    const request = record.request;
+    const response = record.response;
+    if ((record.source_kind !== "page_request" && record.source_kind !== "synthetic_request") ||
+        (record.transport !== "fetch" && record.transport !== "xhr") ||
+        (record.method !== "POST" && record.method !== "GET") ||
+        typeof record.path !== "string" ||
+        typeof record.url !== "string" ||
+        typeof record.status !== "number" ||
+        typeof record.captured_at !== "number" ||
+        typeof record.page_context_namespace !== "string" ||
+        typeof record.shape_key !== "string" ||
+        typeof record.shape !== "object" ||
+        record.shape === null ||
+        Array.isArray(record.shape) ||
+        typeof request !== "object" ||
+        request === null ||
+        Array.isArray(request) ||
+        typeof response !== "object" ||
+        response === null ||
+        Array.isArray(response)) {
+        return null;
+    }
+    return record;
+};
+const asCapturedRequestContextLookupResult = (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+    const record = value;
+    if (typeof record.page_context_namespace !== "string" ||
+        typeof record.shape_key !== "string" ||
+        !Array.isArray(record.available_shape_keys)) {
+        return null;
+    }
+    return {
+        page_context_namespace: record.page_context_namespace,
+        shape_key: record.shape_key,
+        admitted_template: asCapturedRequestContextArtifact(record.admitted_template),
+        rejected_observation: asCapturedRequestContextArtifact(record.rejected_observation),
+        incompatible_observation: asCapturedRequestContextArtifact(record.incompatible_observation),
+        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string")
+    };
+};
+export const readCapturedRequestContextViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "captured-request-context-read",
+        payload: {
+            method: input.method,
+            path: input.path,
+            page_context_namespace: input.page_context_namespace,
+            shape_key: input.shape_key
+        }
+    });
+    return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+};
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
         ? globalThis.location.href
