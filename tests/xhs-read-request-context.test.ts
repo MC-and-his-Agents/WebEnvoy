@@ -310,6 +310,55 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps polling detail context after readyState becomes complete until the captured template arrives", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let readyState = "interactive";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {
+      readyState = "complete";
+    });
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount < 3 ? null : createDetailArtifact();
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-complete-retry-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-complete-retry-001")
+      },
+      createEnvironment({
+        sleep,
+        getReadyState: () => readyState,
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
   it("fails closed for detail when captured note_id shape mismatches", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));

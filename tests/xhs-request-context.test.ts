@@ -324,6 +324,48 @@ describe("xhs search request-context exact-shape reuse", () => {
     );
   });
 
+  it("keeps polling after readyState becomes complete until the captured search template arrives", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let readyState = "interactive";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {
+      readyState = "complete";
+    });
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount < 3 ? null : createCapturedArtifact();
+    });
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-complete-retry-001"),
+        executionContext: createExecutionContext("run-search-context-complete-retry-001")
+      },
+      createEnvironment({
+        sleep,
+        getReadyState: () => readyState,
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
   it("fails closed on shape mismatch instead of falling back to synthetic page-context dispatch", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));

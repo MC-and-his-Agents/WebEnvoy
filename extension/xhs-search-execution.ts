@@ -488,9 +488,7 @@ const readCapturedSearchContextWithRetry = async (
 
   for (
     let attempt = 1;
-    attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
-    lastResult.state !== "hit" &&
-    env.getReadyState() !== "complete";
+    attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS && lastResult.state !== "hit";
     attempt += 1
   ) {
     await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);

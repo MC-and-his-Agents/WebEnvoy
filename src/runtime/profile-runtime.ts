@@ -13,6 +13,7 @@ import {
   type BrowserLaunchMode,
   type BrowserLaunchResult
 } from "./browser-launcher.js";
+import { writeInstalledExtensionBootstrapForRun } from "./browser-extension-staging.js";
 import {
   createProfileLock,
   type ProfileLock
@@ -599,6 +600,23 @@ export class ProfileRuntimeService {
         requestedExecutionMode
       });
       ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
+      const extensionBootstrap = buildExtensionBootstrapInput(
+        input.runId,
+        readSessionId(input.params),
+        fingerprintRuntime,
+        typeof input.params.target_page === "string" ? input.params.target_page : null
+      );
+      if (
+        identityPreflight.mode === "official_chrome_persistent_extension" &&
+        identityPreflight.binding?.extensionId
+      ) {
+        await writeInstalledExtensionBootstrapForRun({
+          profileDir,
+          extensionId: identityPreflight.binding.extensionId,
+          runId: input.runId,
+          extensionBootstrap
+        }).catch(() => undefined);
+      }
       session = beginStartSession(session, {
         runId: input.runId,
         nowIso
@@ -612,12 +630,7 @@ export class ProfileRuntimeService {
         launchMode: identityPreflight.mode,
         extensionBootstrap:
           identityPreflight.mode === "load_extension"
-            ? buildExtensionBootstrapInput(
-                input.runId,
-                readSessionId(input.params),
-                fingerprintRuntime,
-                typeof input.params.target_page === "string" ? input.params.target_page : null
-              )
+            ? extensionBootstrap
             : null
       });
       launchedControllerPid = browserLaunch.controllerPid;
@@ -798,6 +811,23 @@ export class ProfileRuntimeService {
         requestedExecutionMode
       });
       ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
+      const extensionBootstrap = buildExtensionBootstrapInput(
+        input.runId,
+        readSessionId(input.params),
+        fingerprintRuntime,
+        typeof input.params.target_page === "string" ? input.params.target_page : null
+      );
+      if (
+        identityPreflight.mode === "official_chrome_persistent_extension" &&
+        identityPreflight.binding?.extensionId
+      ) {
+        await writeInstalledExtensionBootstrapForRun({
+          profileDir,
+          extensionId: identityPreflight.binding.extensionId,
+          runId: input.runId,
+          extensionBootstrap
+        }).catch(() => undefined);
+      }
       session = beginLoginSession(session, {
         runId: input.runId,
         nowIso
@@ -813,12 +843,7 @@ export class ProfileRuntimeService {
           launchMode: identityPreflight.mode,
           extensionBootstrap:
             identityPreflight.mode === "load_extension"
-              ? buildExtensionBootstrapInput(
-                  input.runId,
-                  readSessionId(input.params),
-                  fingerprintRuntime,
-                  typeof input.params.target_page === "string" ? input.params.target_page : null
-                )
+              ? extensionBootstrap
               : null
         });
         launchedControllerPid = browserLaunch.controllerPid;

@@ -326,9 +326,7 @@ const readCapturedSearchContextWithRetry = async (expectedShape, env) => {
         page_context_namespace: createPageContextNamespace(env.getLocationHref()),
         shape_key: serializeSearchShape(expectedShape)
     }).catch(() => null), expectedShape, env.now());
-    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
-        lastResult.state !== "hit" &&
-        env.getReadyState() !== "complete"; attempt += 1) {
+    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS && lastResult.state !== "hit"; attempt += 1) {
         await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
         lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
             method: "POST",

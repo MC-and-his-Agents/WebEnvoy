@@ -4437,6 +4437,71 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
   });
 
+  it("writes bootstrap target_page into installed persistent extension payload before launch", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-bootstrap-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "persistent_bootstrap_target_page_profile"
+    });
+    const service = createTestService({
+      isProcessAlive: () => true,
+      browserLauncher: {
+        launch: async () => ({
+          browserPath: "/mock/chrome",
+          browserPid: 999999,
+          controllerPid: 999998,
+          launchArgs: ["about:blank"],
+          launchedAt: new Date().toISOString()
+        }),
+        shutdown: async () => undefined
+      }
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "persistent_bootstrap_target_page_profile",
+      runId: "run-runtime-test-persistent-bootstrap-target-page-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: PERSISTENT_EXTENSION_ID,
+          manifest_path: manifestPath
+        },
+        target_page: "search_result_tab"
+      }
+    });
+
+    const bootstrapRaw = await readFile(
+      join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "persistent_bootstrap_target_page_profile",
+        "Default",
+        "Extensions",
+        PERSISTENT_EXTENSION_ID,
+        "1.0.0",
+        "__webenvoy_fingerprint_bootstrap.json"
+      ),
+      "utf8"
+    );
+    const bootstrap = JSON.parse(bootstrapRaw) as {
+      extension_bootstrap?: {
+        run_id?: string;
+        target_page?: string;
+      };
+    };
+
+    expect(bootstrap.extension_bootstrap).toMatchObject({
+      run_id: "run-runtime-test-persistent-bootstrap-target-page-001",
+      target_page: "search_result_tab"
+    });
+  });
+
   it("returns fingerprint_runtime on start/status/stop/login", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-runtime-"));
     tempDirs.push(baseDir);
