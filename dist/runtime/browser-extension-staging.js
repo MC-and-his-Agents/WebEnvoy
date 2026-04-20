@@ -158,7 +158,7 @@ const rewriteStagedContentScriptSourceForBridge = (input) => {
     });
     rewritten = replaceSourceToken({
         source: rewritten,
-        target: "  installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);",
+        target: "  const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);",
         replacement: [
             `  const bridgeBootstrapFallbackSecret = ${JSON.stringify(input.bridgeSecret)};`,
             "  const bridgeBootstrapSecret =",
@@ -172,20 +172,22 @@ const rewriteStagedContentScriptSourceForBridge = (input) => {
             "    typeof bootstrapInput.mainWorldSecret === \"string\" && bootstrapInput.mainWorldSecret.length > 0",
             "      ? bootstrapInput.mainWorldSecret",
             "      : bridgeBootstrapSecret;",
-            "  installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
+            "  const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
         ].join("\n"),
         errorMessage: "staged content-script 缺少 main-world secret 安装锚点，无法注入 per-run secret channel"
     });
     rewritten = replaceSourceToken({
         source: rewritten,
-        target: "      installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);",
+        target: "            const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);",
         replacement: [
             "      const resolvedMainWorldSecret =",
             "        typeof resolvedBootstrap.mainWorldSecret === \"string\" &&",
             "        resolvedBootstrap.mainWorldSecret.length > 0",
             "          ? resolvedBootstrap.mainWorldSecret",
             "          : bridgeBootstrapSecret;",
-            "      installMainWorldEventChannelSecret(resolvedMainWorldSecret);"
+            "      const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(",
+            "        resolvedMainWorldSecret",
+            "      );"
         ].join("\n"),
         errorMessage: "staged content-script 缺少 fallback main-world secret 安装锚点，无法注入 per-run secret channel"
     });

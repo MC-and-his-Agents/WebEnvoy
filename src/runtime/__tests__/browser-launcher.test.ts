@@ -620,7 +620,10 @@ describe("browser-launcher", () => {
     expect(bundledContentScriptRaw).toContain(
       "typeof bootstrapPayload.bridge_bootstrap === \"string\""
     );
-    expect(bundledContentScriptRaw).toContain("installMainWorldEventChannelSecret(resolvedMainWorldSecret);");
+    expect(bundledContentScriptRaw).toContain(
+      "const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret("
+    );
+    expect(bundledContentScriptRaw).toContain("resolvedMainWorldSecret");
     expect(bundledContentScriptRaw).not.toContain("window.postMessage(");
     await expect(
       executeBundledDryRunSearch(join(stagedExtensionPath as string, "build", "content-script.js"))
