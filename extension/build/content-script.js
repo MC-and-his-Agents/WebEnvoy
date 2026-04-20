@@ -8831,6 +8831,9 @@ const bootstrapContentScript = (runtime) => {
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
+    if (bootstrapInput.mainWorldSecret) {
+        void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
+    }
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -8860,6 +8863,9 @@ const bootstrapContentScript = (runtime) => {
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
             installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
+            if (resolvedBootstrap.mainWorldSecret) {
+                void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
+            }
             if (!resolvedBootstrap.fingerprintRuntime) {
                 runtime.sendMessage?.({
                     kind: "result",

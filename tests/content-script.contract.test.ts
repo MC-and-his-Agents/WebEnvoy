@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContentScriptHandler, bootstrapContentScript } from "../extension/content-script.js";
-import { resetMainWorldEventChannelForContract } from "../extension/content-script-handler.js";
+import * as contentScriptHandlerModule from "../extension/content-script-handler.js";
+
+const { resetMainWorldEventChannelForContract } = contentScriptHandlerModule;
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
@@ -432,6 +434,30 @@ describe("content-script bootstrap contract", () => {
     expect(startupTrust?.install_state).toBeUndefined();
   });
 
+  it("activates request-context capture during bootstrap when startup bootstrap payload is present", async () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+      run_id: "run-bootstrap-capture-001",
+      runtime_context_id: "ctx-bootstrap-capture-001",
+      session_id: "nm-session-001",
+      fingerprint_runtime: context
+    };
+    const sessionStorage = createSessionStorage();
+    const { window } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
+
+    const activationSpy = vi
+      .spyOn(contentScriptHandlerModule, "activateCapturedRequestContextCaptureViaMainWorld")
+      .mockResolvedValue(true);
+    const { runtime } = createRuntime();
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(activationSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
     const sessionStorage = createSessionStorage();
     const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);
@@ -449,6 +475,22 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(0);
+  });
+
+  it("does not activate request-context capture during bootstrap when startup payload is missing", async () => {
+    const sessionStorage = createSessionStorage();
+    const { window } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
+
+    const activationSpy = vi
+      .spyOn(contentScriptHandlerModule, "activateCapturedRequestContextCaptureViaMainWorld")
+      .mockResolvedValue(true);
+    const { runtime } = createRuntime();
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+
+    expect(activationSpy).not.toHaveBeenCalled();
   });
 
   it("ignores page-forged fingerprint-install event without secret-derived event name", async () => {
