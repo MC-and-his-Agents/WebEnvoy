@@ -291,6 +291,7 @@ const withMockMainWorld = async (
     mockWindow: Window & Record<string, unknown>;
     mainWorldRequestEvent: string;
     mainWorldResultEvent: string;
+    recordedRequestTypes: string[];
   }) => Promise<void>
 ): Promise<void> => {
   const previousWindow = (globalThis as { window?: unknown }).window;
@@ -299,6 +300,7 @@ const withMockMainWorld = async (
   const previousChrome = (globalThis as { chrome?: unknown }).chrome;
   const { requestEvent: mainWorldRequestEvent, resultEvent: mainWorldResultEvent } =
     resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET);
+  const recordedRequestTypes: string[] = [];
 
   const listeners = new Map<string, Set<(event: MockEvent) => void>>();
   const addListener = (type: string, listener: (event: MockEvent) => void) => {
@@ -368,6 +370,7 @@ const withMockMainWorld = async (
       if (typeof requestId !== "string" || requestId.length === 0 || typeof requestType !== "string") {
         return;
       }
+      recordedRequestTypes.push(requestType);
 
       if (event.type !== mainWorldRequestEvent) {
         return;
@@ -930,7 +933,8 @@ const withMockMainWorld = async (
     await run({
       mockWindow,
       mainWorldRequestEvent,
-      mainWorldResultEvent
+      mainWorldResultEvent,
+      recordedRequestTypes
     });
   } finally {
     resetMainWorldEventChannelForContract();
@@ -1073,6 +1077,78 @@ describe("content-script handler contract", () => {
     });
 
     expect(resolved).toEqual(directFingerprintContext);
+  });
+
+  it("keeps creator publish runtime.bootstrap attestation independent from request-context capture", async () => {
+    await withMockMainWorld(async ({ recordedRequestTypes }) => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      const fingerprintContext = {
+        ...createFingerprintContext(),
+        injection: {
+          installed: true,
+          applied_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          required_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          missing_required_patches: [],
+          source: "main_world"
+        }
+      };
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-runtime-bootstrap-write-001",
+        runId: "run-runtime-bootstrap-write-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.bootstrap",
+        params: {
+          session_id: "nm-session-001"
+        },
+        commandParams: {
+          version: "v1",
+          run_id: "run-runtime-bootstrap-write-001",
+          runtime_context_id: "ctx-runtime-bootstrap-write-001",
+          profile: "profile-a",
+          target_page: "creator_publish_tab",
+          main_world_secret: MAIN_WORLD_CHANNEL_SECRET,
+          fingerprint_context: fingerprintContext
+        },
+        fingerprintContext: null
+      });
+
+      await waitForResult(results);
+
+      expect(results[0]?.ok).toBe(true);
+      expect(results[0]?.payload).toEqual(
+        expect.objectContaining({
+          method: "runtime.bootstrap.ack",
+          runtime_bootstrap_attested: true,
+          result: expect.objectContaining({
+            status: "ready",
+            profile: "profile-a",
+            run_id: "run-runtime-bootstrap-write-001",
+            runtime_context_id: "ctx-runtime-bootstrap-write-001"
+          })
+        })
+      );
+      expect(recordedRequestTypes).not.toContain("captured-request-context-activate");
+    });
   });
 
   it("returns fingerprint_runtime injection status for runtime.ping", async () => {

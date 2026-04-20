@@ -2760,22 +2760,8 @@ class ChromeBackgroundBridge {
 
     try {
       await this.#prepareRuntimeBootstrapRequestContextCapture(request, commandParams);
-    } catch (error) {
-      this.#emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>main-world"
-        },
-        error: {
-          code: "ERR_TRANSPORT_FORWARD_FAILED",
-          message:
-            error instanceof Error
-              ? error.message
-              : "runtime bootstrap request-context capture preparation failed"
-        }
-      });
-      return;
+    } catch {
+      // Keep bootstrap attestation independent from request-context capture preparation.
     }
 
     if (bootstrapReadyFromState && trustedMatchesBootstrap || bootstrapReadyFromTrusted) {

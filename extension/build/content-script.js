@@ -8104,6 +8104,7 @@ const resolveTargetPageFromHref = (href, command) => {
         return null;
     }
 };
+const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 class ContentScriptHandler {
     #listeners = new Set();
     #reachable = true;
@@ -8251,17 +8252,15 @@ class ContentScriptHandler {
             return;
         }
         const channelInstalled = installMainWorldEventChannelSecret(mainWorldSecret);
-        const captureActivated = channelInstalled
-            ? await activateCapturedRequestContextCaptureViaMainWorld().catch(() => false)
-            : false;
-        const runtimeWithInjection = channelInstalled && captureActivated
+        if (channelInstalled && isXhsReadBootstrapTargetPage(commandParams.target_page)) {
+            await activateCapturedRequestContextCaptureViaMainWorld().catch(() => false);
+        }
+        const runtimeWithInjection = channelInstalled || hasInstalledFingerprintInjection(fingerprintRuntime)
             ? await this.#installFingerprintIfPresent({
                 ...message,
                 fingerprintContext: fingerprintRuntime
             })
-            : buildFailedFingerprintInjectionContext(fingerprintRuntime, channelInstalled
-                ? "main world request-context capture unavailable"
-                : "main world event channel unavailable");
+            : buildFailedFingerprintInjectionContext(fingerprintRuntime, "main world event channel unavailable");
         const injection = asRecord(runtimeWithInjection?.injection);
         const attested = injection?.installed === true;
         const ackPayload = buildRuntimeBootstrapAckPayload({

@@ -812,6 +812,73 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("keeps attested runtime.bootstrap ready even when read capture preparation cannot be pre-injected", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockImplementation(async (input: Record<string, unknown>) => {
+      if (input.world === "MAIN") {
+        throw new Error("main world bridge unavailable");
+      }
+      return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-ready-read-best-effort-001",
+      runtimeContextId: "ctx-bootstrap-ready-read-best-effort-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabId: 11,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=AI"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-ready-read-best-effort-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-ready-read-best-effort-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-ready-read-best-effort-001",
+          runtime_context_id: "ctx-bootstrap-ready-read-best-effort-001",
+          profile: "profile-a",
+          target_tab_id: 11,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-ready-read-best-effort-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-ready-read-best-effort-001",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      }),
+      error: null
+    });
+  });
+
   it("keeps issue_208 xhs.search blocked after bootstrap trust when editor attestation is still missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
