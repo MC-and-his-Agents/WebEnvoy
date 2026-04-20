@@ -377,9 +377,38 @@ afterEach(() => {
   delete (globalThis as { chrome?: unknown }).chrome;
   delete (globalThis as { fetch?: unknown }).fetch;
   delete (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY];
+  delete (globalThis as Record<string, unknown>).__webenvoy_content_script_bootstrap_state__;
 });
 
 describe("content-script bootstrap contract", () => {
+  it("keeps bootstrap idempotent across repeated injections", async () => {
+    let listener: ((message: unknown) => void) | null = null;
+    const addListener = vi.fn((callback: (message: unknown) => void) => {
+      listener = callback;
+    });
+    const sendMessage = vi.fn();
+    (globalThis as { fetch?: unknown }).fetch = vi.fn(async () => ({
+      ok: false
+    }));
+    const runtime = {
+      onMessage: {
+        addListener
+      },
+      sendMessage,
+      getURL: vi.fn((path: string) => `chrome-extension://unit-test/${path}`)
+    };
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(listener).not.toBeNull();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("normalizes content results before relay and falls back to structured relay error on send rejection", async () => {
     const { runtime } = createRuntime();
     const sendMessage = vi
@@ -418,8 +447,12 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(sendMessage.mock.calls[0]?.[0]).toEqual({
+    const relayMessages = sendMessage.mock.calls
+      .map((call) => call[0])
+      .filter((message) => asRecord(message)?.id === "relay-json-001");
+
+    expect(relayMessages).toHaveLength(2);
+    expect(relayMessages[0]).toEqual({
       kind: "result",
       id: "relay-json-001",
       ok: true,
@@ -429,7 +462,7 @@ describe("content-script bootstrap contract", () => {
         }
       }
     });
-    expect(sendMessage.mock.calls[1]?.[0]).toEqual({
+    expect(relayMessages[1]).toEqual({
       kind: "result",
       id: "relay-json-001",
       ok: false,

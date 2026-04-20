@@ -5162,7 +5162,21 @@ class ChromeBackgroundBridge {
     try {
       await this.chromeApi.tabs.sendMessage(
         tabId,
-        { kind: "__webenvoy_content_script_probe__" } as unknown as BackgroundToContentMessage
+        {
+          kind: "forward",
+          id: "__webenvoy_content_script_probe__",
+          runId: "__webenvoy_content_script_probe__",
+          tabId,
+          profile: null,
+          cwd: "",
+          timeoutMs: 50,
+          command: "runtime.ping",
+          params: {},
+          commandParams: {
+            simulate_no_response: true
+          },
+          fingerprintContext: null
+        } satisfies BackgroundToContentMessage
       );
       return true;
     } catch {

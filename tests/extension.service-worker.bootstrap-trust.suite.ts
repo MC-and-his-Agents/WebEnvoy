@@ -379,6 +379,17 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
+    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
+      1,
+      11,
+      expect.objectContaining({
+        id: "__webenvoy_content_script_probe__",
+        command: "runtime.ping",
+        commandParams: {
+          simulate_no_response: true
+        }
+      })
+    );
     expect(executeScript).toHaveBeenCalledWith({
       target: { tabId: 11 },
       world: "MAIN",
@@ -393,6 +404,76 @@ describe("extension service worker / bootstrap and trust", () => {
       11,
       expect.objectContaining({
         id: "run-bootstrap-main-world-recover-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("skips classic content-script reinjection when a read-tab receiver answers the compatible probe", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.sendMessage = vi.fn().mockResolvedValue(undefined);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-main-world-probe-hit-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-main-world-probe-hit-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-main-world-probe-hit-001",
+          runtime_context_id: "ctx-bootstrap-main-world-probe-hit-001",
+          profile: "profile-a",
+          target_tab_id: 11,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-main-world-probe-hit-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
+      1,
+      11,
+      expect.objectContaining({
+        id: "__webenvoy_content_script_probe__",
+        command: "runtime.ping",
+        commandParams: {
+          simulate_no_response: true
+        }
+      })
+    );
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(executeScript).not.toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "ISOLATED",
+      files: ["build/content-script.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      11,
+      expect.objectContaining({
+        id: "run-bootstrap-main-world-probe-hit-001",
         command: "runtime.bootstrap"
       })
     );
