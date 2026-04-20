@@ -335,7 +335,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
     };
 };
 const failClosedForRequestContext = (input, env) => {
-    const isIncompatible = input.lookupResult.state === "incompatible";
+    const isIncompatible = input.lookupResult.state === "incompatible" || input.lookupResult.reason === "shape_mismatch";
     const resultKind = isIncompatible ? "request_context_incompatible" : "request_context_missing";
     const message = isIncompatible
         ? `当前页面现场不存在与 ${input.spec.command} 完全一致的请求上下文`
@@ -1023,7 +1023,8 @@ const executeXhsRead = async (input, spec, env) => {
     if (requestContextResult.state !== "hit") {
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-            const isIncompatible = requestContextResult.state === "incompatible";
+            const isIncompatible = requestContextResult.state === "incompatible" ||
+                requestContextResult.reason === "shape_mismatch";
             return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
                 reason: isIncompatible ? "REQUEST_CONTEXT_INCOMPATIBLE" : "REQUEST_CONTEXT_MISSING",
                 message: isIncompatible

@@ -369,7 +369,8 @@ const failClosedForRequestContext = (
   },
   env: XhsSearchEnvironment
 ): SearchExecutionResult => {
-  const isIncompatible = input.lookupResult.state === "incompatible";
+  const isIncompatible =
+    input.lookupResult.state === "incompatible" || input.lookupResult.reason === "shape_mismatch";
   const resultKind = isIncompatible ? "request_context_incompatible" : "request_context_missing";
   const message = isIncompatible
     ? "当前页面现场不存在与 xhs.search 完全一致的请求上下文"
