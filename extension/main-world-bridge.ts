@@ -1,7 +1,6 @@
 import {
   CAPTURED_REQUEST_CONTEXT_PATHS,
   DETAIL_ENDPOINT,
-  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
   SEARCH_ENDPOINT,
   USER_HOME_ENDPOINT,
   WEBENVOY_SYNTHETIC_REQUEST_HEADER,
@@ -44,6 +43,7 @@ type MainWorldWindow = Window & typeof globalThis;
 type MainWorldEventChannel = {
   requestEvent: string;
   resultEvent: string;
+  namespaceEvent: string | null;
 };
 
 type FingerprintPatchInstallContext = {
@@ -740,11 +740,14 @@ const resolveCurrentPageCaptureContext = (): {
 
 const emitCurrentPageContextNamespace = (): void => {
   const { pageContextNamespace, referrer } = resolveCurrentPageCaptureContext();
-  if (typeof mainWindow.dispatchEvent !== "function") {
+  if (
+    typeof mainWindow.dispatchEvent !== "function" ||
+    !activeMainWorldEventChannel?.namespaceEvent
+  ) {
     return;
   }
   mainWindow.dispatchEvent(
-    createWindowEvent(MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, {
+    createWindowEvent(activeMainWorldEventChannel.namespaceEvent, {
       page_context_namespace: pageContextNamespace,
       href: referrer,
       visit_sequence: pageContextVisitSequence
@@ -1185,17 +1188,37 @@ const refreshPageContextLifecycle = (options?: { advanceVisit?: boolean }): void
   emitCurrentPageContextNamespace();
 };
 
+let lastObservedPageContextHref =
+  typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
+
+const refreshPageContextLifecycleForHistoryMutation = (): void => {
+  const currentHref =
+    typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
+  if (currentHref === lastObservedPageContextHref) {
+    installDocumentStartReadCaptureIfNeeded();
+    return;
+  }
+  lastObservedPageContextHref = currentHref;
+  refreshPageContextLifecycle({ advanceVisit: true });
+};
+
 const installPageContextNavigationTracking = (): void => {
   if (typeof mainWindow.addEventListener === "function") {
     mainWindow.addEventListener("popstate", () => {
+      lastObservedPageContextHref =
+        typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
       refreshPageContextLifecycle({ advanceVisit: true });
     });
     mainWindow.addEventListener("hashchange", () => {
+      lastObservedPageContextHref =
+        typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
       refreshPageContextLifecycle({ advanceVisit: true });
     });
     mainWindow.addEventListener("pageshow", (event: Event) => {
       const pageTransitionEvent = event as PageTransitionEvent;
       if (pageTransitionEvent.persisted === true) {
+        lastObservedPageContextHref =
+          typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
         refreshPageContextLifecycle({ advanceVisit: true });
       }
     });
@@ -1215,7 +1238,7 @@ const installPageContextNavigationTracking = (): void => {
         ...args: Parameters<History["pushState"]>
       ): void {
         original.apply(this, args);
-        refreshPageContextLifecycle({ advanceVisit: true });
+        refreshPageContextLifecycleForHistoryMutation();
       };
     };
     patchStateMethod("pushState");
@@ -1747,7 +1770,8 @@ const attachMainWorldEventChannelIfValid = (requestEvent: unknown, resultEvent: 
   }
   attachMainWorldEventChannel({
     requestEvent,
-    resultEvent
+    resultEvent,
+    namespaceEvent: null
   });
   return true;
 };
@@ -1772,7 +1796,8 @@ const resolveExpectedMainWorldEventChannel = (): MainWorldEventChannel | null =>
   }
   return {
     requestEvent,
-    resultEvent
+    resultEvent,
+    namespaceEvent: null
   };
 };
 
@@ -1780,7 +1805,8 @@ const resolveBootstrappedMainWorldEventChannel = (event: Event): MainWorldEventC
   const detail = asRecord((event as CustomEvent<unknown>).detail);
   const requestEvent = asString(detail?.request_event);
   const resultEvent = asString(detail?.result_event);
-  if (!requestEvent || !resultEvent) {
+  const namespaceEvent = asString(detail?.namespace_event);
+  if (!requestEvent || !resultEvent || !namespaceEvent) {
     return null;
   }
   if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
@@ -1789,9 +1815,13 @@ const resolveBootstrappedMainWorldEventChannel = (event: Event): MainWorldEventC
   if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
     return null;
   }
+  if (!isValidChannelEventName(namespaceEvent, "__mw_ns__")) {
+    return null;
+  }
   return {
     requestEvent,
-    resultEvent
+    resultEvent,
+    namespaceEvent
   };
 };
 
@@ -1799,7 +1829,8 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   if (activeMainWorldEventChannel) {
     if (
       activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
-      activeMainWorldEventChannel.resultEvent === channel.resultEvent
+      activeMainWorldEventChannel.resultEvent === channel.resultEvent &&
+      activeMainWorldEventChannel.namespaceEvent === channel.namespaceEvent
     ) {
       return;
     }

@@ -1,4 +1,4 @@
-import { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createVisitedPageContextNamespace } from "./xhs-search-types.js";
+import { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createVisitedPageContextNamespace } from "./xhs-search-types.js";
 import { shouldAutoInstallXhsReadRequestContextCapture } from "./xhs-read-pages.js";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
@@ -512,10 +512,11 @@ const resolveCurrentPageCaptureContext = () => {
 };
 const emitCurrentPageContextNamespace = () => {
     const { pageContextNamespace, referrer } = resolveCurrentPageCaptureContext();
-    if (typeof mainWindow.dispatchEvent !== "function") {
+    if (typeof mainWindow.dispatchEvent !== "function" ||
+        !activeMainWorldEventChannel?.namespaceEvent) {
         return;
     }
-    mainWindow.dispatchEvent(createWindowEvent(MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, {
+    mainWindow.dispatchEvent(createWindowEvent(activeMainWorldEventChannel.namespaceEvent, {
         page_context_namespace: pageContextNamespace,
         href: referrer,
         visit_sequence: pageContextVisitSequence
@@ -842,17 +843,33 @@ const refreshPageContextLifecycle = (options) => {
     installDocumentStartReadCaptureIfNeeded();
     emitCurrentPageContextNamespace();
 };
+let lastObservedPageContextHref = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
+const refreshPageContextLifecycleForHistoryMutation = () => {
+    const currentHref = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
+    if (currentHref === lastObservedPageContextHref) {
+        installDocumentStartReadCaptureIfNeeded();
+        return;
+    }
+    lastObservedPageContextHref = currentHref;
+    refreshPageContextLifecycle({ advanceVisit: true });
+};
 const installPageContextNavigationTracking = () => {
     if (typeof mainWindow.addEventListener === "function") {
         mainWindow.addEventListener("popstate", () => {
+            lastObservedPageContextHref =
+                typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
             refreshPageContextLifecycle({ advanceVisit: true });
         });
         mainWindow.addEventListener("hashchange", () => {
+            lastObservedPageContextHref =
+                typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
             refreshPageContextLifecycle({ advanceVisit: true });
         });
         mainWindow.addEventListener("pageshow", (event) => {
             const pageTransitionEvent = event;
             if (pageTransitionEvent.persisted === true) {
+                lastObservedPageContextHref =
+                    typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
                 refreshPageContextLifecycle({ advanceVisit: true });
             }
         });
@@ -866,7 +883,7 @@ const installPageContextNavigationTracking = () => {
             }
             history[methodName] = function patchedHistoryState(...args) {
                 original.apply(this, args);
-                refreshPageContextLifecycle({ advanceVisit: true });
+                refreshPageContextLifecycleForHistoryMutation();
             };
         };
         patchStateMethod("pushState");
@@ -1297,7 +1314,8 @@ const attachMainWorldEventChannelIfValid = (requestEvent, resultEvent) => {
     }
     attachMainWorldEventChannel({
         requestEvent,
-        resultEvent
+        resultEvent,
+        namespaceEvent: null
     });
     return true;
 };
@@ -1319,14 +1337,16 @@ const resolveExpectedMainWorldEventChannel = () => {
     }
     return {
         requestEvent,
-        resultEvent
+        resultEvent,
+        namespaceEvent: null
     };
 };
 const resolveBootstrappedMainWorldEventChannel = (event) => {
     const detail = asRecord(event.detail);
     const requestEvent = asString(detail?.request_event);
     const resultEvent = asString(detail?.result_event);
-    if (!requestEvent || !resultEvent) {
+    const namespaceEvent = asString(detail?.namespace_event);
+    if (!requestEvent || !resultEvent || !namespaceEvent) {
         return null;
     }
     if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
@@ -1335,15 +1355,20 @@ const resolveBootstrappedMainWorldEventChannel = (event) => {
     if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
         return null;
     }
+    if (!isValidChannelEventName(namespaceEvent, "__mw_ns__")) {
+        return null;
+    }
     return {
         requestEvent,
-        resultEvent
+        resultEvent,
+        namespaceEvent
     };
 };
 const attachMainWorldEventChannel = (channel) => {
     if (activeMainWorldEventChannel) {
         if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
-            activeMainWorldEventChannel.resultEvent === channel.resultEvent) {
+            activeMainWorldEventChannel.resultEvent === channel.resultEvent &&
+            activeMainWorldEventChannel.namespaceEvent === channel.namespaceEvent) {
             return;
         }
         if (activeMainWorldRequestListener) {

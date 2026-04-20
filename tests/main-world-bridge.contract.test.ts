@@ -1,5 +1,4 @@
 import {
-  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
   createPageContextNamespace,
   createVisitedPageContextNamespace
 } from "../extension/xhs-search-types.js";
@@ -142,7 +141,8 @@ const bootstrapMainWorldBridge = async (
     type: "__mw_bootstrap__",
     detail: {
       request_event: secretChannel.requestEvent,
-      result_event: secretChannel.resultEvent
+      result_event: secretChannel.resultEvent,
+      namespace_event: secretChannel.namespaceEvent
     }
   } as unknown as Event);
 
@@ -161,6 +161,7 @@ const bootstrapMainWorldBridge = async (
   return {
     requestEvent: secretChannel.requestEvent,
     resultEvent: secretChannel.resultEvent,
+    namespaceEvent: secretChannel.namespaceEvent,
     requestListener
   };
 };
@@ -236,7 +237,8 @@ describe("main-world bridge contract", () => {
       type: "__mw_bootstrap__",
       detail: {
         request_event: secretChannel.requestEvent,
-        result_event: secretChannel.resultEvent
+        result_event: secretChannel.resultEvent,
+        namespace_event: secretChannel.namespaceEvent
       }
     } as unknown as Event);
 
@@ -304,7 +306,7 @@ describe("main-world bridge contract", () => {
     expect(env.mockWindow.fetch).not.toBe(originalFetch);
     const transitionedNamespace =
       asRecord(
-        env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT).at(-1)
+        env.dispatched.filter((entry) => entry.type === channel.namespaceEvent).at(-1)
           ?.detail
       )?.page_context_namespace ?? createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1);
 
@@ -372,13 +374,16 @@ describe("main-world bridge contract", () => {
 
     const previousNamespace =
       asRecord(
-        env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT)[0]
+        env.dispatched.filter((entry) => entry.type === channel.namespaceEvent)[0]
           ?.detail
       )?.page_context_namespace ?? SEARCH_PAGE_NAMESPACE;
 
-    env.mockWindow.history?.pushState({}, "", SEARCH_PAGE_HREF);
+    env.mockWindow.dispatchEvent({
+      type: "popstate",
+      detail: null
+    } as unknown as Event);
 
-    const namespaceEvents = env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT);
+    const namespaceEvents = env.dispatched.filter((entry) => entry.type === channel.namespaceEvent);
     const currentNamespace =
       asRecord(namespaceEvents.at(-1)?.detail)?.page_context_namespace ??
       createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1);
@@ -427,6 +432,29 @@ describe("main-world bridge contract", () => {
         available_shape_keys: []
       }
     });
+  });
+
+  it("does not rotate page-context namespace for same-url replaceState writes", async () => {
+    const env = createMockMainWorldEnvironment();
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added, { activateCapture: false });
+    const namespaceEventsBefore = env.dispatched.filter((entry) => entry.type === channel.namespaceEvent);
+    const initialNamespace =
+      asRecord(namespaceEventsBefore.at(-1)?.detail)?.page_context_namespace ?? SEARCH_PAGE_NAMESPACE;
+
+    env.mockWindow.history?.replaceState({ filter: "latest" }, "", SEARCH_PAGE_HREF);
+
+    const namespaceEventsAfter = env.dispatched.filter((entry) => entry.type === channel.namespaceEvent);
+    const latestNamespace =
+      asRecord(namespaceEventsAfter.at(-1)?.detail)?.page_context_namespace ?? SEARCH_PAGE_NAMESPACE;
+
+    expect(namespaceEventsAfter).toHaveLength(namespaceEventsBefore.length);
+    expect(latestNamespace).toBe(initialNamespace);
   });
 
   it("removes per-send XHR loadend listeners after capture completes", async () => {
@@ -534,7 +562,8 @@ describe("main-world bridge contract", () => {
       type: "__mw_bootstrap__",
       detail: {
         request_event: secretChannel.requestEvent,
-        result_event: secretChannel.resultEvent
+        result_event: secretChannel.resultEvent,
+        namespace_event: secretChannel.namespaceEvent
       }
     } as unknown as Event);
 

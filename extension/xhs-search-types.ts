@@ -318,6 +318,22 @@ export const CAPTURED_REQUEST_CONTEXT_PATHS = [
 export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
 export const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT =
   "__webenvoy_page_context_namespace__";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
+
+const hashMainWorldEventChannel = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+export const resolveMainWorldPageContextNamespaceEventName = (secret: string): string =>
+  `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(
+    `${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`
+  )}`;
 
 export const createPageContextNamespace = (href: string): PageContextNamespace => {
   const normalized = href.trim();

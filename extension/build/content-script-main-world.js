@@ -7,7 +7,8 @@ let mainWorldEventChannel = null;
 let mainWorldResultListener = null;
 let mainWorldResultListenerEventName = null;
 let latestMainWorldPageContextNamespace = null;
-let mainWorldPageContextNamespaceListenerInstalled = false;
+let mainWorldPageContextNamespaceListener = null;
+let mainWorldPageContextNamespaceListenerEventName = null;
 const pendingMainWorldRequests = new Map();
 const encodeUtf8Base64 = (value) => {
     if (typeof btoa === "function") {
@@ -33,7 +34,8 @@ const createMainWorldBootstrapDetail = (secret) => {
     const names = resolveMainWorldEventNamesForSecret(secret);
     return {
         request_event: names.requestEvent,
-        result_event: names.resultEvent
+        result_event: names.resultEvent,
+        namespace_event: names.namespaceEvent
     };
 };
 const emitMainWorldBootstrap = (secret) => {
@@ -46,7 +48,8 @@ export const resolveMainWorldEventNamesForSecret = (secret) => {
     const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
         requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
-        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`,
+        namespaceEvent: `${"__mw_ns__"}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`
     };
 };
 const createWindowEvent = (type, detail) => {
@@ -59,20 +62,31 @@ const createWindowEvent = (type, detail) => {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const installMainWorldPageContextNamespaceListener = () => {
-    if (mainWorldPageContextNamespaceListenerInstalled ||
-        typeof window === "undefined" ||
-        typeof window.addEventListener !== "function") {
+const installMainWorldPageContextNamespaceListener = (eventName) => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
         return;
     }
-    window.addEventListener("__webenvoy_page_context_namespace__", ((event) => {
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName === eventName) {
+        return;
+    }
+    if (mainWorldPageContextNamespaceListener && mainWorldPageContextNamespaceListenerEventName) {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = ((event) => {
         const detail = asRecord(event.detail);
         const namespace = detail?.page_context_namespace;
         if (typeof namespace === "string" && namespace.length > 0) {
             latestMainWorldPageContextNamespace = namespace;
         }
-    }));
-    mainWorldPageContextNamespaceListenerInstalled = true;
+    });
+    mainWorldPageContextNamespaceListenerEventName = eventName;
+    window.addEventListener(eventName, mainWorldPageContextNamespaceListener);
 };
 const onMainWorldResultEvent = (event) => {
     const detail = (event.detail ?? null);
@@ -113,7 +127,6 @@ const detachMainWorldResultListener = () => {
     mainWorldResultListenerEventName = null;
 };
 export const installMainWorldEventChannelSecret = (secret) => {
-    installMainWorldPageContextNamespaceListener();
     const normalizedSecret = normalizeMainWorldSecret(secret);
     if (typeof window === "undefined" ||
         typeof window.addEventListener !== "function" ||
@@ -128,6 +141,7 @@ export const installMainWorldEventChannelSecret = (secret) => {
         return false;
     }
     const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    installMainWorldPageContextNamespaceListener(names.namespaceEvent);
     if (mainWorldEventChannel?.secret === normalizedSecret &&
         mainWorldResultListenerEventName === names.resultEvent) {
         return true;
@@ -137,7 +151,8 @@ export const installMainWorldEventChannelSecret = (secret) => {
     mainWorldEventChannel = {
         secret: normalizedSecret,
         requestEvent: names.requestEvent,
-        resultEvent: names.resultEvent
+        resultEvent: names.resultEvent,
+        namespaceEvent: names.namespaceEvent
     };
     mainWorldResultListener = onMainWorldResultEvent;
     mainWorldResultListenerEventName = names.resultEvent;
@@ -151,7 +166,19 @@ export const resetMainWorldEventChannelForContract = () => {
     }
     pendingMainWorldRequests.clear();
     latestMainWorldPageContextNamespace = null;
-    mainWorldPageContextNamespaceListenerInstalled = false;
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName &&
+        typeof window !== "undefined" &&
+        typeof window.removeEventListener === "function") {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = null;
+    mainWorldPageContextNamespaceListenerEventName = null;
     detachMainWorldResultListener();
     mainWorldEventChannel = null;
 };
@@ -259,7 +286,9 @@ const asCapturedRequestContextLookupResult = (value) => {
     };
 };
 export const readCapturedRequestContextViaMainWorld = async (input) => {
-    installMainWorldPageContextNamespaceListener();
+    if (mainWorldEventChannel?.namespaceEvent) {
+        installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
+    }
     await activateCapturedRequestContextCaptureViaMainWorld();
     const result = await mainWorldCall({
         type: "captured-request-context-read",
@@ -335,4 +364,3 @@ export const requestXhsSearchJsonViaMainWorld = async (input) => {
     }
     return response.result;
 };
-installMainWorldPageContextNamespaceListener();

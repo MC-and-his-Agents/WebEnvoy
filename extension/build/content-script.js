@@ -4150,6 +4150,17 @@ const CAPTURED_REQUEST_CONTEXT_PATHS = [
 ];
 const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
 const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT = "__webenvoy_page_context_namespace__";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const resolveMainWorldPageContextNamespaceEventName = (secret) => `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`;
 const createPageContextNamespace = (href) => {
     const normalized = href.trim();
     if (normalized.length === 0) {
@@ -7423,7 +7434,8 @@ let mainWorldEventChannel = null;
 let mainWorldResultListener = null;
 let mainWorldResultListenerEventName = null;
 let latestMainWorldPageContextNamespace = null;
-let mainWorldPageContextNamespaceListenerInstalled = false;
+let mainWorldPageContextNamespaceListener = null;
+let mainWorldPageContextNamespaceListenerEventName = null;
 const pendingMainWorldRequests = new Map();
 const encodeUtf8Base64 = (value) => {
     if (typeof btoa === "function") {
@@ -7449,7 +7461,8 @@ const createMainWorldBootstrapDetail = (secret) => {
     const names = resolveMainWorldEventNamesForSecret(secret);
     return {
         request_event: names.requestEvent,
-        result_event: names.resultEvent
+        result_event: names.resultEvent,
+        namespace_event: names.namespaceEvent
     };
 };
 const emitMainWorldBootstrap = (secret) => {
@@ -7462,7 +7475,8 @@ const resolveMainWorldEventNamesForSecret = (secret) => {
     const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
         requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
-        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`,
+        namespaceEvent: `${"__mw_ns__"}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`
     };
 };
 const createWindowEvent = (type, detail) => {
@@ -7475,20 +7489,31 @@ const createWindowEvent = (type, detail) => {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const installMainWorldPageContextNamespaceListener = () => {
-    if (mainWorldPageContextNamespaceListenerInstalled ||
-        typeof window === "undefined" ||
-        typeof window.addEventListener !== "function") {
+const installMainWorldPageContextNamespaceListener = (eventName) => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
         return;
     }
-    window.addEventListener("__webenvoy_page_context_namespace__", ((event) => {
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName === eventName) {
+        return;
+    }
+    if (mainWorldPageContextNamespaceListener && mainWorldPageContextNamespaceListenerEventName) {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = ((event) => {
         const detail = asRecord(event.detail);
         const namespace = detail?.page_context_namespace;
         if (typeof namespace === "string" && namespace.length > 0) {
             latestMainWorldPageContextNamespace = namespace;
         }
-    }));
-    mainWorldPageContextNamespaceListenerInstalled = true;
+    });
+    mainWorldPageContextNamespaceListenerEventName = eventName;
+    window.addEventListener(eventName, mainWorldPageContextNamespaceListener);
 };
 const onMainWorldResultEvent = (event) => {
     const detail = (event.detail ?? null);
@@ -7529,7 +7554,6 @@ const detachMainWorldResultListener = () => {
     mainWorldResultListenerEventName = null;
 };
 const installMainWorldEventChannelSecret = (secret) => {
-    installMainWorldPageContextNamespaceListener();
     const normalizedSecret = normalizeMainWorldSecret(secret);
     if (typeof window === "undefined" ||
         typeof window.addEventListener !== "function" ||
@@ -7544,6 +7568,7 @@ const installMainWorldEventChannelSecret = (secret) => {
         return false;
     }
     const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    installMainWorldPageContextNamespaceListener(names.namespaceEvent);
     if (mainWorldEventChannel?.secret === normalizedSecret &&
         mainWorldResultListenerEventName === names.resultEvent) {
         return true;
@@ -7553,7 +7578,8 @@ const installMainWorldEventChannelSecret = (secret) => {
     mainWorldEventChannel = {
         secret: normalizedSecret,
         requestEvent: names.requestEvent,
-        resultEvent: names.resultEvent
+        resultEvent: names.resultEvent,
+        namespaceEvent: names.namespaceEvent
     };
     mainWorldResultListener = onMainWorldResultEvent;
     mainWorldResultListenerEventName = names.resultEvent;
@@ -7567,7 +7593,19 @@ const resetMainWorldEventChannelForContract = () => {
     }
     pendingMainWorldRequests.clear();
     latestMainWorldPageContextNamespace = null;
-    mainWorldPageContextNamespaceListenerInstalled = false;
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName &&
+        typeof window !== "undefined" &&
+        typeof window.removeEventListener === "function") {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = null;
+    mainWorldPageContextNamespaceListenerEventName = null;
     detachMainWorldResultListener();
     mainWorldEventChannel = null;
 };
@@ -7675,7 +7713,9 @@ const asCapturedRequestContextLookupResult = (value) => {
     };
 };
 const readCapturedRequestContextViaMainWorld = async (input) => {
-    installMainWorldPageContextNamespaceListener();
+    if (mainWorldEventChannel?.namespaceEvent) {
+        installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
+    }
     await activateCapturedRequestContextCaptureViaMainWorld();
     const result = await mainWorldCall({
         type: "captured-request-context-read",
@@ -7751,7 +7791,6 @@ const requestXhsSearchJsonViaMainWorld = async (input) => {
     }
     return response.result;
 };
-installMainWorldPageContextNamespaceListener();
 return { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {

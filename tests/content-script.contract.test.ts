@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContentScriptHandler, bootstrapContentScript } from "../extension/content-script.js";
 import * as contentScriptHandlerModule from "../extension/content-script-handler.js";
 import {
-  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
   createPageContextNamespace,
   createVisitedPageContextNamespace
 } from "../extension/xhs-search-types.js";
@@ -738,9 +737,12 @@ describe("content-script bootstrap contract", () => {
     expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-001")).toBe(
       true
     );
+    const { namespaceEvent } = contentScriptHandlerModule.resolveMainWorldEventNamesForSecret(
+      "namespace-secret-001"
+    );
 
     window.dispatchEvent({
-      type: MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
+      type: namespaceEvent,
       detail: {
         page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1),
         href: window.location.href,
