@@ -278,6 +278,44 @@ describe("xhs search request-context exact-shape reuse", () => {
     );
   });
 
+  it("prefers the captured X-S-Common on exact hits over caller-supplied options", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-xs-common-001", {
+          x_s_common: '{"searchId":"caller-search-id"}'
+        }),
+        executionContext: createExecutionContext("run-search-context-xs-common-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => createCapturedArtifact()
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-S-Common": '{"searchId":"captured-search-id"}'
+        })
+      })
+    );
+  });
+
   it("waits for the first captured search template before failing closed on a fresh page load", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));

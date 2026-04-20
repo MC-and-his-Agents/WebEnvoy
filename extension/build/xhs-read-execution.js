@@ -945,8 +945,8 @@ const buildHeaders = (env, options, signature, capturedHeaders) => ({
         ? {
             "X-s": String(signature["X-s"]),
             "X-t": String(signature["X-t"]),
-            "X-S-Common": options.x_s_common ??
-                getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+            "X-S-Common": getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+                options.x_s_common ??
                 resolveXsCommon(undefined),
             "x-b3-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
                 env.randomId().replace(/-/g, ""),

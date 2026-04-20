@@ -262,6 +262,51 @@ describe("xhs read request-context exact-shape reuse", () => {
     );
   });
 
+  it("prefers captured X-S-Common over caller-supplied options on exact detail hits", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-xs-common-001", "explore_detail_tab", {
+          x_s_common: '{"detailId":"caller-detail-id"}'
+        }),
+        executionContext: createExecutionContext("run-detail-context-xs-common-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => createDetailArtifact()
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-S-Common": '{"detailId":"captured-detail-id"}'
+        })
+      })
+    );
+  });
+
   it("waits for captured detail context before failing closed on a fresh navigation", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,

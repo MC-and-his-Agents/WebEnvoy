@@ -290,16 +290,26 @@ export const readCapturedRequestContextViaMainWorld = async (input) => {
         installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
     }
     await activateCapturedRequestContextCaptureViaMainWorld();
+    const pageContextNamespace = typeof latestMainWorldPageContextNamespace === "string" &&
+        latestMainWorldPageContextNamespace.length > 0
+        ? latestMainWorldPageContextNamespace
+        : null;
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {
             method: input.method,
             path: input.path,
-            page_context_namespace: latestMainWorldPageContextNamespace ?? input.page_context_namespace,
+            ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
             shape_key: input.shape_key
         }
     });
-    return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+    const normalized = asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+    if (normalized &&
+        typeof normalized.page_context_namespace === "string" &&
+        normalized.page_context_namespace.length > 0) {
+        latestMainWorldPageContextNamespace = normalized.page_context_namespace;
+    }
+    return normalized;
 };
 export const activateCapturedRequestContextCaptureViaMainWorld = async () => {
     const result = await mainWorldCall({

@@ -298,6 +298,7 @@ const createCapturedRequestContextProbeWindow = (): {
   const readRequests: Record<string, unknown>[] = [];
   let requestEventName: string | null = null;
   let resultEventName: string | null = null;
+  const locationHref = "https://www.xiaohongshu.com/search_result?keyword=contract";
 
   const emit = (type: string, detail: unknown): void => {
     const handlers = listeners.get(type);
@@ -347,7 +348,9 @@ const createCapturedRequestContextProbeWindow = (): {
               id: detail.id,
               ok: true,
               result: {
-                page_context_namespace: detail.payload?.page_context_namespace,
+                page_context_namespace:
+                  detail.payload?.page_context_namespace ??
+                  createVisitedPageContextNamespace(locationHref, 1),
                 shape_key: detail.payload?.shape_key,
                 admitted_template: null,
                 rejected_observation: null,
@@ -362,7 +365,7 @@ const createCapturedRequestContextProbeWindow = (): {
         return true;
       },
       location: {
-        href: "https://www.xiaohongshu.com/search_result?keyword=contract"
+        href: locationHref
       }
     },
     readRequests
@@ -760,6 +763,29 @@ describe("content-script bootstrap contract", () => {
 
     expect(readRequests).toHaveLength(1);
     expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("falls back to the main-world visited namespace before any namespace event arrives", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-002")).toBe(
+      true
+    );
+
+    const result = await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract"}'
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).not.toHaveProperty("page_context_namespace");
+    expect(result).toMatchObject({
       page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
     });
   });

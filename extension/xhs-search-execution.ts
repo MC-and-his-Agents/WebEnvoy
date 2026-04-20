@@ -932,8 +932,8 @@ export const executeXhsSearch = async (
     "X-s": String(signature["X-s"]),
     "X-t": String(signature["X-t"]),
     "X-S-Common":
-      input.options.x_s_common ??
       getCapturedHeader(requestContextResult.headers, "X-S-Common") ??
+      input.options.x_s_common ??
       resolveXsCommon(undefined),
     "x-b3-traceid":
       getCapturedHeader(requestContextResult.headers, "x-b3-traceid") ??

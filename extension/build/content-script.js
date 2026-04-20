@@ -5480,8 +5480,8 @@ const executeXhsSearch = async (input, env) => {
             "application/json;charset=utf-8",
         "X-s": String(signature["X-s"]),
         "X-t": String(signature["X-t"]),
-        "X-S-Common": input.options.x_s_common ??
-            getCapturedHeader(requestContextResult.headers, "X-S-Common") ??
+        "X-S-Common": getCapturedHeader(requestContextResult.headers, "X-S-Common") ??
+            input.options.x_s_common ??
             resolveXsCommon(undefined),
         "x-b3-traceid": getCapturedHeader(requestContextResult.headers, "x-b3-traceid") ??
             env.randomId().replace(/-/g, ""),
@@ -6559,8 +6559,8 @@ const buildHeaders = (env, options, signature, capturedHeaders) => ({
         ? {
             "X-s": String(signature["X-s"]),
             "X-t": String(signature["X-t"]),
-            "X-S-Common": options.x_s_common ??
-                getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+            "X-S-Common": getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+                options.x_s_common ??
                 resolveXsCommon(undefined),
             "x-b3-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
                 env.randomId().replace(/-/g, ""),
@@ -7717,16 +7717,26 @@ const readCapturedRequestContextViaMainWorld = async (input) => {
         installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
     }
     await activateCapturedRequestContextCaptureViaMainWorld();
+    const pageContextNamespace = typeof latestMainWorldPageContextNamespace === "string" &&
+        latestMainWorldPageContextNamespace.length > 0
+        ? latestMainWorldPageContextNamespace
+        : null;
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {
             method: input.method,
             path: input.path,
-            page_context_namespace: latestMainWorldPageContextNamespace ?? input.page_context_namespace,
+            ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
             shape_key: input.shape_key
         }
     });
-    return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+    const normalized = asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+    if (normalized &&
+        typeof normalized.page_context_namespace === "string" &&
+        normalized.page_context_namespace.length > 0) {
+        latestMainWorldPageContextNamespace = normalized.page_context_namespace;
+    }
+    return normalized;
 };
 const activateCapturedRequestContextCaptureViaMainWorld = async () => {
     const result = await mainWorldCall({
