@@ -147,8 +147,9 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
-const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime, targetPage) => ({
+const buildExtensionBootstrapInput = (profile, runId, sessionId, fingerprintRuntime, targetPage) => ({
     run_id: runId,
+    runtime_context_id: buildRuntimeBootstrapContextId(profile, runId),
     session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime,
     ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
@@ -350,7 +351,7 @@ export class ProfileRuntimeService {
                 requestedExecutionMode
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-            const extensionBootstrap = buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
+            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
             if (identityPreflight.mode === "official_chrome_persistent_extension" &&
                 identityPreflight.binding?.extensionId) {
                 await writeInstalledExtensionBootstrapForRun({
@@ -525,7 +526,7 @@ export class ProfileRuntimeService {
                 requestedExecutionMode
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-            const extensionBootstrap = buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
+            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
             if (identityPreflight.mode === "official_chrome_persistent_extension" &&
                 identityPreflight.binding?.extensionId) {
                 await writeInstalledExtensionBootstrapForRun({

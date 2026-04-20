@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -130,12 +130,17 @@ const seedInstalledPersistentExtension = async (input: {
   profile: string;
   extensionId?: string;
   enabled?: boolean;
+  withRuntimeBundle?: boolean;
 }): Promise<void> => {
   const extensionId = input.extensionId ?? PERSISTENT_EXTENSION_ID;
   const profileDir = join(input.baseDir, ".webenvoy", "profiles", input.profile, "Default");
   const extensionDir = join(profileDir, "Extensions", extensionId, "1.0.0");
-  await mkdir(extensionDir, { recursive: true });
-  await writeFile(join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n", "utf8");
+  if (input.withRuntimeBundle) {
+    await cp(join(process.cwd(), "extension"), extensionDir, { recursive: true });
+  } else {
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n", "utf8");
+  }
   await writeFile(
     join(profileDir, "Preferences"),
     `${JSON.stringify(
@@ -4492,14 +4497,97 @@ describe("profile-runtime fingerprint runtime contract", () => {
     const bootstrap = JSON.parse(bootstrapRaw) as {
       extension_bootstrap?: {
         run_id?: string;
+        runtime_context_id?: string;
         target_page?: string;
       };
     };
 
     expect(bootstrap.extension_bootstrap).toMatchObject({
       run_id: "run-runtime-test-persistent-bootstrap-target-page-001",
+      runtime_context_id: buildRuntimeBootstrapContextId(
+        "persistent_bootstrap_target_page_profile",
+        "run-runtime-test-persistent-bootstrap-target-page-001"
+      ),
       target_page: "search_result_tab"
     });
+  });
+
+  it("installs a synchronous bootstrap script into the installed persistent extension before launch", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-bootstrap-sync-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "persistent_bootstrap_sync_profile",
+      withRuntimeBundle: true
+    });
+    const service = createTestService({
+      isProcessAlive: () => true,
+      browserLauncher: {
+        launch: async () => ({
+          browserPath: "/mock/chrome",
+          browserPid: 999999,
+          controllerPid: 999998,
+          launchArgs: ["about:blank"],
+          launchedAt: new Date().toISOString()
+        }),
+        shutdown: async () => undefined
+      }
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "persistent_bootstrap_sync_profile",
+      runId: "run-runtime-test-persistent-bootstrap-sync-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: PERSISTENT_EXTENSION_ID,
+          manifest_path: manifestPath
+        },
+        target_page: "search_result_tab"
+      }
+    });
+
+    const extensionDir = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "persistent_bootstrap_sync_profile",
+      "Default",
+      "Extensions",
+      PERSISTENT_EXTENSION_ID,
+      "1.0.0"
+    );
+    const bootstrapScriptRaw = await readFile(
+      join(extensionDir, "build", "__webenvoy_fingerprint_bootstrap.js"),
+      "utf8"
+    );
+    expect(bootstrapScriptRaw).toContain('"run_id":"run-runtime-test-persistent-bootstrap-sync-001"');
+    expect(bootstrapScriptRaw).toContain(
+      `"runtime_context_id":"${buildRuntimeBootstrapContextId(
+        "persistent_bootstrap_sync_profile",
+        "run-runtime-test-persistent-bootstrap-sync-001"
+      )}"`
+    );
+    expect(bootstrapScriptRaw).toContain('"session_id":"nm-session-001"');
+    expect(bootstrapScriptRaw).toContain('"target_page":"search_result_tab"');
+    expect(bootstrapScriptRaw).toContain('"main_world_secret":"');
+    const manifestRaw = await readFile(join(extensionDir, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as {
+      content_scripts?: Array<{ world?: string; js?: string[] }>;
+    };
+    const isolatedWorldEntry = (manifest.content_scripts ?? []).find(
+      (entry) => !entry.world || entry.world === "ISOLATED"
+    );
+    const isolatedWorldScripts = isolatedWorldEntry?.js ?? [];
+    const bootstrapIndex = isolatedWorldScripts.indexOf("build/__webenvoy_fingerprint_bootstrap.js");
+    const contentScriptIndex = isolatedWorldScripts.indexOf("build/content-script.js");
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
+    expect(contentScriptIndex).toBeGreaterThanOrEqual(0);
+    expect(bootstrapIndex).toBeLessThan(contentScriptIndex);
   });
 
   it("returns fingerprint_runtime on start/status/stop/login", async () => {

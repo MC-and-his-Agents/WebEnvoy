@@ -185,6 +185,14 @@ const buildBridgeBootstrapPayload = (input: {
   return payload;
 };
 
+const buildInstalledExtensionBootstrapScriptPayload = (input: {
+  bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
+}): Record<string, unknown> => ({
+  ...(input.extensionBootstrap ? { ...input.extensionBootstrap } : {}),
+  main_world_secret: input.bridgeSecret
+});
+
 const buildBootstrapScriptSource = (input: {
   payload: Record<string, unknown>;
 }): string =>
@@ -547,11 +555,29 @@ export const writeInstalledExtensionBootstrapForRun = async (input: {
 
   await Promise.all(
     bootstrapDirs.map(async (dir) => {
+      const bridgeSecret = randomUUID();
       await writeFile(
         join(dir, EXTENSION_BOOTSTRAP_FILENAME),
         `${JSON.stringify(envelope, null, 2)}\n`,
         "utf8"
       );
+      await mkdir(join(dir, "build"), { recursive: true });
+      await writeFile(
+        join(dir, EXTENSION_BOOTSTRAP_SCRIPT_PATH),
+        buildBootstrapScriptSource({
+          payload: buildInstalledExtensionBootstrapScriptPayload({
+            bridgeSecret,
+            extensionBootstrap: input.extensionBootstrap
+          })
+        }),
+        "utf8"
+      );
+      try {
+        await injectBootstrapScriptIntoManifest(join(dir, "manifest.json"));
+      } catch {
+        // Some test fixtures keep a minimal manifest without content_scripts.
+        // Real installed unpacked extensions still receive the synchronous bootstrap path.
+      }
     })
   );
 

@@ -329,6 +329,7 @@ const ensureFingerprintExecutionAllowed = (
 
 type ExtensionBootstrapInput = {
   run_id: string;
+  runtime_context_id: string;
   session_id: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
   target_page?: string;
@@ -345,12 +346,14 @@ type RuntimeBootstrapEnvelope = {
 };
 
 const buildExtensionBootstrapInput = (
+  profile: string,
   runId: string,
   sessionId: string,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>,
   targetPage?: string | null
 ): ExtensionBootstrapInput => ({
   run_id: runId,
+  runtime_context_id: buildRuntimeBootstrapContextId(profile, runId),
   session_id: sessionId,
   fingerprint_runtime: fingerprintRuntime,
   ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
@@ -601,6 +604,7 @@ export class ProfileRuntimeService {
       });
       ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       const extensionBootstrap = buildExtensionBootstrapInput(
+        input.profile,
         input.runId,
         readSessionId(input.params),
         fingerprintRuntime,
@@ -812,6 +816,7 @@ export class ProfileRuntimeService {
       });
       ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
       const extensionBootstrap = buildExtensionBootstrapInput(
+        input.profile,
         input.runId,
         readSessionId(input.params),
         fingerprintRuntime,
