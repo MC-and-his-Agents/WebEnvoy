@@ -179,6 +179,7 @@ describe("main-world bridge contract", () => {
     delete (globalThis as { window?: unknown }).window;
     delete (globalThis as { document?: unknown }).document;
     delete (globalThis as { CustomEvent?: unknown }).CustomEvent;
+    delete (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
     delete (globalThis as Record<string, unknown>).__WEBENVOY_MAIN_WORLD_BRIDGE_INSTALLED_V1__;
   });
 
@@ -255,6 +256,75 @@ describe("main-world bridge contract", () => {
     });
 
     expect(mockWindow.fetch).not.toBe(originalFetch);
+  });
+
+  it("removes per-send XHR loadend listeners after capture completes", async () => {
+    const { mockWindow, mockDocument } = createMockMainWorldEnvironment();
+
+    class MockXMLHttpRequest {
+      status = 200;
+      responseText = JSON.stringify({ code: 0, data: { items: [] } });
+      #listeners = new Map<string, MockEventListener[]>();
+
+      open(_method: string, _url: string | URL): void {}
+
+      setRequestHeader(_name: string, _value: string): void {}
+
+      addEventListener(type: string, listener: MockEventListener): void {
+        const existing = this.#listeners.get(type) ?? [];
+        existing.push(listener);
+        this.#listeners.set(type, existing);
+      }
+
+      removeEventListener(type: string, listener: MockEventListener): void {
+        const existing = this.#listeners.get(type) ?? [];
+        this.#listeners.set(
+          type,
+          existing.filter((entry) => entry !== listener)
+        );
+      }
+
+      getAllResponseHeaders(): string {
+        return "";
+      }
+
+      send(_body?: Document | XMLHttpRequestBodyInit | null): void {}
+
+      listenerCount(type: string): number {
+        return this.#listeners.get(type)?.length ?? 0;
+      }
+
+      dispatch(type: string): void {
+        for (const listener of this.#listeners.get(type) ?? []) {
+          listener({ type } as unknown as Event);
+        }
+      }
+    }
+
+    installMockDomGlobals({
+      mockWindow: mockWindow as Window & Record<string, unknown>,
+      mockDocument
+    });
+    (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = MockXMLHttpRequest;
+
+    await import("../extension/main-world-bridge.js");
+
+    const xhr = new MockXMLHttpRequest();
+    xhr.open("POST", "https://www.xiaohongshu.com/api/sns/web/v1/search/notes");
+    xhr.send(JSON.stringify({ keyword: "contract" }));
+    expect(xhr.listenerCount("loadend")).toBe(1);
+
+    xhr.dispatch("loadend");
+    await flushMicrotasks();
+    expect(xhr.listenerCount("loadend")).toBe(0);
+
+    xhr.open("POST", "https://www.xiaohongshu.com/api/sns/web/v1/search/notes");
+    xhr.send(JSON.stringify({ keyword: "contract" }));
+    expect(xhr.listenerCount("loadend")).toBe(1);
+
+    xhr.dispatch("loadend");
+    await flushMicrotasks();
+    expect(xhr.listenerCount("loadend")).toBe(0);
   });
 
   it("does not publish a page-visible install marker when reinjected into the same page", async () => {

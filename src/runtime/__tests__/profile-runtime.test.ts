@@ -857,7 +857,8 @@ describe("profile-runtime identity preflight", () => {
         persistent_extension_identity: {
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           manifest_path: manifestPath
-        }
+        },
+        target_page: "creator_publish_tab"
       }
     });
 
@@ -878,7 +879,10 @@ describe("profile-runtime identity preflight", () => {
     expect(bridgeRunCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         command: "runtime.bootstrap",
-        profile: "identity_bound_ready_profile"
+        profile: "identity_bound_ready_profile",
+        params: expect.objectContaining({
+          target_page: "creator_publish_tab"
+        })
       })
     );
   });

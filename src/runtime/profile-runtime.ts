@@ -339,6 +339,7 @@ type RuntimeBootstrapEnvelope = {
   run_id: string;
   runtime_context_id: string;
   profile: string;
+  target_page?: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
   fingerprint_patch_manifest: Record<string, unknown>;
   main_world_secret: string;
@@ -364,11 +365,15 @@ const buildRuntimeBootstrapEnvelope = (input: {
   runtimeContextId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
   mainWorldSecret: string;
+  targetPage?: string | null;
 }): RuntimeBootstrapEnvelope => ({
   version: "v1",
   run_id: input.runId,
   runtime_context_id: input.runtimeContextId,
   profile: input.profile,
+  ...(typeof input.targetPage === "string" && input.targetPage.length > 0
+    ? { target_page: input.targetPage }
+    : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
     ? (input.fingerprintRuntime.fingerprint_patch_manifest as unknown as Record<string, unknown>)
@@ -1847,7 +1852,11 @@ export class ProfileRuntimeService {
       runId: input.runtimeInput.runId,
       runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
       fingerprintRuntime: input.fingerprintRuntime,
-      mainWorldSecret: randomUUID()
+      mainWorldSecret: randomUUID(),
+      targetPage:
+        typeof input.runtimeInput.params.target_page === "string"
+          ? input.runtimeInput.params.target_page
+          : null
     });
 
     try {

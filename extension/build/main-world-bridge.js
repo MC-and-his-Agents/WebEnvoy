@@ -788,15 +788,18 @@ const installXhrCapture = () => {
             const requestBodyReady = readArtifactPayload(body).then((payload) => {
                 state.body = payload;
             });
-            this.addEventListener("loadend", () => {
+            const onLoadEnd = () => {
+                this.removeEventListener("loadend", onLoadEnd);
                 void requestBodyReady.then(() => {
                     storeCapturedRequestContext(state, {
                         status: this.status,
                         responseHeaders: headersToRecord(this.getAllResponseHeaders()),
                         responseBody: parseArtifactPayloadText(typeof this.responseText === "string" ? this.responseText : "")
                     });
+                    setXhrCaptureState(this, null);
                 });
-            });
+            };
+            this.addEventListener("loadend", onLoadEnd);
         }
         originalSend.call(this, body);
     };
