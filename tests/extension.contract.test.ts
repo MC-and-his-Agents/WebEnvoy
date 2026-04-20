@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { executeXhsSearch } from "../extension/xhs-search.js";
 import { createCapturedSearchContextHit } from "./extension.relay.shared.js";
 
@@ -43,6 +43,13 @@ type BundledContentScriptHandlerModule = {
     onResult(listener: (message: unknown) => void): () => void;
     onBackgroundMessage(message: Record<string, unknown>): boolean;
   };
+  bootstrapContentScript: (runtime: {
+    onMessage?: {
+      addListener(listener: (message: unknown) => void): void;
+    };
+    sendMessage?: (message: Record<string, unknown>) => Promise<unknown> | void;
+    getURL?: (path: string) => string;
+  }) => boolean;
   installMainWorldEventChannelSecret: (secret: string | null) => boolean;
 };
 
@@ -72,14 +79,18 @@ const loadBundledContentScriptHandlerModule = (
   context.globalThis = context;
   context.structuredClone = structuredClone;
   runInNewContext(
-    `${bundleSource}\n;globalThis.__bundle_handler_exports = { ...__webenvoy_module_content_script_handler, ...__webenvoy_module_content_script_main_world };`,
+    `${bundleSource}\n;globalThis.__bundle_handler_exports = { ...__webenvoy_module_content_script, ...__webenvoy_module_content_script_handler, ...__webenvoy_module_content_script_main_world };`,
     context,
     { filename: bundlePath }
   );
   return context.__bundle_handler_exports as BundledContentScriptHandlerModule;
 };
 
-const createBundledMainWorldWindow = (input: { href: string; keyword: string }) => {
+const createBundledMainWorldWindow = (input: {
+  href: string;
+  keyword: string;
+  mainWorldRequests?: Array<Record<string, unknown>>;
+}) => {
   const listeners = new Map<string, Set<(event: { type: string; detail?: unknown }) => void>>();
   let resultEventName: string | null = null;
 
@@ -111,6 +122,13 @@ const createBundledMainWorldWindow = (input: { href: string; keyword: string }) 
       if (!resultEventName || !detail || typeof detail.id !== "string" || typeof detail.type !== "string") {
         return true;
       }
+      input.mainWorldRequests?.push({
+        type: detail.type,
+        payload:
+          typeof detail.payload === "object" && detail.payload !== null
+            ? { ...(detail.payload as Record<string, unknown>) }
+            : detail.payload
+      });
 
       let result: unknown = null;
       if (detail.type === "captured-request-context-activate") {
@@ -118,8 +136,16 @@ const createBundledMainWorldWindow = (input: { href: string; keyword: string }) 
       } else if (detail.type === "captured-request-context-read") {
         result = createCapturedSearchContextHit({
           href: input.href,
-          keyword: input.keyword
+          keyword: input.keyword,
+          captured_at: Date.now()
         });
+      } else if (detail.type === "fingerprint-install") {
+        result = {
+          installed: true,
+          required_patches: [],
+          applied_patches: [],
+          missing_required_patches: []
+        };
       }
 
       listeners.get(resultEventName)?.forEach((listener) => {
@@ -134,6 +160,26 @@ const createBundledMainWorldWindow = (input: { href: string; keyword: string }) 
       });
       return true;
     }
+  };
+};
+
+const createBundledRuntime = () => {
+  let listener: ((message: unknown) => void) | null = null;
+  const sendMessage = vi.fn(async (_message: Record<string, unknown>) => undefined);
+  return {
+    runtime: {
+      onMessage: {
+        addListener(callback: (message: unknown) => void) {
+          listener = callback;
+        }
+      },
+      sendMessage,
+      getURL: (path: string) => `chrome-extension://unit-test/${path}`
+    },
+    dispatch(message: unknown) {
+      listener?.(message);
+    },
+    sendMessage
   };
 };
 
@@ -386,6 +432,59 @@ describe("extension build contract", () => {
     expect(contentScriptBuild).not.toMatch(/^\s*import\s+/m);
     expect(contentScriptBuild).toMatch(
       /const \{\s*evaluateXhsGate,\s*resolveXhsGateDecisionId,\s*XHS_READ_DOMAIN,\s*XHS_WRITE_DOMAIN,\s*buildIssue209PostGateArtifacts\s*\} = __webenvoy_module_shared_xhs_gate;/s
+    );
+  });
+
+  it("boots bundled content-script on read targets without missing request-context helpers", async () => {
+    const mainWorldRequests: Array<Record<string, unknown>> = [];
+    const mockWindow = createBundledMainWorldWindow({
+      href: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51",
+      keyword: "AI",
+      mainWorldRequests
+    });
+    const { bootstrapContentScript } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+      __webenvoy_fingerprint_bootstrap_payload__: {
+        run_id: "run-bundled-bootstrap-001",
+        runtime_context_id: "runtime-bundled-bootstrap-001",
+        session_id: "session-bundled-bootstrap-001",
+        main_world_secret: "bundle-bootstrap-secret-001",
+        target_page: "search_result_tab"
+      },
+      setTimeout,
+      clearTimeout,
+      URL,
+      location: mockWindow.location,
+      window: mockWindow,
+      document: {
+        title: "Search Result",
+        readyState: "complete",
+        cookie: "a1=session-cookie"
+      },
+      CustomEvent: class CustomEventShim {
+        type: string;
+        detail: unknown;
+
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      }
+    });
+    const { runtime, sendMessage } = createBundledRuntime();
+
+    expect(() => bootstrapContentScript(runtime)).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mainWorldRequests.map((request) => request.type)).toContain(
+      "captured-request-context-activate"
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "result",
+        id: "startup-background-wake",
+        ok: true
+      })
     );
   });
 
@@ -697,6 +796,168 @@ describe("extension build contract", () => {
       method: "POST",
       referrer: searchHref
     });
+  });
+
+  it("executes bundled content-script handler xhs.search live-read with default browser env", async () => {
+    const runtimeMessages: Array<Record<string, unknown>> = [];
+    const mainWorldRequests: Array<Record<string, unknown>> = [];
+    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51";
+    const mockWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      keyword: "AI",
+      mainWorldRequests
+    });
+    const { ContentScriptHandler, installMainWorldEventChannelSecret } =
+      loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+        chrome: {
+          runtime: {
+            sendMessage: (
+              message: Record<string, unknown>,
+              callback?: (response?: Record<string, unknown>) => void
+            ) => {
+              runtimeMessages.push(message);
+              const response =
+                message.kind === "xhs-sign-request"
+                  ? {
+                      ok: true,
+                      result: {
+                        "X-s": "signature",
+                        "X-t": "timestamp"
+                      }
+                    }
+                  : message.kind === "xhs-main-world-request"
+                    ? {
+                        ok: true,
+                        result: {
+                          status: 200,
+                          body: {
+                            code: 0,
+                            data: {
+                              items: []
+                            }
+                          }
+                        }
+                      }
+                    : {
+                        ok: false,
+                        error: {
+                          message: `unexpected message kind: ${String(message.kind)}`
+                        }
+                      };
+
+              callback?.(response);
+              return Promise.resolve(response);
+            }
+          }
+        },
+        crypto: {
+          randomUUID: () => "bundle-live-uuid-003"
+        },
+        setTimeout,
+        clearTimeout,
+        URL,
+        location: mockWindow.location,
+        window: mockWindow,
+        document: {
+          title: "Search Result",
+          readyState: "complete",
+          cookie: "a1=session-cookie"
+        },
+        CustomEvent: class CustomEventShim {
+          type: string;
+          detail: unknown;
+
+          constructor(type: string, init?: { detail?: unknown }) {
+            this.type = type;
+            this.detail = init?.detail;
+          }
+        }
+      });
+    expect(installMainWorldEventChannelSecret("bundle-main-world-secret-003")).toBe(true);
+    const handler = new ContentScriptHandler();
+
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        off();
+        reject(new Error("did not receive bundled browser-env live handler result"));
+      }, 1_000);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-search-live-003",
+        runId: "run-bundled-handler-search-live-003",
+        tabId: 21,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-search-live-003"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-search-live-003",
+          gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-003",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "AI"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 21,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 21,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_handler_search_live_003",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 21,
+              profileRef: "profile-a",
+              approvalRefs: ["approval_admission_issue493_search_live_001"],
+              auditRefs: ["audit_admission_issue493_search_live_001"],
+              grantedAt: "2026-04-17T08:06:31.000Z",
+              targetUrl: searchHref
+            })
+          }
+        }
+      })
+    ).toBe(true);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      kind: "result",
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            outcome: "success"
+          }
+        }
+      }
+    });
+    expect(mainWorldRequests.map((request) => request.type)).toContain(
+      "captured-request-context-read"
+    );
+    expect(runtimeMessages.map((message) => message.kind)).toEqual([
+      "xhs-sign-request",
+      "xhs-main-world-request"
+    ]);
   });
 
   it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {

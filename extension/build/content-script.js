@@ -7711,7 +7711,7 @@ const requestXhsSearchJsonViaMainWorld = async (input) => {
     }
     return response.result;
 };
-return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+return { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {
 const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
@@ -7990,10 +7990,12 @@ const {
 } = __webenvoy_module_xhs_command_contract;
 const { containsCookie } = __webenvoy_module_xhs_search_telemetry;
 const {
+  activateCapturedRequestContextCaptureViaMainWorld,
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readCapturedRequestContextViaMainWorld,
   readPageStateViaMainWorld,
   requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
@@ -8637,11 +8639,13 @@ class ContentScriptHandler {
         }
     }
 }
-return { ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
+return { activateCapturedRequestContextCaptureViaMainWorld, ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, isXhsReadBootstrapTargetPage, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
 })();
 const __webenvoy_module_content_script = (() => {
 const {
+  activateCapturedRequestContextCaptureViaMainWorld,
   ContentScriptHandler,
+  isXhsReadBootstrapTargetPage,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret
 } = __webenvoy_module_content_script_handler;
