@@ -661,6 +661,12 @@ const resolveLatestBucketArtifact = (bucket: CapturedContextBucket): CapturedReq
   );
 };
 
+const isSyntheticRejectedArtifact = (
+  artifact: CapturedRequestContextArtifact | null
+): boolean =>
+  artifact?.source_kind === "synthetic_request" ||
+  artifact?.rejection_reason === "synthetic_request_rejected";
+
 const resolveRouteScopeKeyFromLookup = (
   method: CapturedRequestContextMethod,
   path: string,
@@ -750,7 +756,13 @@ const storeCapturedRequestContext = (
     contextShape.shapeKey
   );
   if (templateReady) {
+    if (isSyntheticRejectedArtifact(bucket.rejectedObservation)) {
+      bucket.rejectedObservation = null;
+    }
     bucket.admittedTemplate = artifact;
+    return;
+  }
+  if (candidate.synthetic) {
     return;
   }
   bucket.rejectedObservation = artifact;

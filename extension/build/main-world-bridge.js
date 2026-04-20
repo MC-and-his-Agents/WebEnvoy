@@ -461,6 +461,8 @@ const resolveLatestBucketArtifact = (bucket) => {
     }
     return (candidates.sort((left, right) => (right.observed_at ?? right.captured_at) - (left.observed_at ?? left.captured_at))[0] ?? null);
 };
+const isSyntheticRejectedArtifact = (artifact) => artifact?.source_kind === "synthetic_request" ||
+    artifact?.rejection_reason === "synthetic_request_rejected";
 const resolveRouteScopeKeyFromLookup = (method, path, shapeKey) => {
     try {
         const parsed = JSON.parse(shapeKey);
@@ -531,7 +533,13 @@ const storeCapturedRequestContext = (candidate, input) => {
     };
     const bucket = getCapturedContextBucket(candidate.pageContextNamespace, contextShape.routeScopeKey, contextShape.shapeKey);
     if (templateReady) {
+        if (isSyntheticRejectedArtifact(bucket.rejectedObservation)) {
+            bucket.rejectedObservation = null;
+        }
         bucket.admittedTemplate = artifact;
+        return;
+    }
+    if (candidate.synthetic) {
         return;
     }
     bucket.rejectedObservation = artifact;

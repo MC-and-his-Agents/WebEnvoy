@@ -451,7 +451,7 @@ describe("main-world bridge contract", () => {
     }
   });
 
-  it("stores synthetic WebEnvoy requests as rejected observations instead of admitted templates", async () => {
+  it("keeps header-marked synthetic WebEnvoy requests out of the exact-shape slot", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({
       mockWindow: env.mockWindow as Window & Record<string, unknown>,
@@ -495,15 +495,12 @@ describe("main-world bridge contract", () => {
       ok: true,
       result: {
         admitted_template: null,
-        rejected_observation: {
-          source_kind: "synthetic_request",
-          rejection_reason: "synthetic_request_rejected"
-        }
+        rejected_observation: null
       }
     });
   });
 
-  it("stores symbol-marked WebEnvoy main-world requests as rejected observations without leaking a network header", async () => {
+  it("keeps symbol-marked WebEnvoy main-world requests out of the exact-shape slot without leaking a network header", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({
       mockWindow: env.mockWindow as Window & Record<string, unknown>,
@@ -552,10 +549,75 @@ describe("main-world bridge contract", () => {
       ok: true,
       result: {
         admitted_template: null,
-        rejected_observation: {
-          source_kind: "synthetic_request",
-          rejection_reason: "synthetic_request_rejected"
+        rejected_observation: null
+      }
+    });
+  });
+
+  it("keeps an admitted exact-shape page request when a later synthetic self-request reuses the same slot", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async (_input, init) => {
+      expect((init?.headers as Record<string, string> | undefined)?.["x-webenvoy-synthetic-request"]).toBeUndefined();
+      return new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
         }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: "{\"keyword\":\"露营\"}"
+      }
+    );
+
+    const syntheticRequestSymbol = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+    const request = new Request("https://www.xiaohongshu.com/api/sns/web/v1/search/notes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"keyword\":\"露营\"}"
+    }) as Request & Record<string | symbol, unknown>;
+    Object.defineProperty(request, syntheticRequestSymbol, {
+      configurable: true,
+      enumerable: false,
+      value: true
+    });
+
+    await (env.mockWindow.fetch as typeof fetch)(request);
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      pageContextNamespace: SEARCH_PAGE_NAMESPACE,
+      shapeKey:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"露营","page":1,"page_size":20,"sort":"general","note_type":0}'
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request",
+          template_ready: true
+        },
+        rejected_observation: null
       }
     });
   });

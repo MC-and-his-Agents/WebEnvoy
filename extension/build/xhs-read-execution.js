@@ -124,6 +124,12 @@ const resolveExactShapeLookupArtifacts = (lookupRecord) => {
             rejectedObservation
         };
     }
+    if (resolveCapturedArtifactStatus(rejectedObservation).rejectionReason === "synthetic_request_rejected") {
+        return {
+            admittedTemplate,
+            rejectedObservation: null
+        };
+    }
     const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
     const rejectedObservedAt = resolveCapturedArtifactObservedAt(rejectedObservation);
     if (rejectedObservedAt !== null &&
@@ -330,6 +336,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
             reason: "template_missing"
         };
     }
+    const status = resolveCapturedArtifactStatus(artifact);
+    if (status.rejectionReason === "synthetic_request_rejected") {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
     if (serializeReadShape(derivedShape) !== serializeReadShape(expectedShape)) {
         return {
             state: "incompatible",
@@ -337,7 +350,6 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
             shape: derivedShape
         };
     }
-    const status = resolveCapturedArtifactStatus(artifact);
     if (status.rejectionReason) {
         return {
             state: "rejected_source",

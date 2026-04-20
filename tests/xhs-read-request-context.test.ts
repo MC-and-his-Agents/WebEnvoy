@@ -428,7 +428,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     );
   });
 
-  it("treats synthetic detail artifacts as rejected_source", async () => {
+  it("ignores synthetic detail artifacts for exact-shape lookup", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -460,8 +460,8 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
       request_context_result: "request_context_missing",
-      request_context_lookup_state: "rejected_source",
-      request_context_miss_reason: "synthetic_request_rejected"
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
@@ -576,6 +576,67 @@ describe("xhs read request-context exact-shape reuse", () => {
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("does not let a newer synthetic exact-shape rejection shadow an admitted detail template", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const admittedTemplate = createDetailArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const rejectedObservation = createDetailArtifact({
+      source_kind: "synthetic_request",
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "synthetic_request_rejected"
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-synthetic-shadow-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-synthetic-shadow-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: admittedTemplate,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageContextRequest: true
+      })
+    );
   });
 
   it("keeps shape_mismatch when only sibling rejected detail shapes exist in the route bucket", async () => {
@@ -768,5 +829,68 @@ describe("xhs read request-context exact-shape reuse", () => {
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("does not let a newer synthetic exact-shape rejection shadow an admitted user_home template", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          user: {
+            user_id: "user-001",
+            nickname: "captured-user"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const admittedTemplate = createUserHomeArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const rejectedObservation = createUserHomeArtifact({
+      source_kind: "synthetic_request",
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "synthetic_request_rejected"
+    });
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-synthetic-shadow-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-synthetic-shadow-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "profile-page",
+          shape_key:
+            '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
+          admitted_template: admittedTemplate,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageContextRequest: true
+      })
+    );
   });
 });

@@ -417,6 +417,61 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("does not let a newer synthetic exact-shape rejection shadow an admitted search template", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const admittedTemplate = createCapturedArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const rejectedObservation = createCapturedArtifact({
+      source_kind: "synthetic_request",
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "synthetic_request_rejected"
+    });
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-synthetic-shadow-001"),
+        executionContext: createExecutionContext("run-search-synthetic-shadow-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "search-page",
+          shape_key:
+            '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"AI","page":2,"page_size":30,"sort":"time_desc","note_type":1}',
+          admitted_template: admittedTemplate,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageContextRequest: true
+      })
+    );
+  });
+
   it("keeps shape_mismatch when only sibling rejected search shapes exist in the route bucket", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
@@ -499,7 +554,7 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("treats synthetic captured requests as rejected_source even when they look template-ready", async () => {
+  it("ignores synthetic captured requests for exact-shape lookup even when they look template-ready", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -535,8 +590,8 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
       request_context_result: "request_context_missing",
-      request_context_lookup_state: "rejected_source",
-      request_context_miss_reason: "synthetic_request_rejected"
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
