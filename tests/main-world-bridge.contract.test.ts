@@ -1332,7 +1332,7 @@ describe("main-world bridge contract", () => {
     });
   });
 
-  it("invalidates an older admitted detail template when newer page evidence shifts to another note_id", async () => {
+  it("preserves an exact admitted detail template when newer sibling note evidence appears", async () => {
     const env = createMockMainWorldEnvironment();
     env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
     installMockDomGlobals({
@@ -1421,13 +1421,19 @@ describe("main-world bridge contract", () => {
     expect(originalSlotResult).toMatchObject({
       ok: true,
       result: {
-        admitted_template: null,
+        admitted_template: {
+          source_kind: "page_request",
+          shape: {
+            note_id: "note-001"
+          }
+        },
         rejected_observation: null,
         incompatible_observation: {
           source_kind: "page_request",
           rejection_reason: "shape_mismatch"
         },
         available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
         ]
       }
@@ -1445,6 +1451,7 @@ describe("main-world bridge contract", () => {
           rejection_reason: "shape_mismatch"
         },
         available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
         ]
       }

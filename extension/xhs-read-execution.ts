@@ -476,24 +476,6 @@ const resolveReadRequestContext = (
   ) {
     const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
     const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
-    if (spec.command === "xhs.detail" && admittedTemplate && incompatibleObservation) {
-      const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
-      const incompatibleObservedAt = resolveCapturedArtifactObservedAt(incompatibleObservation);
-      if (
-        incompatibleObservedAt !== null &&
-        (admittedObservedAt === null || incompatibleObservedAt > admittedObservedAt)
-      ) {
-        return {
-          state: "incompatible",
-          reason: "shape_mismatch",
-          shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
-            preferredDetailNoteId:
-              spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
-            allowDetailRequestFallback: true
-          })
-        };
-      }
-    }
     if (admittedTemplate) {
       return resolveReadRequestContext(
         spec,

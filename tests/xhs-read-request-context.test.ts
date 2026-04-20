@@ -773,8 +773,19 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("fails closed for detail when newer mismatch evidence invalidates an older admitted template", async () => {
-    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+  it("keeps using an exact admitted detail template when newer mismatch evidence is only a sibling note", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001",
+            title: "note-001"
+          }
+        }
+      }
+    }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
     const admittedTemplate = createDetailArtifact({
       captured_at: 1_710_000_000_000,
@@ -839,14 +850,16 @@ describe("xhs read request-context exact-shape reuse", () => {
       })
     );
 
-    expect(result.ok).toBe(false);
-    expect(result.payload.details).toMatchObject({
-      request_context_result: "request_context_incompatible",
-      request_context_lookup_state: "incompatible",
-      request_context_miss_reason: "shape_mismatch"
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
+      source_note_id: "note-001"
     });
-    expect(callSignature).not.toHaveBeenCalled();
-    expect(fetchJson).not.toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageContextRequest: true,
+        referrer: "https://www.xiaohongshu.com/explore/note-001"
+      })
+    );
   });
 
   it("does not let a newer synthetic exact-shape rejection shadow an admitted detail template", async () => {

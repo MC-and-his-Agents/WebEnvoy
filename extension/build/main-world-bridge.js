@@ -617,9 +617,6 @@ const storeCapturedRequestContext = (candidate, input) => {
         return;
     }
     if (detailResponseMismatch && requestedDetailShape) {
-        const requestedBucket = getCapturedContextBucket(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, requestedDetailShape.shapeKey);
-        requestedBucket.admittedTemplate = null;
-        pruneCapturedContextBucket(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, requestedDetailShape.shapeKey);
         setRouteBucketIncompatibleObservation(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, artifact);
     }
     bucket.rejectedObservation = artifact;
