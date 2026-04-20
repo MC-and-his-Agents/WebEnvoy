@@ -4475,7 +4475,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
   });
 
-  it("writes bootstrap target_page into installed persistent extension payload before launch", async () => {
+  it("does not create persistent bootstrap injection files before launch", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-bootstrap-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -4486,19 +4486,34 @@ describe("profile-runtime fingerprint runtime contract", () => {
       baseDir,
       profile: "persistent_bootstrap_target_page_profile"
     });
+    const launchInputs: BrowserLaunchInput[] = [];
     const service = createTestService({
       isProcessAlive: () => true,
       browserLauncher: {
-        launch: async () => ({
+        launch: async (input) => {
+          launchInputs.push(input);
+          return {
           browserPath: "/mock/chrome",
           browserPid: 999999,
           controllerPid: 999998,
           launchArgs: ["about:blank"],
           launchedAt: new Date().toISOString()
-        }),
+          };
+        },
         shutdown: async () => undefined
       }
     });
+
+    const extensionDir = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "persistent_bootstrap_target_page_profile",
+      "Default",
+      "Extensions",
+      PERSISTENT_EXTENSION_ID,
+      "1.0.0"
+    );
 
     await service.start({
       cwd: baseDir,
@@ -4513,39 +4528,24 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
 
-    const bootstrapRaw = await readFile(
-      join(
-        baseDir,
-        ".webenvoy",
-        "profiles",
-        "persistent_bootstrap_target_page_profile",
-        "Default",
-        "Extensions",
-        PERSISTENT_EXTENSION_ID,
-        "1.0.0",
-        "__webenvoy_fingerprint_bootstrap.json"
-      ),
-      "utf8"
-    );
-    const bootstrap = JSON.parse(bootstrapRaw) as {
-      extension_bootstrap?: {
-        run_id?: string;
-        runtime_context_id?: string;
-        target_page?: string;
-      };
-    };
-
-    expect(bootstrap.extension_bootstrap).toMatchObject({
-      run_id: "run-runtime-test-persistent-bootstrap-target-page-001",
-      runtime_context_id: buildRuntimeBootstrapContextId(
-        "persistent_bootstrap_target_page_profile",
-        "run-runtime-test-persistent-bootstrap-target-page-001"
-      ),
-      target_page: "search_result_tab"
+    expect(launchInputs[0]).toMatchObject({
+      command: "runtime.start",
+      launchMode: "official_chrome_persistent_extension",
+      extensionBootstrap: null
+    });
+    await expect(
+      readFile(join(extensionDir, "__webenvoy_fingerprint_bootstrap.json"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(
+      readFile(join(extensionDir, "build", "__webenvoy_fingerprint_bootstrap.js"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
     });
   });
 
-  it("installs a synchronous bootstrap script into the installed persistent extension before launch", async () => {
+  it("does not modify the installed persistent extension manifest during startup", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-bootstrap-sync-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -4571,6 +4571,19 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
 
+    const extensionDir = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "persistent_bootstrap_sync_profile",
+      "Default",
+      "Extensions",
+      PERSISTENT_EXTENSION_ID,
+      "1.0.0"
+    );
+    const manifestFile = join(extensionDir, "manifest.json");
+    const manifestBefore = await readFile(manifestFile, "utf8");
+
     await service.start({
       cwd: baseDir,
       profile: "persistent_bootstrap_sync_profile",
@@ -4584,46 +4597,11 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
 
-    const extensionDir = join(
-      baseDir,
-      ".webenvoy",
-      "profiles",
-      "persistent_bootstrap_sync_profile",
-      "Default",
-      "Extensions",
-      PERSISTENT_EXTENSION_ID,
-      "1.0.0"
-    );
-    const bootstrapScriptRaw = await readFile(
-      join(extensionDir, "build", "__webenvoy_fingerprint_bootstrap.js"),
-      "utf8"
-    );
-    expect(bootstrapScriptRaw).toContain('"run_id":"run-runtime-test-persistent-bootstrap-sync-001"');
-    expect(bootstrapScriptRaw).toContain(
-      `"runtime_context_id":"${buildRuntimeBootstrapContextId(
-        "persistent_bootstrap_sync_profile",
-        "run-runtime-test-persistent-bootstrap-sync-001"
-      )}"`
-    );
-    expect(bootstrapScriptRaw).toContain('"session_id":"nm-session-001"');
-    expect(bootstrapScriptRaw).toContain('"target_page":"search_result_tab"');
-    expect(bootstrapScriptRaw).toContain('"main_world_secret":"');
-    const manifestRaw = await readFile(join(extensionDir, "manifest.json"), "utf8");
-    const manifest = JSON.parse(manifestRaw) as {
-      content_scripts?: Array<{ world?: string; js?: string[] }>;
-    };
-    const isolatedWorldEntry = (manifest.content_scripts ?? []).find(
-      (entry) => !entry.world || entry.world === "ISOLATED"
-    );
-    const isolatedWorldScripts = isolatedWorldEntry?.js ?? [];
-    const bootstrapIndex = isolatedWorldScripts.indexOf("build/__webenvoy_fingerprint_bootstrap.js");
-    const contentScriptIndex = isolatedWorldScripts.indexOf("build/content-script.js");
-    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
-    expect(contentScriptIndex).toBeGreaterThanOrEqual(0);
-    expect(bootstrapIndex).toBeLessThan(contentScriptIndex);
+    const manifestAfter = await readFile(manifestFile, "utf8");
+    expect(manifestAfter).toBe(manifestBefore);
   });
 
-  it("fails fast before launch when persistent binding resolves to a shared unpacked extension dir", async () => {
+  it("starts with a shared unpacked persistent extension dir without mutating its files", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-shared-unpacked-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -4654,76 +4632,42 @@ describe("profile-runtime fingerprint runtime contract", () => {
         shutdown: async () => undefined
       }
     });
+    const sharedManifestPath = join(sharedUnpackedDir, "manifest.json");
+    const sharedManifestBefore = await readFile(sharedManifestPath, "utf8");
 
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "persistent_shared_unpacked_profile",
+      runId: "run-runtime-test-persistent-shared-unpacked-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: PERSISTENT_EXTENSION_ID,
+          manifest_path: manifestPath
+        },
+        target_page: "search_result_tab"
+      }
+    });
+
+    expect(started).toMatchObject({
+      profile: "persistent_shared_unpacked_profile"
+    });
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({
+      command: "runtime.start",
+      launchMode: "official_chrome_persistent_extension",
+      extensionBootstrap: null
+    });
+    expect(await readFile(sharedManifestPath, "utf8")).toBe(sharedManifestBefore);
     await expect(
-      service.start({
-        cwd: baseDir,
-        profile: "persistent_shared_unpacked_profile",
-        runId: "run-runtime-test-persistent-shared-unpacked-001",
-        params: {
-          persistent_extension_identity: {
-            extension_id: PERSISTENT_EXTENSION_ID,
-            manifest_path: manifestPath
-          },
-          target_page: "search_result_tab"
-        }
-      })
+      readFile(join(sharedUnpackedDir, "build", "__webenvoy_fingerprint_bootstrap.js"), "utf8")
     ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_UNAVAILABLE",
-      details: {
-        reason: "PERSISTENT_EXTENSION_SHARED_UNPACKED_DIR"
-      }
+      code: "ENOENT"
     });
-    expect(launch).not.toHaveBeenCalled();
-  });
-
-  it("fails fast before launch when profile-local persistent bootstrap artifacts cannot be written", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-persistent-bootstrap-write-fail-"));
-    tempDirs.push(baseDir);
-    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
-    const manifestPath = await createNativeHostManifest({
-      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
-    });
-    await seedInstalledPersistentExtension({
-      baseDir,
-      profile: "persistent_bootstrap_write_fail_profile",
-      withRuntimeBundle: false
-    });
-    const launch = vi.fn(async () => ({
-      browserPath: "/mock/chrome",
-      browserPid: 999999,
-      controllerPid: 999998,
-      launchArgs: ["about:blank"],
-      launchedAt: new Date().toISOString()
-    }));
-    const service = createTestService({
-      isProcessAlive: () => true,
-      browserLauncher: {
-        launch,
-        shutdown: async () => undefined
-      }
-    });
-
     await expect(
-      service.start({
-        cwd: baseDir,
-        profile: "persistent_bootstrap_write_fail_profile",
-        runId: "run-runtime-test-persistent-bootstrap-write-fail-001",
-        params: {
-          persistent_extension_identity: {
-            extension_id: PERSISTENT_EXTENSION_ID,
-            manifest_path: manifestPath
-          },
-          target_page: "search_result_tab"
-        }
-      })
+      readFile(join(sharedUnpackedDir, "__webenvoy_fingerprint_bootstrap.json"), "utf8")
     ).rejects.toMatchObject({
-      code: "ERR_RUNTIME_UNAVAILABLE",
-      details: {
-        reason: "PERSISTENT_EXTENSION_BOOTSTRAP_WRITE_FAILED"
-      }
+      code: "ENOENT"
     });
-    expect(launch).not.toHaveBeenCalled();
   });
 
   it("returns fingerprint_runtime on start/status/stop/login", async () => {
