@@ -1,4 +1,4 @@
-import { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace } from "./xhs-search-types.js";
+import { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createVisitedPageContextNamespace } from "./xhs-search-types.js";
 import { shouldAutoInstallXhsReadRequestContextCapture } from "./xhs-read-pages.js";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
@@ -15,7 +15,9 @@ const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+const PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.page_context_navigation.v1");
 let capturedRequestContextCaptureInstalled = false;
+let pageContextVisitSequence = 0;
 const DEFAULT_PLUGIN_DESCRIPTORS = [
     {
         name: "Chrome PDF Viewer",
@@ -504,9 +506,20 @@ const resolvePathname = (value) => {
 const resolveCurrentPageCaptureContext = () => {
     const referrer = typeof window.location?.href === "string" ? window.location.href : null;
     return {
-        pageContextNamespace: createPageContextNamespace(referrer ?? "about:blank"),
+        pageContextNamespace: createVisitedPageContextNamespace(referrer ?? "about:blank", pageContextVisitSequence),
         referrer
     };
+};
+const emitCurrentPageContextNamespace = () => {
+    const { pageContextNamespace, referrer } = resolveCurrentPageCaptureContext();
+    if (typeof mainWindow.dispatchEvent !== "function") {
+        return;
+    }
+    mainWindow.dispatchEvent(createWindowEvent(MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, {
+        page_context_namespace: pageContextNamespace,
+        href: referrer,
+        visit_sequence: pageContextVisitSequence
+    }));
 };
 const isSyntheticRequest = (headers) => {
     const marker = headers[WEBENVOY_SYNTHETIC_REQUEST_HEADER];
@@ -821,6 +834,46 @@ const installDocumentStartReadCaptureIfNeeded = () => {
         return;
     }
     installCapturedRequestContextCapture();
+};
+const refreshPageContextLifecycle = (options) => {
+    if (options?.advanceVisit === true) {
+        pageContextVisitSequence += 1;
+    }
+    installDocumentStartReadCaptureIfNeeded();
+    emitCurrentPageContextNamespace();
+};
+const installPageContextNavigationTracking = () => {
+    if (typeof mainWindow.addEventListener === "function") {
+        mainWindow.addEventListener("popstate", () => {
+            refreshPageContextLifecycle({ advanceVisit: true });
+        });
+        mainWindow.addEventListener("hashchange", () => {
+            refreshPageContextLifecycle({ advanceVisit: true });
+        });
+        mainWindow.addEventListener("pageshow", (event) => {
+            const pageTransitionEvent = event;
+            if (pageTransitionEvent.persisted === true) {
+                refreshPageContextLifecycle({ advanceVisit: true });
+            }
+        });
+    }
+    const history = mainWindow.history;
+    if (history && history[PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL] !== true) {
+        const patchStateMethod = (methodName) => {
+            const original = history[methodName];
+            if (typeof original !== "function") {
+                return;
+            }
+            history[methodName] = function patchedHistoryState(...args) {
+                original.apply(this, args);
+                refreshPageContextLifecycle({ advanceVisit: true });
+            };
+        };
+        patchStateMethod("pushState");
+        patchStateMethod("replaceState");
+        history[PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL] = true;
+    }
+    refreshPageContextLifecycle();
 };
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {
@@ -1157,7 +1210,8 @@ const resolveIncompatibleObservation = (routeBucket, requestedShapeKey) => {
 const handleCapturedRequestContextReadRequest = async (request) => {
     const method = normalizeCapturedRequestMethod(request.payload.method);
     const path = asString(request.payload.path);
-    const namespace = asString(request.payload.page_context_namespace);
+    const namespace = asString(request.payload.page_context_namespace) ??
+        resolveCurrentPageCaptureContext().pageContextNamespace;
     const shapeKey = asString(request.payload.shape_key);
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
     const result = method && path && namespace && shapeKey && routeScopeKey
@@ -1339,7 +1393,7 @@ const ensureBootstrapListener = () => {
     window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, activeMainWorldBootstrapListener);
 };
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
-installDocumentStartReadCaptureIfNeeded();
+installPageContextNavigationTracking();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);
 }

@@ -58,6 +58,8 @@ type MainWorldEventChannel = {
 let mainWorldEventChannel: MainWorldEventChannel | null = null;
 let mainWorldResultListener: ((event: Event) => void) | null = null;
 let mainWorldResultListenerEventName: string | null = null;
+let latestMainWorldPageContextNamespace: string | null = null;
+let mainWorldPageContextNamespaceListenerInstalled = false;
 const pendingMainWorldRequests = new Map<
   string,
   {
@@ -132,6 +134,32 @@ const createWindowEvent = (type: string, detail: unknown): Event => {
   return { type, detail } as unknown as Event;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const installMainWorldPageContextNamespaceListener = (): void => {
+  if (
+    mainWorldPageContextNamespaceListenerInstalled ||
+    typeof window === "undefined" ||
+    typeof window.addEventListener !== "function"
+  ) {
+    return;
+  }
+  window.addEventListener(
+    "__webenvoy_page_context_namespace__",
+    ((event: Event) => {
+      const detail = asRecord((event as CustomEvent<unknown>).detail);
+      const namespace = detail?.page_context_namespace;
+      if (typeof namespace === "string" && namespace.length > 0) {
+        latestMainWorldPageContextNamespace = namespace;
+      }
+    }) as EventListener
+  );
+  mainWorldPageContextNamespaceListenerInstalled = true;
+};
+
 const onMainWorldResultEvent = (event: Event): void => {
   const detail = ((event as CustomEvent<unknown>).detail ?? null) as MainWorldResultEnvelope | null;
   if (!detail || typeof detail.id !== "string") {
@@ -175,6 +203,7 @@ const detachMainWorldResultListener = (): void => {
 };
 
 export const installMainWorldEventChannelSecret = (secret: string | null): boolean => {
+  installMainWorldPageContextNamespaceListener();
   const normalizedSecret = normalizeMainWorldSecret(secret);
   if (
     typeof window === "undefined" ||
@@ -218,6 +247,8 @@ export const resetMainWorldEventChannelForContract = (): void => {
     pending.reject(new Error("main world request reset"));
   }
   pendingMainWorldRequests.clear();
+  latestMainWorldPageContextNamespace = null;
+  mainWorldPageContextNamespaceListenerInstalled = false;
   detachMainWorldResultListener();
   mainWorldEventChannel = null;
 };
@@ -351,13 +382,14 @@ const asCapturedRequestContextLookupResult = (
 export const readCapturedRequestContextViaMainWorld = async (
   input: CapturedRequestContextLookup
 ): Promise<CapturedRequestContextLookupResponse | null> => {
+  installMainWorldPageContextNamespaceListener();
   await activateCapturedRequestContextCaptureViaMainWorld();
   const result = await mainWorldCall<unknown>({
     type: "captured-request-context-read",
     payload: {
       method: input.method,
       path: input.path,
-      page_context_namespace: input.page_context_namespace,
+      page_context_namespace: latestMainWorldPageContextNamespace ?? input.page_context_namespace,
       shape_key: input.shape_key
     }
   });
@@ -449,3 +481,5 @@ export const requestXhsSearchJsonViaMainWorld = async (input: {
   }
   return response.result;
 };
+
+installMainWorldPageContextNamespaceListener();

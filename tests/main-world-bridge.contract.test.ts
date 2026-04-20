@@ -1,4 +1,8 @@
-import { createPageContextNamespace } from "../extension/xhs-search-types.js";
+import {
+  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
+  createPageContextNamespace,
+  createVisitedPageContextNamespace
+} from "../extension/xhs-search-types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type MockEventListener = (event: Event) => void;
@@ -17,6 +21,11 @@ const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
 const SEARCH_PAGE_HREF = "https://www.xiaohongshu.com/search_result?keyword=contract";
 const SEARCH_PAGE_NAMESPACE = createPageContextNamespace(SEARCH_PAGE_HREF);
@@ -61,6 +70,20 @@ const createMockMainWorldEnvironment = () => {
     },
     navigator: {}
   };
+  const updateHref = (url?: string | URL | null): void => {
+    if (url === undefined || url === null) {
+      return;
+    }
+    mockWindow.location.href = new URL(String(url), mockWindow.location.href).toString();
+  };
+  (mockWindow as typeof mockWindow & { history?: History }).history = {
+    pushState: vi.fn((_state: unknown, _unused: string, url?: string | URL | null) => {
+      updateHref(url);
+    }),
+    replaceState: vi.fn((_state: unknown, _unused: string, url?: string | URL | null) => {
+      updateHref(url);
+    })
+  } as unknown as History;
   const mockDocument = {
     createElement: () => ({ textContent: "", remove: () => {} }),
     documentElement: {
@@ -193,8 +216,7 @@ describe("main-world bridge contract", () => {
 
     await import("../extension/main-world-bridge.js");
 
-    expect(added).toHaveLength(1);
-    expect(added[0]?.type).toBe("__mw_bootstrap__");
+    expect(added.map((entry) => entry.type)).toContain("__mw_bootstrap__");
   });
 
   it("attaches a secret-derived request listener after receiving bootstrap event", async () => {
@@ -232,8 +254,7 @@ describe("main-world bridge contract", () => {
 
     await import("../extension/main-world-bridge.js");
 
-    expect(added).toHaveLength(1);
-    expect(added[0]?.type).toBe("__mw_bootstrap__");
+    expect(added.map((entry) => entry.type)).toContain("__mw_bootstrap__");
     expect(mockWindow.fetch).not.toBe(originalFetch);
   });
 
@@ -256,6 +277,156 @@ describe("main-world bridge contract", () => {
     });
 
     expect(mockWindow.fetch).not.toBe(originalFetch);
+  });
+
+  it("arms request-context capture before an SPA transition enters a read page", async () => {
+    const env = createMockMainWorldEnvironment();
+    const originalFetch = env.mockWindow.fetch;
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore";
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    expect(env.mockWindow.fetch).toBe(originalFetch);
+
+    env.mockWindow.history?.pushState({}, "", SEARCH_PAGE_HREF);
+    expect(env.mockWindow.fetch).not.toBe(originalFetch);
+    const transitionedNamespace =
+      asRecord(
+        env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT).at(-1)
+          ?.detail
+      )?.page_context_namespace ?? createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1);
+
+    await (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ keyword: "contract" })
+      }
+    );
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      pageContextNamespace: String(transitionedNamespace),
+      shapeKey:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract","page":1,"page_size":20,"sort":"general","note_type":0}'
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request"
+        }
+      }
+    });
+  });
+
+  it("splits page-context namespaces across same-url revisits in the same document", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ keyword: "contract" })
+      }
+    );
+
+    const previousNamespace =
+      asRecord(
+        env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT)[0]
+          ?.detail
+      )?.page_context_namespace ?? SEARCH_PAGE_NAMESPACE;
+
+    env.mockWindow.history?.pushState({}, "", SEARCH_PAGE_HREF);
+
+    const namespaceEvents = env.dispatched.filter((entry) => entry.type === MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT);
+    const currentNamespace =
+      asRecord(namespaceEvents.at(-1)?.detail)?.page_context_namespace ??
+      createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1);
+    expect(namespaceEvents.at(-1)?.detail).toMatchObject({
+      page_context_namespace: currentNamespace,
+      visit_sequence: 1
+    });
+
+    const previousVisitResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      pageContextNamespace: String(previousNamespace),
+      shapeKey:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract","page":1,"page_size":20,"sort":"general","note_type":0}'
+    });
+    const currentVisitResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      pageContextNamespace: String(currentNamespace),
+      shapeKey:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract","page":1,"page_size":20,"sort":"general","note_type":0}'
+    });
+
+    expect(previousVisitResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          page_context_namespace: String(previousNamespace)
+        }
+      }
+    });
+    expect(currentVisitResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: []
+      }
+    });
   });
 
   it("removes per-send XHR loadend listeners after capture completes", async () => {

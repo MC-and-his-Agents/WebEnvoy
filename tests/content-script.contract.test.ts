@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContentScriptHandler, bootstrapContentScript } from "../extension/content-script.js";
 import * as contentScriptHandlerModule from "../extension/content-script-handler.js";
+import {
+  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
+  createPageContextNamespace,
+  createVisitedPageContextNamespace
+} from "../extension/xhs-search-types.js";
 
 const { resetMainWorldEventChannelForContract } = contentScriptHandlerModule;
 
@@ -276,6 +281,92 @@ const createStartupInstallProbeWindow = (
       }
     },
     startupInstallRequests
+  };
+};
+
+const createCapturedRequestContextProbeWindow = (): {
+  window: {
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
+    dispatchEvent: (event: Event) => boolean;
+    location: {
+      href: string;
+    };
+  };
+  readRequests: Record<string, unknown>[];
+} => {
+  const listeners = new Map<string, Set<EventListener>>();
+  const readRequests: Record<string, unknown>[] = [];
+  let requestEventName: string | null = null;
+  let resultEventName: string | null = null;
+
+  const emit = (type: string, detail: unknown): void => {
+    const handlers = listeners.get(type);
+    if (!handlers) {
+      return;
+    }
+    const event = {
+      type,
+      detail
+    } as unknown as Event;
+    for (const listener of handlers) {
+      listener(event);
+    }
+  };
+
+  return {
+    window: {
+      addEventListener(type, listener) {
+        const handlers = listeners.get(type) ?? new Set<EventListener>();
+        handlers.add(listener);
+        listeners.set(type, handlers);
+      },
+      removeEventListener(type, listener) {
+        listeners.get(type)?.delete(listener);
+      },
+      dispatchEvent(event: Event) {
+        const customEvent = event as CustomEvent<unknown>;
+        const detail = asRecord(customEvent.detail);
+        if (
+          typeof customEvent.type === "string" &&
+          customEvent.type.startsWith("__mw_req__") &&
+          typeof detail?.id === "string"
+        ) {
+          requestEventName ??= customEvent.type;
+          resultEventName ??= customEvent.type.replace("__mw_req__", "__mw_res__");
+          if (detail.type === "captured-request-context-activate") {
+            emit(resultEventName, {
+              id: detail.id,
+              ok: true,
+              result: true
+            });
+            return true;
+          }
+          if (detail.type === "captured-request-context-read") {
+            readRequests.push(detail);
+            emit(resultEventName, {
+              id: detail.id,
+              ok: true,
+              result: {
+                page_context_namespace: detail.payload?.page_context_namespace,
+                shape_key: detail.payload?.shape_key,
+                admitted_template: null,
+                rejected_observation: null,
+                incompatible_observation: null,
+                available_shape_keys: []
+              }
+            });
+            return true;
+          }
+        }
+        emit(customEvent.type, customEvent.detail);
+        return true;
+      },
+      location: {
+        href: "https://www.xiaohongshu.com/search_result?keyword=contract"
+      }
+    },
+    readRequests
   };
 };
 
@@ -605,6 +696,37 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
 
     expect(activationSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses the latest main-world page-context namespace for request-context reads after a revisit", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-001")).toBe(
+      true
+    );
+
+    window.dispatchEvent({
+      type: MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
+      detail: {
+        page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1),
+        href: window.location.href,
+        visit_sequence: 1
+      }
+    } as unknown as Event);
+
+    await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract"}'
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
   });
 
   it("ignores page-forged fingerprint-install event without secret-derived event name", async () => {

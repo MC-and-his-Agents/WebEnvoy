@@ -1,10 +1,12 @@
 import {
   CAPTURED_REQUEST_CONTEXT_PATHS,
   DETAIL_ENDPOINT,
+  MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT,
   SEARCH_ENDPOINT,
   USER_HOME_ENDPOINT,
   WEBENVOY_SYNTHETIC_REQUEST_HEADER,
   createPageContextNamespace,
+  createVisitedPageContextNamespace,
   type CapturedRequestContextArtifact,
   type CapturedRequestContextCommand,
   type CapturedRequestContextLookupResult,
@@ -109,7 +111,11 @@ const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+const PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL = Symbol.for(
+  "webenvoy.main_world.page_context_navigation.v1"
+);
 let capturedRequestContextCaptureInstalled = false;
+let pageContextVisitSequence = 0;
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -724,9 +730,26 @@ const resolveCurrentPageCaptureContext = (): {
 } => {
   const referrer = typeof window.location?.href === "string" ? window.location.href : null;
   return {
-    pageContextNamespace: createPageContextNamespace(referrer ?? "about:blank"),
+    pageContextNamespace: createVisitedPageContextNamespace(
+      referrer ?? "about:blank",
+      pageContextVisitSequence
+    ),
     referrer
   };
+};
+
+const emitCurrentPageContextNamespace = (): void => {
+  const { pageContextNamespace, referrer } = resolveCurrentPageCaptureContext();
+  if (typeof mainWindow.dispatchEvent !== "function") {
+    return;
+  }
+  mainWindow.dispatchEvent(
+    createWindowEvent(MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT, {
+      page_context_namespace: pageContextNamespace,
+      href: referrer,
+      visit_sequence: pageContextVisitSequence
+    })
+  );
 };
 
 const isSyntheticRequest = (headers: Record<string, string>): boolean => {
@@ -1154,6 +1177,55 @@ const installDocumentStartReadCaptureIfNeeded = (): void => {
   installCapturedRequestContextCapture();
 };
 
+const refreshPageContextLifecycle = (options?: { advanceVisit?: boolean }): void => {
+  if (options?.advanceVisit === true) {
+    pageContextVisitSequence += 1;
+  }
+  installDocumentStartReadCaptureIfNeeded();
+  emitCurrentPageContextNamespace();
+};
+
+const installPageContextNavigationTracking = (): void => {
+  if (typeof mainWindow.addEventListener === "function") {
+    mainWindow.addEventListener("popstate", () => {
+      refreshPageContextLifecycle({ advanceVisit: true });
+    });
+    mainWindow.addEventListener("hashchange", () => {
+      refreshPageContextLifecycle({ advanceVisit: true });
+    });
+    mainWindow.addEventListener("pageshow", (event: Event) => {
+      const pageTransitionEvent = event as PageTransitionEvent;
+      if (pageTransitionEvent.persisted === true) {
+        refreshPageContextLifecycle({ advanceVisit: true });
+      }
+    });
+  }
+
+  const history = mainWindow.history as
+    | (History & { [PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL]?: boolean })
+    | undefined;
+  if (history && history[PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL] !== true) {
+    const patchStateMethod = (methodName: "pushState" | "replaceState"): void => {
+      const original = history[methodName];
+      if (typeof original !== "function") {
+        return;
+      }
+      history[methodName] = function patchedHistoryState(
+        this: History,
+        ...args: Parameters<History["pushState"]>
+      ): void {
+        original.apply(this, args);
+        refreshPageContextLifecycle({ advanceVisit: true });
+      };
+    };
+    patchStateMethod("pushState");
+    patchStateMethod("replaceState");
+    history[PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL] = true;
+  }
+
+  refreshPageContextLifecycle();
+};
+
 const createWindowEvent = (type: string, detail: unknown): Event => {
   if (typeof CustomEvent === "function") {
     return new CustomEvent(type, { detail });
@@ -1572,7 +1644,9 @@ const resolveIncompatibleObservation = (
 const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest): Promise<void> => {
   const method = normalizeCapturedRequestMethod(request.payload.method);
   const path = asString(request.payload.path);
-  const namespace = asString(request.payload.page_context_namespace) as PageContextNamespace | null;
+  const namespace =
+    (asString(request.payload.page_context_namespace) as PageContextNamespace | null) ??
+    resolveCurrentPageCaptureContext().pageContextNamespace;
   const shapeKey = asString(request.payload.shape_key);
   const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
   const result: CapturedRequestContextLookupResult | null =
@@ -1786,7 +1860,7 @@ const ensureBootstrapListener = (): void => {
 };
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
-installDocumentStartReadCaptureIfNeeded();
+installPageContextNavigationTracking();
 if (expectedMainWorldEventChannel) {
   attachMainWorldEventChannel(expectedMainWorldEventChannel);
 } else {

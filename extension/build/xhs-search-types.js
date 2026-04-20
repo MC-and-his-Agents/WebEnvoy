@@ -7,6 +7,7 @@ export const CAPTURED_REQUEST_CONTEXT_PATHS = [
     USER_HOME_ENDPOINT
 ];
 export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+export const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT = "__webenvoy_page_context_namespace__";
 export const createPageContextNamespace = (href) => {
     const normalized = href.trim();
     if (normalized.length === 0) {
@@ -27,4 +28,8 @@ export const createPageContextNamespace = (href) => {
     catch {
         return normalized;
     }
+};
+export const createVisitedPageContextNamespace = (href, visitSequence) => {
+    const baseNamespace = createPageContextNamespace(href);
+    return visitSequence > 0 ? `${baseNamespace}|visit=${visitSequence}` : baseNamespace;
 };
