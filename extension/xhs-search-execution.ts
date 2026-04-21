@@ -216,12 +216,24 @@ const resolveRequestContextState = async (
   }
 
   const shapeKey = serializeSearchRequestShape(shape);
-  const lookup = await env.readCapturedRequestContext({
-    method: "POST",
-    path: SEARCH_ENDPOINT,
-    page_context_namespace: fallbackNamespace,
-    shape_key: shapeKey
-  });
+  let lookup: Awaited<ReturnType<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>> =
+    null;
+  try {
+    lookup = await env.readCapturedRequestContext({
+      method: "POST",
+      path: SEARCH_ENDPOINT,
+      page_context_namespace: fallbackNamespace,
+      shape_key: shapeKey
+    });
+  } catch {
+    return {
+      status: "miss",
+      failureReason: "template_missing",
+      pageContextNamespace: fallbackNamespace,
+      shapeKey,
+      availableShapeKeys: []
+    };
+  }
 
   const pageContextNamespace = lookup?.page_context_namespace ?? fallbackNamespace;
   const availableShapeKeys = lookup?.available_shape_keys ?? [];

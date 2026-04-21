@@ -663,6 +663,55 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("normalizes limit-only request bodies into the canonical page_size search shape", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        keyword: "露营",
+        limit: 10
+      })
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "露营", page_size: 10 })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          shape_key: createShapeKey({ keyword: "露营", page_size: 10 }),
+          shape: {
+            page_size: 10
+          }
+        }
+      }
+    });
+  });
+
   it.each([
     { label: "page", admitted: createShapeKey({ keyword: "露营", page: 2 }), requested: createShapeKey({ keyword: "露营", page: 1 }) },
     { label: "page_size", admitted: createShapeKey({ keyword: "露营", page_size: 10 }), requested: createShapeKey({ keyword: "露营", page_size: 20 }) },

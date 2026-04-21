@@ -206,6 +206,7 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
           keyword: unknown;
           page?: unknown;
           page_size?: unknown;
+          limit?: unknown;
           sort?: unknown;
           note_type?: unknown;
         })

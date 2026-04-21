@@ -345,12 +345,15 @@ export const normalizeSearchRequestShapeInput = (input: {
   keyword: unknown;
   page?: unknown;
   page_size?: unknown;
+  limit?: unknown;
   sort?: unknown;
   note_type?: unknown;
 }): Omit<SearchRequestShape, "command" | "method" | "pathname"> | null => {
   const keyword = toTrimmedString(input.keyword);
   const page = input.page === undefined ? 1 : asInteger(input.page);
-  const pageSize = input.page_size === undefined ? 20 : asInteger(input.page_size);
+  const pageSizeInput =
+    input.page_size !== undefined ? input.page_size : input.limit !== undefined ? input.limit : 20;
+  const pageSize = asInteger(pageSizeInput);
   const sort = input.sort === undefined ? "general" : toTrimmedString(input.sort);
   const noteType = input.note_type === undefined ? 0 : asInteger(input.note_type);
   if (!keyword || page === null || pageSize === null || sort === null || noteType === null) {
@@ -369,6 +372,7 @@ export const createSearchRequestShape = (input: {
   keyword: unknown;
   page?: unknown;
   page_size?: unknown;
+  limit?: unknown;
   sort?: unknown;
   note_type?: unknown;
 }): SearchRequestShape | null => {

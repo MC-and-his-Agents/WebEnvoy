@@ -4166,7 +4166,8 @@ const toTrimmedString = (value) => typeof value === "string" && value.trim().len
 const normalizeSearchRequestShapeInput = (input) => {
     const keyword = toTrimmedString(input.keyword);
     const page = input.page === undefined ? 1 : asInteger(input.page);
-    const pageSize = input.page_size === undefined ? 20 : asInteger(input.page_size);
+    const pageSizeInput = input.page_size !== undefined ? input.page_size : input.limit !== undefined ? input.limit : 20;
+    const pageSize = asInteger(pageSizeInput);
     const sort = input.sort === undefined ? "general" : toTrimmedString(input.sort);
     const noteType = input.note_type === undefined ? 0 : asInteger(input.note_type);
     if (!keyword || page === null || pageSize === null || sort === null || noteType === null) {
@@ -4996,12 +4997,24 @@ const resolveRequestContextState = async (input, env) => {
         };
     }
     const shapeKey = serializeSearchRequestShape(shape);
-    const lookup = await env.readCapturedRequestContext({
-        method: "POST",
-        path: SEARCH_ENDPOINT,
-        page_context_namespace: fallbackNamespace,
-        shape_key: shapeKey
-    });
+    let lookup = null;
+    try {
+        lookup = await env.readCapturedRequestContext({
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            page_context_namespace: fallbackNamespace,
+            shape_key: shapeKey
+        });
+    }
+    catch {
+        return {
+            status: "miss",
+            failureReason: "template_missing",
+            pageContextNamespace: fallbackNamespace,
+            shapeKey,
+            availableShapeKeys: []
+        };
+    }
     const pageContextNamespace = lookup?.page_context_namespace ?? fallbackNamespace;
     const availableShapeKeys = lookup?.available_shape_keys ?? [];
     const siblingShapeKeys = availableShapeKeys.filter((candidate) => candidate !== shapeKey);

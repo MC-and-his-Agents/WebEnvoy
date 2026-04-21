@@ -1471,6 +1471,101 @@ describe("extension build contract", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("fails closed when request-context lookup raises instead of downgrading to a generic execution error", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-lookup-error-001",
+      sessionId: "nm-session-source-search-live-lookup-error-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-lookup-error-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_lookup_error_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-lookup-error-001",
+            sessionId: "nm-session-source-search-live-lookup-error-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-lookup-error-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-lookup-error-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          readCapturedRequestContext: async () => {
+            throw new Error("main-world lookup transport failed");
+          },
+          callSignature: async () => {
+            throw new Error("signature should not be used on request-context read failure");
+          },
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "ERR_EXECUTION_FAILED"
+      },
+      payload: {
+        details: {
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing"
+        },
+        observability: {
+          failure_site: {
+            target: "captured_request_context"
+          }
+        }
+      }
+    });
+
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       label: "template_missing",
