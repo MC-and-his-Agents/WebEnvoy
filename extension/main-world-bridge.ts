@@ -935,6 +935,7 @@ const storeCapturedRequestContext = (
       null
     );
   }
+  bucket.admittedTemplate = null;
   bucket.rejectedObservation = artifact;
 };
 

@@ -641,6 +641,7 @@ const storeCapturedRequestContext = (candidate, input) => {
     else if (!incompatibleObservation) {
         setRouteBucketIncompatibleObservation(candidate.pageContextNamespace, contextShape.routeScopeKey, null);
     }
+    bucket.admittedTemplate = null;
     bucket.rejectedObservation = artifact;
 };
 const resolveFetchCandidate = async (input, init) => {

@@ -35,6 +35,7 @@ const serializeCanonicalShape = (value) => {
         keyword: record.keyword,
         page: record.page,
         page_size: record.page_size,
+        limit: record.limit,
         sort: record.sort,
         note_type: record.note_type
     });

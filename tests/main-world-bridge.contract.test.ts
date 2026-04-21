@@ -663,6 +663,68 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("revokes an admitted exact-shape template after a later rejection for the same shape", async () => {
+    const env = createMockMainWorldEnvironment();
+    let requestCount = 0;
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        });
+      }
+      return new Response(JSON.stringify({ code: 500, msg: "failed" }), {
+        status: 500,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "露营" })
+    });
+
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "露营" })
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "露营" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          rejection_reason: "failed_request_rejected"
+        }
+      }
+    });
+  });
+
   it("normalizes limit-only request bodies into the canonical page_size search shape", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({
