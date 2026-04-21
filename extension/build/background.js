@@ -220,11 +220,24 @@ const scoreXhsRuntimeSurfaceTab = (tab) => {
     return 3;
 };
 const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage, requestedResourceId) => {
+    return await resolvePreferredXhsReadTargetTabId(chromeApi, preferredPage, requestedResourceId);
+};
+const resolvePreferredXhsReadTargetTabId = async (chromeApi, preferredPage, requestedResourceId) => {
     const xhsUrlPatterns = [
         "*://www.xiaohongshu.com/*",
         "*://edith.xiaohongshu.com/*",
         "*://*.xiaohongshu.com/*"
     ];
+    const queryAllWindowTabs = async () => {
+        try {
+            return await chromeApi.tabs.query({
+                url: xhsUrlPatterns
+            });
+        }
+        catch {
+            return [];
+        }
+    };
     let currentWindowTabs = [];
     try {
         currentWindowTabs = await chromeApi.tabs.query({
@@ -235,16 +248,17 @@ const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage, 
     catch {
         currentWindowTabs = [];
     }
+    let allWindowTabs = null;
+    const resolveAllWindowTabs = async () => {
+        if (allWindowTabs) {
+            return allWindowTabs;
+        }
+        allWindowTabs = await queryAllWindowTabs();
+        return allWindowTabs;
+    };
     let xhsTabs = currentWindowTabs;
     if (currentWindowTabs.length === 0) {
-        try {
-            xhsTabs = await chromeApi.tabs.query({
-                url: xhsUrlPatterns
-            });
-        }
-        catch {
-            xhsTabs = [];
-        }
+        xhsTabs = await resolveAllWindowTabs();
     }
     const resourceBoundTabs = requestedResourceId && preferredPage
         ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
@@ -253,6 +267,14 @@ const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage, 
         return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
     }
     if (requestedResourceId && preferredPage) {
+        if (currentWindowTabs.length > 0) {
+            const globalResourceBoundTabs = (await resolveAllWindowTabs()).filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId));
+            if (globalResourceBoundTabs.length === 1) {
+                return typeof globalResourceBoundTabs[0]?.id === "number"
+                    ? globalResourceBoundTabs[0].id
+                    : null;
+            }
+        }
         return null;
     }
     const ranked = xhsTabs
@@ -1703,6 +1725,17 @@ class ChromeBackgroundBridge {
             domain: targetDomain
         };
     }
+    #doesStrictTargetBindingMatch(requestTargetBinding, storedTarget) {
+        if (storedTarget.sourceTabId === null && storedTarget.sourceDomain === null) {
+            return true;
+        }
+        if (storedTarget.sourceTabId === null || storedTarget.sourceDomain === null) {
+            return false;
+        }
+        return (requestTargetBinding !== null &&
+            requestTargetBinding.tabId === storedTarget.sourceTabId &&
+            requestTargetBinding.domain === storedTarget.sourceDomain);
+    }
     async #rememberStartupTrustedFingerprintContext(payload, sender) {
         const startupTrust = asRecord(payload.startup_fingerprint_trust);
         if (!startupTrust) {
@@ -1820,6 +1853,7 @@ class ChromeBackgroundBridge {
         if (bootstrap.sessionId !== sessionId ||
             bootstrap.runId !== runId ||
             bootstrap.status !== "ready" ||
+            !this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), bootstrap) ||
             bootstrap.serializedFingerprintRuntime !==
                 serializeFingerprintRuntimeContext(requestedFingerprintContext)) {
             return null;
@@ -1845,12 +1879,7 @@ class ChromeBackgroundBridge {
             }
             return null;
         }
-        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
-        if (trustedEntry.sourceTabId !== null &&
-            trustedEntry.sourceDomain !== null &&
-            (!requestTargetBinding ||
-                requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
-                requestTargetBinding.domain !== trustedEntry.sourceDomain)) {
+        if (!this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), trustedEntry)) {
             return null;
         }
         return { ...trusted };
@@ -1951,6 +1980,7 @@ class ChromeBackgroundBridge {
         const requestRunId = asNonEmptyString(request.params.run_id);
         const requestProfile = asNonEmptyString(request.profile);
         const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
         if (!version ||
             version !== "v1" ||
             !runId ||
@@ -1996,6 +2026,8 @@ class ChromeBackgroundBridge {
                 status: "stale",
                 mainWorldSecret,
                 serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
+                sourceTabId: requestTargetBinding?.tabId ?? null,
+                sourceDomain: requestTargetBinding?.domain ?? null,
                 updatedAt: new Date().toISOString()
             });
             this.#emit({
@@ -2030,6 +2062,7 @@ class ChromeBackgroundBridge {
             currentBootstrapState.version === version &&
             currentBootstrapState.runId === runId &&
             currentBootstrapState.runtimeContextId === runtimeContextId &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, currentBootstrapState) &&
             currentBootstrapState.serializedFingerprintRuntime === serializedFingerprintRuntime;
         const trusted = this.#runtimeTrustState.getTrusted(profile, requestSessionId);
         const trustedHasInstalledInjection = hasInstalledFingerprintInjection(trusted?.fingerprintRuntime ?? null);
@@ -2037,6 +2070,7 @@ class ChromeBackgroundBridge {
             trusted.sessionId === requestSessionId &&
             trusted.runId === runId &&
             trusted.runtimeContextId === runtimeContextId &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, trusted) &&
             trustedHasInstalledInjection;
         const bootstrapReadyFromTrusted = trustedMatchesBootstrap &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
@@ -2056,6 +2090,14 @@ class ChromeBackgroundBridge {
                 status: "ready",
                 mainWorldSecret,
                 serializedFingerprintRuntime,
+                sourceTabId: trusted?.sourceTabId ??
+                    requestTargetBinding?.tabId ??
+                    currentBootstrapState?.sourceTabId ??
+                    null,
+                sourceDomain: trusted?.sourceDomain ??
+                    requestTargetBinding?.domain ??
+                    currentBootstrapState?.sourceDomain ??
+                    null,
                 updatedAt: new Date().toISOString()
             });
             this.#emit({
@@ -2097,6 +2139,8 @@ class ChromeBackgroundBridge {
             status: "pending",
             mainWorldSecret,
             serializedFingerprintRuntime,
+            sourceTabId: requestTargetBinding?.tabId ?? null,
+            sourceDomain: requestTargetBinding?.domain ?? null,
             updatedAt: new Date().toISOString()
         });
         // Keep the request pending until the execution surface returns an explicit bootstrap ack
@@ -2440,10 +2484,17 @@ class ChromeBackgroundBridge {
         const runMatches = !!bootstrap && !!requestRunId && bootstrap.runId === requestRunId;
         const runtimeContextMatches = !!bootstrap &&
             (!requestRuntimeContextId || bootstrap.runtimeContextId === requestRuntimeContextId);
+        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
+        const targetBindingMatches = requestTargetBinding === null ||
+            (!!bootstrap && this.#doesStrictTargetBindingMatch(requestTargetBinding, bootstrap));
         const bootstrapState = bootstrap === null
             ? "not_started"
             : sessionMatches && runMatches && runtimeContextMatches
-                ? bootstrap.status
+                ? targetBindingMatches
+                    ? bootstrap.status
+                    : bootstrap.status === "ready"
+                        ? "pending"
+                        : bootstrap.status
                 : "stale";
         this.#emit({
             id: request.id,
@@ -2565,11 +2616,15 @@ class ChromeBackgroundBridge {
             });
             return;
         }
+        const sourceBinding = this.#resolveRequestTargetBinding(input.request);
+        if (sourceBinding) {
+            bootstrap.sourceTabId = sourceBinding.tabId;
+            bootstrap.sourceDomain = sourceBinding.domain;
+        }
         bootstrap.status = "ready";
         bootstrap.updatedAt = new Date().toISOString();
         this.#runtimeTrustState.setBootstrap(profile, bootstrap);
         const attestedFingerprintRuntime = resolveAttestedFingerprintRuntimeContext(input.payload.fingerprint_runtime ?? null);
-        const sourceBinding = this.#resolveRequestTargetBinding(input.request);
         if (attestedFingerprintRuntime &&
             attestedFingerprintRuntime.profile === profile &&
             sourceBinding) {
@@ -4109,55 +4164,7 @@ class ChromeBackgroundBridge {
                 : {};
             const requestedResourceId = resolveRequestedXhsResourceId(command, rawCommandParams);
             const preferredPage = resolvePreferredXhsReadPage(command, resolveXhsGateCommandInput(rawCommandParams).targetPage);
-            const xhsUrlPatterns = [
-                "*://www.xiaohongshu.com/*",
-                "*://edith.xiaohongshu.com/*",
-                "*://*.xiaohongshu.com/*"
-            ];
-            let currentWindowTabs = [];
-            try {
-                currentWindowTabs = await this.chromeApi.tabs.query({
-                    currentWindow: true,
-                    url: xhsUrlPatterns
-                });
-            }
-            catch {
-                currentWindowTabs = [];
-            }
-            let xhsTabs = currentWindowTabs;
-            if (currentWindowTabs.length === 0) {
-                try {
-                    xhsTabs = await this.chromeApi.tabs.query({
-                        url: xhsUrlPatterns
-                    });
-                }
-                catch {
-                    xhsTabs = [];
-                }
-            }
-            const resourceBoundTabs = requestedResourceId && preferredPage
-                ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
-                : [];
-            if (resourceBoundTabs.length === 1) {
-                return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
-            }
-            if (requestedResourceId && preferredPage) {
-                return null;
-            }
-            const ranked = xhsTabs
-                .filter((tab) => typeof tab.id === "number")
-                .sort((left, right) => {
-                const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
-                if (scoreDiff !== 0) {
-                    return scoreDiff;
-                }
-                if (left.active === right.active) {
-                    return 0;
-                }
-                return left.active ? -1 : 1;
-            });
-            const candidate = ranked[0];
-            return typeof candidate?.id === "number" ? candidate.id : null;
+            return await resolvePreferredXhsReadTargetTabId(this.chromeApi, preferredPage, requestedResourceId);
         }
         let tabs = [];
         try {
@@ -4339,7 +4346,8 @@ class ChromeBackgroundBridge {
         }
         if (bootstrap.sessionId !== sessionId ||
             bootstrap.runId !== runId ||
-            bootstrap.status !== "ready") {
+            bootstrap.status !== "ready" ||
+            !this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), bootstrap)) {
             return null;
         }
         return asNonEmptyString(bootstrap.mainWorldSecret);

@@ -764,7 +764,7 @@ describe("content-script bootstrap contract", () => {
     expect(activationSpy).not.toHaveBeenCalled();
   });
 
-  it("honors the requested page-context namespace for request-context reads after a revisit", async () => {
+  it("prefers the latest visited page-context namespace when the caller only has the base namespace", async () => {
     const { window, readRequests } = createCapturedRequestContextProbeWindow();
     (globalThis as { window?: unknown }).window = window;
 
@@ -794,7 +794,41 @@ describe("content-script bootstrap contract", () => {
 
     expect(readRequests).toHaveLength(1);
     expect(asRecord(readRequests[0]?.payload)).toMatchObject({
-      page_context_namespace: createPageContextNamespace(window.location.href)
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("keeps an explicitly requested visited page-context namespace during request-context reads", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-001b")).toBe(
+      true
+    );
+    const { namespaceEvent } = contentScriptHandlerModule.resolveMainWorldEventNamesForSecret(
+      "namespace-secret-001b"
+    );
+
+    window.dispatchEvent({
+      type: namespaceEvent,
+      detail: {
+        page_context_namespace: createVisitedPageContextNamespace(window.location.href, 2),
+        href: window.location.href,
+        visit_sequence: 2
+      }
+    } as unknown as Event);
+
+    await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1),
+      shape_key:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract"}'
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
     });
   });
 

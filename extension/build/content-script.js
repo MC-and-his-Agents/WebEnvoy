@@ -7481,6 +7481,10 @@ const encodeUtf8Base64 = (value) => {
     }
     throw new Error("base64 encoder is unavailable");
 };
+const stripVisitedPageContextSuffix = (namespace) => {
+    const visitSuffixIndex = namespace.indexOf("|visit=");
+    return visitSuffixIndex >= 0 ? namespace.slice(0, visitSuffixIndex) : namespace;
+};
 const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
 const hashMainWorldEventChannel = (value) => {
     let hash = 0x811c9dc5;
@@ -7751,12 +7755,18 @@ const readCapturedRequestContextViaMainWorld = async (input) => {
         installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
     }
     await activateCapturedRequestContextCaptureViaMainWorld();
-    const pageContextNamespace = typeof input.page_context_namespace === "string" && input.page_context_namespace.length > 0
+    const requestedPageContextNamespace = typeof input.page_context_namespace === "string" && input.page_context_namespace.length > 0
         ? input.page_context_namespace
-        : typeof latestMainWorldPageContextNamespace === "string" &&
-            latestMainWorldPageContextNamespace.length > 0
-            ? latestMainWorldPageContextNamespace
-            : null;
+        : null;
+    const latestVisitedPageContextNamespace = typeof latestMainWorldPageContextNamespace === "string" &&
+        latestMainWorldPageContextNamespace.length > 0
+        ? latestMainWorldPageContextNamespace
+        : null;
+    const pageContextNamespace = requestedPageContextNamespace &&
+        latestVisitedPageContextNamespace &&
+        requestedPageContextNamespace === stripVisitedPageContextSuffix(latestVisitedPageContextNamespace)
+        ? latestVisitedPageContextNamespace
+        : requestedPageContextNamespace ?? latestVisitedPageContextNamespace;
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {

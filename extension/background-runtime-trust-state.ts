@@ -21,6 +21,8 @@ interface RuntimeBootstrapState {
   status: RuntimeBootstrapStatus;
   mainWorldSecret: string;
   serializedFingerprintRuntime: string;
+  sourceTabId: number | null;
+  sourceDomain: string | null;
   updatedAt: string;
 }
 
