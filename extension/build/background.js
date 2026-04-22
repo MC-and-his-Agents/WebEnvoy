@@ -262,22 +262,12 @@ const resolvePreferredXhsReadTargetTabId = async (chromeApi, preferredPage, requ
     if (currentWindowTabs.length === 0) {
         xhsTabs = await resolveAllWindowTabs();
     }
-    const resourceBoundTabs = requestedResourceId && preferredPage
-        ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
-        : [];
-    if (resourceBoundTabs.length === 1) {
-        return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
-    }
     if (requestedResourceId && preferredPage) {
-        if (currentWindowTabs.length > 0) {
-            const globalResourceBoundTabs = (await resolveAllWindowTabs()).filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId));
-            if (globalResourceBoundTabs.length === 1) {
-                return typeof globalResourceBoundTabs[0]?.id === "number"
-                    ? globalResourceBoundTabs[0].id
-                    : null;
-            }
+        const globalResourceBoundTabs = (await resolveAllWindowTabs()).filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId));
+        if (globalResourceBoundTabs.length !== 1) {
+            return null;
         }
-        return null;
+        return typeof globalResourceBoundTabs[0]?.id === "number" ? globalResourceBoundTabs[0].id : null;
     }
     if (preferredPage === "search_result_tab") {
         const globalTabs = await resolveAllWindowTabs();
@@ -2527,7 +2517,7 @@ class ChromeBackgroundBridge {
             error: null
         });
     }
-    #handleRuntimeBootstrapForwardResult(input) {
+    async #handleRuntimeBootstrapForwardResult(input) {
         const profile = asNonEmptyString(input.request.profile);
         const bootstrap = profile ? this.#runtimeTrustState.getBootstrap(profile) : null;
         const ackResult = asRecord(input.payload.result);
@@ -2626,7 +2616,8 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        const sourceBinding = this.#resolveRequestTargetBinding(input.request);
+        const sourceBinding = this.#resolveRequestTargetBinding(input.request) ??
+            (await this.#resolveStartupTrustSenderBinding(input.sender));
         if (sourceBinding) {
             bootstrap.sourceTabId = sourceBinding.tabId;
             bootstrap.sourceDomain = sourceBinding.domain;
@@ -4014,7 +4005,7 @@ class ChromeBackgroundBridge {
         const suppressHostResponse = pending.suppressHostResponse === true;
         const command = String(request.params.command ?? "");
         if (command === "runtime.bootstrap") {
-            this.#handleRuntimeBootstrapForwardResult({
+            void this.#handleRuntimeBootstrapForwardResult({
                 request,
                 result,
                 payload,
