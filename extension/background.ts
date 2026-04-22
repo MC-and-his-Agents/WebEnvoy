@@ -597,18 +597,21 @@ const resolvePreferredXhsReadTargetTabId = async (
     if (globalResourceBoundTabs.length !== 1) {
       return null;
     }
-    return typeof globalResourceBoundTabs[0]?.id === "number" ? globalResourceBoundTabs[0].id : null;
-  }
-  if (preferredPage === "search_result_tab") {
-    const globalTabs = await resolveAllWindowTabs();
-    if (globalTabs.length > 0) {
-      xhsTabs = globalTabs;
+      return typeof globalResourceBoundTabs[0]?.id === "number" ? globalResourceBoundTabs[0].id : null;
     }
-  }
-  const preferredTabs =
+  let preferredTabs =
     preferredPage !== null
       ? xhsTabs.filter((tab) => scoreXhsTab(tab, preferredPage) === 0)
       : xhsTabs;
+  if (
+    preferredPage === "search_result_tab" &&
+    preferredTabs.length === 0 &&
+    currentWindowTabs.length > 0
+  ) {
+    const globalTabs = await resolveAllWindowTabs();
+    preferredTabs = globalTabs.filter((tab) => scoreXhsTab(tab, preferredPage) === 0);
+    xhsTabs = globalTabs;
+  }
   if (preferredPage !== null && preferredTabs.length === 0) {
     return null;
   }

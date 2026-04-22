@@ -348,6 +348,82 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     );
   });
 
+  it("keeps current-window priority for search_result_tab bootstrap before falling back across windows", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (query?: { currentWindow?: boolean }) => {
+      if (query?.currentWindow) {
+        return [
+          {
+            id: 31,
+            active: true,
+            url: "https://www.xiaohongshu.com/search_result?keyword=当前窗口"
+          }
+        ];
+      }
+      return [
+        {
+          id: 31,
+          active: true,
+          url: "https://www.xiaohongshu.com/search_result?keyword=当前窗口"
+        },
+        {
+          id: 52,
+          active: false,
+          url: "https://www.xiaohongshu.com/search_result?keyword=其他窗口"
+        }
+      ];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-search-current-window-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-search-current-window-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-search-current-window-001",
+          runtime_context_id: "ctx-bootstrap-search-current-window-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-search-current-window-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 31 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({
+        id: "run-bootstrap-search-current-window-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("searches across all windows for search_result_tab bootstrap when target_tab_id is omitted", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
