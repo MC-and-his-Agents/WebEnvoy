@@ -562,11 +562,9 @@ export class ContentScriptHandler {
 
   async #handleXhsReadCommand(message: BackgroundToContentMessage): Promise<void> {
     const commandParams = asRecord(message.commandParams) ?? {};
-    if (message.command === "xhs.search") {
-      const mainWorldSecret = asString(commandParams.main_world_secret);
-      if (mainWorldSecret) {
-        installMainWorldEventChannelSecret(mainWorldSecret);
-      }
+    const mainWorldSecret = asString(commandParams.main_world_secret);
+    if (mainWorldSecret) {
+      installMainWorldEventChannelSecret(mainWorldSecret);
     }
     const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);

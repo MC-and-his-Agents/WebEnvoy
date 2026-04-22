@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ContentScriptHandler, type BackgroundToContentMessage } from "../extension/content-script-handler.js";
+import * as contentScriptMainWorldModule from "../extension/content-script-main-world.js";
+import {
+  ContentScriptHandler,
+  type BackgroundToContentMessage
+} from "../extension/content-script-handler.js";
 
 const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
@@ -269,6 +273,40 @@ describe("content-script handler xhs read commands", () => {
       (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
         .execution_audit as Record<string, unknown> | null)
     ).toBeNull();
+  });
+
+  it("reinstalls the main-world channel secret for xhs.detail and xhs.user_home forwards", async () => {
+    const installSecret = vi.spyOn(
+      contentScriptMainWorldModule,
+      "installMainWorldEventChannelSecret"
+    );
+
+    for (const input of [
+      {
+        command: "xhs.detail" as const,
+        abilityId: "xhs.note.detail.v1",
+        targetPage: "explore_detail_tab" as const,
+        href: "https://www.xiaohongshu.com/explore/note-001",
+        payload: { note_id: "note-001" }
+      },
+      {
+        command: "xhs.user_home" as const,
+        abilityId: "xhs.user.home.v1",
+        targetPage: "profile_tab" as const,
+        href: "https://www.xiaohongshu.com/user/profile/user-001",
+        payload: { user_id: "user-001" }
+      }
+    ]) {
+      installSecret.mockClear();
+      const { handler, message } = createMessage(input);
+      message.commandParams.main_world_secret = `secret-${input.command}`;
+
+      const resultPromise = waitForSingleResult(handler);
+      expect(handler.onBackgroundMessage(message)).toBe(true);
+      await resultPromise;
+
+      expect(installSecret).toHaveBeenCalledWith(`secret-${input.command}`);
+    }
   });
 
   it("admits anonymous_context on the extension path when the target site is actually logged out", async () => {

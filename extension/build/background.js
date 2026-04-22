@@ -279,6 +279,12 @@ const resolvePreferredXhsReadTargetTabId = async (chromeApi, preferredPage, requ
         }
         return null;
     }
+    if (preferredPage === "search_result_tab") {
+        const globalTabs = await resolveAllWindowTabs();
+        if (globalTabs.length > 0) {
+            xhsTabs = globalTabs;
+        }
+    }
     const ranked = xhsTabs
         .filter((tab) => typeof tab.id === "number")
         .sort((left, right) => {
@@ -2917,7 +2923,7 @@ class ChromeBackgroundBridge {
             fingerprintContext: forwardFingerprintContext
         };
         try {
-            await this.#sendMessageWithContentScriptRecovery(tabId, forward);
+            await this.#sendMessageWithContentScriptRecovery(tabId, forward, dispatchRequest);
         }
         catch (error) {
             this.#failPending(dispatchRequest.id, {
@@ -4358,13 +4364,16 @@ class ChromeBackgroundBridge {
         }
         return asNonEmptyString(bootstrap.mainWorldSecret);
     }
-    async #sendMessageWithContentScriptRecovery(tabId, forward) {
+    async #sendMessageWithContentScriptRecovery(tabId, forward, request) {
         try {
             await this.chromeApi.tabs.sendMessage(tabId, forward);
             return;
         }
         catch (initialError) {
             try {
+                if (this.#shouldEnsureMainWorldBridge(forward.command, null)) {
+                    await this.#ensureMainWorldBridgeInjected(request, tabId);
+                }
                 await this.#ensureContentScriptInjected(tabId);
             }
             catch (recoveryError) {

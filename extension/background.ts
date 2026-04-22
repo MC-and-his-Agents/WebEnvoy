@@ -610,6 +610,12 @@ const resolvePreferredXhsReadTargetTabId = async (
     }
     return null;
   }
+  if (preferredPage === "search_result_tab") {
+    const globalTabs = await resolveAllWindowTabs();
+    if (globalTabs.length > 0) {
+      xhsTabs = globalTabs;
+    }
+  }
   const ranked = xhsTabs
     .filter((tab) => typeof tab.id === "number")
     .sort((left, right) => {
@@ -3841,7 +3847,7 @@ class ChromeBackgroundBridge {
     };
 
     try {
-      await this.#sendMessageWithContentScriptRecovery(tabId, forward);
+      await this.#sendMessageWithContentScriptRecovery(tabId, forward, dispatchRequest);
     } catch (error) {
       this.#failPending(dispatchRequest.id, {
         code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -5534,13 +5540,17 @@ class ChromeBackgroundBridge {
 
   async #sendMessageWithContentScriptRecovery(
     tabId: number,
-    forward: BackgroundToContentMessage
+    forward: BackgroundToContentMessage,
+    request: BridgeRequest
   ): Promise<void> {
     try {
       await this.chromeApi.tabs.sendMessage(tabId, forward);
       return;
     } catch (initialError) {
       try {
+        if (this.#shouldEnsureMainWorldBridge(forward.command, null)) {
+          await this.#ensureMainWorldBridgeInjected(request, tabId);
+        }
         await this.#ensureContentScriptInjected(tabId);
       } catch (recoveryError) {
         const initialMessage =
