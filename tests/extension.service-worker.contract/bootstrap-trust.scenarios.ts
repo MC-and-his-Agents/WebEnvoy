@@ -816,6 +816,132 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     });
   });
 
+  it("keeps runtime.readiness pending when the requested target binding no longer matches the trusted bootstrap", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-target-bound-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-target-bound-001",
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 77,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-target-bound-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-target-bound-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-target-bound-001",
+      runtimeContextId: "ctx-bootstrap-target-bound-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabId: 77,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-target-bound-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-target-bound-001",
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 77,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-target-bound-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-target-bound-002",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-target-mismatch-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-target-mismatch-003",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "pending",
+        runtime_context_id: "ctx-bootstrap-target-bound-001",
+        transport_state: "ready"
+      })
+    });
+  });
+
   it("binds auto-resolved runtime.bootstrap readiness to the sender tab after ack", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

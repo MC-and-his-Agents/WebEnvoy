@@ -2799,7 +2799,7 @@ class ChromeBackgroundBridge {
       return;
     }
     if (command === "runtime.readiness") {
-      this.#handleRuntimeReadiness(request);
+      await this.#handleRuntimeReadiness(request);
       return;
     }
 
@@ -3359,7 +3359,7 @@ class ChromeBackgroundBridge {
     });
   }
 
-  #handleRuntimeReadiness(request: BridgeRequest): void {
+  async #handleRuntimeReadiness(request: BridgeRequest): Promise<void> {
     const profile = asNonEmptyString(request.profile);
     const bootstrap = profile ? this.#runtimeTrustState.getBootstrap(profile) : null;
     const requestRunId = asNonEmptyString(request.params.run_id);
@@ -3370,9 +3370,12 @@ class ChromeBackgroundBridge {
     const runtimeContextMatches =
       !!bootstrap &&
       (!requestRuntimeContextId || bootstrap.runtimeContextId === requestRuntimeContextId);
-    const requestTargetBinding = this.#resolveRequestTargetBinding(request);
+    const {
+      binding: requestTargetBinding,
+      requested: targetBindingRequested
+    } = await this.#resolveRuntimeReadinessTargetBinding(request);
     const targetBindingMatches =
-      requestTargetBinding === null ||
+      !targetBindingRequested ||
       (!!bootstrap && this.#doesStrictTargetBindingMatch(requestTargetBinding, bootstrap));
     const bootstrapState =
       bootstrap === null
@@ -3404,7 +3407,57 @@ class ChromeBackgroundBridge {
         transport_state: "ready"
       },
       error: null
-    });
+      });
+  }
+
+  async #resolveRuntimeReadinessTargetBinding(request: BridgeRequest): Promise<{
+    binding: { tabId: number; domain: string } | null;
+    requested: boolean;
+  }> {
+    const explicitBinding = this.#resolveRequestTargetBinding(request);
+    if (explicitBinding) {
+      return {
+        binding: explicitBinding,
+        requested: true
+      };
+    }
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const options = asRecord(commandParams.options);
+    const readTarget = (key: string): unknown =>
+      Object.prototype.hasOwnProperty.call(commandParams, key)
+        ? commandParams[key]
+        : options?.[key];
+    const targetDomain = asNonEmptyString(readTarget("target_domain"));
+    const targetPage = asNonEmptyString(readTarget("target_page"));
+    const preferredPage = resolvePreferredXhsReadPage("runtime.bootstrap", targetPage);
+    if (!targetDomain || !XHS_DOMAIN_ALLOWLIST.has(targetDomain) || !preferredPage) {
+      return {
+        binding: null,
+        requested: false
+      };
+    }
+    const requestedResourceId = resolveRuntimeBootstrapRequestedXhsResourceId(
+      commandParams,
+      preferredPage
+    );
+    const targetTabId = await resolveRuntimeBootstrapReadTargetTabId(
+      this.chromeApi,
+      preferredPage,
+      requestedResourceId
+    );
+    if (targetTabId === null) {
+      return {
+        binding: null,
+        requested: true
+      };
+    }
+    return {
+      binding: {
+        tabId: targetTabId,
+        domain: targetDomain
+      },
+      requested: true
+    };
   }
 
   async #handleRuntimeBootstrapForwardResult(input: {
@@ -5261,19 +5314,17 @@ class ChromeBackgroundBridge {
         command === "runtime.bootstrap" &&
         isXhsReadTargetPage(runtimeBootstrapTargetPage) &&
         preferredRuntimeBootstrapReadPage
-      ) {
-        const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(
-          this.chromeApi,
-          preferredRuntimeBootstrapReadPage,
-          runtimeBootstrapRequestedResourceId
-        );
-        if (runtimeBootstrapReadTabId !== null) {
-          return runtimeBootstrapReadTabId;
-        }
-        if (runtimeBootstrapRequestedResourceId) {
+        ) {
+          const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(
+            this.chromeApi,
+            preferredRuntimeBootstrapReadPage,
+            runtimeBootstrapRequestedResourceId
+          );
+          if (runtimeBootstrapReadTabId !== null) {
+            return runtimeBootstrapReadTabId;
+          }
           return null;
         }
-      }
       let runtimeSurfaceTabs: ExtensionTab[] = [];
       try {
         runtimeSurfaceTabs = await this.chromeApi.tabs.query({

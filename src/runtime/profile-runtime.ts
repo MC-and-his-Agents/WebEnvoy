@@ -303,6 +303,21 @@ const readRequestedExecutionMode = (params: JsonObject): string | null => {
   return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
 
+const buildRuntimeTargetParams = (params: JsonObject): JsonObject => ({
+  ...(typeof params.target_domain === "string" && params.target_domain.length > 0
+    ? { target_domain: params.target_domain }
+    : {}),
+  ...(typeof params.target_tab_id === "number" && Number.isInteger(params.target_tab_id)
+    ? { target_tab_id: params.target_tab_id }
+    : {}),
+  ...(typeof params.target_page === "string" && params.target_page.length > 0
+    ? { target_page: params.target_page }
+    : {}),
+  ...(typeof params.target_resource_id === "string" && params.target_resource_id.length > 0
+    ? { target_resource_id: params.target_resource_id }
+    : {})
+});
+
 const ensureFingerprintExecutionAllowed = (
   requestedExecutionMode: string | null,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
@@ -1999,16 +2014,17 @@ export class ProfileRuntimeService {
       input.runtimeInput.runId
     );
     try {
-      const result = await bridge.runCommand({
-        runId: input.runtimeInput.runId,
-        profile: input.runtimeInput.profile,
-        cwd: input.runtimeInput.cwd,
-        command: "runtime.readiness",
-        params: {
-          run_id: input.runtimeInput.runId,
-          runtime_context_id: runtimeContextId
-        } as JsonObject
-      });
+        const result = await bridge.runCommand({
+          runId: input.runtimeInput.runId,
+          profile: input.runtimeInput.profile,
+          cwd: input.runtimeInput.cwd,
+          command: "runtime.readiness",
+          params: {
+            run_id: input.runtimeInput.runId,
+            runtime_context_id: runtimeContextId,
+            ...buildRuntimeTargetParams(input.runtimeInput.params)
+          } as JsonObject
+        });
       if (!result.ok) {
         throw this.#buildRuntimeBootstrapCliError(result);
       }

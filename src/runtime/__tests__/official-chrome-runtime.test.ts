@@ -42,6 +42,38 @@ describe("prepareOfficialChromeRuntime", () => {
     });
   });
 
+  it("forwards target binding into runtime.status params without leaking persistent extension identity", () => {
+    expect(
+      buildOfficialChromeRuntimeStatusParams(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_profile",
+          run_id: "run-runtime-ready-identity-002",
+          command: "xhs.detail",
+          params: {
+            persistentExtensionIdentity: {
+              extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              manifestPath: "/tmp/native-host-manifest.json"
+            }
+          }
+        },
+        "live_read_high_risk",
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "explore_detail_tab",
+          targetResourceId: "note-001"
+        }
+      )
+    ).toEqual({
+      requested_execution_mode: "live_read_high_risk",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "explore_detail_tab",
+      target_resource_id: "note-001"
+    });
+  });
+
   it("converges pending bootstrap to ready through the shared runtime contract", async () => {
     const readStatus = vi
       .fn()
@@ -268,6 +300,98 @@ describe("prepareOfficialChromeRuntime", () => {
         params: expect.objectContaining({
           target_page: "explore_detail_tab",
           target_resource_id: "note-001"
+        })
+      })
+    );
+  });
+
+  it("forwards target binding into runtime.readiness when bootstrap convergence remains pending after status refresh", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { command: string; params: Record<string, unknown> }) => {
+        if (request.command === "runtime.bootstrap") {
+          return {
+            ok: true,
+            payload: {
+              result: {
+                version: "v1",
+                run_id: "run-runtime-target-readiness-001",
+                runtime_context_id: request.params.runtime_context_id,
+                profile: "official_target_readiness_profile",
+                status: "ready"
+              }
+            },
+            error: null
+          };
+        }
+        return {
+          ok: true,
+          payload: {
+            transport_state: "ready",
+            bootstrap_state: "ready"
+          },
+          error: null
+        };
+      })
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_target_readiness_profile",
+          run_id: "run-runtime-target-readiness-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "search_result_tab",
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      bootstrapState: "ready",
+      transportState: "ready"
+    });
+
+    expect(bridge.runCommand).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        command: "runtime.readiness",
+        params: expect.objectContaining({
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 52,
+          target_page: "search_result_tab"
         })
       })
     );
