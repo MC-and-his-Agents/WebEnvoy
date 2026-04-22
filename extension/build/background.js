@@ -7,13 +7,20 @@ import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRisk
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, buildIssue209PostGateArtifacts, collectXhsCommandGateReasons, evaluateXhsGate, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsGateApprovalId, resolveXhsGateDecisionId, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
+import { SEARCH_ENDPOINT } from "./xhs-search-types.js";
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
 const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
-const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
+const XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST = new Set([
+    SEARCH_ENDPOINT,
+    DETAIL_ENDPOINT,
+    USER_HOME_ENDPOINT
+]);
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"];
 const editorInputSelectors = [
@@ -111,7 +118,12 @@ const resolvePreferredXhsReadPage = (command, targetPage) => {
     }
     return null;
 };
+const isXhsReadTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 const resolveRequestedXhsResourceId = (command, commandParams) => {
+    const explicitTargetResourceId = resolveRuntimeBootstrapRequestedXhsResourceId(commandParams, resolvePreferredXhsReadPage(command, asNonEmptyString(commandParams.target_page)));
+    if (explicitTargetResourceId) {
+        return explicitTargetResourceId;
+    }
     const input = asRecord(commandParams.input);
     if (command === "xhs.detail") {
         return asNonEmptyString(input?.note_id);
@@ -120,6 +132,13 @@ const resolveRequestedXhsResourceId = (command, commandParams) => {
         return asNonEmptyString(input?.user_id);
     }
     return null;
+};
+const resolveRuntimeBootstrapRequestedXhsResourceId = (commandParams, preferredPage) => {
+    if (preferredPage !== "explore_detail_tab" && preferredPage !== "profile_tab") {
+        return null;
+    }
+    const options = asRecord(commandParams.options);
+    return asNonEmptyString(commandParams.target_resource_id ?? options?.target_resource_id);
 };
 const isAllowedTargetPageForXhsReadCommand = (command, targetPage) => {
     if (!targetPage) {
@@ -201,6 +220,79 @@ const scoreXhsRuntimeSurfaceTab = (tab) => {
         return 2;
     }
     return 3;
+};
+const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage, requestedResourceId) => {
+    return await resolvePreferredXhsReadTargetTabId(chromeApi, preferredPage, requestedResourceId);
+};
+const resolvePreferredXhsReadTargetTabId = async (chromeApi, preferredPage, requestedResourceId) => {
+    const xhsUrlPatterns = [
+        "*://www.xiaohongshu.com/*",
+        "*://edith.xiaohongshu.com/*",
+        "*://*.xiaohongshu.com/*"
+    ];
+    const queryAllWindowTabs = async () => {
+        try {
+            return await chromeApi.tabs.query({
+                url: xhsUrlPatterns
+            });
+        }
+        catch {
+            return [];
+        }
+    };
+    let currentWindowTabs = [];
+    try {
+        currentWindowTabs = await chromeApi.tabs.query({
+            currentWindow: true,
+            url: xhsUrlPatterns
+        });
+    }
+    catch {
+        currentWindowTabs = [];
+    }
+    let allWindowTabs = null;
+    const resolveAllWindowTabs = async () => {
+        if (allWindowTabs) {
+            return allWindowTabs;
+        }
+        allWindowTabs = await queryAllWindowTabs();
+        return allWindowTabs;
+    };
+    let xhsTabs = currentWindowTabs;
+    if (currentWindowTabs.length === 0) {
+        xhsTabs = await resolveAllWindowTabs();
+    }
+    const resourceBoundTabs = requestedResourceId && preferredPage
+        ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
+        : [];
+    if (resourceBoundTabs.length === 1) {
+        return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
+    }
+    if (requestedResourceId && preferredPage) {
+        if (currentWindowTabs.length > 0) {
+            const globalResourceBoundTabs = (await resolveAllWindowTabs()).filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId));
+            if (globalResourceBoundTabs.length === 1) {
+                return typeof globalResourceBoundTabs[0]?.id === "number"
+                    ? globalResourceBoundTabs[0].id
+                    : null;
+            }
+        }
+        return null;
+    }
+    const ranked = xhsTabs
+        .filter((tab) => typeof tab.id === "number")
+        .sort((left, right) => {
+        const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
+        if (scoreDiff !== 0) {
+            return scoreDiff;
+        }
+        if (left.active === right.active) {
+            return 0;
+        }
+        return left.active ? -1 : 1;
+    });
+    const candidate = ranked[0];
+    return typeof candidate?.id === "number" ? candidate.id : null;
 };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -1635,6 +1727,17 @@ class ChromeBackgroundBridge {
             domain: targetDomain
         };
     }
+    #doesStrictTargetBindingMatch(requestTargetBinding, storedTarget) {
+        if (storedTarget.sourceTabId === null && storedTarget.sourceDomain === null) {
+            return true;
+        }
+        if (storedTarget.sourceTabId === null || storedTarget.sourceDomain === null) {
+            return false;
+        }
+        return (requestTargetBinding !== null &&
+            requestTargetBinding.tabId === storedTarget.sourceTabId &&
+            requestTargetBinding.domain === storedTarget.sourceDomain);
+    }
     async #rememberStartupTrustedFingerprintContext(payload, sender) {
         const startupTrust = asRecord(payload.startup_fingerprint_trust);
         if (!startupTrust) {
@@ -1735,10 +1838,35 @@ class ChromeBackgroundBridge {
         }
         return trusted;
     }
+    #resolveReadyBootstrapFingerprintContext(request, requestedFingerprintContext) {
+        if (!requestedFingerprintContext) {
+            return null;
+        }
+        const profile = asNonEmptyString(request.profile);
+        const runId = asNonEmptyString(request.params.run_id);
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        if (!profile || !runId || !sessionId) {
+            return null;
+        }
+        const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+        if (!bootstrap) {
+            return null;
+        }
+        if (bootstrap.sessionId !== sessionId ||
+            bootstrap.runId !== runId ||
+            bootstrap.status !== "ready" ||
+            !this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), bootstrap) ||
+            bootstrap.serializedFingerprintRuntime !==
+                serializeFingerprintRuntimeContext(requestedFingerprintContext)) {
+            return null;
+        }
+        return { ...requestedFingerprintContext };
+    }
     #resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext) {
+        const readyBootstrapFingerprintContext = this.#resolveReadyBootstrapFingerprintContext(request, requestedFingerprintContext);
         const trustedEntry = this.#resolveTrustedFingerprintContext(request);
         if (!trustedEntry) {
-            return null;
+            return readyBootstrapFingerprintContext;
         }
         const trusted = trustedEntry.fingerprintRuntime;
         if (requestedFingerprintContext &&
@@ -1753,12 +1881,7 @@ class ChromeBackgroundBridge {
             }
             return null;
         }
-        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
-        if (trustedEntry.sourceTabId !== null &&
-            trustedEntry.sourceDomain !== null &&
-            (!requestTargetBinding ||
-                requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
-                requestTargetBinding.domain !== trustedEntry.sourceDomain)) {
+        if (!this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), trustedEntry)) {
             return null;
         }
         return { ...trusted };
@@ -1859,6 +1982,7 @@ class ChromeBackgroundBridge {
         const requestRunId = asNonEmptyString(request.params.run_id);
         const requestProfile = asNonEmptyString(request.profile);
         const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
         if (!version ||
             version !== "v1" ||
             !runId ||
@@ -1904,6 +2028,8 @@ class ChromeBackgroundBridge {
                 status: "stale",
                 mainWorldSecret,
                 serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
+                sourceTabId: requestTargetBinding?.tabId ?? null,
+                sourceDomain: requestTargetBinding?.domain ?? null,
                 updatedAt: new Date().toISOString()
             });
             this.#emit({
@@ -1938,6 +2064,7 @@ class ChromeBackgroundBridge {
             currentBootstrapState.version === version &&
             currentBootstrapState.runId === runId &&
             currentBootstrapState.runtimeContextId === runtimeContextId &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, currentBootstrapState) &&
             currentBootstrapState.serializedFingerprintRuntime === serializedFingerprintRuntime;
         const trusted = this.#runtimeTrustState.getTrusted(profile, requestSessionId);
         const trustedHasInstalledInjection = hasInstalledFingerprintInjection(trusted?.fingerprintRuntime ?? null);
@@ -1945,9 +2072,16 @@ class ChromeBackgroundBridge {
             trusted.sessionId === requestSessionId &&
             trusted.runId === runId &&
             trusted.runtimeContextId === runtimeContextId &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, trusted) &&
             trustedHasInstalledInjection;
         const bootstrapReadyFromTrusted = trustedMatchesBootstrap &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
+        try {
+            await this.#prepareRuntimeBootstrapRequestContextCapture(request, commandParams);
+        }
+        catch {
+            // Keep bootstrap attestation independent from request-context capture preparation.
+        }
         if (bootstrapReadyFromState && trustedMatchesBootstrap || bootstrapReadyFromTrusted) {
             this.#runtimeTrustState.setBootstrap(profile, {
                 version,
@@ -1958,6 +2092,14 @@ class ChromeBackgroundBridge {
                 status: "ready",
                 mainWorldSecret,
                 serializedFingerprintRuntime,
+                sourceTabId: trusted?.sourceTabId ??
+                    requestTargetBinding?.tabId ??
+                    currentBootstrapState?.sourceTabId ??
+                    null,
+                sourceDomain: trusted?.sourceDomain ??
+                    requestTargetBinding?.domain ??
+                    currentBootstrapState?.sourceDomain ??
+                    null,
                 updatedAt: new Date().toISOString()
             });
             this.#emit({
@@ -1999,6 +2141,8 @@ class ChromeBackgroundBridge {
             status: "pending",
             mainWorldSecret,
             serializedFingerprintRuntime,
+            sourceTabId: requestTargetBinding?.tabId ?? null,
+            sourceDomain: requestTargetBinding?.domain ?? null,
             updatedAt: new Date().toISOString()
         });
         // Keep the request pending until the execution surface returns an explicit bootstrap ack
@@ -2159,15 +2303,16 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
+        const { requestEvent, resultEvent, namespaceEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
         try {
             const results = await this.chromeApi.scripting.executeScript({
                 target: { tabId },
                 world: "MAIN",
-                func: async (requestEventName, resultEventName) => {
+                func: async (requestEventName, resultEventName, namespaceEventName) => {
                     const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
                     const requestEvent = typeof requestEventName === "string" ? requestEventName : "";
                     const resultEvent = typeof resultEventName === "string" ? resultEventName : "";
+                    const namespaceEvent = typeof namespaceEventName === "string" ? namespaceEventName : "";
                     const state = {
                         ready_state: document.readyState,
                         href: location.href,
@@ -2175,7 +2320,7 @@ class ChromeBackgroundBridge {
                         mime_types_length: typeof navigator.mimeTypes?.length === "number" ? navigator.mimeTypes.length : null,
                         has_get_battery: typeof navigator.getBattery === "function"
                     };
-                    if (!requestEvent || !resultEvent) {
+                    if (!requestEvent || !resultEvent || !namespaceEvent) {
                         return {
                             ...state,
                             probe_response_received: false,
@@ -2217,7 +2362,8 @@ class ChromeBackgroundBridge {
                         window.dispatchEvent(new CustomEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
                             detail: {
                                 request_event: requestEvent,
-                                result_event: resultEvent
+                                result_event: resultEvent,
+                                namespace_event: namespaceEvent
                             }
                         }));
                         window.dispatchEvent(new CustomEvent(requestEvent, {
@@ -2229,7 +2375,7 @@ class ChromeBackgroundBridge {
                         }));
                     });
                 },
-                args: [requestEvent, resultEvent]
+                args: [requestEvent, resultEvent, namespaceEvent]
             });
             const payload = Array.isArray(results) && results.length > 0
                 ? results[0]?.result
@@ -2342,10 +2488,17 @@ class ChromeBackgroundBridge {
         const runMatches = !!bootstrap && !!requestRunId && bootstrap.runId === requestRunId;
         const runtimeContextMatches = !!bootstrap &&
             (!requestRuntimeContextId || bootstrap.runtimeContextId === requestRuntimeContextId);
+        const requestTargetBinding = this.#resolveRequestTargetBinding(request);
+        const targetBindingMatches = requestTargetBinding === null ||
+            (!!bootstrap && this.#doesStrictTargetBindingMatch(requestTargetBinding, bootstrap));
         const bootstrapState = bootstrap === null
             ? "not_started"
             : sessionMatches && runMatches && runtimeContextMatches
-                ? bootstrap.status
+                ? targetBindingMatches
+                    ? bootstrap.status
+                    : bootstrap.status === "ready"
+                        ? "pending"
+                        : bootstrap.status
                 : "stale";
         this.#emit({
             id: request.id,
@@ -2467,11 +2620,15 @@ class ChromeBackgroundBridge {
             });
             return;
         }
+        const sourceBinding = this.#resolveRequestTargetBinding(input.request);
+        if (sourceBinding) {
+            bootstrap.sourceTabId = sourceBinding.tabId;
+            bootstrap.sourceDomain = sourceBinding.domain;
+        }
         bootstrap.status = "ready";
         bootstrap.updatedAt = new Date().toISOString();
         this.#runtimeTrustState.setBootstrap(profile, bootstrap);
         const attestedFingerprintRuntime = resolveAttestedFingerprintRuntimeContext(input.payload.fingerprint_runtime ?? null);
-        const sourceBinding = this.#resolveRequestTargetBinding(input.request);
         if (attestedFingerprintRuntime &&
             attestedFingerprintRuntime.profile === profile &&
             sourceBinding) {
@@ -2655,6 +2812,20 @@ class ChromeBackgroundBridge {
                 }
             });
             return;
+        }
+        const readyBootstrapMainWorldSecret = this.#resolveReadyBootstrapMainWorldSecret(dispatchRequest, command);
+        if (readyBootstrapMainWorldSecret) {
+            commandParams = {
+                ...commandParams,
+                main_world_secret: readyBootstrapMainWorldSecret
+            };
+            dispatchRequest = {
+                ...dispatchRequest,
+                params: {
+                    ...dispatchRequest.params,
+                    command_params: commandParams
+                }
+            };
         }
         if (this.#shouldEnsureMainWorldBridge(command, xhsForwardState.requestedExecutionMode)) {
             try {
@@ -3673,6 +3844,7 @@ class ChromeBackgroundBridge {
                     : null;
                 const headersRecord = asRecord(requestHeaders) ?? {};
                 const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string"));
+                const syntheticRequestSymbol = Symbol.for("webenvoy.main_world.synthetic_request.v1");
                 const timeoutMs = typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
                     ? Math.max(1, Math.trunc(requestTimeoutMs))
                     : 5_000;
@@ -3681,7 +3853,7 @@ class ChromeBackgroundBridge {
                     controller.abort();
                 }, timeoutMs);
                 try {
-                    const response = await fetch(String(requestUrl), {
+                    const request = new Request(String(requestUrl), {
                         method: requestMethod === "GET" ? "GET" : "POST",
                         headers,
                         credentials: "include",
@@ -3692,6 +3864,12 @@ class ChromeBackgroundBridge {
                             : {}),
                         signal: controller.signal
                     });
+                    Object.defineProperty(request, syntheticRequestSymbol, {
+                        configurable: true,
+                        enumerable: false,
+                        value: true
+                    });
+                    const response = await fetch(request);
                     const text = await response.text();
                     let body = null;
                     if (text.length > 0) {
@@ -3773,7 +3951,7 @@ class ChromeBackgroundBridge {
             !parsedRequestUrl ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname) ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedRequestUrl.hostname) ||
-            parsedRequestUrl.pathname !== XHS_SEARCH_REQUEST_PATH) {
+            !XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST.has(parsedRequestUrl.pathname)) {
             sendResponse({
                 ok: false,
                 error: {
@@ -3944,6 +4122,22 @@ class ChromeBackgroundBridge {
         }
         const command = String(request.params.command ?? "");
         if (command === "runtime.ping" || command === "runtime.bootstrap") {
+            const runtimeBootstrapTargetPage = asNonEmptyString(commandParams.target_page);
+            const preferredRuntimeBootstrapReadPage = resolvePreferredXhsReadPage(command, runtimeBootstrapTargetPage);
+            const runtimeBootstrapRequestedResourceId = command === "runtime.bootstrap"
+                ? resolveRuntimeBootstrapRequestedXhsResourceId(commandParams, preferredRuntimeBootstrapReadPage)
+                : null;
+            if (command === "runtime.bootstrap" &&
+                isXhsReadTargetPage(runtimeBootstrapTargetPage) &&
+                preferredRuntimeBootstrapReadPage) {
+                const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(this.chromeApi, preferredRuntimeBootstrapReadPage, runtimeBootstrapRequestedResourceId);
+                if (runtimeBootstrapReadTabId !== null) {
+                    return runtimeBootstrapReadTabId;
+                }
+                if (runtimeBootstrapRequestedResourceId) {
+                    return null;
+                }
+            }
             let runtimeSurfaceTabs = [];
             try {
                 runtimeSurfaceTabs = await this.chromeApi.tabs.query({
@@ -3974,55 +4168,7 @@ class ChromeBackgroundBridge {
                 : {};
             const requestedResourceId = resolveRequestedXhsResourceId(command, rawCommandParams);
             const preferredPage = resolvePreferredXhsReadPage(command, resolveXhsGateCommandInput(rawCommandParams).targetPage);
-            const xhsUrlPatterns = [
-                "*://www.xiaohongshu.com/*",
-                "*://edith.xiaohongshu.com/*",
-                "*://*.xiaohongshu.com/*"
-            ];
-            let currentWindowTabs = [];
-            try {
-                currentWindowTabs = await this.chromeApi.tabs.query({
-                    currentWindow: true,
-                    url: xhsUrlPatterns
-                });
-            }
-            catch {
-                currentWindowTabs = [];
-            }
-            let xhsTabs = currentWindowTabs;
-            if (currentWindowTabs.length === 0) {
-                try {
-                    xhsTabs = await this.chromeApi.tabs.query({
-                        url: xhsUrlPatterns
-                    });
-                }
-                catch {
-                    xhsTabs = [];
-                }
-            }
-            const resourceBoundTabs = requestedResourceId && preferredPage
-                ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
-                : [];
-            if (resourceBoundTabs.length === 1) {
-                return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
-            }
-            if (requestedResourceId && preferredPage) {
-                return null;
-            }
-            const ranked = xhsTabs
-                .filter((tab) => typeof tab.id === "number")
-                .sort((left, right) => {
-                const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
-                if (scoreDiff !== 0) {
-                    return scoreDiff;
-                }
-                if (left.active === right.active) {
-                    return 0;
-                }
-                return left.active ? -1 : 1;
-            });
-            const candidate = ranked[0];
-            return typeof candidate?.id === "number" ? candidate.id : null;
+            return await resolvePreferredXhsReadTargetTabId(this.chromeApi, preferredPage, requestedResourceId);
         }
         let tabs = [];
         try {
@@ -4068,6 +4214,17 @@ class ChromeBackgroundBridge {
             world: "ISOLATED",
             files: ["build/content-script.js"]
         });
+    }
+    async #prepareRuntimeBootstrapRequestContextCapture(request, commandParams) {
+        if (!isXhsReadTargetPage(commandParams.target_page)) {
+            return;
+        }
+        const targetTabId = await this.#resolveTargetTabId(request);
+        if (targetTabId === null) {
+            return;
+        }
+        await this.#ensureMainWorldBridgeInjected(request, targetTabId);
+        await this.#ensureContentScriptInjected(targetTabId);
     }
     async #ensureMainWorldBridgeInjected(request, tabId) {
         const existingEnsure = this.#pendingMainWorldBridgeEnsures.get(tabId);
@@ -4123,15 +4280,16 @@ class ChromeBackgroundBridge {
         if (!this.chromeApi.scripting?.executeScript) {
             return false;
         }
-        const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
+        const { requestEvent, resultEvent, namespaceEvent } = resolveMainWorldEventNamesForSecret(mainWorldSecret);
         const probe = await this.chromeApi.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: async (requestEventName, resultEventName) => {
+            func: async (requestEventName, resultEventName, namespaceEventName) => {
                 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
                 const requestEvent = typeof requestEventName === "string" ? requestEventName : "";
                 const resultEvent = typeof resultEventName === "string" ? resultEventName : "";
-                if (!requestEvent || !resultEvent) {
+                const namespaceEvent = typeof namespaceEventName === "string" ? namespaceEventName : "";
+                if (!requestEvent || !resultEvent || !namespaceEvent) {
                     return false;
                 }
                 return await new Promise((resolve) => {
@@ -4157,7 +4315,8 @@ class ChromeBackgroundBridge {
                     window.dispatchEvent(new CustomEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
                         detail: {
                             request_event: requestEvent,
-                            result_event: resultEvent
+                            result_event: resultEvent,
+                            namespace_event: namespaceEvent
                         }
                     }));
                     window.dispatchEvent(new CustomEvent(requestEvent, {
@@ -4169,14 +4328,35 @@ class ChromeBackgroundBridge {
                     }));
                 });
             },
-            args: [requestEvent, resultEvent]
+            args: [requestEvent, resultEvent, namespaceEvent]
         });
         return probe[0]?.result === true;
     }
     #shouldEnsureMainWorldBridge(command, requestedExecutionMode) {
-        void command;
         void requestedExecutionMode;
-        return false;
+        return command === "runtime.bootstrap" || XHS_GATE_COMMANDS.has(command);
+    }
+    #resolveReadyBootstrapMainWorldSecret(request, command) {
+        if (!XHS_GATE_COMMANDS.has(command)) {
+            return null;
+        }
+        const profile = asNonEmptyString(request.profile);
+        const runId = asNonEmptyString(request.params.run_id);
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        if (!profile || !runId || !sessionId) {
+            return null;
+        }
+        const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+        if (!bootstrap) {
+            return null;
+        }
+        if (bootstrap.sessionId !== sessionId ||
+            bootstrap.runId !== runId ||
+            bootstrap.status !== "ready" ||
+            !this.#doesStrictTargetBindingMatch(this.#resolveRequestTargetBinding(request), bootstrap)) {
+            return null;
+        }
+        return asNonEmptyString(bootstrap.mainWorldSecret);
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {
