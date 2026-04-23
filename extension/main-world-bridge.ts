@@ -1037,7 +1037,7 @@ const resolveFetchCandidate = async (
   const initHeaders = headersToRecord(init?.headers);
   const headers = mergeHeaders(baseHeaders, initHeaders);
   const method = normalizeCapturedRequestMethod(
-    init?.method ?? (isRequestLike(input) ? input.method : "POST")
+    init?.method ?? (isRequestLike(input) ? input.method : "GET")
   );
   if (!method) {
     return null;

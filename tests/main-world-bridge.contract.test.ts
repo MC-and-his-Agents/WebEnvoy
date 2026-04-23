@@ -512,6 +512,65 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("infers GET for default fetch user_home captures when method is omitted", async () => {
+    const env = createMockMainWorldEnvironment(USER_HOME_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            user: {
+              userId: "user-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(
+      `https://www.xiaohongshu.com${USER_HOME_ENDPOINT}?user_id=user-001`,
+      {
+        headers: {
+          accept: "application/json"
+        }
+      }
+    );
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(USER_HOME_PAGE_HREF),
+      shapeKey: createUserHomeShapeKey("user-001"),
+      method: "GET",
+      path: USER_HOME_ENDPOINT
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          method: "GET",
+          path: USER_HOME_ENDPOINT
+        }
+      }
+    });
+  });
+
   it("splits page-context namespaces across same-url revisits in the same document", async () => {
     const env = createMockMainWorldEnvironment();
     env.setFetchHandler(async () => {
