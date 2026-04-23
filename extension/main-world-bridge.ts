@@ -1,14 +1,19 @@
 import {
+  DETAIL_ENDPOINT,
   SEARCH_ENDPOINT,
+  USER_HOME_ENDPOINT,
   WEBENVOY_SYNTHETIC_REQUEST_HEADER,
   createPageContextNamespace,
+  createDetailRequestShape,
   createSearchRequestShape,
+  createUserHomeRequestShape,
   createVisitedPageContextNamespace,
   resolveActiveVisitedPageContextNamespace,
   type CapturedRequestContextArtifact,
   type CapturedRequestContextCommand,
   type CapturedRequestContextLookupResult,
   type CapturedRequestContextMethod,
+  type CapturedRequestContextPath,
   type PageContextNamespace
 } from "./xhs-search-types.js";
 
@@ -53,7 +58,7 @@ type FingerprintPatchInstallContext = {
 type CapturedRequestCandidate = {
   transport: "fetch";
   method: CapturedRequestContextMethod;
-  path: typeof SEARCH_ENDPOINT;
+  path: CapturedRequestContextPath;
   url: string;
   headers: Record<string, string>;
   body: unknown;
@@ -66,7 +71,7 @@ type CapturedContextShape = {
   routeScope: {
     command: CapturedRequestContextCommand;
     method: CapturedRequestContextMethod;
-    pathname: typeof SEARCH_ENDPOINT;
+    pathname: CapturedRequestContextPath;
   };
   routeScopeKey: string;
   shape: CapturedRequestContextArtifact["shape"];
@@ -166,7 +171,8 @@ const normalizeCapturedRequestMethod = (value: unknown): CapturedRequestContextM
   if (typeof value !== "string") {
     return null;
   }
-  return value.trim().toUpperCase() === "POST" ? "POST" : null;
+  const normalized = value.trim().toUpperCase();
+  return normalized === "POST" || normalized === "GET" ? normalized : null;
 };
 
 const normalizeHeaderName = (value: string): string => value.trim().toLowerCase();
@@ -188,7 +194,7 @@ const toTrimmedString = (value: unknown): string | null =>
 const createCapturedContextRouteScope = (
   command: CapturedRequestContextCommand,
   method: CapturedRequestContextMethod,
-  pathname: typeof SEARCH_ENDPOINT
+  pathname: CapturedRequestContextPath
 ): CapturedContextShape["routeScope"] => ({
   command,
   method,
@@ -222,6 +228,61 @@ const parseSearchShape = (value: unknown): CapturedContextShape | null => {
     shape,
     shapeKey: JSON.stringify(shape)
   };
+};
+
+const parseDetailShape = (value: unknown): CapturedContextShape | null => {
+  const shape = createDetailRequestShape(asRecord(value) ?? {});
+  if (!shape) {
+    return null;
+  }
+  const routeScope = createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT);
+  return {
+    routeScope,
+    routeScopeKey: serializeCapturedContextRouteScope(routeScope),
+    shape,
+    shapeKey: JSON.stringify(shape)
+  };
+};
+
+const resolveUserIdFromUrl = (value: string): string | null => {
+  try {
+    const url = new URL(value);
+    return toTrimmedString(url.searchParams.get("user_id"));
+  } catch {
+    return null;
+  }
+};
+
+const parseUserHomeShape = (input: { url: string; body: unknown }): CapturedContextShape | null => {
+  const bodyRecord = asRecord(input.body);
+  const shape = createUserHomeRequestShape({
+    user_id: bodyRecord?.user_id ?? resolveUserIdFromUrl(input.url)
+  });
+  if (!shape) {
+    return null;
+  }
+  const routeScope = createCapturedContextRouteScope("xhs.user_home", "GET", USER_HOME_ENDPOINT);
+  return {
+    routeScope,
+    routeScopeKey: serializeCapturedContextRouteScope(routeScope),
+    shape,
+    shapeKey: JSON.stringify(shape)
+  };
+};
+
+const resolveCapturedContextShape = (
+  candidate: Pick<CapturedRequestCandidate, "path" | "url" | "body">
+): CapturedContextShape | null => {
+  if (candidate.path === SEARCH_ENDPOINT) {
+    return parseSearchShape(candidate.body);
+  }
+  if (candidate.path === DETAIL_ENDPOINT) {
+    return parseDetailShape(candidate.body);
+  }
+  if (candidate.path === USER_HOME_ENDPOINT) {
+    return parseUserHomeShape(candidate);
+  }
+  return null;
 };
 
 const getCapturedContextNamespaceBuckets = (
@@ -399,19 +460,30 @@ const resolveAbsoluteUrl = (value: string): string | null => {
   }
 };
 
-const resolvePathname = (value: string): string | null => {
+const resolvePathname = (value: string): CapturedRequestContextPath | null => {
   try {
     const pathname = new URL(value).pathname;
-    return pathname === SEARCH_ENDPOINT ? pathname : null;
+    return pathname === SEARCH_ENDPOINT ||
+      pathname === DETAIL_ENDPOINT ||
+      pathname === USER_HOME_ENDPOINT
+      ? pathname
+      : null;
   } catch {
     return null;
   }
 };
 
-const isSearchResultPage = (href: string): boolean => {
+const isSupportedReadPage = (href: string): boolean => {
   try {
     const url = new URL(href, "https://www.xiaohongshu.com/");
-    return url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result");
+    if (url.hostname !== "www.xiaohongshu.com") {
+      return false;
+    }
+    return (
+      url.pathname.startsWith("/search_result") ||
+      url.pathname.startsWith("/explore/") ||
+      url.pathname.startsWith("/user/profile/")
+    );
   } catch {
     return false;
   }
@@ -824,12 +896,25 @@ const resolveRouteScopeKeyFromLookup = (
     const command = record.command;
     const pathname = toTrimmedString(record.pathname);
     const shapeMethod = normalizeCapturedRequestMethod(record.method);
-    if (command !== "xhs.search" || pathname !== path || shapeMethod !== method) {
+    if (pathname !== path || shapeMethod !== method) {
       return null;
     }
-    return serializeCapturedContextRouteScope(
-      createCapturedContextRouteScope("xhs.search", method, SEARCH_ENDPOINT)
-    );
+    if (command === "xhs.search" && pathname === SEARCH_ENDPOINT && method === "POST") {
+      return serializeCapturedContextRouteScope(
+        createCapturedContextRouteScope("xhs.search", method, SEARCH_ENDPOINT)
+      );
+    }
+    if (command === "xhs.detail" && pathname === DETAIL_ENDPOINT && method === "POST") {
+      return serializeCapturedContextRouteScope(
+        createCapturedContextRouteScope("xhs.detail", method, DETAIL_ENDPOINT)
+      );
+    }
+    if (command === "xhs.user_home" && pathname === USER_HOME_ENDPOINT && method === "GET") {
+      return serializeCapturedContextRouteScope(
+        createCapturedContextRouteScope("xhs.user_home", method, USER_HOME_ENDPOINT)
+      );
+    }
+    return null;
   } catch {
     return null;
   }
@@ -848,7 +933,7 @@ const storeCapturedRequestContext = (
     input.status >= 200 &&
     input.status < 300 &&
     !hasCapturedRequestBusinessFailure(input.responseBody);
-  const contextShape = parseSearchShape(candidate.body);
+  const contextShape = resolveCapturedContextShape(candidate);
   if (!contextShape) {
     return;
   }
@@ -945,14 +1030,14 @@ const resolveFetchCandidate = async (
   input: unknown,
   init?: RequestInit
 ): Promise<CapturedRequestCandidate | null> => {
-  if (!isSearchResultPage(typeof window.location?.href === "string" ? window.location.href : "")) {
+  if (!isSupportedReadPage(typeof window.location?.href === "string" ? window.location.href : "")) {
     return null;
   }
   const baseHeaders = isRequestLike(input) ? headersToRecord(input.headers) : {};
   const initHeaders = headersToRecord(init?.headers);
   const headers = mergeHeaders(baseHeaders, initHeaders);
   const method = normalizeCapturedRequestMethod(
-    init?.method ?? (isRequestLike(input) ? input.method : "POST")
+    init?.method ?? (isRequestLike(input) ? input.method : "GET")
   );
   if (!method) {
     return null;
@@ -970,7 +1055,7 @@ const resolveFetchCandidate = async (
   }
   const url = resolveAbsoluteUrl(inputUrl);
   const path = url ? resolvePathname(url) : null;
-  if (!url || path !== SEARCH_ENDPOINT) {
+  if (!url || !path) {
     return null;
   }
   const bodySource =
@@ -1073,7 +1158,7 @@ const refreshPageContextLifecycle = (options?: { advanceVisit?: boolean }): void
   if (options?.advanceVisit === true) {
     pageContextVisitSequence += 1;
   }
-  if (isSearchResultPage(typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "")) {
+  if (isSupportedReadPage(typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "")) {
     installCapturedRequestContextCapture();
   }
   emitCurrentPageContextNamespace();
@@ -1083,7 +1168,7 @@ const refreshPageContextLifecycleForHistoryMutation = (): void => {
   const currentHref =
     typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
   if (currentHref === lastObservedPageContextHref) {
-    if (isSearchResultPage(currentHref)) {
+    if (isSupportedReadPage(currentHref)) {
       installCapturedRequestContextCapture();
       emitCurrentPageContextNamespace();
     }

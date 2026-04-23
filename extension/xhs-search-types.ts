@@ -55,8 +55,8 @@ export interface FetchResult {
   body: unknown;
 }
 
-export type CapturedRequestContextMethod = "POST";
-export type CapturedRequestContextCommand = "xhs.search";
+export type CapturedRequestContextMethod = "POST" | "GET";
+export type CapturedRequestContextCommand = "xhs.search" | "xhs.detail" | "xhs.user_home";
 export type PageContextNamespace = string;
 export type CapturedRequestContextRejectionReason =
   | "synthetic_request_rejected"
@@ -64,8 +64,8 @@ export type CapturedRequestContextRejectionReason =
   | "shape_mismatch";
 
 export interface SearchRequestShape {
-  command: CapturedRequestContextCommand;
-  method: CapturedRequestContextMethod;
+  command: "xhs.search";
+  method: "POST";
   pathname: typeof SEARCH_ENDPOINT;
   keyword: string;
   page: number;
@@ -74,9 +74,33 @@ export interface SearchRequestShape {
   note_type: number;
 }
 
+export interface DetailRequestShape {
+  command: "xhs.detail";
+  method: "POST";
+  pathname: typeof DETAIL_ENDPOINT;
+  note_id: string;
+}
+
+export interface UserHomeRequestShape {
+  command: "xhs.user_home";
+  method: "GET";
+  pathname: typeof USER_HOME_ENDPOINT;
+  user_id: string;
+}
+
+export type CapturedRequestContextShape =
+  | SearchRequestShape
+  | DetailRequestShape
+  | UserHomeRequestShape;
+
+export type CapturedRequestContextPath =
+  | typeof SEARCH_ENDPOINT
+  | typeof DETAIL_ENDPOINT
+  | typeof USER_HOME_ENDPOINT;
+
 export interface CapturedRequestContextLookup {
   method: CapturedRequestContextMethod;
-  path: typeof SEARCH_ENDPOINT;
+  path: CapturedRequestContextPath;
   page_context_namespace: PageContextNamespace;
   shape_key: string;
 }
@@ -85,14 +109,14 @@ export interface CapturedRequestContextArtifact {
   source_kind: "page_request" | "synthetic_request";
   transport: "fetch";
   method: CapturedRequestContextMethod;
-  path: typeof SEARCH_ENDPOINT;
+  path: CapturedRequestContextPath;
   url: string;
   status: number;
   captured_at: number;
   observed_at?: number;
   page_context_namespace: PageContextNamespace;
   shape_key: string;
-  shape: SearchRequestShape;
+  shape: CapturedRequestContextShape;
   referrer?: string | null;
   template_ready?: boolean;
   rejection_reason?: CapturedRequestContextRejectionReason | null;
@@ -314,6 +338,8 @@ export interface XhsExecutionContext {
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+export const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+export const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
 export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
@@ -389,6 +415,43 @@ export const createSearchRequestShape = (input: {
 };
 
 export const serializeSearchRequestShape = (shape: SearchRequestShape): string =>
+  JSON.stringify(shape);
+
+export const createDetailRequestShape = (input: {
+  note_id?: unknown;
+  source_note_id?: unknown;
+}): DetailRequestShape | null => {
+  const noteId = toTrimmedString(input.note_id ?? input.source_note_id);
+  if (!noteId) {
+    return null;
+  }
+  return {
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+  };
+};
+
+export const serializeDetailRequestShape = (shape: DetailRequestShape): string =>
+  JSON.stringify(shape);
+
+export const createUserHomeRequestShape = (input: {
+  user_id?: unknown;
+}): UserHomeRequestShape | null => {
+  const userId = toTrimmedString(input.user_id);
+  if (!userId) {
+    return null;
+  }
+  return {
+    command: "xhs.user_home",
+    method: "GET",
+    pathname: USER_HOME_ENDPOINT,
+    user_id: userId
+  };
+};
+
+export const serializeUserHomeRequestShape = (shape: UserHomeRequestShape): string =>
   JSON.stringify(shape);
 
 export const resolveMainWorldPageContextNamespaceEventName = (secret: string): string =>

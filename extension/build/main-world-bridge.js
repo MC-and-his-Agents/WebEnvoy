@@ -1,4 +1,4 @@
-import { SEARCH_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createSearchRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace } from "./xhs-search-types.js";
+import { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createDetailRequestShape, createSearchRequestShape, createUserHomeRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace } from "./xhs-search-types.js";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
@@ -62,7 +62,8 @@ const normalizeCapturedRequestMethod = (value) => {
     if (typeof value !== "string") {
         return null;
     }
-    return value.trim().toUpperCase() === "POST" ? "POST" : null;
+    const normalized = value.trim().toUpperCase();
+    return normalized === "POST" || normalized === "GET" ? normalized : null;
 };
 const normalizeHeaderName = (value) => value.trim().toLowerCase();
 const asInteger = (value) => {
@@ -96,6 +97,56 @@ const parseSearchShape = (value) => {
         shape,
         shapeKey: JSON.stringify(shape)
     };
+};
+const parseDetailShape = (value) => {
+    const shape = createDetailRequestShape(asRecord(value) ?? {});
+    if (!shape) {
+        return null;
+    }
+    const routeScope = createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT);
+    return {
+        routeScope,
+        routeScopeKey: serializeCapturedContextRouteScope(routeScope),
+        shape,
+        shapeKey: JSON.stringify(shape)
+    };
+};
+const resolveUserIdFromUrl = (value) => {
+    try {
+        const url = new URL(value);
+        return toTrimmedString(url.searchParams.get("user_id"));
+    }
+    catch {
+        return null;
+    }
+};
+const parseUserHomeShape = (input) => {
+    const bodyRecord = asRecord(input.body);
+    const shape = createUserHomeRequestShape({
+        user_id: bodyRecord?.user_id ?? resolveUserIdFromUrl(input.url)
+    });
+    if (!shape) {
+        return null;
+    }
+    const routeScope = createCapturedContextRouteScope("xhs.user_home", "GET", USER_HOME_ENDPOINT);
+    return {
+        routeScope,
+        routeScopeKey: serializeCapturedContextRouteScope(routeScope),
+        shape,
+        shapeKey: JSON.stringify(shape)
+    };
+};
+const resolveCapturedContextShape = (candidate) => {
+    if (candidate.path === SEARCH_ENDPOINT) {
+        return parseSearchShape(candidate.body);
+    }
+    if (candidate.path === DETAIL_ENDPOINT) {
+        return parseDetailShape(candidate.body);
+    }
+    if (candidate.path === USER_HOME_ENDPOINT) {
+        return parseUserHomeShape(candidate);
+    }
+    return null;
 };
 const getCapturedContextNamespaceBuckets = (namespace) => {
     let namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
@@ -240,16 +291,25 @@ const resolveAbsoluteUrl = (value) => {
 const resolvePathname = (value) => {
     try {
         const pathname = new URL(value).pathname;
-        return pathname === SEARCH_ENDPOINT ? pathname : null;
+        return pathname === SEARCH_ENDPOINT ||
+            pathname === DETAIL_ENDPOINT ||
+            pathname === USER_HOME_ENDPOINT
+            ? pathname
+            : null;
     }
     catch {
         return null;
     }
 };
-const isSearchResultPage = (href) => {
+const isSupportedReadPage = (href) => {
     try {
         const url = new URL(href, "https://www.xiaohongshu.com/");
-        return url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result");
+        if (url.hostname !== "www.xiaohongshu.com") {
+            return false;
+        }
+        return (url.pathname.startsWith("/search_result") ||
+            url.pathname.startsWith("/explore/") ||
+            url.pathname.startsWith("/user/profile/"));
     }
     catch {
         return false;
@@ -564,10 +624,19 @@ const resolveRouteScopeKeyFromLookup = (method, path, shapeKey) => {
         const command = record.command;
         const pathname = toTrimmedString(record.pathname);
         const shapeMethod = normalizeCapturedRequestMethod(record.method);
-        if (command !== "xhs.search" || pathname !== path || shapeMethod !== method) {
+        if (pathname !== path || shapeMethod !== method) {
             return null;
         }
-        return serializeCapturedContextRouteScope(createCapturedContextRouteScope("xhs.search", method, SEARCH_ENDPOINT));
+        if (command === "xhs.search" && pathname === SEARCH_ENDPOINT && method === "POST") {
+            return serializeCapturedContextRouteScope(createCapturedContextRouteScope("xhs.search", method, SEARCH_ENDPOINT));
+        }
+        if (command === "xhs.detail" && pathname === DETAIL_ENDPOINT && method === "POST") {
+            return serializeCapturedContextRouteScope(createCapturedContextRouteScope("xhs.detail", method, DETAIL_ENDPOINT));
+        }
+        if (command === "xhs.user_home" && pathname === USER_HOME_ENDPOINT && method === "GET") {
+            return serializeCapturedContextRouteScope(createCapturedContextRouteScope("xhs.user_home", method, USER_HOME_ENDPOINT));
+        }
+        return null;
     }
     catch {
         return null;
@@ -578,7 +647,7 @@ const storeCapturedRequestContext = (candidate, input) => {
         input.status >= 200 &&
         input.status < 300 &&
         !hasCapturedRequestBusinessFailure(input.responseBody);
-    const contextShape = parseSearchShape(candidate.body);
+    const contextShape = resolveCapturedContextShape(candidate);
     if (!contextShape) {
         return;
     }
@@ -647,13 +716,13 @@ const storeCapturedRequestContext = (candidate, input) => {
     bucket.rejectedObservation = artifact;
 };
 const resolveFetchCandidate = async (input, init) => {
-    if (!isSearchResultPage(typeof window.location?.href === "string" ? window.location.href : "")) {
+    if (!isSupportedReadPage(typeof window.location?.href === "string" ? window.location.href : "")) {
         return null;
     }
     const baseHeaders = isRequestLike(input) ? headersToRecord(input.headers) : {};
     const initHeaders = headersToRecord(init?.headers);
     const headers = mergeHeaders(baseHeaders, initHeaders);
-    const method = normalizeCapturedRequestMethod(init?.method ?? (isRequestLike(input) ? input.method : "POST"));
+    const method = normalizeCapturedRequestMethod(init?.method ?? (isRequestLike(input) ? input.method : "GET"));
     if (!method) {
         return null;
     }
@@ -669,7 +738,7 @@ const resolveFetchCandidate = async (input, init) => {
     }
     const url = resolveAbsoluteUrl(inputUrl);
     const path = url ? resolvePathname(url) : null;
-    if (!url || path !== SEARCH_ENDPOINT) {
+    if (!url || !path) {
         return null;
     }
     const bodySource = init?.body !== undefined
@@ -760,7 +829,7 @@ const refreshPageContextLifecycle = (options) => {
     if (options?.advanceVisit === true) {
         pageContextVisitSequence += 1;
     }
-    if (isSearchResultPage(typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "")) {
+    if (isSupportedReadPage(typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "")) {
         installCapturedRequestContextCapture();
     }
     emitCurrentPageContextNamespace();
@@ -768,7 +837,7 @@ const refreshPageContextLifecycle = (options) => {
 const refreshPageContextLifecycleForHistoryMutation = () => {
     const currentHref = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
     if (currentHref === lastObservedPageContextHref) {
-        if (isSearchResultPage(currentHref)) {
+        if (isSupportedReadPage(currentHref)) {
             installCapturedRequestContextCapture();
             emitCurrentPageContextNamespace();
         }

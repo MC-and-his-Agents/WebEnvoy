@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DETAIL_ENDPOINT,
   SEARCH_ENDPOINT,
+  USER_HOME_ENDPOINT,
   createPageContextNamespace,
+  createDetailRequestShape,
   createSearchRequestShape,
+  createUserHomeRequestShape,
   createVisitedPageContextNamespace,
+  serializeDetailRequestShape,
   serializeSearchRequestShape
+  ,
+  serializeUserHomeRequestShape
 } from "../extension/xhs-search-types.js";
 
 type MockEventListener = (event: Event) => void;
@@ -21,6 +28,8 @@ class MockCustomEvent<T> {
 }
 
 const SEARCH_PAGE_HREF = "https://www.xiaohongshu.com/search_result?keyword=contract";
+const DETAIL_PAGE_HREF = "https://www.xiaohongshu.com/explore/note-001";
+const USER_HOME_PAGE_HREF = "https://www.xiaohongshu.com/user/profile/user-001";
 
 const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve();
@@ -46,7 +55,23 @@ const createShapeKey = (input: {
   return serializeSearchRequestShape(shape);
 };
 
-const createMockMainWorldEnvironment = () => {
+const createDetailShapeKey = (noteId: string): string => {
+  const shape = createDetailRequestShape({ source_note_id: noteId });
+  if (!shape) {
+    throw new Error("detail shape must be valid in test");
+  }
+  return serializeDetailRequestShape(shape);
+};
+
+const createUserHomeShapeKey = (userId: string): string => {
+  const shape = createUserHomeRequestShape({ user_id: userId });
+  if (!shape) {
+    throw new Error("user_home shape must be valid in test");
+  }
+  return serializeUserHomeRequestShape(shape);
+};
+
+const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
   const listeners = new Map<string, MockEventListener[]>();
   const added: Array<{ type: string; listener: MockEventListener }> = [];
   const dispatched: Array<{ type: string; detail: unknown }> = [];
@@ -82,7 +107,7 @@ const createMockMainWorldEnvironment = () => {
       return await fetchHandler(input, init);
     }),
     location: {
-      href: SEARCH_PAGE_HREF
+      href
     },
     navigator: {}
   };
@@ -167,6 +192,8 @@ const readCapturedContext = async (input: {
   requestListener: MockEventListener;
   pageContextNamespace: string;
   shapeKey: string;
+  method?: "POST" | "GET";
+  path?: string;
 }) => {
   await flushMicrotasks();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -177,8 +204,8 @@ const readCapturedContext = async (input: {
       id: `read-${Date.now()}`,
       type: "captured-request-context-read",
       payload: {
-        method: "POST",
-        path: SEARCH_ENDPOINT,
+        method: input.method ?? "POST",
+        path: input.path ?? SEARCH_ENDPOINT,
         page_context_namespace: input.pageContextNamespace,
         shape_key: input.shapeKey
       }
@@ -354,6 +381,191 @@ describe("main-world bridge contract", () => {
       result: {
         admitted_template: {
           source_kind: "page_request"
+        }
+      }
+    });
+  });
+
+  it("captures detail request-context on real detail pages", async () => {
+    const env = createMockMainWorldEnvironment(DETAIL_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            note: {
+              note_id: "note-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${DETAIL_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ source_note_id: "note-001" })
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(DETAIL_PAGE_HREF),
+      shapeKey: createDetailShapeKey("note-001"),
+      method: "POST",
+      path: DETAIL_ENDPOINT
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          method: "POST",
+          path: DETAIL_ENDPOINT,
+          shape: {
+            command: "xhs.detail",
+            note_id: "note-001"
+          }
+        }
+      }
+    });
+  });
+
+  it("captures user_home request-context on real profile pages", async () => {
+    const env = createMockMainWorldEnvironment(USER_HOME_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            user: {
+              userId: "user-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(
+      `https://www.xiaohongshu.com${USER_HOME_ENDPOINT}?user_id=user-001`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json"
+        }
+      }
+    );
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(USER_HOME_PAGE_HREF),
+      shapeKey: createUserHomeShapeKey("user-001"),
+      method: "GET",
+      path: USER_HOME_ENDPOINT
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          method: "GET",
+          path: USER_HOME_ENDPOINT,
+          shape: {
+            command: "xhs.user_home",
+            user_id: "user-001"
+          }
+        }
+      }
+    });
+  });
+
+  it("infers GET for default fetch user_home captures when method is omitted", async () => {
+    const env = createMockMainWorldEnvironment(USER_HOME_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            user: {
+              userId: "user-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(
+      `https://www.xiaohongshu.com${USER_HOME_ENDPOINT}?user_id=user-001`,
+      {
+        headers: {
+          accept: "application/json"
+        }
+      }
+    );
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(USER_HOME_PAGE_HREF),
+      shapeKey: createUserHomeShapeKey("user-001"),
+      method: "GET",
+      path: USER_HOME_ENDPOINT
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          method: "GET",
+          path: USER_HOME_ENDPOINT
         }
       }
     });

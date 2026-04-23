@@ -4141,6 +4141,8 @@ return { XHS_ALLOWED_DOMAINS, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN, buildIssue209Po
 })();
 const __webenvoy_module_xhs_search_types = (() => {
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
 const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
@@ -4194,6 +4196,32 @@ const createSearchRequestShape = (input) => {
     };
 };
 const serializeSearchRequestShape = (shape) => JSON.stringify(shape);
+const createDetailRequestShape = (input) => {
+    const noteId = toTrimmedString(input.note_id ?? input.source_note_id);
+    if (!noteId) {
+        return null;
+    }
+    return {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: DETAIL_ENDPOINT,
+        note_id: noteId
+    };
+};
+const serializeDetailRequestShape = (shape) => JSON.stringify(shape);
+const createUserHomeRequestShape = (input) => {
+    const userId = toTrimmedString(input.user_id);
+    if (!userId) {
+        return null;
+    }
+    return {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: userId
+    };
+};
+const serializeUserHomeRequestShape = (shape) => JSON.stringify(shape);
 const resolveMainWorldPageContextNamespaceEventName = (secret) => `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`;
 const createPageContextNamespace = (href) => {
     const normalized = href.trim();
