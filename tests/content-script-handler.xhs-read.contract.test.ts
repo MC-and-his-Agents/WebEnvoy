@@ -5,6 +5,7 @@ import {
   ContentScriptHandler,
   type BackgroundToContentMessage
 } from "../extension/content-script-handler.js";
+import type { XhsSearchEnvironment } from "../extension/xhs-search-types.js";
 
 const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
@@ -149,10 +150,34 @@ const createMessage = (input: {
   payload: Record<string, unknown>;
   cookie?: string;
   options?: Record<string, unknown>;
+  xhsEnvOverrides?: Partial<XhsSearchEnvironment>;
 }): {
   handler: ContentScriptHandler;
   message: BackgroundToContentMessage;
 } => {
+  const mergedOptions = {
+    ...approvedLiveOptions,
+    ...(input.options ?? {}),
+    target_page: input.targetPage,
+    audit_record: {
+      ...(approvedLiveOptions.audit_record),
+      target_page: input.targetPage
+    },
+    admission_context: {
+      approval_admission_evidence: {
+        ...(approvedLiveOptions.admission_context.approval_admission_evidence),
+        target_page: input.targetPage
+      },
+      audit_admission_evidence: {
+        ...(approvedLiveOptions.admission_context.audit_admission_evidence),
+        target_page: input.targetPage
+      }
+    }
+  };
+  if (!Object.prototype.hasOwnProperty.call(input.options ?? {}, "simulate_result")) {
+    mergedOptions.simulate_result = "success";
+  }
+
   const handler = new ContentScriptHandler({
     xhsEnv: {
       now: () => Date.now(),
@@ -170,7 +195,8 @@ const createMessage = (input: {
         body: {
           code: 0
         }
-      })
+      }),
+      ...(input.xhsEnvOverrides ?? {})
     }
   });
 
@@ -197,26 +223,7 @@ const createMessage = (input: {
           action: "read"
         },
         input: input.payload,
-        options: {
-          ...approvedLiveOptions,
-          ...(input.options ?? {}),
-          target_page: input.targetPage,
-          audit_record: {
-            ...(approvedLiveOptions.audit_record),
-            target_page: input.targetPage
-          },
-          admission_context: {
-            approval_admission_evidence: {
-              ...(approvedLiveOptions.admission_context.approval_admission_evidence),
-              target_page: input.targetPage
-            },
-            audit_admission_evidence: {
-              ...(approvedLiveOptions.admission_context.audit_admission_evidence),
-              target_page: input.targetPage
-            }
-          },
-          simulate_result: "success"
-        }
+        options: mergedOptions
       }
     }
   };
@@ -414,5 +421,129 @@ describe("content-script handler xhs read commands", () => {
         }
       }
     });
+  });
+
+  it("preserves request-context incompatible diagnostics for xhs.detail failures on the extension path", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      targetPage: "explore_detail_tab",
+      href: "https://www.xiaohongshu.com/explore/abc123",
+      options: {
+        simulate_result: null
+      },
+      payload: {
+        note_id: "abc123"
+      },
+      xhsEnvOverrides: {
+        readCapturedRequestContext: async () =>
+          ({
+            source_kind: "page_request",
+            transport: "fetch",
+            method: "POST",
+            path: "/api/sns/web/v1/feed",
+            url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+            status: 200,
+            captured_at: 1_710_000_000_000,
+            page_context_namespace: "xhs.detail",
+            shape_key:
+              '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"abc123"}',
+            shape: undefined,
+            request: {
+              headers: {},
+              body: {
+                source_note_id: "abc123"
+              }
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  note: {
+                    note_id: "note-999"
+                  }
+                }
+              }
+            }
+          }) as never
+      }
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+    const payload = (result.payload ?? {}) as Record<string, unknown>;
+    const details = (payload.details ?? {}) as Record<string, unknown>;
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED"
+    });
+    expect(details).toMatchObject({
+      reason: "REQUEST_CONTEXT_INCOMPATIBLE",
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch",
+      captured_request_shape: {
+        note_id: "note-999"
+      }
+    });
+  });
+
+  it("preserves page-state fallback diagnostics for xhs.user_home failures on the extension path", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.user_home",
+      abilityId: "xhs.user.home.v1",
+      targetPage: "profile_tab",
+      href: "https://www.xiaohongshu.com/user/profile/user-001",
+      options: {
+        simulate_result: null
+      },
+      payload: {
+        user_id: "user-001"
+      },
+      xhsEnvOverrides: {
+        readCapturedRequestContext: async () => null,
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-001"
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson: async () => ({ status: 200, body: { code: 0 } })
+      }
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+    const payload = (result.payload ?? {}) as Record<string, unknown>;
+    const details = (payload.details ?? {}) as Record<string, unknown>;
+    const observability = (payload.observability ?? {}) as Record<string, unknown>;
+
+    expect(result.ok).toBe(false);
+    expect(details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "captured_request_context"
+      }
+    });
+    expect((observability.key_requests as unknown[] | undefined) ?? []).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_MISSING"
+      })
+    ]);
   });
 });

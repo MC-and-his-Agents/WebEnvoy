@@ -5572,9 +5572,21 @@ const {
   resolveRiskStateOutput,
   resolveXsCommon
 } = __webenvoy_module_xhs_search_telemetry;
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
+const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
+const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "SESSION_EXPIRED",
+    "ACCOUNT_ABNORMAL",
+    "BROWSER_ENV_ABNORMAL",
+    "GATEWAY_INVOKER_FAILED",
+    "CAPTCHA_REQUIRED"
+]);
 const XHS_DETAIL_SPEC = {
     command: "xhs.detail",
-    endpoint: "/api/sns/web/v1/feed",
+    endpoint: DETAIL_ENDPOINT,
     method: "POST",
     pageKind: "detail",
     requestClass: "xhs.detail",
@@ -5582,14 +5594,14 @@ const XHS_DETAIL_SPEC = {
         source_note_id: params.note_id
     }),
     buildUrl: () => "/api/sns/web/v1/feed",
-    buildSignatureUri: () => "/api/sns/web/v1/feed",
+    buildSignatureUri: () => DETAIL_ENDPOINT,
     buildDataRef: (params) => ({
         note_id: params.note_id
     })
 };
 const XHS_USER_HOME_SPEC = {
     command: "xhs.user_home",
-    endpoint: "/api/sns/web/v1/user/otherinfo",
+    endpoint: USER_HOME_ENDPOINT,
     method: "GET",
     pageKind: "user_home",
     requestClass: "xhs.user_home",
@@ -5608,6 +5620,583 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
+const parseJsonRecord = (value) => {
+    if (typeof value === "string") {
+        try {
+            return asRecord(JSON.parse(value));
+        }
+        catch {
+            return null;
+        }
+    }
+    return asRecord(value);
+};
+const normalizeCapturedHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(record).filter((entry) => typeof entry[1] === "string"));
+};
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const resolveCapturedArtifactHeaders = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return {};
+    }
+    const request = asRecord(record.request);
+    return normalizeCapturedHeaders(record.template_headers ?? request?.headers);
+};
+const resolveCapturedArtifactReferrer = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    return asString(record.referrer);
+};
+const resolveCapturedArtifactStatus = (value) => {
+    const record = asRecord(value);
+    const requestStatus = asRecord(record?.request_status);
+    const sourceKind = asString(record?.source_kind);
+    const httpStatus = asInteger(requestStatus?.http_status) ?? asInteger(record?.status);
+    const completion = asString(requestStatus?.completion);
+    const templateReady = typeof record?.template_ready === "boolean" ? record.template_ready : null;
+    const explicitReason = asString(record?.rejection_reason);
+    const rejectionReason = explicitReason === "synthetic_request_rejected" ||
+        explicitReason === "failed_request_rejected" ||
+        explicitReason === "shape_mismatch"
+        ? explicitReason
+        : sourceKind !== null && sourceKind !== "page_request"
+            ? "synthetic_request_rejected"
+            : (completion !== null && completion !== "completed") ||
+                (httpStatus !== null && (httpStatus < 200 || httpStatus >= 300))
+                ? "failed_request_rejected"
+                : templateReady === false
+                    ? "failed_request_rejected"
+                    : null;
+    return {
+        sourceKind,
+        httpStatus,
+        templateReady,
+        rejectionReason
+    };
+};
+const resolveCapturedArtifactObservedAt = (value) => {
+    const record = asRecord(value);
+    return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
+};
+const resolveRejectedSourceReason = (spec, artifact) => {
+    const status = resolveCapturedArtifactStatus(artifact);
+    if (status.rejectionReason === "synthetic_request_rejected" ||
+        status.rejectionReason === "shape_mismatch") {
+        return status.rejectionReason;
+    }
+    if (status.rejectionReason === "failed_request_rejected") {
+        const response = asRecord(artifact.response);
+        const responseBody = response?.body;
+        const inferred = inferReadFailure(spec, status.httpStatus ?? 0, responseBody);
+        if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason)) {
+            return inferred.reason;
+        }
+        return "failed_request_rejected";
+    }
+    return "failed_request_rejected";
+};
+const resolveRejectedSourceMessage = (spec, reason) => {
+    switch (reason) {
+        case "SESSION_EXPIRED":
+            return `登录已失效，无法执行 ${spec.command}`;
+        case "ACCOUNT_ABNORMAL":
+            return "账号异常，平台拒绝当前请求";
+        case "BROWSER_ENV_ABNORMAL":
+            return "浏览器环境异常，平台拒绝当前请求";
+        case "GATEWAY_INVOKER_FAILED":
+            return `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`;
+        case "CAPTCHA_REQUIRED":
+            return "平台要求额外人机验证，无法继续执行";
+        case "TARGET_API_RESPONSE_INVALID":
+            return `${spec.command} 接口返回了未识别的失败响应`;
+        default:
+            return null;
+    }
+};
+const waitForRequestContextRetry = async (env, ms) => {
+    if (typeof env.sleep === "function") {
+        await env.sleep(ms);
+        return;
+    }
+    await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+};
+const resolveExactShapeLookupArtifacts = (lookupRecord) => {
+    const admittedTemplate = asRecord(lookupRecord.admitted_template);
+    const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+    if (!admittedTemplate || !rejectedObservation) {
+        return {
+            admittedTemplate,
+            rejectedObservation
+        };
+    }
+    if (resolveCapturedArtifactStatus(rejectedObservation).rejectionReason === "synthetic_request_rejected") {
+        return {
+            admittedTemplate,
+            rejectedObservation: null
+        };
+    }
+    const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+    const rejectedObservedAt = resolveCapturedArtifactObservedAt(rejectedObservation);
+    if (rejectedObservedAt !== null &&
+        (admittedObservedAt === null || rejectedObservedAt > admittedObservedAt)) {
+        return {
+            admittedTemplate: null,
+            rejectedObservation
+        };
+    }
+    return {
+        admittedTemplate,
+        rejectedObservation: null
+    };
+};
+const parseUserIdFromUrl = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return asString(url.searchParams.get("user_id"));
+    }
+    catch {
+        return null;
+    }
+};
+const resolveDetailResponseNoteId = (value, preferredNoteId) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    let fallbackNoteId = null;
+    for (const candidate of getDetailResponseCandidates(record)) {
+        const candidateNoteId = asString(candidate.note_id) ?? asString(candidate.noteId);
+        if (candidateNoteId) {
+            if (preferredNoteId && candidateNoteId === preferredNoteId) {
+                return candidateNoteId;
+            }
+            fallbackNoteId ??= candidateNoteId;
+        }
+    }
+    return preferredNoteId ? null : fallbackNoteId;
+};
+const hasUserHomeResponseDataShape = (record) => [
+    "nickname",
+    "avatar",
+    "avatar_url",
+    "images",
+    "follows",
+    "fans",
+    "basicInfo",
+    "basic_info",
+    "interactions"
+].some((key) => key in record);
+const iterateUserHomeResponseCandidates = (value) => {
+    const collectCandidates = (candidate, seen = new Set()) => {
+        const record = asRecord(candidate);
+        if (record) {
+            if (seen.has(record)) {
+                return [];
+            }
+            seen.add(record);
+            return [
+                record,
+                ...collectCandidates(record.basic_info, seen),
+                ...collectCandidates(record.basicInfo, seen),
+                ...collectCandidates(record.profile, seen),
+                ...collectCandidates(record.user, seen)
+            ];
+        }
+        if (Array.isArray(candidate)) {
+            return candidate.flatMap((entry) => collectCandidates(entry, seen));
+        }
+        return [];
+    };
+    const responseRecord = asRecord(value);
+    const dataRecord = asRecord(responseRecord?.data ?? value);
+    if (!dataRecord) {
+        return [];
+    }
+    return [
+        ...collectCandidates(dataRecord.user),
+        ...collectCandidates(dataRecord.basic_info),
+        ...collectCandidates(dataRecord.basicInfo),
+        ...collectCandidates(dataRecord.profile),
+        ...(hasUserHomeResponseDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+};
+const resolveUserHomeResponseUserId = (value, preferredUserId) => {
+    let fallbackUserId = null;
+    for (const candidate of iterateUserHomeResponseCandidates(value)) {
+        const userId = asString(candidate.user_id) ?? asString(candidate.userId);
+        if (userId) {
+            if (preferredUserId && userId === preferredUserId) {
+                return userId;
+            }
+            fallbackUserId ??= userId;
+        }
+    }
+    return preferredUserId ? null : fallbackUserId;
+};
+const createDetailShape = (noteId) => ({
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+});
+const deriveReadShapeFromCommand = (spec, params) => spec.command === "xhs.detail"
+    ? {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: DETAIL_ENDPOINT,
+        note_id: params.note_id
+    }
+    : {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: params.user_id
+    };
+const deriveDetailShapeFromSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const noteId = asString(record.note_id);
+    if (!noteId) {
+        return null;
+    }
+    return createDetailShape(noteId);
+};
+const deriveDetailRejectedShapeFromRequestSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const noteId = asString(record.source_note_id);
+    if (!noteId) {
+        return null;
+    }
+    return createDetailShape(noteId);
+};
+const deriveUserHomeShapeFromSource = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const userId = asString(record.user_id) ?? asString(record.userId) ?? parseUserIdFromUrl(asString(record.url));
+    if (!userId) {
+        return null;
+    }
+    return {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: userId
+    };
+};
+const deriveReadShapeFromArtifact = (spec, artifact, options) => {
+    if (!artifact) {
+        return null;
+    }
+    const record = asRecord(artifact);
+    if (!record) {
+        return null;
+    }
+    const artifactStatus = resolveCapturedArtifactStatus(record);
+    const explicitShape = parseJsonRecord(record.shape);
+    const response = asRecord(record.response);
+    if (explicitShape) {
+        if (spec.command === "xhs.detail") {
+            const explicitDetailShape = deriveDetailShapeFromSource(explicitShape);
+            const responseDetailShape = (() => {
+                const preferredNoteId = options?.preferredDetailNoteId ?? explicitDetailShape?.note_id ?? null;
+                const responseNoteId = resolveDetailResponseNoteId(response?.body, preferredNoteId) ??
+                    resolveDetailResponseNoteId(response?.body);
+                return responseNoteId ? createDetailShape(responseNoteId) : null;
+            })();
+            if (explicitDetailShape &&
+                responseDetailShape &&
+                responseDetailShape.note_id !== explicitDetailShape.note_id) {
+                return responseDetailShape;
+            }
+            if (options?.allowDetailRequestFallback === false) {
+                return responseDetailShape;
+            }
+            return explicitDetailShape;
+        }
+        const explicitUserHomeShape = deriveUserHomeShapeFromSource(explicitShape);
+        if (artifactStatus.rejectionReason && explicitUserHomeShape) {
+            return explicitUserHomeShape;
+        }
+        const responseUserId = resolveUserHomeResponseUserId(response?.body, explicitUserHomeShape?.user_id ?? null);
+        return explicitUserHomeShape &&
+            responseUserId &&
+            responseUserId === explicitUserHomeShape.user_id
+            ? explicitUserHomeShape
+            : null;
+    }
+    if (spec.command === "xhs.detail") {
+        const noteIdFromResponse = resolveDetailResponseNoteId(response?.body, options?.preferredDetailNoteId) ??
+            resolveDetailResponseNoteId(response?.body);
+        if (noteIdFromResponse) {
+            return createDetailShape(noteIdFromResponse);
+        }
+    }
+    const request = asRecord(record.request);
+    if (spec.command === "xhs.detail" && resolveCapturedArtifactStatus(record).rejectionReason) {
+        const rejectedRequestShape = deriveDetailRejectedShapeFromRequestSource(request?.body);
+        if (rejectedRequestShape) {
+            return rejectedRequestShape;
+        }
+    }
+    if (spec.command === "xhs.detail" && options?.allowDetailRequestFallback !== false) {
+        return deriveDetailShapeFromSource(request?.body);
+    }
+    const urlShape = deriveUserHomeShapeFromSource({ url: asString(record.url) });
+    const requestShape = deriveUserHomeShapeFromSource(request?.body);
+    const expectedUserId = urlShape?.user_id ?? requestShape?.user_id ?? null;
+    if (artifactStatus.rejectionReason && expectedUserId) {
+        return (createUserHomeRequestShape({
+            user_id: expectedUserId
+        }) ?? null);
+    }
+    const responseUserId = resolveUserHomeResponseUserId(response?.body, expectedUserId);
+    if (!expectedUserId || !responseUserId || responseUserId !== expectedUserId) {
+        return null;
+    }
+    return (createUserHomeRequestShape({
+        user_id: expectedUserId
+    }) ?? null);
+};
+const serializeReadShape = (shape) => shape.command === "xhs.detail"
+    ? JSON.stringify({
+        command: shape.command,
+        method: shape.method,
+        pathname: shape.pathname,
+        note_id: shape.note_id
+    })
+    : JSON.stringify({
+        command: shape.command,
+        method: shape.method,
+        pathname: shape.pathname,
+        user_id: shape.user_id
+    });
+const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) => {
+    if (!artifact) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const lookupRecord = asRecord(artifact);
+    if (lookupRecord &&
+        ("admitted_template" in lookupRecord ||
+            "rejected_observation" in lookupRecord ||
+            "incompatible_observation" in lookupRecord)) {
+        const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
+        const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
+        if (admittedTemplate) {
+            return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
+                allowDetailRequestFallback: false
+            });
+        }
+        if (rejectedObservation) {
+            const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
+                preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                allowDetailRequestFallback: true
+            });
+            return {
+                state: "rejected_source",
+                reason: resolveRejectedSourceReason(spec, rejectedObservation),
+                shape: derivedShape ?? expectedShape
+            };
+        }
+        if (incompatibleObservation) {
+            return {
+                state: "incompatible",
+                reason: "shape_mismatch",
+                shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
+                    preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                    allowDetailRequestFallback: true
+                })
+            };
+        }
+        const availableShapeKeys = Array.isArray(lookupRecord.available_shape_keys)
+            ? lookupRecord.available_shape_keys.filter((item) => typeof item === "string")
+            : [];
+        if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
+            return {
+                state: "miss",
+                reason: "shape_mismatch",
+            };
+        }
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const derivedShape = deriveReadShapeFromArtifact(spec, artifact, {
+        preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+        allowDetailRequestFallback: spec.command === "xhs.detail" && !resolveCapturedArtifactStatus(artifact).rejectionReason
+            ? false
+            : (options?.allowDetailRequestFallback ?? true)
+    });
+    if (!derivedShape) {
+        return {
+            state: "miss",
+            reason: "template_missing"
+        };
+    }
+    const status = resolveCapturedArtifactStatus(artifact);
+    if (serializeReadShape(derivedShape) !== serializeReadShape(expectedShape)) {
+        return {
+            state: "incompatible",
+            reason: "shape_mismatch",
+            shape: derivedShape
+        };
+    }
+    if (status.rejectionReason) {
+        return {
+            state: "rejected_source",
+            reason: resolveRejectedSourceReason(spec, artifact),
+            shape: derivedShape
+        };
+    }
+    const observedAt = resolveCapturedArtifactObservedAt(artifact);
+    if (observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+        return {
+            state: "stale",
+            reason: "template_stale",
+            shape: derivedShape
+        };
+    }
+    return {
+        state: "hit",
+        shape: derivedShape,
+        headers: resolveCapturedArtifactHeaders(artifact),
+        referrer: resolveCapturedArtifactReferrer(artifact)
+    };
+};
+const failClosedForRequestContext = (input, env) => {
+    const failureSurface = resolveRequestContextFailureSurface(input.spec, input.lookupResult);
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failureSurface.message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: failureSurface.reasonCode,
+        request_context_result: failureSurface.resultKind,
+        request_context_lookup_state: input.lookupResult.state,
+        request_context_miss_reason: input.lookupResult.reason,
+        request_context_shape: input.expectedShape,
+        request_context_shape_key: serializeReadShape(input.expectedShape),
+        ...("shape" in input.lookupResult && input.lookupResult.shape
+            ? { captured_request_shape: input.lookupResult.shape }
+            : {})
+    }, createReadObservability({
+        spec: input.spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        failureReason: input.lookupResult.reason,
+        includeKeyRequest: false,
+        failureSite: {
+            stage: "execution",
+            component: "page",
+            target: "captured_request_context",
+            summary: input.lookupResult.reason
+        }
+    }), createReadDiagnosis(input.spec, {
+        reason: input.lookupResult.reason,
+        summary: failureSurface.message,
+        category: "page_changed"
+    }), input.gate, input.auditRecord), input.gate.execution_audit);
+};
+const resolveRequestContextFailureSurface = (spec, lookupResult) => {
+    const isIncompatible = lookupResult.state === "incompatible" || lookupResult.reason === "shape_mismatch";
+    if (lookupResult.state === "error") {
+        return {
+            resultKind: "request_context_missing",
+            message: `当前页面现场请求上下文读取失败，无法继续执行 ${spec.command}`,
+            reasonCode: "REQUEST_CONTEXT_READ_FAILED"
+        };
+    }
+    const rejectedSourceMessage = lookupResult.state === "rejected_source"
+        ? resolveRejectedSourceMessage(spec, lookupResult.reason)
+        : null;
+    const resultKind = isIncompatible ? "request_context_incompatible" : "request_context_missing";
+    const message = rejectedSourceMessage ??
+        (isIncompatible
+            ? `当前页面现场不存在与 ${spec.command} 完全一致的请求上下文`
+            : `当前页面现场缺少可复用的 ${spec.command} 请求上下文`);
+    const reasonCode = rejectedSourceMessage && BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason)
+        ? lookupResult.reason
+        : isIncompatible
+            ? "REQUEST_CONTEXT_INCOMPATIBLE"
+            : "REQUEST_CONTEXT_MISSING";
+    return {
+        resultKind,
+        message,
+        reasonCode
+    };
+};
+const readCapturedReadContextWithRetry = async (spec, expectedShape, env) => {
+    const readCapturedRequestContext = env.readCapturedRequestContext;
+    if (!readCapturedRequestContext) {
+        return resolveReadRequestContext(spec, null, expectedShape, env.now());
+    }
+    let pageContextNamespace = createPageContextNamespace(env.getLocationHref());
+    const lookupOnce = async () => {
+        try {
+            const result = await readCapturedRequestContext({
+                method: spec.method,
+                path: spec.endpoint,
+                page_context_namespace: pageContextNamespace,
+                shape_key: serializeReadShape(expectedShape)
+            });
+            const nextNamespace = asString(asRecord(result)?.page_context_namespace);
+            if (nextNamespace) {
+                pageContextNamespace = nextNamespace;
+            }
+            return resolveReadRequestContext(spec, result, expectedShape, env.now());
+        }
+        catch (error) {
+            return {
+                state: "error",
+                reason: "request_context_read_failed",
+                detail: error instanceof Error ? error.message : String(error)
+            };
+        }
+    };
+    let lastResult = await lookupOnce();
+    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS && lastResult.state !== "hit"; attempt += 1) {
+        await waitForRequestContextRetry(env, REQUEST_CONTEXT_WAIT_RETRY_MS);
+        lastResult = await lookupOnce();
+    }
+    return lastResult;
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5838,14 +6427,12 @@ const responseContainsRequestedTarget = (spec, params, body) => {
     if (spec.command === "xhs.detail") {
         return getDetailResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.note_id, [
             "note_id",
-            "noteId",
-            "id"
+            "noteId"
         ]));
     }
     return getUserHomeResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.user_id, [
         "user_id",
-        "userId",
-        "id"
+        "userId"
     ]));
 };
 const createReadDiagnosis = (spec, input) => {
@@ -5876,8 +6463,14 @@ const hasUserHomePageStateFallback = (params, root) => {
         asNonEmptyString(user.userId),
         asNonEmptyString(user.user_id),
         asNonEmptyString(user.id),
+        asNonEmptyString(asRecord(user.basic_info)?.userId),
+        asNonEmptyString(asRecord(user.basic_info)?.user_id),
         asNonEmptyString(asRecord(user.basicInfo)?.userId),
         asNonEmptyString(asRecord(user.basicInfo)?.user_id),
+        asNonEmptyString(asRecord(asRecord(user.profile)?.basic_info)?.userId),
+        asNonEmptyString(asRecord(asRecord(user.profile)?.basic_info)?.user_id),
+        asNonEmptyString(asRecord(asRecord(user.profile)?.basicInfo)?.userId),
+        asNonEmptyString(asRecord(asRecord(user.profile)?.basicInfo)?.user_id),
         asNonEmptyString(asRecord(user.profile)?.userId),
         asNonEmptyString(asRecord(user.profile)?.user_id)
     ].filter((value) => value !== null);
@@ -5891,10 +6484,12 @@ const canUsePageStateFallback = (spec, params, root) => spec.command === "xhs.de
     : hasUserHomePageStateFallback(params, root);
 const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
     const requestId = `req-${env.randomId()}`;
+    const requestAttempted = requestFailure.requestAttempted !== false;
     return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
         ability_id: input.abilityId,
         stage: "execution",
-        reason: requestFailure.reason
+        reason: requestFailure.reason,
+        ...(requestFailure.requestContextDetails ?? {})
     }, {
         page_state: {
             page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
@@ -5904,18 +6499,22 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
             fallback_used: true
         },
         key_requests: [
-            {
-                request_id: requestId,
-                stage: "request",
-                method: spec.method,
-                url: spec.endpoint,
-                outcome: "failed",
-                ...(typeof requestFailure.statusCode === "number"
-                    ? { status_code: requestFailure.statusCode }
-                    : {}),
-                failure_reason: requestFailure.reason,
-                request_class: spec.requestClass
-            },
+            ...(requestAttempted
+                ? [
+                    {
+                        request_id: requestId,
+                        stage: "request",
+                        method: spec.method,
+                        url: spec.endpoint,
+                        outcome: "failed",
+                        ...(typeof requestFailure.statusCode === "number"
+                            ? { status_code: requestFailure.statusCode }
+                            : {}),
+                        failure_reason: requestFailure.reason,
+                        request_class: spec.requestClass
+                    }
+                ]
+                : []),
             {
                 request_id: `${requestId}-page-state`,
                 stage: "page_state_fallback",
@@ -5927,12 +6526,20 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
                 duration_ms: Math.max(0, env.now() - startedAt)
             }
         ],
-        failure_site: {
-            stage: "request",
-            component: "network",
-            target: spec.endpoint,
-            summary: requestFailure.message
-        }
+        failure_site: requestFailure.failureSite ??
+            (requestAttempted
+                ? {
+                    stage: "request",
+                    component: "network",
+                    target: spec.endpoint,
+                    summary: requestFailure.message
+                }
+                : {
+                    stage: "execution",
+                    component: "page",
+                    target: "captured_request_context",
+                    summary: requestFailure.message
+                })
     }, createReadDiagnosis(spec, {
         reason: requestFailure.reason,
         summary: requestFailure.message
@@ -6112,8 +6719,8 @@ const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) =>
         summary: mapped.message
     }), gate, auditRecord), gate?.execution_audit ?? null);
 };
-const buildHeaders = (env, options, signature) => ({
-    Accept: "application/json, text/plain, */*",
+const buildHeaders = (env, options, signature, capturedHeaders) => ({
+    Accept: getCapturedHeader(capturedHeaders ?? {}, "Accept") ?? "application/json, text/plain, */*",
     ...(options.target_domain === "www.xiaohongshu.com" || options.target_domain === undefined
         ? {}
         : {}),
@@ -6121,12 +6728,16 @@ const buildHeaders = (env, options, signature) => ({
         ? {
             "X-s": String(signature["X-s"]),
             "X-t": String(signature["X-t"]),
-            "X-S-Common": resolveXsCommon(options.x_s_common),
-            "x-b3-traceid": env.randomId().replace(/-/g, ""),
-            "x-xray-traceid": env.randomId().replace(/-/g, "")
+            "X-S-Common": getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
+                options.x_s_common ??
+                resolveXsCommon(undefined),
+            "x-b3-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
+                env.randomId().replace(/-/g, ""),
+            "x-xray-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-xray-traceid") ??
+                env.randomId().replace(/-/g, "")
         }
         : {}),
-    "Content-Type": "application/json;charset=utf-8"
+    "Content-Type": getCapturedHeader(capturedHeaders ?? {}, "Content-Type") ?? "application/json;charset=utf-8"
 });
 const executeXhsRead = async (input, spec, env) => {
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
@@ -6237,6 +6848,45 @@ const executeXhsRead = async (input, spec, env) => {
             summary: `登录态缺失，无法执行 ${spec.command}`
         }), gate, auditRecord), gate.execution_audit);
     }
+    const expectedShape = deriveReadShapeFromCommand(spec, input.params);
+    const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env);
+    if (requestContextResult.state !== "hit") {
+        const pageStateRoot = await resolvePageStateRoot();
+        if (requestContextResult.state !== "error" &&
+            canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            const failureSurface = resolveRequestContextFailureSurface(spec, requestContextResult);
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: failureSurface.reasonCode,
+                message: failureSurface.message,
+                detail: requestContextResult.reason,
+                requestAttempted: false,
+                failureSite: {
+                    stage: "execution",
+                    component: "page",
+                    target: "captured_request_context",
+                    summary: failureSurface.message
+                },
+                requestContextDetails: {
+                    request_context_result: failureSurface.resultKind,
+                    request_context_lookup_state: requestContextResult.state,
+                    request_context_miss_reason: requestContextResult.reason,
+                    request_context_shape: expectedShape,
+                    request_context_shape_key: serializeReadShape(expectedShape),
+                    ...("shape" in requestContextResult && requestContextResult.shape
+                        ? { captured_request_shape: requestContextResult.shape }
+                        : {})
+                }
+            });
+        }
+        return failClosedForRequestContext({
+            abilityId: input.abilityId,
+            spec,
+            expectedShape,
+            lookupResult: requestContextResult,
+            gate,
+            auditRecord
+        }, env);
+    }
     let signature;
     try {
         signature = await env.callSignature(spec.buildSignatureUri(input.params), payload);
@@ -6247,7 +6897,14 @@ const executeXhsRead = async (input, spec, env) => {
             return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
                 reason: "SIGNATURE_ENTRY_MISSING",
                 message: "页面签名入口不可用",
-                detail: error instanceof Error ? error.message : String(error)
+                detail: error instanceof Error ? error.message : String(error),
+                requestAttempted: false,
+                failureSite: {
+                    stage: "action",
+                    component: "page",
+                    target: "window._webmsxyw",
+                    summary: "页面签名入口不可用"
+                }
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
@@ -6280,8 +6937,11 @@ const executeXhsRead = async (input, spec, env) => {
         response = await env.fetchJson({
             url: spec.buildUrl(input.params),
             method: spec.method,
-            headers: buildHeaders(env, input.options, signature),
+            headers: buildHeaders(env, input.options, signature, requestContextResult.headers),
             ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+            pageContextRequest: true,
+            referrer: requestContextResult.referrer ?? env.getLocationHref(),
+            referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
                 : 30_000

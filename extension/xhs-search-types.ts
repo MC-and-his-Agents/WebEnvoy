@@ -156,6 +156,7 @@ export interface XhsSearchEnvironment {
   readCapturedRequestContext?(
     input: CapturedRequestContextLookup
   ): Promise<CapturedRequestContextLookupResult | null>;
+  sleep?(ms: number): Promise<void>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;
