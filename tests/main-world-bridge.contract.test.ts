@@ -448,6 +448,69 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("does not admit detail request-context when the response only exposes a bare id", async () => {
+    const env = createMockMainWorldEnvironment(DETAIL_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            note: {
+              id: "note-001",
+              title: "bare id only"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${DETAIL_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ source_note_id: "note-001" })
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(DETAIL_PAGE_HREF),
+      shapeKey: createDetailShapeKey("note-001"),
+      method: "POST",
+      path: DETAIL_ENDPOINT
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          rejection_reason: "failed_request_rejected",
+          shape: {
+            command: "xhs.detail",
+            note_id: "note-001"
+          }
+        }
+      }
+    });
+  });
+
   it("captures user_home request-context on real profile pages", async () => {
     const env = createMockMainWorldEnvironment(USER_HOME_PAGE_HREF);
     env.setFetchHandler(async () => {

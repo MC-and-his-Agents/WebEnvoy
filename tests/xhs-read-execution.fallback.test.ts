@@ -4,6 +4,9 @@ import { executeXhsDetail } from "../extension/xhs-detail.js";
 import { executeXhsUserHome } from "../extension/xhs-user-home.js";
 import type { XhsSearchEnvironment, XhsSearchOptions } from "../extension/xhs-search-types.js";
 
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
+
 const createApprovalRecord = () => ({
   approved: true,
   approver: "qa-reviewer",
@@ -137,6 +140,106 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
   ...overrides
 });
 
+const createDetailRequestContext = (
+  noteId: string,
+  overrides?: Record<string, unknown>
+): Record<string, unknown> => ({
+  source_kind: "page_request",
+  transport: "fetch",
+  method: "POST",
+  path: DETAIL_ENDPOINT,
+  url: `https://www.xiaohongshu.com${DETAIL_ENDPOINT}`,
+  status: 200,
+  captured_at: 1_710_000_000_000,
+  page_context_namespace: "xhs.detail",
+  shape_key: JSON.stringify({
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+  }),
+  shape: {
+    command: "xhs.detail",
+    method: "POST",
+    pathname: DETAIL_ENDPOINT,
+    note_id: noteId
+  },
+  request: {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/json;charset=utf-8",
+      "X-S-Common": "{\"detailId\":\"captured-detail-id\"}"
+    },
+    body: {
+      source_note_id: noteId
+    }
+  },
+  response: {
+    headers: {},
+    body: {
+      code: 0,
+      data: {
+        note: {
+          noteId
+        }
+      }
+    }
+  },
+  referrer: `https://www.xiaohongshu.com/explore/${noteId}`,
+  ...(overrides ?? {})
+});
+
+const createUserHomeRequestContext = (
+  userId: string,
+  overrides?: Record<string, unknown>
+): Record<string, unknown> => ({
+  source_kind: "page_request",
+  transport: "fetch",
+  method: "GET",
+  path: USER_HOME_ENDPOINT,
+  url: `https://www.xiaohongshu.com${USER_HOME_ENDPOINT}?user_id=${userId}`,
+  status: 200,
+  captured_at: 1_710_000_000_000,
+  page_context_namespace: "xhs.user_home",
+  shape_key: JSON.stringify({
+    command: "xhs.user_home",
+    method: "GET",
+    pathname: USER_HOME_ENDPOINT,
+    user_id: userId
+  }),
+  shape: {
+    command: "xhs.user_home",
+    method: "GET",
+    pathname: USER_HOME_ENDPOINT,
+    user_id: userId
+  },
+  request: {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "X-S-Common": "{\"userId\":\"captured-user-id\"}"
+    },
+    body: null
+  },
+  response: {
+    headers: {},
+    body: {
+      code: 0,
+      data: {
+        user: {
+          userId
+        }
+      }
+    }
+  },
+  referrer: `https://www.xiaohongshu.com/user/profile/${userId}`,
+  ...(overrides ?? {})
+});
+
+const createRequestContextReader = (
+  artifact: Record<string, unknown>
+): NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]> =>
+  (async () => artifact as never) as NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>;
+
 const createFallbackExecutionContext = (runId: string) => ({
   runId,
   sessionId: "nm-session-001",
@@ -179,7 +282,10 @@ describe("xhs read execution fallback", () => {
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-success-001",
         callSignature,
-        fetchJson
+        fetchJson,
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-success-001")
+        )
       })
     );
 
@@ -244,7 +350,10 @@ describe("xhs read execution fallback", () => {
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-success-001",
         callSignature,
-        fetchJson
+        fetchJson,
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-success-001")
+        )
       })
     );
 
@@ -293,6 +402,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-wrapped-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-wrapped-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -343,6 +455,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-nested-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-nested-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -391,6 +506,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-missing-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-missing-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -439,6 +557,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-missing-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-missing-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -468,6 +589,56 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("keeps user_home execution failed when api success payload only exposes a bare id", async () => {
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-bare-id-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-bare-id-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-bare-id-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-bare-id-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-bare-id-001")
+        ),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              user: {
+                id: "user-bare-id-001",
+                nickname: "bare id only"
+              }
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user bare-id failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.user_home 接口返回成功但未包含目标数据"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      failure_site: {
+        target: "/api/sns/web/v1/user/otherinfo"
+      }
+    });
+  });
+
   it("does not treat metadata note id as detail success evidence", async () => {
     const result = await executeXhsDetail(
       {
@@ -485,6 +656,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-metadata-only-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-metadata-only-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -512,7 +686,51 @@ describe("xhs read execution fallback", () => {
     expect(result.error.message).toBe("xhs.detail 接口返回成功但未包含目标数据");
   });
 
-  it("uses detail page-state fallback when a 200 payload omits the requested note", async () => {
+  it("keeps detail execution failed when the api success payload only exposes a bare id", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-bare-id-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-bare-id-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-bare-id-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-bare-id-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-bare-id-001")
+        ),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              id: "note-bare-id-001",
+              title: "bare id only"
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail bare-id failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.detail 接口返回成功但未包含目标数据"
+    });
+  });
+
+  it("uses detail page-state fallback when request context is missing but page state still proves the requested note", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
     const result = await executeXhsDetail(
       {
         abilityId: "xhs.note.detail.v1",
@@ -538,21 +756,7 @@ describe("xhs read execution fallback", () => {
             }
           }
         }),
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: 0,
-            data: {
-              items: [
-                {
-                  note_card: {
-                    noteId: "different-note"
-                  }
-                }
-              ]
-            }
-          }
-        })
+        fetchJson
       })
     );
 
@@ -565,9 +769,157 @@ describe("xhs read execution fallback", () => {
         fallback_used: true
       },
       failure_site: {
-        target: "/api/sns/web/v1/feed"
+        target: "captured_request_context"
       }
     });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_MISSING"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("uses detail page-state fallback when request-context lookup errors but page state still proves the requested note", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-read-error-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-read-error-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-read-error-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-read-error-001",
+        readCapturedRequestContext: vi.fn(async () => {
+          throw new Error("bridge unavailable");
+        }),
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-read-error-001": {
+                noteId: "note-read-error-001"
+              }
+            }
+          }
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail read-error failure");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "captured_request_context"
+      }
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_READ_FAILED"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_READ_FAILED",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "error",
+      request_context_miss_reason: "request_context_read_failed"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("preserves CAPTCHA_REQUIRED during detail page-state fallback for rejected exact-hit request context", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-fallback-rejected-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-fallback-rejected-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-fallback-rejected-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-fallback-rejected-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-fallback-rejected-001", {
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 429
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 429001,
+                msg: "captcha required"
+              }
+            }
+          })
+        ),
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-fallback-rejected-001": {
+                noteId: "note-fallback-rejected-001"
+              }
+            }
+          }
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail rejected-context fallback failure envelope");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "平台要求额外人机验证，无法继续执行"
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "CAPTCHA_REQUIRED"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "CAPTCHA_REQUIRED",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "CAPTCHA_REQUIRED"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("does not treat metadata user id as user_home success evidence", async () => {
@@ -587,6 +939,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-metadata-only-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-metadata-only-001")
+        ),
         fetchJson: async () => ({
           status: 200,
           body: {
@@ -612,7 +967,8 @@ describe("xhs read execution fallback", () => {
     expect(result.error.message).toBe("xhs.user_home 接口返回成功但未包含目标数据");
   });
 
-  it("uses user_home page-state fallback when a 200 payload omits the requested user", async () => {
+  it("uses user_home page-state fallback when request context is missing but page state still proves the requested user", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
     const result = await executeXhsUserHome(
       {
         abilityId: "xhs.user.home.v1",
@@ -631,22 +987,11 @@ describe("xhs read execution fallback", () => {
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-target-missing-001",
         readPageStateRoot: async () => ({
           user: {
-            userId: "user-fallback-target-missing-001"
-          },
-          board: {},
-          note: {}
-        }),
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: 0,
-            data: {
-              user: {
-                userId: "different-user"
-              }
-            }
+            userId: "user-fallback-target-missing-001",
+            nickname: "target user"
           }
-        })
+        }),
+        fetchJson
       })
     );
 
@@ -659,9 +1004,251 @@ describe("xhs read execution fallback", () => {
         fallback_used: true
       },
       failure_site: {
-        target: "/api/sns/web/v1/user/otherinfo"
+        target: "captured_request_context"
       }
     });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_MISSING"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("does not use user_home page-state fallback when page state only exposes root.user metadata", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-metadata-only-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-metadata-only-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-fallback-metadata-only-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-metadata-only-001",
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-fallback-metadata-only-001"
+          }
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home metadata-only request-context failure");
+    }
+    expect((result.payload.observability as Record<string, unknown>).page_state).not.toHaveProperty(
+      "fallback_used"
+    );
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("uses user_home page-state fallback when request-context lookup errors but page state still proves the requested user", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-read-error-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-read-error-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-read-error-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-read-error-001",
+        readCapturedRequestContext: vi.fn(async () => {
+          throw new Error("bridge unavailable");
+        }),
+        readPageStateRoot: async () => ({
+          user: {
+            basic_info: {
+              user_id: "user-read-error-001"
+            }
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home read-error failure");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "captured_request_context"
+      }
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_READ_FAILED"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_READ_FAILED",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "error",
+      request_context_miss_reason: "request_context_read_failed"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("preserves GATEWAY_INVOKER_FAILED during user_home page-state fallback for rejected exact-hit request context", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-rejected-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-rejected-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-fallback-rejected-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-rejected-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-fallback-rejected-001", {
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 500
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 500100,
+                msg: "create invoker failed"
+              }
+            }
+          })
+        ),
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-fallback-rejected-001"
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home rejected-context fallback failure envelope");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "网关调用失败，当前上下文不足以完成 xhs.user_home 请求"
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "GATEWAY_INVOKER_FAILED"
+      })
+    ]);
+    expect(result.payload.details).toMatchObject({
+      reason: "GATEWAY_INVOKER_FAILED",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "GATEWAY_INVOKER_FAILED"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("uses user_home page-state fallback when page state only proves the requested user via basic_info.user_id", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-basic-info-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-basic-info-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-fallback-basic-info-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-basic-info-001",
+        readPageStateRoot: async () => ({
+          user: {
+            basic_info: {
+              user_id: "user-fallback-basic-info-001"
+            }
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home basic_info fallback failure envelope");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
+      failure_site: {
+        target: "captured_request_context"
+      }
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("uses detail page-state fallback when feed api is blocked but note state is still present", async () => {
@@ -682,6 +1269,7 @@ describe("xhs read execution fallback", () => {
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
         getPageStateRoot: () => null,
+        readCapturedRequestContext: createRequestContextReader(createDetailRequestContext("note-001")),
         readPageStateRoot: async () => ({
           note: {
             noteDetailMap: {
@@ -755,6 +1343,7 @@ describe("xhs read execution fallback", () => {
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
         getPageStateRoot: () => null,
+        readCapturedRequestContext: createRequestContextReader(createUserHomeRequestContext("user-001")),
         readPageStateRoot: async () => ({
           user: {
             userId: "user-001"
@@ -808,6 +1397,9 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-signature-fallback-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-signature-fallback-001")
+        ),
         readPageStateRoot: async () => ({
           note: {
             noteDetailMap: {
@@ -836,9 +1428,16 @@ describe("xhs read execution fallback", () => {
         fallback_used: true
       },
       failure_site: {
-        target: "/api/sns/web/v1/feed"
+        target: "window._webmsxyw"
       }
     });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "SIGNATURE_ENTRY_MISSING"
+      })
+    ]);
   });
 
   it("projects simulated signature-entry failures with page-change semantics for xhs.detail", async () => {
@@ -940,6 +1539,7 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-404",
+        readCapturedRequestContext: createRequestContextReader(createDetailRequestContext("note-404")),
         fetchJson: async () => ({
           status: 500,
           body: {
@@ -959,7 +1559,7 @@ describe("xhs read execution fallback", () => {
     });
   });
 
-  it("falls back to sync page-state hook when readPageStateRoot is absent", async () => {
+  it("falls back to sync page-state hook when request context is missing and readPageStateRoot is absent", async () => {
     const environment = createEnvironment({
       readPageStateRoot: undefined,
       getLocationHref: () => "https://www.xiaohongshu.com/explore/note-sync-001",
@@ -970,12 +1570,6 @@ describe("xhs read execution fallback", () => {
               noteId: "note-sync-001"
             }
           }
-        }
-      }),
-      fetchJson: async () => ({
-        status: 500,
-        body: {
-          msg: "create invoker failed"
         }
       })
     });
@@ -1006,6 +1600,12 @@ describe("xhs read execution fallback", () => {
         fallback_used: true
       }
     });
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
   });
 
   it("keeps user_home execution failed when page-state user identity does not match requested user_id", async () => {
@@ -1026,6 +1626,7 @@ describe("xhs read execution fallback", () => {
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
         getPageStateRoot: () => null,
+        readCapturedRequestContext: createRequestContextReader(createUserHomeRequestContext("user-001")),
         readPageStateRoot: async () => ({
           user: {
             userId: "user-999"
