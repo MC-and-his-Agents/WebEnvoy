@@ -202,7 +202,9 @@ export const ensureOfficialChromeRuntimeReady = async (
   requestedExecutionMode: XhsExecutionMode,
   bridge: NativeMessagingBridge,
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
-  gate: ReturnType<typeof normalizeGateOptionsForContract>,
+  gate: ReturnType<typeof normalizeGateOptionsForContract> & {
+    targetResourceId?: string | null;
+  },
   readStatus?: () => Promise<JsonObject>
 ): Promise<void> => {
   await prepareOfficialChromeRuntime({
@@ -214,8 +216,26 @@ export const ensureOfficialChromeRuntimeReady = async (
     bootstrapTargetTabId: gate.targetTabId,
     bootstrapTargetDomain: gate.targetDomain,
     bootstrapTargetPage: gate.targetPage,
+    bootstrapTargetResourceId: gate.targetResourceId ?? null,
     readStatus
   });
+};
+
+const resolveBootstrapTargetResourceId = (
+  command: string,
+  parsedInput: JsonObject
+): string | null => {
+  if (command === "xhs.detail") {
+    return typeof parsedInput.note_id === "string" && parsedInput.note_id.trim().length > 0
+      ? parsedInput.note_id.trim()
+      : null;
+  }
+  if (command === "xhs.user_home") {
+    return typeof parsedInput.user_id === "string" && parsedInput.user_id.trim().length > 0
+      ? parsedInput.user_id.trim()
+      : null;
+  }
+  return null;
 };
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
@@ -310,7 +330,10 @@ const xhsReadCommand = async (
       gate.requestedExecutionMode,
       bridge,
       fingerprintContext,
-      gate
+      {
+        ...gate,
+        targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
+      }
     );
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile

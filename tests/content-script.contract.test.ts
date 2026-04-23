@@ -183,19 +183,27 @@ const createExtensionStorageArea = (
 };
 
 const createRuntime = () => {
-  let listener: ((message: unknown) => void) | null = null;
+  const listeners = new Set<(message: unknown) => void>();
   return {
     runtime: {
       onMessage: {
         addListener(callback: (message: unknown) => void) {
-          listener = callback;
+          listeners.add(callback);
+        },
+        removeListener(callback: (message: unknown) => void) {
+          listeners.delete(callback);
         }
       },
       sendMessage: vi.fn(),
       getURL: vi.fn((path: string) => `chrome-extension://unit-test/${path}`)
     },
     dispatch(message: unknown) {
-      listener?.(message);
+      for (const listener of listeners) {
+        listener(message);
+      }
+    },
+    listenerCount() {
+      return listeners.size;
     }
   };
 };
@@ -533,6 +541,90 @@ describe("content-script bootstrap contract", () => {
     const startupTrust = asRecord(startupTrustPayload?.startup_fingerprint_trust);
     expect(startupTrust?.trusted).toBeUndefined();
     expect(startupTrust?.install_state).toBeUndefined();
+  });
+
+  it("keeps content-script bootstrap idempotent when the bundle is reinjected into the same tab", () => {
+    const { runtime, dispatch, listenerCount } = createRuntime();
+    const onResult = vi.spyOn(ContentScriptHandler.prototype, "onResult");
+    const setReachable = vi.spyOn(ContentScriptHandler.prototype, "setReachable");
+    const onBackgroundMessage = vi
+      .spyOn(ContentScriptHandler.prototype, "onBackgroundMessage")
+      .mockReturnValue(true);
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(onResult).toHaveBeenCalledTimes(2);
+    expect(setReachable).toHaveBeenCalledWith(false);
+    expect(listenerCount()).toBe(1);
+
+    dispatch({
+      kind: "forward",
+      id: "forward-once-001",
+      runId: "forward-once-001",
+      command: "runtime.ping",
+      params: {},
+      commandParams: {}
+    });
+
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores stale async bootstrap fallback after a newer reinjection takes ownership", async () => {
+    let resolveBootstrapFetch: ((value: { ok: boolean; json: () => Promise<unknown> }) => void) | null =
+      null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveBootstrapFetch = resolve as typeof resolveBootstrapFetch;
+        })
+    ) as typeof fetch;
+
+    try {
+      const { runtime } = createRuntime();
+      (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = null;
+
+      expect(bootstrapContentScript(runtime)).toBe(true);
+
+      const context = createFingerprintContext();
+      (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+        run_id: "run-bootstrap-current-002",
+        runtime_context_id: "ctx-bootstrap-current-002",
+        session_id: "nm-session-002",
+        fingerprint_runtime: context
+      };
+      expect(bootstrapContentScript(runtime)).toBe(true);
+
+      expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+      expect(runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "startup-fingerprint-trust:run-bootstrap-current-002"
+        })
+      );
+
+      resolveBootstrapFetch?.({
+        ok: true,
+        json: async () => ({
+          extension_bootstrap: {
+            run_id: "run-bootstrap-stale-001",
+            runtime_context_id: "ctx-bootstrap-stale-001",
+            session_id: "nm-session-001",
+            fingerprint_runtime: createFingerprintContext()
+          }
+        })
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+      expect(runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "startup-fingerprint-trust:run-bootstrap-stale-001"
+        })
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {

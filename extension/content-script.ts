@@ -18,6 +18,7 @@ const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payl
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
+const CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY = "__webenvoy_content_script_bootstrap_state__";
 const STAGED_STARTUP_TRUST_RUN_ID = undefined;
 const STAGED_STARTUP_TRUST_SESSION_ID = undefined;
 const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;
@@ -34,8 +35,10 @@ type ContentScriptStorageArea = {
 };
 
 type ContentScriptRuntime = {
+  [CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY]?: ContentScriptBootstrapState;
   onMessage?: {
     addListener(listener: (message: unknown) => void): void;
+    removeListener?(listener: (message: unknown) => void): void;
   };
   sendMessage?: (message: ContentToBackgroundMessage) => Promise<unknown> | void;
   getURL?: (path: string) => string;
@@ -63,6 +66,13 @@ type BootstrapFingerprintContext = {
   runtimeContextId: string | null;
   sessionId: string | null;
   mainWorldSecret: string | null;
+};
+
+type ContentScriptBootstrapState = {
+  generation: number;
+  handler: ContentScriptHandler | null;
+  detachResultRelay: (() => void) | null;
+  messageListener: ((message: unknown) => void) | null;
 };
 
 const normalizeForwardMessage = (
@@ -457,12 +467,44 @@ const relayContentResultToBackground = (
   }
 };
 
+const resolveBootstrapState = (
+  runtime: ContentScriptRuntime
+): ContentScriptBootstrapState => {
+  const existingState = runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY];
+  if (existingState) {
+    return existingState;
+  }
+
+  const state: ContentScriptBootstrapState = {
+    generation: 0,
+    handler: null,
+    detachResultRelay: null,
+    messageListener: null
+  };
+  runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = state;
+  return state;
+};
+
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
   if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
     return false;
   }
 
+  const state = resolveBootstrapState(runtime);
+  state.generation += 1;
+  const generation = state.generation;
+  state.detachResultRelay?.();
+  if (state.handler) {
+    state.handler.setReachable(false);
+  }
+  if (state.messageListener && runtime.onMessage.removeListener) {
+    runtime.onMessage.removeListener(state.messageListener);
+  }
+
   const handler = new ContentScriptHandler();
+  state.handler = handler;
+  state.detachResultRelay = null;
+  state.messageListener = null;
   const bootstrapPayload = readBootstrapFingerprintContext();
   const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
   installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
@@ -478,6 +520,9 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     });
     if (!bootstrapInput.runId || !bootstrapInput.runtimeContextId || !bootstrapInput.sessionId) {
       void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+        if (state.generation !== generation || state.handler !== handler) {
+          return;
+        }
         if (
           !resolvedBootstrap.runId ||
           !resolvedBootstrap.runtimeContextId ||
@@ -495,6 +540,9 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     }
   } else {
     void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+      if (state.generation !== generation || state.handler !== handler) {
+        return;
+      }
       installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
       if (!resolvedBootstrap.fingerprintRuntime) {
         runtime.sendMessage?.({
@@ -523,11 +571,17 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     });
   }
 
-  handler.onResult((message) => {
+  state.detachResultRelay = handler.onResult((message) => {
+    if (state.generation !== generation || state.handler !== handler) {
+      return;
+    }
     relayContentResultToBackground(runtime, message);
   });
 
-  runtime.onMessage.addListener((message: unknown) => {
+  const messageListener = (message: unknown) => {
+    if (state.generation !== generation || state.handler !== handler) {
+      return;
+    }
     const request = message as Partial<BackgroundToContentMessage> | null;
     if (!request || request.kind !== "forward" || typeof request.id !== "string") {
       return;
@@ -550,7 +604,9 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
         }
       });
     }
-  });
+  };
+  runtime.onMessage.addListener(messageListener);
+  state.messageListener = messageListener;
 
   return true;
 };

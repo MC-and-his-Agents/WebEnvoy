@@ -154,8 +154,22 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
         bootstrapTargetTabId: gate.targetTabId,
         bootstrapTargetDomain: gate.targetDomain,
         bootstrapTargetPage: gate.targetPage,
+        bootstrapTargetResourceId: gate.targetResourceId ?? null,
         readStatus
     });
+};
+const resolveBootstrapTargetResourceId = (command, parsedInput) => {
+    if (command === "xhs.detail") {
+        return typeof parsedInput.note_id === "string" && parsedInput.note_id.trim().length > 0
+            ? parsedInput.note_id.trim()
+            : null;
+    }
+    if (command === "xhs.user_home") {
+        return typeof parsedInput.user_id === "string" && parsedInput.user_id.trim().length > 0
+            ? parsedInput.user_id.trim()
+            : null;
+    }
+    return null;
 };
 const xhsSearch = async (context) => {
     return xhsReadCommand(context, {
@@ -216,7 +230,10 @@ const xhsReadCommand = async (context, inputConfig) => {
             requestId: envelope.requestId,
             runId: context.run_id
         });
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
+        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {
+            ...gate,
+            targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
+        });
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
         });

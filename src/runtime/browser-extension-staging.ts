@@ -55,11 +55,14 @@ const hashMainWorldEventChannel = (value: string): string => {
 
 const resolveMainWorldEventNamesForSecret = (
   secret: string
-): { requestEvent: string; resultEvent: string } => {
+): { requestEvent: string; resultEvent: string; namespaceEvent: string } => {
   const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
   return {
     requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
-    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`,
+    namespaceEvent: `${"__mw_ns__"}${hashMainWorldEventChannel(
+      `${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`
+    )}`
   };
 };
 
@@ -243,7 +246,9 @@ const rewriteStagedContentScriptSourceForBridge = (input: {
       "        resolvedBootstrap.mainWorldSecret.length > 0",
       "          ? resolvedBootstrap.mainWorldSecret",
       "          : bridgeBootstrapSecret;",
-      "      installMainWorldEventChannelSecret(resolvedMainWorldSecret);"
+      "      const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(",
+      "        resolvedMainWorldSecret",
+      "      );"
     ].join("\n"),
     errorMessage:
       "staged content-script 缺少 fallback main-world secret 安装锚点，无法注入 per-run secret channel"
@@ -263,7 +268,8 @@ const rewriteStagedMainWorldBridgeSourceForBridge = (input: {
     replacement: [
       'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
       `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = ${JSON.stringify(expectedEventNames.requestEvent)};`,
-      `const EXPECTED_MAIN_WORLD_RESULT_EVENT = ${JSON.stringify(expectedEventNames.resultEvent)};`
+      `const EXPECTED_MAIN_WORLD_RESULT_EVENT = ${JSON.stringify(expectedEventNames.resultEvent)};`,
+      `const EXPECTED_MAIN_WORLD_NAMESPACE_EVENT = ${JSON.stringify(expectedEventNames.namespaceEvent)};`
     ].join("\n"),
     errorMessage: "staged main-world-bridge 缺少 event 常量锚点，无法注入 secret-derived channel"
   });
@@ -273,7 +279,8 @@ const rewriteStagedMainWorldBridgeSourceForBridge = (input: {
     replacement: [
       "    if (",
       "      requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||",
-      "      resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT",
+      "      resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT ||",
+      "      namespaceEvent !== EXPECTED_MAIN_WORLD_NAMESPACE_EVENT",
       "    ) {",
       "      return null;",
       "    }",

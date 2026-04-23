@@ -22,6 +22,13 @@ type RuntimeTakeoverEvidence = {
   runtimeContextId?: string | null;
 };
 
+type OfficialChromeBootstrapTarget = {
+  targetTabId?: number | null;
+  targetDomain?: string | null;
+  targetPage?: string | null;
+  targetResourceId?: string | null;
+};
+
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 const profileRuntime = new ProfileRuntimeService();
@@ -89,6 +96,7 @@ const buildRuntimeBootstrapEnvelope = (input: {
   targetTabId?: number | null;
   targetDomain?: string | null;
   targetPage?: string | null;
+  targetResourceId?: string | null;
 }): JsonObject & {
   version: "v1";
   run_id: string;
@@ -109,6 +117,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
   ...(typeof input.targetPage === "string" && input.targetPage.length > 0
     ? { target_page: input.targetPage }
     : {}),
+  ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+    ? { target_resource_id: input.targetResourceId }
+    : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
   main_world_secret: randomUUID()
@@ -119,12 +130,30 @@ const sleep = async (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+const buildOfficialChromeTargetParams = (
+  input: OfficialChromeBootstrapTarget = {}
+): JsonObject => ({
+  ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
+    ? { target_tab_id: input.targetTabId }
+    : {}),
+  ...(typeof input.targetDomain === "string" && input.targetDomain.length > 0
+    ? { target_domain: input.targetDomain }
+    : {}),
+  ...(typeof input.targetPage === "string" && input.targetPage.length > 0
+    ? { target_page: input.targetPage }
+    : {}),
+  ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+    ? { target_resource_id: input.targetResourceId }
+    : {})
+});
+
 const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
   lockHeld: boolean;
   context: RuntimeContext;
   bridge: NativeMessagingBridge;
   consumerId: string;
   identityBindingState: string;
+  target?: OfficialChromeBootstrapTarget;
 }): Promise<{
   identityBindingState: string;
   transportState: TransportState;
@@ -141,7 +170,8 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
       runtime_context_id: buildRuntimeBootstrapContextId(
         input.context.profile ?? "",
         input.context.run_id
-      )
+      ),
+      ...buildOfficialChromeTargetParams(input.target)
     }
   });
   if (!readinessResult.ok) {
@@ -229,6 +259,7 @@ const waitForOfficialChromeRuntimeReadinessViaBridge = async (input: {
   bridge: NativeMessagingBridge;
   consumerId: string;
   identityBindingState: string;
+  target?: OfficialChromeBootstrapTarget;
 }): Promise<{
   identityBindingState: string;
   transportState: TransportState;
@@ -274,10 +305,12 @@ const applyReadinessToStatus = (
 
 export const buildOfficialChromeRuntimeStatusParams = (
   _context: RuntimeContext,
-  requestedExecutionMode: string
+  requestedExecutionMode: string,
+  target: OfficialChromeBootstrapTarget = {}
 ): JsonObject => {
   return {
-    requested_execution_mode: requestedExecutionMode
+    requested_execution_mode: requestedExecutionMode,
+    ...buildOfficialChromeTargetParams(target)
   };
 };
 
@@ -290,33 +323,46 @@ export const prepareOfficialChromeRuntime = async (input: {
   bootstrapTargetTabId?: number | null;
   bootstrapTargetDomain?: string | null;
   bootstrapTargetPage?: string | null;
+  bootstrapTargetResourceId?: string | null;
   readStatus?: RuntimeStatusReader;
   attachRuntime?: RuntimeAttachReader;
 }): Promise<JsonObject> => {
   const readStatus =
     input.readStatus ??
     (async () =>
-      await profileRuntime.status({
-        cwd: input.context.cwd,
-        profile: input.context.profile ?? "",
-        runId: input.context.run_id,
-        params: buildOfficialChromeRuntimeStatusParams(
-          input.context,
-          input.requestedExecutionMode
-        )
-      }));
+        await profileRuntime.status({
+          cwd: input.context.cwd,
+          profile: input.context.profile ?? "",
+          runId: input.context.run_id,
+          params: buildOfficialChromeRuntimeStatusParams(
+            input.context,
+            input.requestedExecutionMode,
+            {
+              targetTabId: input.bootstrapTargetTabId,
+              targetDomain: input.bootstrapTargetDomain,
+              targetPage: input.bootstrapTargetPage,
+              targetResourceId: input.bootstrapTargetResourceId
+            }
+          )
+        }));
   const attachRuntime =
     input.attachRuntime ??
     (async () =>
-      await profileRuntime.attach({
-        cwd: input.context.cwd,
-        profile: input.context.profile ?? "",
-        runId: input.context.run_id,
-        params: buildOfficialChromeRuntimeStatusParams(
-          input.context,
-          input.requestedExecutionMode
-        )
-      }));
+        await profileRuntime.attach({
+          cwd: input.context.cwd,
+          profile: input.context.profile ?? "",
+          runId: input.context.run_id,
+          params: buildOfficialChromeRuntimeStatusParams(
+            input.context,
+            input.requestedExecutionMode,
+            {
+              targetTabId: input.bootstrapTargetTabId,
+              targetDomain: input.bootstrapTargetDomain,
+              targetPage: input.bootstrapTargetPage,
+              targetResourceId: input.bootstrapTargetResourceId
+            }
+          )
+        }));
 
   let status = await readStatus();
   const identityPreflight = asObject(status.identityPreflight);
@@ -388,7 +434,8 @@ export const prepareOfficialChromeRuntime = async (input: {
       fingerprintRuntime: input.fingerprintContext,
       targetTabId: input.bootstrapTargetTabId,
       targetDomain: input.bootstrapTargetDomain ?? null,
-      targetPage: input.bootstrapTargetPage ?? null
+      targetPage: input.bootstrapTargetPage ?? null,
+      targetResourceId: input.bootstrapTargetResourceId ?? null
     });
     const bootstrapResult = await input.bridge.runCommand({
       runId: input.context.run_id,
@@ -499,7 +546,13 @@ export const prepareOfficialChromeRuntime = async (input: {
       context: input.context,
       bridge: input.bridge,
       consumerId: input.consumerId,
-      identityBindingState
+      identityBindingState,
+      target: {
+        targetTabId: input.bootstrapTargetTabId,
+        targetDomain: input.bootstrapTargetDomain,
+        targetPage: input.bootstrapTargetPage,
+        targetResourceId: input.bootstrapTargetResourceId
+      }
     });
     runtimeReadiness = bridgedReadiness.runtimeReadiness;
     identityBindingState = bridgedReadiness.identityBindingState;
@@ -534,7 +587,13 @@ export const prepareOfficialChromeRuntime = async (input: {
         context: input.context,
         bridge: input.bridge,
         consumerId: input.consumerId,
-        identityBindingState
+        identityBindingState,
+        target: {
+          targetTabId: input.bootstrapTargetTabId,
+          targetDomain: input.bootstrapTargetDomain,
+          targetPage: input.bootstrapTargetPage,
+          targetResourceId: input.bootstrapTargetResourceId
+        }
       });
       runtimeReadiness = bridgedReadiness.runtimeReadiness;
       identityBindingState = bridgedReadiness.identityBindingState;
@@ -546,7 +605,13 @@ export const prepareOfficialChromeRuntime = async (input: {
           context: input.context,
           bridge: input.bridge,
           consumerId: input.consumerId,
-          identityBindingState
+          identityBindingState,
+          target: {
+            targetTabId: input.bootstrapTargetTabId,
+            targetDomain: input.bootstrapTargetDomain,
+            targetPage: input.bootstrapTargetPage,
+            targetResourceId: input.bootstrapTargetResourceId
+          }
         });
         runtimeReadiness = convergedReadiness.runtimeReadiness;
         identityBindingState = convergedReadiness.identityBindingState;

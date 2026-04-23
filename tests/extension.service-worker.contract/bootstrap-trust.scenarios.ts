@@ -348,6 +348,263 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     );
   });
 
+  it("keeps current-window priority for search_result_tab bootstrap before falling back across windows", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (query?: { currentWindow?: boolean }) => {
+      if (query?.currentWindow) {
+        return [
+          {
+            id: 31,
+            active: true,
+            url: "https://www.xiaohongshu.com/search_result?keyword=当前窗口"
+          }
+        ];
+      }
+      return [
+        {
+          id: 31,
+          active: true,
+          url: "https://www.xiaohongshu.com/search_result?keyword=当前窗口"
+        },
+        {
+          id: 52,
+          active: false,
+          url: "https://www.xiaohongshu.com/search_result?keyword=其他窗口"
+        }
+      ];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-search-current-window-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-search-current-window-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-search-current-window-001",
+          runtime_context_id: "ctx-bootstrap-search-current-window-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-search-current-window-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 31 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({
+        id: "run-bootstrap-search-current-window-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("searches across all windows for search_result_tab bootstrap when target_tab_id is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (query?: { currentWindow?: boolean }) => {
+      if (query?.currentWindow) {
+        return [{ id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" }];
+      }
+      return [
+        { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+        {
+          id: 52,
+          active: false,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      ];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-search-all-windows-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-search-all-windows-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-search-all-windows-001",
+          runtime_context_id: "ctx-bootstrap-search-all-windows-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-search-all-windows-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 52 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      52,
+      expect.objectContaining({
+        id: "run-bootstrap-search-all-windows-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("fails closed when search_result_tab bootstrap cannot find any search_result tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+      { id: 52, active: false, url: "https://www.xiaohongshu.com/user/profile/user-001" }
+    ]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-search-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-search-missing-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-search-missing-001",
+          runtime_context_id: "ctx-bootstrap-search-missing-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-search-missing-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-search-missing-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: "target tab is unavailable"
+      })
+    });
+  });
+
+  it("uses target_resource_id to bind detail bootstrap to the matching tab across windows", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (query?: { currentWindow?: boolean }) => {
+      if (query?.currentWindow) {
+        return [{ id: 31, active: true, url: "https://www.xiaohongshu.com/explore/other-note" }];
+      }
+      return [
+        { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/other-note" },
+        { id: 52, active: false, url: "https://www.xiaohongshu.com/explore/note-001" }
+      ];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-detail-resource-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-detail-resource-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-detail-resource-001",
+          runtime_context_id: "ctx-bootstrap-detail-resource-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_resource_id: "note-001",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-detail-resource-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 52 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      52,
+      expect.objectContaining({
+        id: "run-bootstrap-detail-resource-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("does not rely on a background main-world control channel before runtime.bootstrap forward", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
@@ -491,6 +748,146 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     );
   });
 
+  it("binds startup-trust recovery to the sender tab before bootstrap becomes ready", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    const attestedFingerprintContext = {
+      ...fingerprintContext,
+      injection: {
+        installed: true,
+        required_patches: ["audio_context"],
+        missing_required_patches: [],
+        source: "main_world"
+      }
+    };
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-startup-bind-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-startup-bind-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-startup-bind-001",
+          runtime_context_id: "ctx-bootstrap-startup-bind-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-startup-bind-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-startup-bind-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "startup-fingerprint-trust:run-bootstrap-startup-bind-001",
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: "run-bootstrap-startup-bind-001",
+            runtime_context_id: "ctx-bootstrap-startup-bind-001",
+            profile: "profile-a",
+            session_id: "nm-session-001",
+            fingerprint_runtime: attestedFingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 11,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-startup-bind-hit-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-startup-bind-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-startup-bind-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 11,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-startup-bind-hit-002",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "ready",
+        runtime_context_id: "ctx-bootstrap-startup-bind-001",
+        transport_state: "ready"
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-startup-bind-miss-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-startup-bind-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-startup-bind-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-startup-bind-miss-003",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "pending",
+        runtime_context_id: "ctx-bootstrap-startup-bind-001",
+        transport_state: "ready"
+      })
+    });
+  });
+
   it("converges runtime bootstrap state to ready after trusted bootstrap hit", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -631,6 +1028,300 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
         bootstrap_state: "ready",
         run_id: "run-bootstrap-trusted-ready-001",
         runtime_context_id: "ctx-bootstrap-trusted-ready-001"
+      })
+    });
+  });
+
+  it("keeps runtime.readiness pending when the requested target binding no longer matches the trusted bootstrap", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-target-bound-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-target-bound-001",
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 77,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-target-bound-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-target-bound-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-target-bound-001",
+      runtimeContextId: "ctx-bootstrap-target-bound-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabId: 77,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-target-bound-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-target-bound-001",
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 77,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-target-bound-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-target-bound-002",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-target-mismatch-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-target-bound-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-target-bound-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-target-mismatch-003",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "pending",
+        runtime_context_id: "ctx-bootstrap-target-bound-001",
+        transport_state: "ready"
+      })
+    });
+  });
+
+  it("binds auto-resolved runtime.bootstrap readiness to the sender tab after ack", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.tabs.query = vi.fn(async (query?: { currentWindow?: boolean }) => {
+      if (query?.currentWindow) {
+        return [{ id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" }];
+      }
+      return [
+        { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+        {
+          id: 52,
+          active: false,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      ];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-auto-bind-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-auto-bind-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-auto-bind-001",
+          runtime_context_id: "ctx-bootstrap-auto-bind-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-auto-bind-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-auto-bind-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "startup-fingerprint-trust:run-bootstrap-auto-bind-001",
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: "run-bootstrap-auto-bind-001",
+            runtime_context_id: "ctx-bootstrap-auto-bind-001",
+            profile: "profile-a",
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 52,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-trusted-probe-auto-bind-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-auto-bind-001",
+        command: "runtime.trusted_fingerprint_probe",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-trusted-probe-auto-bind-002",
+      status: "success",
+      payload: expect.objectContaining({
+        trusted_context_present: true,
+        trusted_context: expect.objectContaining({
+          run_id: "run-bootstrap-auto-bind-001",
+          runtime_context_id: "ctx-bootstrap-auto-bind-001",
+          source_tab_id: 52,
+          source_domain: "www.xiaohongshu.com"
+        })
+      })
+    });
+  });
+
+  it("fails closed when runtime.bootstrap target_resource_id matches multiple windows", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/note-001" },
+      { id: 52, active: false, url: "https://www.xiaohongshu.com/explore/note-001" }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-detail-ambiguous-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-detail-ambiguous-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-detail-ambiguous-001",
+          runtime_context_id: "ctx-bootstrap-detail-ambiguous-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_resource_id: "note-001",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-detail-ambiguous-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-detail-ambiguous-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: "target tab is unavailable"
       })
     });
   });
@@ -1381,20 +2072,78 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     });
     await Promise.resolve();
 
-    await waitForPostedMessage(firstPort.postMessage, {
-      id: "run-trusted-probe-after-ready-001",
-      status: "success",
-      payload: expect.objectContaining({
-        trusted_context_present: true,
+      await waitForPostedMessage(firstPort.postMessage, {
+        id: "run-trusted-probe-after-ready-001",
+        status: "success",
+        payload: expect.objectContaining({
+          trusted_context_present: true,
         trusted_context: expect.objectContaining({
           source_tab_id: 77,
           source_domain: "creator.xiaohongshu.com",
           run_id: "run-bootstrap-ready-001",
           runtime_context_id: "ctx-bootstrap-ready-001"
+          })
         })
-      })
+      });
+
+      firstPort.onMessageListeners[0]?.({
+        id: "run-readiness-after-ping-hit-002",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "run-bootstrap-ready-001",
+          command: "runtime.readiness",
+          command_params: {
+            runtime_context_id: "ctx-bootstrap-ready-001",
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 77
+          },
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 50
+      });
+      await Promise.resolve();
+
+      await waitForPostedMessage(firstPort.postMessage, {
+        id: "run-readiness-after-ping-hit-002",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          runtime_context_id: "ctx-bootstrap-ready-001",
+          transport_state: "ready"
+        })
+      });
+
+      firstPort.onMessageListeners[0]?.({
+        id: "run-readiness-after-ping-miss-003",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "run-bootstrap-ready-001",
+          command: "runtime.readiness",
+          command_params: {
+            runtime_context_id: "ctx-bootstrap-ready-001",
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 78
+          },
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 50
+      });
+      await Promise.resolve();
+
+      await waitForPostedMessage(firstPort.postMessage, {
+        id: "run-readiness-after-ping-miss-003",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "pending",
+          runtime_context_id: "ctx-bootstrap-ready-001",
+          transport_state: "ready"
+        })
+      });
     });
-  });
 
   it("keeps new runtime.bootstrap pending when a stale trusted context arrives later", async () => {
     const firstPort = createMockPort();

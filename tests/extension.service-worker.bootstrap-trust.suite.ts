@@ -239,7 +239,13 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "runtime.bootstrap"
       })
     );
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
 
     await promoteBootstrapReadinessThroughPing({
       runtimeMessageListeners,
@@ -319,7 +325,13 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 52 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       52,
       expect.objectContaining({
@@ -364,7 +376,13 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({
@@ -494,6 +512,9 @@ describe("extension service worker / bootstrap and trust", () => {
           run_id: "run-bootstrap-trusted-ready-001",
           runtime_context_id: "ctx-bootstrap-trusted-ready-001",
           profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
           fingerprint_runtime: fingerprintContext,
           fingerprint_patch_manifest: {
             required_patches: ["audio_context"]
@@ -521,7 +542,8 @@ describe("extension service worker / bootstrap and trust", () => {
       profile: "profile-a",
       sessionId: "nm-session-001",
       fingerprintContext,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+      tabId: 32,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
     });
 
     firstPort.onMessageListeners[0]?.({
@@ -537,6 +559,9 @@ describe("extension service worker / bootstrap and trust", () => {
           run_id: "run-bootstrap-trusted-ready-001",
           runtime_context_id: "ctx-bootstrap-trusted-ready-001",
           profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
           fingerprint_runtime: fingerprintContext,
           fingerprint_patch_manifest: {
             required_patches: ["audio_context"]
@@ -583,7 +608,7 @@ describe("extension service worker / bootstrap and trust", () => {
         trusted_context: expect.objectContaining({
           run_id: "run-bootstrap-trusted-ready-001",
           runtime_context_id: "ctx-bootstrap-trusted-ready-001",
-          source_domain: "creator.xiaohongshu.com"
+          source_domain: "www.xiaohongshu.com"
         })
       })
     });
@@ -2058,8 +2083,15 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          id: "run-xhs-error-payload-001",
+          command: "xhs.search"
+        })
+      );
+    });
 
     runtimeMessageListeners[0]?.(
       {
@@ -2081,34 +2113,30 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       {
         tab: {
-          id: 11
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
         }
       }
     );
-    await Promise.resolve();
-
-    const forwardedError = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
-      .find((message) => message.id === "run-xhs-error-payload-001");
-    expect(forwardedError).toMatchObject({
+    await waitForPostedMessage(firstPort.postMessage, {
       id: "run-xhs-error-payload-001",
       status: "error",
-      payload: {
-        consumer_gate_result: {
+      payload: expect.objectContaining({
+        consumer_gate_result: expect.objectContaining({
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",
           requested_execution_mode: "dry_run",
           effective_execution_mode: "dry_run",
           issue_scope: "issue_209"
-        },
-        details: {
+        }),
+        details: expect.objectContaining({
           reason: "SESSION_EXPIRED"
-        },
-        diagnosis: {
+        }),
+        diagnosis: expect.objectContaining({
           category: "request_failed"
-        }
-      }
+        })
+      })
     });
   });
 
@@ -3749,22 +3777,21 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: dryRequestId,
-        command: "xhs.search",
-        fingerprintContext: expect.objectContaining({
-          injection: expect.objectContaining({
-            installed: true,
-            missing_required_patches: []
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          id: dryRequestId,
+          command: "xhs.search",
+          fingerprintContext: expect.objectContaining({
+            injection: expect.objectContaining({
+              installed: true,
+              missing_required_patches: []
+            })
           })
         })
-      })
-    );
+      );
+    });
   });
 
   it("keeps target_tab_id existence as a hard gate even when trusted fingerprint context is bound", async () => {
@@ -5597,16 +5624,15 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: "run-xhs-explicit-target-allow-001",
-        command: "xhs.search"
-      })
-    );
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          id: "run-xhs-explicit-target-allow-001",
+          command: "xhs.search"
+        })
+      );
+    });
   });
 
   it("returns current runtime tabs through the native bridge diagnostics path", async () => {

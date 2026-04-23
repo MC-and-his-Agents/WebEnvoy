@@ -298,11 +298,14 @@ const hashMainWorldEventChannel = (value: string): string => {
 
 const resolveMainWorldEventNamesForSecret = (
   secret: string
-): { requestEvent: string; resultEvent: string } => {
+): { requestEvent: string; resultEvent: string; namespaceEvent: string } => {
   const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
   return {
     requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
-    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`,
+    namespaceEvent: `${"__mw_ns__"}${hashMainWorldEventChannel(
+      `${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`
+    )}`
   };
 };
 
@@ -606,21 +609,30 @@ describe("browser-launcher", () => {
       mainWorldBridgeRaw,
       "EXPECTED_MAIN_WORLD_RESULT_EVENT"
     );
+    const expectedNamespaceEvent = matchConstStringValue(
+      mainWorldBridgeRaw,
+      "EXPECTED_MAIN_WORLD_NAMESPACE_EVENT"
+    );
     expect(payloadKey).toBeTruthy();
     expect(payloadKey).toBe("__webenvoy_fingerprint_bootstrap_payload__");
     expect(contentFallbackSecret).toBeTruthy();
     expect(expectedRequestEvent).toBeTruthy();
     expect(expectedResultEvent).toBeTruthy();
+    expect(expectedNamespaceEvent).toBeTruthy();
     const expectedEvents = resolveMainWorldEventNamesForSecret(contentFallbackSecret as string);
     expect(expectedRequestEvent).toBe(expectedEvents.requestEvent);
     expect(expectedResultEvent).toBe(expectedEvents.resultEvent);
+    expect(expectedNamespaceEvent).toBe(expectedEvents.namespaceEvent);
     expect(bundledContentScriptRaw).toContain(
       "installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
     );
     expect(bundledContentScriptRaw).toContain(
       "typeof bootstrapPayload.bridge_bootstrap === \"string\""
     );
-    expect(bundledContentScriptRaw).toContain("installMainWorldEventChannelSecret(resolvedMainWorldSecret);");
+    expect(bundledContentScriptRaw).toContain(
+      "const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret("
+    );
+    expect(bundledContentScriptRaw).toContain("resolvedMainWorldSecret");
     expect(bundledContentScriptRaw).not.toContain("window.postMessage(");
     await expect(
       executeBundledDryRunSearch(join(stagedExtensionPath as string, "build", "content-script.js"))
@@ -642,10 +654,16 @@ describe("browser-launcher", () => {
       `const EXPECTED_MAIN_WORLD_RESULT_EVENT = "${expectedEvents.resultEvent}";`
     );
     expect(mainWorldBridgeRaw).toContain(
+      `const EXPECTED_MAIN_WORLD_NAMESPACE_EVENT = "${expectedEvents.namespaceEvent}";`
+    );
+    expect(mainWorldBridgeRaw).toContain(
       "requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||"
     );
     expect(mainWorldBridgeRaw).toContain(
       "resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT"
+    );
+    expect(mainWorldBridgeRaw).toContain(
+      "namespaceEvent !== EXPECTED_MAIN_WORLD_NAMESPACE_EVENT"
     );
     expect(bootstrapScriptRaw).toContain(`const payloadKey = "${payloadKey as string}";`);
     expect(bootstrapScriptRaw).toContain(

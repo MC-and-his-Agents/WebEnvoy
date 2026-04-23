@@ -7921,11 +7921,9 @@ class ContentScriptHandler {
     }
     async #handleXhsReadCommand(message) {
         const commandParams = asRecord(message.commandParams) ?? {};
-        if (message.command === "xhs.search") {
-            const mainWorldSecret = asString(commandParams.main_world_secret);
-            if (mainWorldSecret) {
-                installMainWorldEventChannelSecret(mainWorldSecret);
-            }
+        const mainWorldSecret = asString(commandParams.main_world_secret);
+        if (mainWorldSecret) {
+            installMainWorldEventChannelSecret(mainWorldSecret);
         }
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
@@ -8177,6 +8175,7 @@ const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payl
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
+const CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY = "__webenvoy_content_script_bootstrap_state__";
 const STAGED_STARTUP_TRUST_RUN_ID = undefined;
 const STAGED_STARTUP_TRUST_SESSION_ID = undefined;
 const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;
@@ -8499,11 +8498,38 @@ const relayContentResultToBackground = (runtime, message, options) => {
         relayFailure("CONTENT_RESULT_RELAY_FAILED", error);
     }
 };
+const resolveBootstrapState = (runtime) => {
+    const existingState = runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY];
+    if (existingState) {
+        return existingState;
+    }
+    const state = {
+        generation: 0,
+        handler: null,
+        detachResultRelay: null,
+        messageListener: null
+    };
+    runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = state;
+    return state;
+};
 const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
         return false;
     }
+    const state = resolveBootstrapState(runtime);
+    state.generation += 1;
+    const generation = state.generation;
+    state.detachResultRelay?.();
+    if (state.handler) {
+        state.handler.setReachable(false);
+    }
+    if (state.messageListener && runtime.onMessage.removeListener) {
+        runtime.onMessage.removeListener(state.messageListener);
+    }
     const handler = new ContentScriptHandler();
+    state.handler = handler;
+    state.detachResultRelay = null;
+    state.messageListener = null;
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
@@ -8519,6 +8545,9 @@ const bootstrapContentScript = (runtime) => {
         });
         if (!bootstrapInput.runId || !bootstrapInput.runtimeContextId || !bootstrapInput.sessionId) {
             void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+                if (state.generation !== generation || state.handler !== handler) {
+                    return;
+                }
                 if (!resolvedBootstrap.runId ||
                     !resolvedBootstrap.runtimeContextId ||
                     !resolvedBootstrap.sessionId) {
@@ -8535,6 +8564,9 @@ const bootstrapContentScript = (runtime) => {
     }
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+            if (state.generation !== generation || state.handler !== handler) {
+                return;
+            }
             installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
             if (!resolvedBootstrap.fingerprintRuntime) {
                 runtime.sendMessage?.({
@@ -8559,10 +8591,16 @@ const bootstrapContentScript = (runtime) => {
             });
         });
     }
-    handler.onResult((message) => {
+    state.detachResultRelay = handler.onResult((message) => {
+        if (state.generation !== generation || state.handler !== handler) {
+            return;
+        }
         relayContentResultToBackground(runtime, message);
     });
-    runtime.onMessage.addListener((message) => {
+    const messageListener = (message) => {
+        if (state.generation !== generation || state.handler !== handler) {
+            return;
+        }
         const request = message;
         if (!request || request.kind !== "forward" || typeof request.id !== "string") {
             return;
@@ -8583,7 +8621,9 @@ const bootstrapContentScript = (runtime) => {
                 }
             });
         }
-    });
+    };
+    runtime.onMessage.addListener(messageListener);
+    state.messageListener = messageListener;
     return true;
 };
 const globalChrome = globalThis.chrome;

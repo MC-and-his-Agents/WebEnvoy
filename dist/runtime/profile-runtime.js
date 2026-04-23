@@ -131,6 +131,20 @@ const readRequestedExecutionMode = (params) => {
     const mode = params.requested_execution_mode;
     return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
+const buildRuntimeTargetParams = (params) => ({
+    ...(typeof params.target_domain === "string" && params.target_domain.length > 0
+        ? { target_domain: params.target_domain }
+        : {}),
+    ...(typeof params.target_tab_id === "number" && Number.isInteger(params.target_tab_id)
+        ? { target_tab_id: params.target_tab_id }
+        : {}),
+    ...(typeof params.target_page === "string" && params.target_page.length > 0
+        ? { target_page: params.target_page }
+        : {}),
+    ...(typeof params.target_resource_id === "string" && params.target_resource_id.length > 0
+        ? { target_resource_id: params.target_resource_id }
+        : {})
+});
 const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRuntime) => {
     if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
         return;
@@ -1462,6 +1476,7 @@ export class ProfileRuntimeService {
                         ...input.runtimeInput,
                         runId: input.observedRunId
                     },
+                    includeTargetBinding: false,
                     lockHeld: true,
                     observedRunId: undefined
                 });
@@ -1507,6 +1522,7 @@ export class ProfileRuntimeService {
                 ...input.runtimeInput,
                 runId: input.observedRunId
             },
+            includeTargetBinding: false,
             lockHeld: true,
             observedRunId: undefined
         });
@@ -1523,7 +1539,10 @@ export class ProfileRuntimeService {
                 command: "runtime.readiness",
                 params: {
                     run_id: input.runtimeInput.runId,
-                    runtime_context_id: runtimeContextId
+                    runtime_context_id: runtimeContextId,
+                    ...(input.includeTargetBinding === false
+                        ? {}
+                        : buildRuntimeTargetParams(input.runtimeInput.params))
                 }
             });
             if (!result.ok) {

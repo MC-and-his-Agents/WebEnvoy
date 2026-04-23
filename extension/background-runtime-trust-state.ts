@@ -22,6 +22,8 @@ interface RuntimeBootstrapState {
   mainWorldSecret: string;
   serializedFingerprintRuntime: string;
   updatedAt: string;
+  sourceTabId: number | null;
+  sourceDomain: string | null;
 }
 
 const defaultMaxTrustedFingerprintContexts = 64;
