@@ -158,16 +158,9 @@ const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 const MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL = Symbol.for("webenvoy.main_world.bridge.state.v1");
-const patchedAudioContextPrototypes = new WeakSet();
-const audioNoiseSeedByPrototype = new WeakMap();
-const capturedRequestContextBucketsByNamespace = new Map();
-const capturedRequestContextIncompatibleByNamespace = new Map();
 const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
 const PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.page_context_navigation.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
-let capturedRequestContextCaptureInstalled = false;
-let pageContextVisitSequence = 0;
-let lastObservedPageContextHref = typeof window.location?.href === "string" ? window.location.href : "about:blank";
 const DEFAULT_PLUGIN_DESCRIPTORS = [
     {
         name: "Chrome PDF Viewer",
@@ -213,7 +206,14 @@ const resolveMainWorldBridgeSharedState = () => {
     const state = {
         activeMainWorldEventChannel: null,
         activeMainWorldRequestListener: null,
-        activeMainWorldBootstrapListener: null
+        activeMainWorldBootstrapListener: null,
+        patchedAudioContextPrototypes: new WeakSet(),
+        audioNoiseSeedByPrototype: new WeakMap(),
+        capturedRequestContextBucketsByNamespace: new Map(),
+        capturedRequestContextIncompatibleByNamespace: new Map(),
+        capturedRequestContextCaptureInstalled: false,
+        pageContextVisitSequence: 0,
+        lastObservedPageContextHref: typeof window.location?.href === "string" ? window.location.href : "about:blank"
     };
     Object.defineProperty(mainWindow, MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL, {
         value: state,
@@ -371,10 +371,10 @@ const detailResponseContainsCanonicalNoteId = (body, expectedNoteId) => {
     });
 };
 const getCapturedContextNamespaceBuckets = (namespace) => {
-    let namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
+    let namespaceBuckets = mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(namespace);
     if (!namespaceBuckets) {
         namespaceBuckets = new Map();
-        capturedRequestContextBucketsByNamespace.set(namespace, namespaceBuckets);
+        mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.set(namespace, namespaceBuckets);
     }
     return namespaceBuckets;
 };
@@ -400,10 +400,10 @@ const getCapturedContextBucket = (namespace, routeScopeKey, shapeKey) => {
     return bucket;
 };
 const setRouteBucketIncompatibleObservation = (namespace, routeScopeKey, artifact) => {
-    let routeIncompatible = capturedRequestContextIncompatibleByNamespace.get(namespace);
+    let routeIncompatible = mainWorldBridgeSharedState.capturedRequestContextIncompatibleByNamespace.get(namespace);
     if (!routeIncompatible) {
         routeIncompatible = new Map();
-        capturedRequestContextIncompatibleByNamespace.set(namespace, routeIncompatible);
+        mainWorldBridgeSharedState.capturedRequestContextIncompatibleByNamespace.set(namespace, routeIncompatible);
     }
     if (artifact) {
         routeIncompatible.set(routeScopeKey, artifact);
@@ -411,10 +411,12 @@ const setRouteBucketIncompatibleObservation = (namespace, routeScopeKey, artifac
     }
     routeIncompatible.delete(routeScopeKey);
     if (routeIncompatible.size === 0) {
-        capturedRequestContextIncompatibleByNamespace.delete(namespace);
+        mainWorldBridgeSharedState.capturedRequestContextIncompatibleByNamespace.delete(namespace);
     }
 };
-const getRouteBucketIncompatibleObservation = (namespace, routeScopeKey) => capturedRequestContextIncompatibleByNamespace.get(namespace)?.get(routeScopeKey) ?? null;
+const getRouteBucketIncompatibleObservation = (namespace, routeScopeKey) => mainWorldBridgeSharedState.capturedRequestContextIncompatibleByNamespace
+    .get(namespace)
+    ?.get(routeScopeKey) ?? null;
 const parseArtifactPayloadText = (text) => {
     if (text.length === 0) {
         return null;
@@ -540,7 +542,7 @@ const isSupportedReadPage = (href) => {
 const resolveCurrentPageCaptureContext = () => {
     const href = typeof window.location?.href === "string" ? window.location.href : "about:blank";
     return {
-        pageContextNamespace: createVisitedPageContextNamespace(href, pageContextVisitSequence),
+        pageContextNamespace: createVisitedPageContextNamespace(href, mainWorldBridgeSharedState.pageContextVisitSequence),
         referrer: href
     };
 };
@@ -553,7 +555,7 @@ const emitCurrentPageContextNamespace = () => {
     mainWindow.dispatchEvent(createWindowEvent(namespaceEvent, {
         page_context_namespace: pageContextNamespace,
         href: referrer,
-        visit_sequence: pageContextVisitSequence
+        visit_sequence: mainWorldBridgeSharedState.pageContextVisitSequence
     }));
 };
 const isSyntheticRequest = (headers) => {
@@ -731,8 +733,8 @@ const installAudioContextPatch = (context) => {
         return;
     }
     context.appliedPatches.push("audio_context");
-    audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
-    if (patchedAudioContextPrototypes.has(prototype)) {
+    mainWorldBridgeSharedState.audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
+    if (mainWorldBridgeSharedState.patchedAudioContextPrototypes.has(prototype)) {
         return;
     }
     const patchedChannelData = new WeakSet();
@@ -747,7 +749,7 @@ const installAudioContextPatch = (context) => {
                 typeof channelData.length === "number" &&
                 channelData.length > 0 &&
                 !patchedChannelData.has(channelData)) {
-                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
+                const noiseSeed = mainWorldBridgeSharedState.audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
                 channelData[0] = channelData[0] + noiseSeed;
                 patchedChannelData.add(channelData);
             }
@@ -763,7 +765,7 @@ const installAudioContextPatch = (context) => {
         }
         return patchAudioBuffer(renderingResult);
     };
-    patchedAudioContextPrototypes.add(prototype);
+    mainWorldBridgeSharedState.patchedAudioContextPrototypes.add(prototype);
 };
 const installBatteryPatch = (context) => {
     if (!context.bundle || !context.requiredPatches.has("battery")) {
@@ -1044,15 +1046,15 @@ const installFetchCapture = () => {
     window.fetch = patchedFetch;
 };
 const installCapturedRequestContextCapture = () => {
-    if (capturedRequestContextCaptureInstalled) {
+    if (mainWorldBridgeSharedState.capturedRequestContextCaptureInstalled) {
         return;
     }
     installFetchCapture();
-    capturedRequestContextCaptureInstalled = true;
+    mainWorldBridgeSharedState.capturedRequestContextCaptureInstalled = true;
 };
 const refreshPageContextLifecycle = (options) => {
     if (options?.advanceVisit === true) {
-        pageContextVisitSequence += 1;
+        mainWorldBridgeSharedState.pageContextVisitSequence += 1;
     }
     if (isSupportedReadPage(typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "")) {
         installCapturedRequestContextCapture();
@@ -1061,32 +1063,32 @@ const refreshPageContextLifecycle = (options) => {
 };
 const refreshPageContextLifecycleForHistoryMutation = () => {
     const currentHref = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
-    if (currentHref === lastObservedPageContextHref) {
+    if (currentHref === mainWorldBridgeSharedState.lastObservedPageContextHref) {
         if (isSupportedReadPage(currentHref)) {
             installCapturedRequestContextCapture();
             emitCurrentPageContextNamespace();
         }
         return;
     }
-    lastObservedPageContextHref = currentHref;
+    mainWorldBridgeSharedState.lastObservedPageContextHref = currentHref;
     refreshPageContextLifecycle({ advanceVisit: true });
 };
 const installPageContextNavigationTracking = () => {
     if (typeof mainWindow.addEventListener === "function") {
         mainWindow.addEventListener("popstate", () => {
-            lastObservedPageContextHref =
+            mainWorldBridgeSharedState.lastObservedPageContextHref =
                 typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
             refreshPageContextLifecycle({ advanceVisit: true });
         });
         mainWindow.addEventListener("hashchange", () => {
-            lastObservedPageContextHref =
+            mainWorldBridgeSharedState.lastObservedPageContextHref =
                 typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
             refreshPageContextLifecycle({ advanceVisit: true });
         });
         mainWindow.addEventListener("pageshow", (event) => {
             const pageTransitionEvent = event;
             if (pageTransitionEvent.persisted === true) {
-                lastObservedPageContextHref =
+                mainWorldBridgeSharedState.lastObservedPageContextHref =
                     typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "about:blank";
                 refreshPageContextLifecycle({ advanceVisit: true });
             }
@@ -1187,7 +1189,7 @@ const handleCapturedRequestContextReadRequest = async (request) => {
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
     const result = method && path && namespace && shapeKey && routeScopeKey
         ? (() => {
-            const namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
+            const namespaceBuckets = mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(namespace);
             const routeBucket = namespaceBuckets?.get(routeScopeKey) ?? null;
             const exactBucket = routeBucket?.get(shapeKey) ?? null;
             return {
