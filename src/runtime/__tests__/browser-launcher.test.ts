@@ -657,6 +657,9 @@ describe("browser-launcher", () => {
       `const EXPECTED_MAIN_WORLD_NAMESPACE_EVENT = "${expectedEvents.namespaceEvent}";`
     );
     expect(mainWorldBridgeRaw).toContain(
+      `const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1:${expectedEvents.requestEvent}");`
+    );
+    expect(mainWorldBridgeRaw).toContain(
       "requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||"
     );
     expect(mainWorldBridgeRaw).toContain(
