@@ -353,6 +353,11 @@ const resolveCapturedArtifactObservedAt = (value: unknown): number | null => {
   return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
 };
 
+const isCapturedArtifactStale = (value: unknown, now: number): boolean => {
+  const observedAt = resolveCapturedArtifactObservedAt(value);
+  return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
+};
+
 const resolveRejectedSourceReason = (
   spec: XhsReadCommandSpec,
   artifact: Record<string, unknown>
@@ -759,7 +764,7 @@ const resolveReadRequestContext = (
         expectedShape,
         now,
         {
-          allowDetailResponseBareIdAlias: true,
+          allowDetailResponseBareIdAlias: false,
           allowDetailRequestFallback: false
         }
       );
@@ -776,6 +781,13 @@ const resolveReadRequestContext = (
           state: "incompatible",
           reason: "shape_mismatch",
           shape: derivedShape
+        };
+      }
+      if (isCapturedArtifactStale(rejectedObservation, now)) {
+        return {
+          state: "stale",
+          reason: "template_stale",
+          shape: derivedShape ?? expectedShape
         };
       }
       return {
@@ -838,19 +850,18 @@ const resolveReadRequestContext = (
     };
   }
 
-  if (status.rejectionReason) {
+  if (isCapturedArtifactStale(artifact, now)) {
     return {
-      state: "rejected_source",
-      reason: resolveRejectedSourceReason(spec, artifact as Record<string, unknown>),
+      state: "stale",
+      reason: "template_stale",
       shape: derivedShape
     };
   }
 
-  const observedAt = resolveCapturedArtifactObservedAt(artifact);
-  if (observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+  if (status.rejectionReason) {
     return {
-      state: "stale",
-      reason: "template_stale",
+      state: "rejected_source",
+      reason: resolveRejectedSourceReason(spec, artifact as Record<string, unknown>),
       shape: derivedShape
     };
   }
@@ -1721,12 +1732,8 @@ const buildHeaders = (
           getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
           options.x_s_common ??
           resolveXsCommon(undefined),
-        "x-b3-traceid":
-          getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
-          env.randomId().replace(/-/g, ""),
-        "x-xray-traceid":
-          getCapturedHeader(capturedHeaders ?? {}, "x-xray-traceid") ??
-          env.randomId().replace(/-/g, "")
+        "x-b3-traceid": env.randomId().replace(/-/g, ""),
+        "x-xray-traceid": env.randomId().replace(/-/g, "")
       }
     : {}),
   "Content-Type":

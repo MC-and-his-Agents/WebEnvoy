@@ -151,6 +151,10 @@ const resolveCapturedArtifactObservedAt = (value) => {
     const record = asRecord(value);
     return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
 };
+const isCapturedArtifactStale = (value, now) => {
+    const observedAt = resolveCapturedArtifactObservedAt(value);
+    return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
+};
 const resolveRejectedSourceReason = (spec, artifact) => {
     const status = resolveCapturedArtifactStatus(artifact);
     if (status.rejectionReason === "synthetic_request_rejected" ||
@@ -476,7 +480,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
         if (admittedTemplate) {
             return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
-                allowDetailResponseBareIdAlias: true,
+                allowDetailResponseBareIdAlias: false,
                 allowDetailRequestFallback: false
             });
         }
@@ -491,6 +495,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                     state: "incompatible",
                     reason: "shape_mismatch",
                     shape: derivedShape
+                };
+            }
+            if (isCapturedArtifactStale(rejectedObservation, now)) {
+                return {
+                    state: "stale",
+                    reason: "template_stale",
+                    shape: derivedShape ?? expectedShape
                 };
             }
             return {
@@ -545,18 +556,17 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
             shape: derivedShape
         };
     }
+    if (isCapturedArtifactStale(artifact, now)) {
+        return {
+            state: "stale",
+            reason: "template_stale",
+            shape: derivedShape
+        };
+    }
     if (status.rejectionReason) {
         return {
             state: "rejected_source",
             reason: resolveRejectedSourceReason(spec, artifact),
-            shape: derivedShape
-        };
-    }
-    const observedAt = resolveCapturedArtifactObservedAt(artifact);
-    if (observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
-        return {
-            state: "stale",
-            reason: "template_stale",
             shape: derivedShape
         };
     }
@@ -1207,10 +1217,8 @@ const buildHeaders = (env, options, signature, capturedHeaders) => ({
             "X-S-Common": getCapturedHeader(capturedHeaders ?? {}, "X-S-Common") ??
                 options.x_s_common ??
                 resolveXsCommon(undefined),
-            "x-b3-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-b3-traceid") ??
-                env.randomId().replace(/-/g, ""),
-            "x-xray-traceid": getCapturedHeader(capturedHeaders ?? {}, "x-xray-traceid") ??
-                env.randomId().replace(/-/g, "")
+            "x-b3-traceid": env.randomId().replace(/-/g, ""),
+            "x-xray-traceid": env.randomId().replace(/-/g, "")
         }
         : {}),
     "Content-Type": getCapturedHeader(capturedHeaders ?? {}, "Content-Type") ?? "application/json;charset=utf-8"

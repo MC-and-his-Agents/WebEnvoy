@@ -265,8 +265,8 @@ describe("xhs read request-context exact-shape reuse", () => {
         referrer: "https://www.xiaohongshu.com/explore/note-001",
         headers: expect.objectContaining({
           "X-S-Common": "{\"detailId\":\"captured-detail-id\"}",
-          "x-b3-traceid": "trace-b3-detail",
-          "x-xray-traceid": "trace-xray-detail"
+          "x-b3-traceid": "generatedid001",
+          "x-xray-traceid": "generatedid001"
         }),
         body: JSON.stringify({
           source_note_id: "note-001",
@@ -949,7 +949,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("treats exact-shape admitted detail artifacts with a conflicting bare id as incompatible", async () => {
+  it("fails closed for exact-shape admitted detail artifacts when the response only exposes a conflicting bare id", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -992,12 +992,9 @@ describe("xhs read request-context exact-shape reuse", () => {
 
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
-      request_context_result: "request_context_incompatible",
-      request_context_lookup_state: "incompatible",
-      request_context_miss_reason: "shape_mismatch",
-      captured_request_shape: {
-        note_id: "note-999"
-      }
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
@@ -1248,7 +1245,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     );
   });
 
-  it("reuses exact-shape admitted detail templates when the captured response identifies the note with a bare id", async () => {
+  it("fails closed for exact-shape admitted detail templates when the captured response only exposes a bare id", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,
       body: {
@@ -1301,9 +1298,14 @@ describe("xhs read request-context exact-shape reuse", () => {
       })
     );
 
-    expect(result.ok).toBe(true);
-    expect(callSignature).toHaveBeenCalled();
-    expect(fetchJson).toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("returns rejected_source for exact-shape synthetic detail observations", async () => {
@@ -1340,6 +1342,49 @@ describe("xhs read request-context exact-shape reuse", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
       request_context_miss_reason: "synthetic_request_rejected"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("expires stale exact-shape synthetic detail observations as template_stale", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const syntheticArtifact = {
+      ...createDetailArtifact({
+        captured_at: 1_710_000_000_000,
+        observed_at: 1_710_000_000_000
+      }),
+      source_kind: "synthetic_request",
+      template_ready: true,
+      rejection_reason: "synthetic_request_rejected"
+    } as unknown as CapturedRequestContextArtifact;
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-rejected-stale-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-rejected-stale-001")
+      },
+      createEnvironment({
+        now: () => 1_710_001_000_000,
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => syntheticArtifact
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "stale",
+      request_context_miss_reason: "template_stale"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
@@ -1994,8 +2039,8 @@ describe("xhs read request-context exact-shape reuse", () => {
         referrer: "https://www.xiaohongshu.com/user/profile/user-001",
         headers: expect.objectContaining({
           "X-S-Common": "{\"userId\":\"captured-user-id\"}",
-          "x-b3-traceid": "trace-b3-user",
-          "x-xray-traceid": "trace-xray-user"
+          "x-b3-traceid": "generatedid001",
+          "x-xray-traceid": "generatedid001"
         })
       })
     );
@@ -2119,6 +2164,69 @@ describe("xhs read request-context exact-shape reuse", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "stale",
       request_context_miss_reason: "template_stale"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("expires stale exact-shape rejected user_home lookup observations as template_stale", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const rejectedObservation = createUserHomeArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000,
+      template_ready: false,
+      rejection_reason: "failed_request_rejected",
+      request_status: {
+        completion: "failed",
+        http_status: 500
+      },
+      response: {
+        headers: {},
+        body: {
+          code: 500100,
+          msg: "create invoker failed"
+        }
+      }
+    });
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-rejected-stale-lookup-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-rejected-stale-lookup-001")
+      },
+      createEnvironment({
+        now: () => 1_710_001_000_000,
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "profile-page",
+          shape_key:
+            '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
+          admitted_template: null,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "stale",
+      request_context_miss_reason: "template_stale",
+      captured_request_shape: {
+        user_id: "user-001"
+      }
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

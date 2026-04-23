@@ -148,6 +148,56 @@ const resolveCapturedContextShape = (candidate) => {
     }
     return null;
 };
+const collectNestedResponseRecords = (value, nestedKeys, seen = new Set()) => {
+    const record = asRecord(value);
+    if (record) {
+        if (seen.has(record)) {
+            return [];
+        }
+        seen.add(record);
+        return [record, ...nestedKeys.flatMap((key) => collectNestedResponseRecords(record[key], nestedKeys, seen))];
+    }
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => collectNestedResponseRecords(entry, nestedKeys, seen));
+    }
+    return [];
+};
+const hasDetailResponseDataShape = (record) => [
+    "title",
+    "desc",
+    "user",
+    "interact_info",
+    "image_list",
+    "video_info",
+    "note_card",
+    "note_card_list"
+].some((key) => key in record);
+const detailResponseContainsCanonicalNoteId = (body, expectedNoteId) => {
+    const responseRecord = asRecord(body);
+    const dataRecord = asRecord(responseRecord?.data ?? body);
+    if (!dataRecord) {
+        return false;
+    }
+    const candidates = [
+        ...collectNestedResponseRecords(dataRecord.note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedResponseRecords(dataRecord.note_card, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedResponseRecords(dataRecord.note_card_list, [
+            "note",
+            "note_card",
+            "current_note",
+            "item"
+        ]),
+        ...collectNestedResponseRecords(dataRecord.current_note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedResponseRecords(dataRecord.item, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedResponseRecords(dataRecord.items, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedResponseRecords(dataRecord.notes, ["note", "note_card", "current_note", "item"]),
+        ...(hasDetailResponseDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+    return candidates.some((candidate) => {
+        const canonicalNoteId = asString(candidate.note_id) ?? asString(candidate.noteId);
+        return canonicalNoteId === expectedNoteId;
+    });
+};
 const getCapturedContextNamespaceBuckets = (namespace) => {
     let namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
     if (!namespaceBuckets) {
@@ -643,7 +693,7 @@ const resolveRouteScopeKeyFromLookup = (method, path, shapeKey) => {
     }
 };
 const storeCapturedRequestContext = (candidate, input) => {
-    const templateReady = !candidate.synthetic &&
+    const baseTemplateReady = !candidate.synthetic &&
         input.status >= 200 &&
         input.status < 300 &&
         !hasCapturedRequestBusinessFailure(input.responseBody);
@@ -651,6 +701,9 @@ const storeCapturedRequestContext = (candidate, input) => {
     if (!contextShape) {
         return;
     }
+    const templateReady = baseTemplateReady &&
+        (contextShape.routeScope.command !== "xhs.detail" ||
+            detailResponseContainsCanonicalNoteId(input.responseBody, contextShape.shape.note_id ?? ""));
     const artifact = {
         source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
         transport: candidate.transport,
