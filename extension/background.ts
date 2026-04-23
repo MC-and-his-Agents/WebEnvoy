@@ -97,6 +97,7 @@ const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
 const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
+const STAGED_EXTENSION_BOOTSTRAP_SCRIPT_PATH = "build/__webenvoy_fingerprint_bootstrap.js";
 const XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST = new Set([
   SEARCH_ENDPOINT,
   DETAIL_ENDPOINT,
@@ -158,6 +159,11 @@ interface ExtensionChromeApi {
   runtime: {
     connectNative(hostName: string): ExtensionPort;
     getURL?: (path: string) => string;
+    getManifest?: () => {
+      content_scripts?: Array<{
+        js?: string[];
+      }>;
+    };
     onMessage: {
       addListener(
         listener: (
@@ -5455,8 +5461,13 @@ class ChromeBackgroundBridge {
     if (!this.chromeApi.scripting?.executeScript) {
       return;
     }
+    const forceReinjectForStagedExtension = this.#shouldForceStagedMainWorldBridgeReinject();
     const probeSecret = this.#resolveMainWorldBridgeProbeSecret(request);
-    if (probeSecret && await this.#isMainWorldBridgeInstalled(tabId, probeSecret)) {
+    if (
+      !forceReinjectForStagedExtension &&
+      probeSecret &&
+      await this.#isMainWorldBridgeInstalled(tabId, probeSecret)
+    ) {
       return;
     }
     await this.chromeApi.scripting.executeScript({
@@ -5464,6 +5475,14 @@ class ChromeBackgroundBridge {
       world: "MAIN",
       files: ["build/main-world-bridge.js"]
     });
+  }
+
+  #shouldForceStagedMainWorldBridgeReinject(): boolean {
+    const manifest = this.chromeApi.runtime.getManifest?.();
+    const contentScripts = Array.isArray(manifest?.content_scripts) ? manifest.content_scripts : [];
+    return contentScripts.some((entry) =>
+      Array.isArray(entry?.js) && entry.js.includes(STAGED_EXTENSION_BOOTSTRAP_SCRIPT_PATH)
+    );
   }
 
   #resolveMainWorldBridgeProbeSecret(request: BridgeRequest): string | null {
