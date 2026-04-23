@@ -435,7 +435,10 @@ const parseUserIdFromUrl = (value: string | null): string | null => {
 
 const resolveDetailResponseNoteId = (
   value: unknown,
-  preferredNoteId?: string | null
+  preferredNoteId?: string | null,
+  options?: {
+    allowBareIdAlias?: boolean;
+  }
 ): string | null => {
   const record = asRecord(value);
   if (!record) {
@@ -449,6 +452,14 @@ const resolveDetailResponseNoteId = (
         return candidateNoteId;
       }
       fallbackNoteId ??= candidateNoteId;
+      continue;
+    }
+    if (
+      options?.allowBareIdAlias &&
+      preferredNoteId &&
+      asString(candidate.id) === preferredNoteId
+    ) {
+      return preferredNoteId;
     }
   }
   return preferredNoteId ? null : fallbackNoteId;
@@ -591,6 +602,7 @@ const deriveReadShapeFromArtifact = (
   options?: {
     preferredDetailNoteId?: string | null;
     allowDetailRequestFallback?: boolean;
+    allowDetailResponseBareIdAlias?: boolean;
   }
 ): ReadRequestShape | null => {
   if (!artifact) {
@@ -609,7 +621,9 @@ const deriveReadShapeFromArtifact = (
       const responseDetailShape = (() => {
         const preferredNoteId = options?.preferredDetailNoteId ?? explicitDetailShape?.note_id ?? null;
         const responseNoteId =
-          resolveDetailResponseNoteId(response?.body, preferredNoteId) ??
+          resolveDetailResponseNoteId(response?.body, preferredNoteId, {
+            allowBareIdAlias: options?.allowDetailResponseBareIdAlias
+          }) ??
           resolveDetailResponseNoteId(response?.body);
         return responseNoteId ? createDetailShape(responseNoteId) : null;
       })();
@@ -667,15 +681,7 @@ const deriveReadShapeFromArtifact = (
       }) ?? null
     );
   }
-  const responseUserId = resolveUserHomeResponseUserId(response?.body, expectedUserId);
-  if (!expectedUserId || !responseUserId || responseUserId !== expectedUserId) {
-    return null;
-  }
-  return (
-    createUserHomeRequestShape({
-      user_id: expectedUserId
-    }) ?? null
-  );
+  return null;
 };
 
 const serializeReadShape = (shape: ReadRequestShape): string =>
@@ -700,6 +706,7 @@ const resolveReadRequestContext = (
   now: number,
   options?: {
     allowDetailRequestFallback?: boolean;
+    allowDetailResponseBareIdAlias?: boolean;
   }
 ): ReadRequestContextLookupResult => {
   if (!artifact) {
@@ -724,6 +731,7 @@ const resolveReadRequestContext = (
         expectedShape,
         now,
         {
+          allowDetailResponseBareIdAlias: true,
           allowDetailRequestFallback: false
         }
       );
@@ -732,6 +740,7 @@ const resolveReadRequestContext = (
       const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
         preferredDetailNoteId:
           spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+        allowDetailResponseBareIdAlias: true,
         allowDetailRequestFallback: true
       });
       return {
@@ -747,6 +756,7 @@ const resolveReadRequestContext = (
         shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
           preferredDetailNoteId:
             spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+          allowDetailResponseBareIdAlias: true,
           allowDetailRequestFallback: true
         })
       };
@@ -771,6 +781,7 @@ const resolveReadRequestContext = (
     {
       preferredDetailNoteId:
         spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+      allowDetailResponseBareIdAlias: options?.allowDetailResponseBareIdAlias ?? false,
       allowDetailRequestFallback:
         spec.command === "xhs.detail" && !resolveCapturedArtifactStatus(artifact).rejectionReason
           ? false

@@ -5785,7 +5785,7 @@ const parseUserIdFromUrl = (value) => {
         return null;
     }
 };
-const resolveDetailResponseNoteId = (value, preferredNoteId) => {
+const resolveDetailResponseNoteId = (value, preferredNoteId, options) => {
     const record = asRecord(value);
     if (!record) {
         return null;
@@ -5798,6 +5798,12 @@ const resolveDetailResponseNoteId = (value, preferredNoteId) => {
                 return candidateNoteId;
             }
             fallbackNoteId ??= candidateNoteId;
+            continue;
+        }
+        if (options?.allowBareIdAlias &&
+            preferredNoteId &&
+            asString(candidate.id) === preferredNoteId) {
+            return preferredNoteId;
         }
     }
     return preferredNoteId ? null : fallbackNoteId;
@@ -5933,7 +5939,9 @@ const deriveReadShapeFromArtifact = (spec, artifact, options) => {
             const explicitDetailShape = deriveDetailShapeFromSource(explicitShape);
             const responseDetailShape = (() => {
                 const preferredNoteId = options?.preferredDetailNoteId ?? explicitDetailShape?.note_id ?? null;
-                const responseNoteId = resolveDetailResponseNoteId(response?.body, preferredNoteId) ??
+                const responseNoteId = resolveDetailResponseNoteId(response?.body, preferredNoteId, {
+                    allowBareIdAlias: options?.allowDetailResponseBareIdAlias
+                }) ??
                     resolveDetailResponseNoteId(response?.body);
                 return responseNoteId ? createDetailShape(responseNoteId) : null;
             })();
@@ -5983,13 +5991,7 @@ const deriveReadShapeFromArtifact = (spec, artifact, options) => {
             user_id: expectedUserId
         }) ?? null);
     }
-    const responseUserId = resolveUserHomeResponseUserId(response?.body, expectedUserId);
-    if (!expectedUserId || !responseUserId || responseUserId !== expectedUserId) {
-        return null;
-    }
-    return (createUserHomeRequestShape({
-        user_id: expectedUserId
-    }) ?? null);
+    return null;
 };
 const serializeReadShape = (shape) => shape.command === "xhs.detail"
     ? JSON.stringify({
@@ -6020,12 +6022,14 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
         if (admittedTemplate) {
             return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
+                allowDetailResponseBareIdAlias: true,
                 allowDetailRequestFallback: false
             });
         }
         if (rejectedObservation) {
             const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
                 preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                allowDetailResponseBareIdAlias: true,
                 allowDetailRequestFallback: true
             });
             return {
@@ -6040,6 +6044,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                 reason: "shape_mismatch",
                 shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
                     preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                    allowDetailResponseBareIdAlias: true,
                     allowDetailRequestFallback: true
                 })
             };
@@ -6060,6 +6065,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
     }
     const derivedShape = deriveReadShapeFromArtifact(spec, artifact, {
         preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+        allowDetailResponseBareIdAlias: options?.allowDetailResponseBareIdAlias ?? false,
         allowDetailRequestFallback: spec.command === "xhs.detail" && !resolveCapturedArtifactStatus(artifact).rejectionReason
             ? false
             : (options?.allowDetailRequestFallback ?? true)

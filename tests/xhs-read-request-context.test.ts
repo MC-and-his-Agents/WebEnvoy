@@ -168,6 +168,15 @@ const createUserHomeArtifact = (
     url: "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001",
     status: 200,
     captured_at: 1_710_000_000_000,
+    page_context_namespace: "xhs.user_home",
+    shape_key:
+      '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
+    shape: {
+      command: "xhs.user_home",
+      method: "GET",
+      pathname: "/api/sns/web/v1/user/otherinfo",
+      user_id: "user-001"
+    },
     request: {
       headers: {
         Accept: "application/json, text/plain, */*",
@@ -1116,6 +1125,64 @@ describe("xhs read request-context exact-shape reuse", () => {
     );
   });
 
+  it("reuses exact-shape admitted detail templates when the captured response identifies the note with a bare id", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-bare-id-hit-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-bare-id-hit-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: createDetailArtifact({
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  note: {
+                    id: "note-001",
+                    title: "bare id only"
+                  }
+                }
+              }
+            }
+          }),
+          rejected_observation: null,
+          incompatible_observation: null
+        })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalled();
+  });
+
   it("returns rejected_source for exact-shape synthetic detail observations", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
@@ -1802,6 +1869,43 @@ describe("xhs read request-context exact-shape reuse", () => {
         })
       })
     );
+  });
+
+  it("fails closed for raw user_home artifacts without an exact shape even when the response user_id matches", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-raw-template-missing-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-raw-template-missing-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createUserHomeArtifact({
+            shape: undefined,
+            shape_key: undefined
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("waits for captured user_home context before failing closed on a fresh navigation", async () => {
