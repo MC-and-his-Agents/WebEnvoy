@@ -1348,7 +1348,13 @@ const hasUserHomePageStateFallback = (params: XhsUserHomeParams, root: JsonRecor
     return false;
   }
 
-  return asRecord(root?.board) !== null || asRecord(root?.note) !== null || user !== null;
+  return (
+    asRecord(root?.board) !== null ||
+    asRecord(root?.note) !== null ||
+    asRecord(user.basic_info) !== null ||
+    asRecord(user.basicInfo) !== null ||
+    asRecord(user.profile) !== null
+  );
 };
 
 const canUsePageStateFallback = (

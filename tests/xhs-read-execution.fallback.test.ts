@@ -1026,6 +1026,50 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("does not use user_home page-state fallback when page state only exposes root.user metadata", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-metadata-only-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-metadata-only-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-fallback-metadata-only-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-metadata-only-001",
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-fallback-metadata-only-001"
+          }
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home metadata-only request-context failure");
+    }
+    expect((result.payload.observability as Record<string, unknown>).page_state).not.toHaveProperty(
+      "fallback_used"
+    );
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect(result.payload.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("does not use user_home page-state fallback when request-context lookup errors before capture succeeds", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
     const result = await executeXhsUserHome(
