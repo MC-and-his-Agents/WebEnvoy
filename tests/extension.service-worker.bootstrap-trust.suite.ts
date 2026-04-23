@@ -392,6 +392,68 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("forces staged main-world bridge reinjection even when a probe says the tab is already ready", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.runtime.getManifest = vi.fn(() => ({
+      content_scripts: [
+        { js: ["build/main-world-bridge.js"] },
+        { js: ["build/content-script.js", "build/__webenvoy_fingerprint_bootstrap.js"] }
+      ]
+    }));
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
+      ) => {
+        if ("func" in input && typeof input.func === "function") {
+          return [{ result: true }];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-staged-reinject-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-staged-reinject-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-staged-reinject-001",
+          runtime_context_id: "ctx-bootstrap-staged-reinject-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-staged-reinject-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 11 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      })
+    );
+  });
+
   it("keeps runtime.bootstrap pending when startup trust lacks main-world attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

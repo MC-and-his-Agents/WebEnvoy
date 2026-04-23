@@ -196,6 +196,7 @@ const rewriteStagedContentScriptSourceForBridge = (input) => {
 };
 const rewriteStagedMainWorldBridgeSourceForBridge = (input) => {
     const expectedEventNames = resolveMainWorldEventNamesForSecret(input.bridgeSecret);
+    const stagedInstallKey = `webenvoy.main_world.bridge.bundle.v1:${expectedEventNames.requestEvent}`;
     let rewritten = input.source;
     rewritten = replaceSourceToken({
         source: rewritten,
@@ -207,6 +208,12 @@ const rewriteStagedMainWorldBridgeSourceForBridge = (input) => {
             `const EXPECTED_MAIN_WORLD_NAMESPACE_EVENT = ${JSON.stringify(expectedEventNames.namespaceEvent)};`
         ].join("\n"),
         errorMessage: "staged main-world-bridge 缺少 event 常量锚点，无法注入 secret-derived channel"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: 'const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1");',
+        replacement: `const __webenvoy_install_key = Symbol.for(${JSON.stringify(stagedInstallKey)});`,
+        errorMessage: "staged main-world-bridge 缺少 install guard 锚点，无法注入 secret-scoped key"
     });
     rewritten = replaceSourceToken({
         source: rewritten,

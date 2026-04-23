@@ -71,6 +71,9 @@ export const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
         return current.port;
       }),
       getURL: vi.fn((path: string) => `chrome-extension://test-extension/${path}`),
+      getManifest: vi.fn(() => ({
+        content_scripts: [{ js: ["build/main-world-bridge.js"] }, { js: ["build/content-script.js"] }]
+      })),
       onMessage: {
         addListener: (
           listener: (

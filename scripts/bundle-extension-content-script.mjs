@@ -32,21 +32,9 @@ const renderClassicModule = ({ moduleVar, prelude = "", sourceBody, exports }) =
     .filter((line) => line.length > 0)
     .join("\n");
 
-const wrapClassicBundleWithInstallGuard = ({ bundleSource, installKey }) =>
+const wrapClassicBundleInIife = ({ bundleSource }) =>
   [
     "(() => {",
-    "const __webenvoy_install_scope = globalThis;",
-    `const __webenvoy_install_key = Symbol.for(${JSON.stringify(installKey)});`,
-    "if (__webenvoy_install_scope[__webenvoy_install_key]) {",
-    "  return;",
-    "}",
-    "Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {",
-    "  value: true,",
-    "  configurable: false,",
-    "  enumerable: false,",
-    "  writable: false",
-    "});",
-    "",
     bundleSource,
     "})();"
   ].join("\n");
@@ -548,6 +536,17 @@ const buildMainWorldBridgeBundle = async () => {
   const mainWorldBridgeModule = renderClassicModule({
     moduleVar: "__webenvoy_module_main_world_bridge",
     prelude: [
+      "const __webenvoy_install_scope = globalThis;",
+      'const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1");',
+      "if (__webenvoy_install_scope[__webenvoy_install_key]) {",
+      "  return {};",
+      "}",
+      "Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {",
+      "  value: true,",
+      "  configurable: false,",
+      "  enumerable: false,",
+      "  writable: false",
+      "});",
       "const {",
       "  DETAIL_ENDPOINT,",
       "  SEARCH_ENDPOINT,",
@@ -572,9 +571,8 @@ const buildMainWorldBridgeBundle = async () => {
     mainWorldBridgeModule
   ].join("\n");
 
-  return wrapClassicBundleWithInstallGuard({
-    bundleSource,
-    installKey: "webenvoy.main_world.bridge.bundle.v1"
+  return wrapClassicBundleInIife({
+    bundleSource
   });
 };
 
