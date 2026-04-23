@@ -1670,10 +1670,8 @@ class ChromeBackgroundBridge {
         if (!canPrimeFromBootstrap) {
             return;
         }
-        // Runtime bootstrap readiness should be promoted by execution-surface attestation,
-        // regardless of whether an XHS-specific target binding is present.
-        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, asNonEmptyString(request.params.run_id) ?? bootstrap?.runId ?? null, bootstrap?.runtimeContextId ?? null);
         const sourceBinding = this.#resolveRequestTargetBinding(request);
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, asNonEmptyString(request.params.run_id) ?? bootstrap?.runId ?? null, bootstrap?.runtimeContextId ?? null, sourceBinding);
         if (!sourceBinding) {
             return;
         }
@@ -1732,7 +1730,7 @@ class ChromeBackgroundBridge {
     }
     #doesStrictTargetBindingMatch(requestTargetBinding, storedTarget) {
         if (storedTarget.sourceTabId === null && storedTarget.sourceDomain === null) {
-            return true;
+            return requestTargetBinding === null;
         }
         if (storedTarget.sourceTabId === null || storedTarget.sourceDomain === null) {
             return false;
@@ -1768,10 +1766,10 @@ class ChromeBackgroundBridge {
         if (!explicitSessionId || explicitSessionId !== this.#sessionId) {
             return;
         }
-        if (hasInstalledFingerprintInjection(fingerprintRuntime)) {
-            this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime, asNonEmptyString(startupTrust.run_id ?? null), asNonEmptyString(startupTrust.runtime_context_id ?? null));
-        }
         const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
+        if (hasInstalledFingerprintInjection(fingerprintRuntime)) {
+            this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime, asNonEmptyString(startupTrust.run_id ?? null), asNonEmptyString(startupTrust.runtime_context_id ?? null), senderBinding);
+        }
         if (!senderBinding) {
             return;
         }
@@ -1801,7 +1799,7 @@ class ChromeBackgroundBridge {
     #upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, source) {
         this.#runtimeTrustState.upsertTrusted(profile, sessionId, this.#normalizeTrustedFingerprintRuntime(fingerprintRuntime), source);
     }
-    #promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, signalRunId, signalRuntimeContextId) {
+    #promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, signalRunId, signalRuntimeContextId, sourceBinding) {
         const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
         if (!bootstrap) {
             return;
@@ -1820,6 +1818,10 @@ class ChromeBackgroundBridge {
             bootstrap.updatedAt = new Date().toISOString();
             this.#runtimeTrustState.setBootstrap(profile, bootstrap);
             return;
+        }
+        if (sourceBinding) {
+            bootstrap.sourceTabId = sourceBinding.tabId;
+            bootstrap.sourceDomain = sourceBinding.domain;
         }
         bootstrap.status = "ready";
         bootstrap.updatedAt = new Date().toISOString();
