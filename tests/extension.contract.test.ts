@@ -468,6 +468,10 @@ describe("extension build contract", () => {
     expect(fs.existsSync(contentScriptHandlerBuildPath)).toBe(true);
     expect(fs.existsSync(xhsEditorInputBuildPath)).toBe(true);
     expect(fs.existsSync(fingerprintProfileSharedPath)).toBe(true);
+
+    const mainWorldBridgeSource = fs.readFileSync(mainWorldBridgeBuildPath, "utf8");
+    expect(mainWorldBridgeSource).not.toMatch(/^\s*import\s/m);
+    expect(mainWorldBridgeSource).not.toMatch(/^\s*export\s/m);
   });
 
   it("keeps extension build entry imports resolvable in node module loading", async () => {
