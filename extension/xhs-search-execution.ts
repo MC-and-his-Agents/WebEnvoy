@@ -238,7 +238,9 @@ const resolveRequestContextState = async (
 
   const shapeKey = serializeSearchRequestShape(shape);
   let pageContextNamespace = fallbackNamespace;
-  const lookupOnce = async (): Promise<RequestContextState> => {
+  const lookupOnce = async (input?: {
+    deferShapeMismatch?: boolean;
+  }): Promise<RequestContextState> => {
     let lookup: Awaited<ReturnType<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>> =
       null;
     try {
@@ -328,6 +330,17 @@ const resolveRequestContextState = async (
     }
 
     if (incompatibleObservation || siblingShapeKeys.length > 0) {
+      if (input?.deferShapeMismatch === true) {
+        return {
+          status: "miss",
+          failureReason: "template_missing",
+          pageContextNamespace,
+          shapeKey,
+          availableShapeKeys: siblingShapeKeys,
+          observedAt:
+            incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+        };
+      }
       return {
         status: "miss",
         failureReason: "shape_mismatch",
@@ -348,7 +361,9 @@ const resolveRequestContextState = async (
     };
   };
 
-  let lastState = await lookupOnce();
+  let lastState = await lookupOnce({
+    deferShapeMismatch: REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS > 1
+  });
   for (
     let attempt = 1;
     attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
@@ -357,7 +372,9 @@ const resolveRequestContextState = async (
     attempt += 1
   ) {
     await waitForRequestContextRetry(env, REQUEST_CONTEXT_WAIT_RETRY_MS);
-    lastState = await lookupOnce();
+    lastState = await lookupOnce({
+      deferShapeMismatch: attempt + 1 < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS
+    });
   }
   return lastState;
 };
