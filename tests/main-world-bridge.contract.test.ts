@@ -91,6 +91,7 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
     status = 200;
     responseText = JSON.stringify({ code: 0, data: { items: [{ id: "note-xhr-001" }] } });
     response = this.responseText;
+    responseType = "";
     readonly listeners = new Map<string, MockEventListener[]>();
 
     open(method: string, url: string | URL): void {
@@ -487,6 +488,60 @@ describe("main-world bridge contract", () => {
           }
         },
         rejected_observation: null
+      }
+    });
+  });
+
+  it("captures JSON XHR search response without reading responseText", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const xhr = new (env.mockWindow.XMLHttpRequest as unknown as {
+      new (): XMLHttpRequest;
+    })();
+    Object.defineProperty(xhr, "responseType", {
+      configurable: true,
+      value: "json"
+    });
+    Object.defineProperty(xhr, "response", {
+      configurable: true,
+      value: { code: 0, data: { items: [{ id: "note-json-xhr-001" }] } }
+    });
+    Object.defineProperty(xhr, "responseText", {
+      configurable: true,
+      get: () => {
+        throw new Error("responseText must not be read for json XHR");
+      }
+    });
+    xhr.open("POST", `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`);
+    xhr.setRequestHeader("content-type", "application/json;charset=utf-8");
+    xhr.send(JSON.stringify({ keyword: "xhr-json" }));
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "xhr-json" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request",
+          transport: "xhr",
+          request: {
+            body: {
+              keyword: "xhr-json"
+            }
+          }
+        }
       }
     });
   });

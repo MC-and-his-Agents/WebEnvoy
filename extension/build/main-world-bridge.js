@@ -1037,16 +1037,39 @@ const resolveXhrCandidate = async (state, bodySource) => {
     };
 };
 const captureXhrResponse = (candidate, xhr) => {
-    const responseText = typeof xhr.responseText === "string"
-        ? xhr.responseText
-        : typeof xhr.response === "string"
-            ? xhr.response
-            : "";
+    const responseBody = readXhrResponseBody(xhr);
     storeCapturedRequestContext(candidate, {
         status: typeof xhr.status === "number" ? xhr.status : 0,
         responseHeaders: headersToRecord(typeof xhr.getAllResponseHeaders === "function" ? xhr.getAllResponseHeaders() : ""),
-        responseBody: parseArtifactPayloadText(responseText)
+        responseBody
     });
+};
+const readXhrResponseBody = (xhr) => {
+    const responseType = typeof xhr.responseType === "string" ? xhr.responseType : "";
+    if (responseType === "" || responseType === "text") {
+        const responseText = readXhrProperty(xhr, "responseText");
+        if (typeof responseText === "string") {
+            return parseArtifactPayloadText(responseText);
+        }
+        const response = readXhrProperty(xhr, "response");
+        return typeof response === "string" ? parseArtifactPayloadText(response) : response;
+    }
+    const response = readXhrProperty(xhr, "response");
+    if (responseType === "json") {
+        return response;
+    }
+    return {
+        response_type: responseType,
+        response_available: response !== null && response !== undefined
+    };
+};
+const readXhrProperty = (xhr, property) => {
+    try {
+        return xhr[property];
+    }
+    catch {
+        return undefined;
+    }
 };
 const installFetchCapture = () => {
     const originalFetch = window.fetch;
