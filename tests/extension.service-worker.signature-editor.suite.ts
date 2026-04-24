@@ -389,6 +389,171 @@ describe("extension service worker / signature and editor input", () => {
     });
   });
 
+  it("allows xhs main-world request replay against the captured edith read API host", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockResolvedValueOnce([
+      {
+        result: {
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        }
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "https://edith.xiaohongshu.com/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"keyword\":\"露营\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+        }
+      },
+      () => {}
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: expect.arrayContaining([
+          "https://edith.xiaohongshu.com/api/sns/web/v1/search/notes"
+        ])
+      })
+    );
+  });
+
+  it("rejects captured edith read API replay from creator-side sender tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "https://edith.xiaohongshu.com/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"keyword\":\"露营\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://creator.xiaohongshu.com/publish"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_MAIN_WORLD_REQUEST_FORBIDDEN",
+        message: "xhs main-world request is out of allowlist scope"
+      }
+    });
+  });
+
+  it("strips WebEnvoy synthetic marker before forwarding xhs main-world request headers", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockResolvedValueOnce([
+      {
+        result: {
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        }
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000",
+          "x-webenvoy-synthetic-request": "1"
+        },
+        body: "{\"keyword\":\"露营\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+        }
+      },
+      () => {}
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          "POST",
+          {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1700000000"
+          },
+          "{\"keyword\":\"露营\"}",
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+  });
+
   it("preserves AbortError metadata when xhs main-world request executeScript times out", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);

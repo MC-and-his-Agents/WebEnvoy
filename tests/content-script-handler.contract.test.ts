@@ -1398,14 +1398,13 @@ describe("content-script handler contract", () => {
         await waitForResult(results);
 
         expect(forgedReplySent).toBe(true);
-        expect(results[0]?.ok).toBe(true);
-        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
+        expect(results[0]?.ok).toBe(false);
+        expect(mainWorldFetch).not.toHaveBeenCalled();
         const payload = results[0]?.payload as Record<string, unknown>;
-        const summary = payload?.summary as Record<string, unknown>;
-        const requestContext = summary?.request_context as Record<string, unknown>;
+        const details = payload?.details as Record<string, unknown>;
         const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
         const injection = fingerprintRuntime?.injection as Record<string, unknown>;
-        expect(requestContext?.status).toBe("exact_hit");
+        expect(details?.reason).toBe("SIGNATURE_ENTRY_MISSING");
         expect(injection?.installed).toBe(true);
       } finally {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
@@ -1509,8 +1508,8 @@ describe("content-script handler contract", () => {
           expect.objectContaining({
             method: "POST",
             credentials: "include",
-            headers: expect.objectContaining({
-              "x-webenvoy-synthetic-request": "1"
+            headers: expect.not.objectContaining({
+              "x-webenvoy-synthetic-request": expect.any(String)
             }),
             referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
             referrerPolicy: "strict-origin-when-cross-origin"

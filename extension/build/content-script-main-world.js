@@ -1,4 +1,4 @@
-import { WEBENVOY_SYNTHETIC_REQUEST_HEADER, resolveActiveVisitedPageContextNamespace, resolveMainWorldPageContextNamespaceEventName } from "./xhs-search-types.js";
+import { resolveActiveVisitedPageContextNamespace, resolveMainWorldPageContextNamespaceEventName } from "./xhs-search-types.js";
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
@@ -297,10 +297,7 @@ export const requestXhsSearchJsonViaMainWorld = async (input) => {
         kind: "xhs-main-world-request",
         url: resolveMainWorldRequestUrl(input.url),
         method: input.method,
-        headers: {
-            ...input.headers,
-            [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
-        },
+        headers: input.headers,
         ...(typeof input.body === "string" ? { body: input.body } : {}),
         timeout_ms: input.timeoutMs,
         ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),

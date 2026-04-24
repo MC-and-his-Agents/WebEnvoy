@@ -4929,6 +4929,12 @@ const serializeRequestBody = (value) => {
     }
     return JSON.stringify(value);
 };
+const buildReplayRequestPayload = (capturedBody, freshPayload) => ({
+    ...capturedBody,
+    search_id: typeof freshPayload.search_id === "string" && freshPayload.search_id.length > 0
+        ? freshPayload.search_id
+        : capturedBody.search_id
+});
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -4956,6 +4962,27 @@ const serializeCanonicalShape = (value) => {
     });
     return shape ? serializeSearchRequestShape(shape) : null;
 };
+const XHS_SEARCH_REPLAY_HOST_ALLOWLIST = new Set([
+    "www.xiaohongshu.com",
+    "edith.xiaohongshu.com"
+]);
+const resolveTrustedSearchReplayUrl = (value) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        return null;
+    }
+    try {
+        const parsed = new URL(value);
+        if (parsed.protocol !== "https:" ||
+            !XHS_SEARCH_REPLAY_HOST_ALLOWLIST.has(parsed.hostname) ||
+            parsed.pathname !== SEARCH_ENDPOINT) {
+            return null;
+        }
+        return `${parsed.origin}${SEARCH_ENDPOINT}`;
+    }
+    catch {
+        return null;
+    }
+};
 const isTrustedCapturedTemplate = (template, expected) => {
     const templateRecord = asRecord(template);
     if (!templateRecord) {
@@ -4974,12 +5001,64 @@ const isTrustedCapturedTemplate = (template, expected) => {
         serializeCanonicalShape(templateShape) !== expected.shapeKey) {
         return false;
     }
+    if (resolveTrustedSearchReplayUrl(templateRecord.url) === null) {
+        return false;
+    }
     const request = asRecord(templateRecord.request);
     if (!request || !asRecord(request.headers)) {
         return false;
     }
     return serializeCanonicalShape(request.body) === expected.shapeKey;
 };
+const getCapturedHeader = (headers, key) => {
+    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
+    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+const SEARCH_REPLAY_HEADER_DENYLIST = new Set([
+    "accept",
+    "accept-encoding",
+    "connection",
+    "content-length",
+    "content-type",
+    "cookie",
+    "host",
+    "origin",
+    "referer",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "sec-fetch-user",
+    "user-agent",
+    "x-b3-traceid",
+    "x-rap-param",
+    "x-s",
+    "x-s-common",
+    "x-t",
+    "x-webenvoy-synthetic-request",
+    "x-xray-traceid"
+]);
+const buildCapturedReplayHeaders = (headers) => Object.fromEntries(Object.entries(headers).filter(([name, value]) => {
+    const normalizedName = name.trim().toLowerCase();
+    return (normalizedName.length > 0 &&
+        typeof value === "string" &&
+        value.trim().length > 0 &&
+        !SEARCH_REPLAY_HEADER_DENYLIST.has(normalizedName));
+}));
+const buildHeaders = (env, options, signature, capturedHeaders) => ({
+    ...buildCapturedReplayHeaders(capturedHeaders),
+    Accept: getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
+    "X-s": String(signature["X-s"]),
+    "X-t": String(signature["X-t"]),
+    "X-S-Common": getCapturedHeader(capturedHeaders, "X-S-Common") ??
+        options.x_s_common ??
+        resolveXsCommon(undefined),
+    "x-b3-traceid": env.randomId().replace(/-/g, ""),
+    "x-xray-traceid": env.randomId().replace(/-/g, ""),
+    "Content-Type": getCapturedHeader(capturedHeaders, "Content-Type") ?? "application/json;charset=utf-8"
+});
 const isTrustedRejectedObservation = (observation, expected) => {
     const observationRecord = asRecord(observation);
     if (!observationRecord) {
@@ -5096,6 +5175,16 @@ const resolveRequestContextState = async (input, env) => {
             ? lookup?.incompatible_observation ?? null
             : null;
         if (admittedTemplate && admittedTemplate.template_ready !== false) {
+            const replayUrl = resolveTrustedSearchReplayUrl(admittedTemplate.url);
+            if (!replayUrl) {
+                return {
+                    status: "miss",
+                    failureReason: "template_missing",
+                    pageContextNamespace,
+                    shapeKey,
+                    availableShapeKeys
+                };
+            }
             const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
             if (env.now() - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
                 return {
@@ -5111,6 +5200,7 @@ const resolveRequestContextState = async (input, env) => {
                 status: "hit",
                 template: {
                     request: {
+                        url: replayUrl,
                         headers: admittedTemplate.request.headers,
                         body: admittedTemplate.request.body
                     },
@@ -5480,7 +5570,37 @@ const executeXhsSearch = async (input, env) => {
     const headers = {
         ...requestContextState.template.request.headers
     };
-    const requestBody = serializeRequestBody(requestContextState.template.request.body);
+    const capturedRequestBody = asRecord(requestContextState.template.request.body);
+    if (!capturedRequestBody) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "当前页面现场缺少可复用的搜索请求模板", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "REQUEST_CONTEXT_MISSING",
+            request_context_reason: "template_missing",
+            page_context_namespace: requestContextState.pageContextNamespace,
+            shape_key: requestContextState.shapeKey,
+            available_shape_keys: []
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "REQUEST_CONTEXT_MISSING",
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "captured_request_context",
+                summary: "当前页面现场缺少可复用的搜索请求模板"
+            }
+        }), createDiagnosis({
+            reason: "REQUEST_CONTEXT_MISSING",
+            summary: "当前页面现场缺少可复用的搜索请求模板"
+        }), gate, auditRecord), gate.execution_audit);
+    }
+    const signaturePayload = buildReplayRequestPayload(capturedRequestBody, payload);
+    const requestBody = serializeRequestBody(signaturePayload);
     if (typeof requestBody !== "string") {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "当前页面现场缺少可复用的搜索请求模板", {
             ability_id: input.abilityId,
@@ -5509,12 +5629,42 @@ const executeXhsSearch = async (input, env) => {
             summary: "当前页面现场缺少可复用的搜索请求模板"
         }), gate, auditRecord), gate.execution_audit);
     }
+    let signature;
+    try {
+        signature = await env.callSignature(SEARCH_ENDPOINT, signaturePayload);
+    }
+    catch (error) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SIGNATURE_ENTRY_MISSING"
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: error instanceof Error ? error.message : String(error),
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "window._webmsxyw",
+                summary: "页面签名入口不可用"
+            }
+        }), createDiagnosis({
+            reason: "SIGNATURE_ENTRY_MISSING",
+            summary: "页面签名入口不可用",
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     let response;
+    const replayHeaders = buildHeaders(env, input.options, signature, headers);
     try {
         response = await env.fetchJson({
-            url: SEARCH_ENDPOINT,
+            url: requestContextState.template.request.url,
             method: "POST",
-            headers,
+            headers: replayHeaders,
             body: requestBody,
             pageContextRequest: true,
             referrer: requestContextState.template.referrer ?? env.getLocationHref(),
@@ -5564,7 +5714,6 @@ const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const count = parseCount(response.body);
-    const requestBodyRecord = asRecord(requestContextState.template.request.body);
     return {
         ok: true,
         payload: {
@@ -5576,8 +5725,8 @@ const executeXhsSearch = async (input, env) => {
                     outcome: "success",
                     data_ref: {
                         query: input.params.query,
-                        search_id: typeof requestBodyRecord?.search_id === "string"
-                            ? requestBodyRecord.search_id
+                        search_id: typeof signaturePayload.search_id === "string"
+                            ? signaturePayload.search_id
                             : payload.search_id
                     },
                     metrics: {
@@ -8002,10 +8151,7 @@ const requestXhsSearchJsonViaMainWorld = async (input) => {
         kind: "xhs-main-world-request",
         url: resolveMainWorldRequestUrl(input.url),
         method: input.method,
-        headers: {
-            ...input.headers,
-            [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
-        },
+        headers: input.headers,
         ...(typeof input.body === "string" ? { body: input.body } : {}),
         timeout_ms: input.timeoutMs,
         ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),
