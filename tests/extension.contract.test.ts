@@ -1660,6 +1660,102 @@ describe("extension build contract", () => {
     );
   });
 
+  it("falls back to captured exact-hit signature when the page signer is unavailable", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-captured-signature-001",
+      sessionId: "nm-session-source-search-live-captured-signature-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-captured-signature-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const fetchJson = vi.fn(async (request: { headers: Record<string, string> }) => {
+      expect(request.headers).toMatchObject({
+        "X-s": "signed-template",
+        "X-t": "1700000000"
+      });
+      return {
+        status: 200,
+        body: {
+          code: 0,
+          data: {
+            items: []
+          }
+        }
+      };
+    });
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_captured_signature_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-captured-signature-001",
+            sessionId: "nm-session-source-search-live-captured-signature-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-captured-signature-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-captured-signature-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          readCapturedRequestContext: async () =>
+            createCapturedSearchContextArtifact({
+              href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+              keyword: "露营装备",
+              captured_at: 1_710_000_000_000
+            }),
+          callSignature: async () => {
+            throw new Error("window._webmsxyw is not available");
+          },
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          request_context: {
+            status: "exact_hit"
+          }
+        }
+      }
+    });
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for a fresh captured xhs.search template before failing closed", async () => {
     const admissionContext = buildLiveReadAdmissionContext({
       runId: "run-source-search-live-context-wait-001",

@@ -101,6 +101,11 @@ const getCapturedHeader = (headers, key) => {
     const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
     return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
 };
+const resolveCapturedSignature = (headers) => {
+    const xSignature = getCapturedHeader(headers, "X-s");
+    const xTimestamp = getCapturedHeader(headers, "X-t");
+    return xSignature && xTimestamp ? { "X-s": xSignature, "X-t": xTimestamp } : null;
+};
 const SEARCH_REPLAY_HEADER_DENYLIST = new Set([
     "accept",
     "accept-encoding",
@@ -721,29 +726,35 @@ export const executeXhsSearch = async (input, env) => {
         signature = await env.callSignature(SEARCH_ENDPOINT, signaturePayload);
     }
     catch (error) {
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
-            ability_id: input.abilityId,
-            stage: "execution",
-            reason: "SIGNATURE_ENTRY_MISSING"
-        }, createObservability({
-            href: env.getLocationHref(),
-            title: env.getDocumentTitle(),
-            readyState: env.getReadyState(),
-            requestId: `req-${env.randomId()}`,
-            outcome: "failed",
-            failureReason: error instanceof Error ? error.message : String(error),
-            includeKeyRequest: false,
-            failureSite: {
-                stage: "action",
-                component: "page",
-                target: "window._webmsxyw",
-                summary: "页面签名入口不可用"
-            }
-        }), createDiagnosis({
-            reason: "SIGNATURE_ENTRY_MISSING",
-            summary: "页面签名入口不可用",
-            category: "page_changed"
-        }), gate, auditRecord), gate.execution_audit);
+        const capturedSignature = resolveCapturedSignature(headers);
+        if (capturedSignature) {
+            signature = capturedSignature;
+        }
+        else {
+            return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+                ability_id: input.abilityId,
+                stage: "execution",
+                reason: "SIGNATURE_ENTRY_MISSING"
+            }, createObservability({
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "failed",
+                failureReason: error instanceof Error ? error.message : String(error),
+                includeKeyRequest: false,
+                failureSite: {
+                    stage: "action",
+                    component: "page",
+                    target: "window._webmsxyw",
+                    summary: "页面签名入口不可用"
+                }
+            }), createDiagnosis({
+                reason: "SIGNATURE_ENTRY_MISSING",
+                summary: "页面签名入口不可用",
+                category: "page_changed"
+            }), gate, auditRecord), gate.execution_audit);
+        }
     }
     let response;
     const replayHeaders = buildHeaders(env, input.options, signature, headers);
