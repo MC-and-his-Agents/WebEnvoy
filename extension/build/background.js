@@ -49,7 +49,19 @@ const hashMainWorldBridgeProbeSecret = (value) => {
 };
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_READ_API_DOMAIN = "edith.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const XHS_MAIN_WORLD_REQUEST_DOMAIN_ALLOWLIST = new Set([
+    XHS_READ_DOMAIN,
+    XHS_WRITE_DOMAIN,
+    XHS_READ_API_DOMAIN
+]);
+const isXhsMainWorldRequestHostAllowed = (input) => {
+    if (!XHS_MAIN_WORLD_REQUEST_DOMAIN_ALLOWLIST.has(input.requestHost)) {
+        return false;
+    }
+    return input.requestHost !== XHS_READ_API_DOMAIN || input.senderHost === XHS_READ_DOMAIN;
+};
 const STARTUP_TRUST_ALLOWLIST_URLS = [`*://${XHS_READ_DOMAIN}/*`, `*://${XHS_WRITE_DOMAIN}/*`];
 const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODES = new Set(EXECUTION_MODES);
@@ -3882,6 +3894,9 @@ class ChromeBackgroundBridge {
         if (!this.chromeApi.scripting?.executeScript) {
             throw new Error("chrome.scripting.executeScript is unavailable");
         }
+        const syntheticRequestHeader = "x-webenvoy-synthetic-request";
+        const sanitizedHeaders = Object.fromEntries(Object.entries(input.headers).filter((entry) => typeof entry[1] === "string" &&
+            entry[0].trim().toLowerCase() !== syntheticRequestHeader));
         const results = await this.chromeApi.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
@@ -3890,7 +3905,9 @@ class ChromeBackgroundBridge {
                     ? value
                     : null;
                 const headersRecord = asRecord(requestHeaders) ?? {};
-                const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string"));
+                const syntheticRequestHeader = "x-webenvoy-synthetic-request";
+                const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string" &&
+                    entry[0].trim().toLowerCase() !== syntheticRequestHeader));
                 const syntheticRequestSymbol = Symbol.for("webenvoy.main_world.synthetic_request.v1");
                 const timeoutMs = typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
                     ? Math.max(1, Math.trunc(requestTimeoutMs))
@@ -3939,7 +3956,7 @@ class ChromeBackgroundBridge {
             args: [
                 input.url,
                 input.method,
-                input.headers,
+                sanitizedHeaders,
                 input.body,
                 input.timeoutMs,
                 input.referrer,
@@ -3997,7 +4014,10 @@ class ChromeBackgroundBridge {
             !parsedSenderUrl ||
             !parsedRequestUrl ||
             !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname) ||
-            !XHS_DOMAIN_ALLOWLIST.has(parsedRequestUrl.hostname) ||
+            !isXhsMainWorldRequestHostAllowed({
+                senderHost: parsedSenderUrl.hostname,
+                requestHost: parsedRequestUrl.hostname
+            }) ||
             !XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST.has(parsedRequestUrl.pathname)) {
             sendResponse({
                 ok: false,

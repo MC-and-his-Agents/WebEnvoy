@@ -1076,6 +1076,60 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("keeps symbol-marked synthetic WebEnvoy requests out of admitted templates without marker headers", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async (input) => {
+      const headers = input instanceof Request ? input.headers : null;
+      expect(headers?.has("x-webenvoy-synthetic-request")).toBe(false);
+      return new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const request = new Request(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "symbol-synthetic" })
+    });
+    Object.defineProperty(request, Symbol.for("webenvoy.main_world.synthetic_request.v1"), {
+      configurable: true,
+      enumerable: false,
+      value: true
+    });
+    await (env.mockWindow.fetch as typeof fetch)(request);
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "symbol-synthetic" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "synthetic_request",
+          transport: "fetch",
+          rejection_reason: "synthetic_request_rejected"
+        }
+      }
+    });
+  });
+
   it("preserves a previously admitted exact-shape template when a later synthetic replay is rejected", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({

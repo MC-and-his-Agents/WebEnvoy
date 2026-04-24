@@ -47,6 +47,7 @@ type RequestContextState =
       status: "hit";
       template: {
         request: {
+          url: string;
           headers: Record<string, string>;
           body: unknown;
         };
@@ -76,6 +77,17 @@ const serializeRequestBody = (value: unknown): string | undefined => {
   }
   return JSON.stringify(value);
 };
+
+const buildReplayRequestPayload = (
+  capturedBody: JsonRecord,
+  freshPayload: JsonRecord
+): JsonRecord => ({
+  ...capturedBody,
+  search_id:
+    typeof freshPayload.search_id === "string" && freshPayload.search_id.length > 0
+      ? freshPayload.search_id
+      : capturedBody.search_id
+});
 
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
@@ -110,6 +122,30 @@ const serializeCanonicalShape = (value: unknown): string | null => {
   return shape ? serializeSearchRequestShape(shape) : null;
 };
 
+const XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST = new Set([
+  "https://www.xiaohongshu.com",
+  "https://edith.xiaohongshu.com"
+]);
+
+const resolveTrustedSearchReplayUrl = (value: unknown): string | null => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" ||
+      !XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST.has(parsed.origin) ||
+      parsed.pathname !== SEARCH_ENDPOINT
+    ) {
+      return null;
+    }
+    return `${parsed.origin}${SEARCH_ENDPOINT}`;
+  } catch {
+    return null;
+  }
+};
+
 const isTrustedCapturedTemplate = (
   template: unknown,
   expected: { pageContextNamespace: string; shapeKey: string }
@@ -135,12 +171,90 @@ const isTrustedCapturedTemplate = (
   ) {
     return false;
   }
+  if (resolveTrustedSearchReplayUrl(templateRecord.url) === null) {
+    return false;
+  }
   const request = asRecord(templateRecord.request);
   if (!request || !asRecord(request.headers)) {
     return false;
   }
   return serializeCanonicalShape(request.body) === expected.shapeKey;
 };
+
+const getCapturedHeader = (headers: Record<string, string>, key: string): string | null => {
+  const matchedEntry = Object.entries(headers).find(
+    ([candidate]) => candidate.toLowerCase() === key.toLowerCase()
+  );
+  return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
+};
+
+const resolveCapturedSignature = (
+  headers: Record<string, string>
+): { "X-s": string; "X-t": string } | null => {
+  const xSignature = getCapturedHeader(headers, "X-s");
+  const xTimestamp = getCapturedHeader(headers, "X-t");
+  return xSignature && xTimestamp ? { "X-s": xSignature, "X-t": xTimestamp } : null;
+};
+
+const SEARCH_REPLAY_HEADER_DENYLIST = new Set([
+  "accept",
+  "accept-encoding",
+  "connection",
+  "content-length",
+  "content-type",
+  "cookie",
+  "host",
+  "origin",
+  "referer",
+  "sec-ch-ua",
+  "sec-ch-ua-mobile",
+  "sec-ch-ua-platform",
+  "sec-fetch-dest",
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "sec-fetch-user",
+  "user-agent",
+  "x-b3-traceid",
+  "x-rap-param",
+  "x-s",
+  "x-s-common",
+  "x-t",
+  "x-webenvoy-synthetic-request",
+  "x-xray-traceid"
+]);
+
+const buildCapturedReplayHeaders = (headers: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).filter(([name, value]) => {
+      const normalizedName = name.trim().toLowerCase();
+      return (
+        normalizedName.length > 0 &&
+        typeof value === "string" &&
+        value.trim().length > 0 &&
+        !SEARCH_REPLAY_HEADER_DENYLIST.has(normalizedName)
+      );
+    })
+  );
+
+const buildHeaders = (
+  env: XhsSearchEnvironment,
+  options: XhsSearchOptions,
+  signature: { "X-s": string; "X-t": string | number },
+  capturedHeaders: Record<string, string>
+): Record<string, string> => ({
+  ...buildCapturedReplayHeaders(capturedHeaders),
+  Accept: getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
+  "X-s": String(signature["X-s"]),
+  "X-t": String(signature["X-t"]),
+  "X-S-Common":
+    getCapturedHeader(capturedHeaders, "X-S-Common") ??
+    options.x_s_common ??
+    resolveXsCommon(undefined),
+  "x-b3-traceid": env.randomId().replace(/-/g, ""),
+  "x-xray-traceid": env.randomId().replace(/-/g, ""),
+  "Content-Type":
+    getCapturedHeader(capturedHeaders, "Content-Type") ?? "application/json;charset=utf-8"
+});
 
 const isTrustedRejectedObservation = (
   observation: unknown,
@@ -295,6 +409,16 @@ const resolveRequestContextState = async (
       : null;
 
     if (admittedTemplate && admittedTemplate.template_ready !== false) {
+      const replayUrl = resolveTrustedSearchReplayUrl(admittedTemplate.url);
+      if (!replayUrl) {
+        return {
+          status: "miss",
+          failureReason: "template_missing",
+          pageContextNamespace,
+          shapeKey,
+          availableShapeKeys
+        };
+      }
       const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
       if (env.now() - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
         return {
@@ -310,6 +434,7 @@ const resolveRequestContextState = async (
         status: "hit",
         template: {
           request: {
+            url: replayUrl,
             headers: admittedTemplate.request.headers,
             body: admittedTemplate.request.body
           },
@@ -775,8 +900,8 @@ export const executeXhsSearch = async (
   const headers: Record<string, string> = {
     ...requestContextState.template.request.headers
   };
-  const requestBody = serializeRequestBody(requestContextState.template.request.body);
-  if (typeof requestBody !== "string") {
+  const capturedRequestBody = asRecord(requestContextState.template.request.body);
+  if (!capturedRequestBody) {
     return withExecutionAuditInFailurePayload(
       createFailure(
         "ERR_EXECUTION_FAILED",
@@ -816,12 +941,105 @@ export const executeXhsSearch = async (
     );
   }
 
+  const freshReplayPayload = buildReplayRequestPayload(capturedRequestBody, payload);
+  const freshRequestBody = serializeRequestBody(freshReplayPayload);
+  if (typeof freshRequestBody !== "string") {
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "当前页面现场缺少可复用的搜索请求模板",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing",
+          page_context_namespace: requestContextState.pageContextNamespace,
+          shape_key: requestContextState.shapeKey,
+          available_shape_keys: []
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "REQUEST_CONTEXT_MISSING",
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "captured_request_context",
+            summary: "当前页面现场缺少可复用的搜索请求模板"
+          }
+        }),
+        createDiagnosis({
+          reason: "REQUEST_CONTEXT_MISSING",
+          summary: "当前页面现场缺少可复用的搜索请求模板"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
+    );
+  }
+
+  let replayPayload = freshReplayPayload;
+  let requestBody = freshRequestBody;
+  let signature: { "X-s": string; "X-t": string | number };
+  try {
+    signature = await env.callSignature(SEARCH_ENDPOINT, freshReplayPayload);
+  } catch (error) {
+    const capturedSignature = resolveCapturedSignature(headers);
+    const capturedRequestBodyText = serializeRequestBody(capturedRequestBody);
+    if (capturedSignature && typeof capturedRequestBodyText === "string") {
+      signature = capturedSignature;
+      replayPayload = capturedRequestBody;
+      requestBody = capturedRequestBodyText;
+    } else {
+      return withExecutionAuditInFailurePayload(
+        createFailure(
+          "ERR_EXECUTION_FAILED",
+          "页面签名入口不可用",
+          {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SIGNATURE_ENTRY_MISSING"
+          },
+          createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: error instanceof Error ? error.message : String(error),
+            includeKeyRequest: false,
+            failureSite: {
+              stage: "action",
+              component: "page",
+              target: "window._webmsxyw",
+              summary: "页面签名入口不可用"
+            }
+          }),
+          createDiagnosis({
+            reason: "SIGNATURE_ENTRY_MISSING",
+            summary: "页面签名入口不可用",
+            category: "page_changed"
+          }),
+          gate,
+          auditRecord
+        ),
+        gate.execution_audit as JsonRecord | null
+      );
+    }
+  }
+
   let response: { status: number; body: unknown };
+  const replayHeaders = buildHeaders(env, input.options, signature, headers);
   try {
     response = await env.fetchJson({
-      url: SEARCH_ENDPOINT,
+      url: requestContextState.template.request.url,
       method: "POST",
-      headers,
+      headers: replayHeaders,
       body: requestBody,
       pageContextRequest: true,
       referrer: requestContextState.template.referrer ?? env.getLocationHref(),
@@ -895,7 +1113,6 @@ export const executeXhsSearch = async (
   }
 
   const count = parseCount(response.body);
-  const requestBodyRecord = asRecord(requestContextState.template.request.body);
   return {
     ok: true,
     payload: {
@@ -908,8 +1125,8 @@ export const executeXhsSearch = async (
           data_ref: {
             query: input.params.query,
             search_id:
-              typeof requestBodyRecord?.search_id === "string"
-                ? requestBodyRecord.search_id
+              typeof replayPayload.search_id === "string"
+                ? replayPayload.search_id
                 : payload.search_id
           },
           metrics: {

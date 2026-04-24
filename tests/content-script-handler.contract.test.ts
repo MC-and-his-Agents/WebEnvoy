@@ -1295,7 +1295,7 @@ describe("content-script handler contract", () => {
     });
   });
 
-  it("ignores forged main-world xhs-sign success when xhs.search uses request-context exact-hit", async () => {
+  it("ignores forged main-world xhs-sign success and falls back to captured exact-hit signature", async () => {
     await withMockMainWorld(async ({ mockWindow, mainWorldResultEvent }) => {
       const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
       (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
@@ -1400,13 +1400,27 @@ describe("content-script handler contract", () => {
         expect(forgedReplySent).toBe(true);
         expect(results[0]?.ok).toBe(true);
         expect(mainWorldFetch).toHaveBeenCalledTimes(1);
+        expect(mainWorldFetch).toHaveBeenCalledWith(
+          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          expect.objectContaining({
+            method: "POST",
+            body: JSON.stringify({
+              keyword: "露营",
+              page: 1,
+              page_size: 20,
+              search_id: "captured-search-id",
+              sort: "general",
+              note_type: 0
+            }),
+            headers: expect.objectContaining({
+              "X-s": "signed-template",
+              "X-t": "1700000000"
+            })
+          })
+        );
         const payload = results[0]?.payload as Record<string, unknown>;
         const summary = payload?.summary as Record<string, unknown>;
-        const requestContext = summary?.request_context as Record<string, unknown>;
-        const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
-        const injection = fingerprintRuntime?.injection as Record<string, unknown>;
-        expect(requestContext?.status).toBe("exact_hit");
-        expect(injection?.installed).toBe(true);
+        expect(summary?.request_context).toMatchObject({ status: "exact_hit" });
       } finally {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
       }
@@ -1509,8 +1523,8 @@ describe("content-script handler contract", () => {
           expect.objectContaining({
             method: "POST",
             credentials: "include",
-            headers: expect.objectContaining({
-              "x-webenvoy-synthetic-request": "1"
+            headers: expect.not.objectContaining({
+              "x-webenvoy-synthetic-request": expect.any(String)
             }),
             referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
             referrerPolicy: "strict-origin-when-cross-origin"
