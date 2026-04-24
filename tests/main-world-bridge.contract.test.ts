@@ -92,6 +92,7 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
     responseText = JSON.stringify({ code: 0, data: { items: [{ id: "note-xhr-001" }] } });
     response = this.responseText;
     responseType = "";
+    completionEvent = "loadend";
     readonly listeners = new Map<string, MockEventListener[]>();
 
     open(method: string, url: string | URL): void {
@@ -111,7 +112,7 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
         body
       });
       void Promise.resolve().then(() => {
-        this.dispatch("loadend");
+        this.dispatch(this.completionEvent);
       });
     }
 
@@ -540,6 +541,77 @@ describe("main-world bridge contract", () => {
             body: {
               keyword: "xhr-json"
             }
+          }
+        }
+      }
+    });
+  });
+
+  it("keeps an admitted XHR template when a later same-shape XHR is aborted", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const firstXhr = new (env.mockWindow.XMLHttpRequest as unknown as {
+      new (): XMLHttpRequest;
+    })();
+    firstXhr.open("POST", `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`);
+    firstXhr.setRequestHeader("content-type", "application/json;charset=utf-8");
+    firstXhr.send(JSON.stringify({ keyword: "xhr-abort-safe" }));
+
+    const firstResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "xhr-abort-safe" })
+    });
+    expect(firstResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request",
+          transport: "xhr"
+        }
+      }
+    });
+
+    const abortedXhr = new (env.mockWindow.XMLHttpRequest as unknown as {
+      new (): XMLHttpRequest;
+    })() as XMLHttpRequest & { completionEvent: string };
+    Object.defineProperty(abortedXhr, "status", {
+      configurable: true,
+      value: 0
+    });
+    abortedXhr.completionEvent = "abort";
+    abortedXhr.open("POST", `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`);
+    abortedXhr.setRequestHeader("content-type", "application/json;charset=utf-8");
+    abortedXhr.send(JSON.stringify({ keyword: "xhr-abort-safe" }));
+
+    const resultAfterAbort = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "xhr-abort-safe" })
+    });
+
+    expect(resultAfterAbort).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request",
+          transport: "xhr",
+          status: 200
+        },
+        rejected_observation: {
+          request_status: {
+            http_status: null
           }
         }
       }
