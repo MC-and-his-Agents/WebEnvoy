@@ -1668,11 +1668,21 @@ describe("extension build contract", () => {
       targetTabId: 11,
       targetPage: "search_result_tab"
     });
-    const fetchJson = vi.fn(async (request: { headers: Record<string, string> }) => {
+    const fetchJson = vi.fn(async (request: { body?: string; headers: Record<string, string> }) => {
       expect(request.headers).toMatchObject({
         "X-s": "signed-template",
         "X-t": "1700000000"
       });
+      expect(request.body).toBe(
+        JSON.stringify({
+          keyword: "露营装备",
+          page: 1,
+          page_size: 20,
+          search_id: "captured-search-id",
+          sort: "general",
+          note_type: 0
+        })
+      );
       return {
         status: 200,
         body: {

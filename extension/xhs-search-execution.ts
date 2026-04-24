@@ -941,9 +941,9 @@ export const executeXhsSearch = async (
     );
   }
 
-  const signaturePayload = buildReplayRequestPayload(capturedRequestBody, payload);
-  const requestBody = serializeRequestBody(signaturePayload);
-  if (typeof requestBody !== "string") {
+  const freshReplayPayload = buildReplayRequestPayload(capturedRequestBody, payload);
+  const freshRequestBody = serializeRequestBody(freshReplayPayload);
+  if (typeof freshRequestBody !== "string") {
     return withExecutionAuditInFailurePayload(
       createFailure(
         "ERR_EXECUTION_FAILED",
@@ -983,13 +983,18 @@ export const executeXhsSearch = async (
     );
   }
 
+  let replayPayload = freshReplayPayload;
+  let requestBody = freshRequestBody;
   let signature: { "X-s": string; "X-t": string | number };
   try {
-    signature = await env.callSignature(SEARCH_ENDPOINT, signaturePayload);
+    signature = await env.callSignature(SEARCH_ENDPOINT, freshReplayPayload);
   } catch (error) {
     const capturedSignature = resolveCapturedSignature(headers);
-    if (capturedSignature) {
+    const capturedRequestBodyText = serializeRequestBody(capturedRequestBody);
+    if (capturedSignature && typeof capturedRequestBodyText === "string") {
       signature = capturedSignature;
+      replayPayload = capturedRequestBody;
+      requestBody = capturedRequestBodyText;
     } else {
       return withExecutionAuditInFailurePayload(
         createFailure(
@@ -1120,8 +1125,8 @@ export const executeXhsSearch = async (
           data_ref: {
             query: input.params.query,
             search_id:
-              typeof signaturePayload.search_id === "string"
-                ? signaturePayload.search_id
+              typeof replayPayload.search_id === "string"
+                ? replayPayload.search_id
                 : payload.search_id
           },
           metrics: {

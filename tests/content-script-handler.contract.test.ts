@@ -1404,6 +1404,14 @@ describe("content-script handler contract", () => {
           "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
           expect.objectContaining({
             method: "POST",
+            body: JSON.stringify({
+              keyword: "露营",
+              page: 1,
+              page_size: 20,
+              search_id: "captured-search-id",
+              sort: "general",
+              note_type: 0
+            }),
             headers: expect.objectContaining({
               "X-s": "signed-template",
               "X-t": "1700000000"
