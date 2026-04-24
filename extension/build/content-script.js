@@ -5038,7 +5038,6 @@ const SEARCH_REPLAY_HEADER_DENYLIST = new Set([
     "sec-fetch-user",
     "user-agent",
     "x-b3-traceid",
-    "x-rap-param",
     "x-s",
     "x-s-common",
     "x-t",
