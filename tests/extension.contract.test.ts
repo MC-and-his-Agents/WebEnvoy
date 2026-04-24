@@ -1455,13 +1455,13 @@ describe("extension build contract", () => {
         "X-t": "1710000000",
         "X-S-Common": expect.any(String),
         "x-b3-traceid": "sourcereq001",
+        "x-rap-param": "captured-gateway-param",
         "x-xray-traceid": "sourcereq001",
         "xsecappid": "xhs-pc-web"
       });
       expect(request.headers).not.toMatchObject({
         origin: "https://www.xiaohongshu.com",
         referer: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
-        "x-rap-param": "captured-gateway-param",
         "x-s": "signed-template",
         "x-t": "1700000000"
       });
