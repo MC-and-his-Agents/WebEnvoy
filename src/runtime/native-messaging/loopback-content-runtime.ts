@@ -485,6 +485,8 @@ export class InMemoryContentScriptRuntime {
                   ? "浏览器环境异常，平台拒绝当前请求"
                   : simulated === "captcha_required"
                     ? "平台要求额外人机验证，无法继续执行"
+                    : simulated === "generic_api_warning"
+                      ? `${commandName} 接口返回了未识别的失败响应`
                     : simulated === "signature_entry_missing"
                       ? "页面签名入口不可用"
                       : `网关调用失败，当前上下文不足以完成 ${commandName} 请求`
@@ -499,22 +501,24 @@ export class InMemoryContentScriptRuntime {
                 : simulated === "account_abnormal"
                   ? "ACCOUNT_ABNORMAL"
                   : simulated === "browser_env_abnormal"
-                    ? "BROWSER_ENV_ABNORMAL"
-                    : simulated === "captcha_required"
-                      ? "CAPTCHA_REQUIRED"
+                  ? "BROWSER_ENV_ABNORMAL"
+                  : simulated === "captcha_required"
+                    ? "CAPTCHA_REQUIRED"
+                    : simulated === "generic_api_warning"
+                      ? "TARGET_API_RESPONSE_INVALID"
                       : simulated === "signature_entry_missing"
                         ? "SIGNATURE_ENTRY_MISSING"
                         : "GATEWAY_INVOKER_FAILED"
           },
           ...gateBundle,
-            observability: {
-              page_state: {
-                page_kind: simulated === "login_required" ? "login" : commandSpec.page_kind,
-                url: simulated === "login_required" ? "https://www.xiaohongshu.com/login" : commandSpec.url,
-                title: commandSpec.title,
-                ready_state: "complete",
-                observation_status: "complete"
-              },
+          observability: {
+            page_state: {
+              page_kind: simulated === "login_required" ? "login" : commandSpec.page_kind,
+              url: simulated === "login_required" ? "https://www.xiaohongshu.com/login" : commandSpec.url,
+              title: commandSpec.title,
+              ready_state: "complete",
+              observation_status: "complete"
+            },
             key_requests:
               simulated === "signature_entry_missing"
                 ? []
@@ -532,6 +536,8 @@ export class InMemoryContentScriptRuntime {
                             ? 200
                             : simulated === "captcha_required"
                               ? 429
+                              : simulated === "generic_api_warning"
+                                ? 400
                               : simulated === "gateway_invoker_failed"
                                 ? 500
                                 : undefined,

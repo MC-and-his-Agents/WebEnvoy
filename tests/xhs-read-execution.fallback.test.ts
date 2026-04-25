@@ -1426,6 +1426,59 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("does not classify generic read api frequency warnings as account-risk pages", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-generic-warning-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-generic-warning-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-generic-warning-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-generic-warning-001",
+        getPageStateRoot: () => null,
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-generic-warning-001")
+        ),
+        readPageStateRoot: async () => null,
+        fetchJson: async () => ({
+          status: 400,
+          body: {
+            code: -1,
+            msg: "操作频繁，请稍后再试"
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail generic warning failure envelope");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.detail 接口返回了未识别的失败响应"
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "TARGET_API_RESPONSE_INVALID",
+      status_code: 400
+    });
+    expect(result.payload.observability).toMatchObject({
+      key_requests: [
+        expect.objectContaining({
+          failure_reason: "TARGET_API_RESPONSE_INVALID"
+        })
+      ]
+    });
+  });
+
   it("uses detail page-state fallback when signature entry is unavailable but note state is still present", async () => {
     const result = await executeXhsDetail(
       {

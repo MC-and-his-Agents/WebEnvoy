@@ -4418,10 +4418,10 @@ const classifyXhsAccountSafetySurface = (input) => {
         };
     }
     if (href.includes("/login") ||
-        text.includes("扫码登录") ||
-        text.includes("登录后") ||
-        text.includes("输入手机号") ||
-        text.includes("小红书如何扫码") ||
+        (title.includes("登录") &&
+            (bodyText.includes("扫码登录") || bodyText.includes("输入手机号"))) ||
+        (bodyText.includes("扫码登录") &&
+            (bodyText.includes("输入手机号") || bodyText.includes("小红书如何扫码"))) ||
         text.includes("登录探索更多内容")) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
@@ -4596,6 +4596,10 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         },
+        generic_api_warning: {
+            reason: "TARGET_API_RESPONSE_INVALID",
+            message: "搜索接口返回了未识别的失败响应"
+        },
         gateway_invoker_failed: {
             reason: "GATEWAY_INVOKER_FAILED",
             message: "网关调用失败，当前上下文不足以完成搜索请求"
@@ -4615,9 +4619,11 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
                 ? 200
                 : simulated === "captcha_required"
                     ? 429
-                    : simulated === "gateway_invoker_failed"
-                        ? 500
-                        : undefined,
+                    : simulated === "generic_api_warning"
+                        ? 400
+                        : simulated === "gateway_invoker_failed"
+                            ? 500
+                            : undefined,
         failureReason: simulated,
         includeKeyRequest: semantics.includeKeyRequest,
         failureSite: {
@@ -4676,16 +4682,6 @@ const inferFailure = (status, body) => {
         return {
             reason: "BROWSER_ENV_ABNORMAL",
             message: "浏览器环境异常，平台拒绝当前请求"
-        };
-    }
-    if (normalized.includes("risk") ||
-        message.includes("安全验证") ||
-        message.includes("访问异常") ||
-        message.includes("环境异常") ||
-        message.includes("操作频繁")) {
-        return {
-            reason: "XHS_ACCOUNT_RISK_PAGE",
-            message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
     if (status >= 500 || normalized.includes("create invoker failed")) {
@@ -6752,16 +6748,6 @@ const inferReadFailure = (spec, status, body) => {
         return {
             reason: "BROWSER_ENV_ABNORMAL",
             message: "浏览器环境异常，平台拒绝当前请求"
-        };
-    }
-    if (normalized.includes("risk") ||
-        message.includes("安全验证") ||
-        message.includes("访问异常") ||
-        message.includes("环境异常") ||
-        message.includes("操作频繁")) {
-        return {
-            reason: "XHS_ACCOUNT_RISK_PAGE",
-            message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
     if (status >= 500 || normalized.includes("create invoker failed")) {

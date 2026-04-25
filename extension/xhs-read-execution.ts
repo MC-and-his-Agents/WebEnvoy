@@ -1147,18 +1147,6 @@ const inferReadFailure = (
       message: "浏览器环境异常，平台拒绝当前请求"
     };
   }
-  if (
-    normalized.includes("risk") ||
-    message.includes("安全验证") ||
-    message.includes("访问异常") ||
-    message.includes("环境异常") ||
-    message.includes("操作频繁")
-  ) {
-    return {
-      reason: "XHS_ACCOUNT_RISK_PAGE",
-      message: "当前页面命中小红书账号风险或安全验证页面"
-    };
-  }
   if (status >= 500 || normalized.includes("create invoker failed")) {
     return {
       reason: "GATEWAY_INVOKER_FAILED",

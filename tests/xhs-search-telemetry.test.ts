@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPageKind,
   classifyXhsAccountSafetySurface,
-  createObservability
+  createObservability,
+  inferFailure
 } from "../extension/xhs-search-telemetry.js";
 
 describe("xhs-search telemetry helpers", () => {
@@ -47,6 +48,25 @@ describe("xhs-search telemetry helpers", () => {
         bodyText: "这是一篇普通笔记，讨论露营投资风险和环境异常天气如何应对。"
       })
     ).toBeNull();
+  });
+
+  it("does not classify ordinary login wording as a login-required surface", () => {
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result?keyword=%E7%99%BB%E5%BD%95",
+        title: "小红书 - 搜索",
+        bodyText: "这是一篇普通教程笔记，登录后可以看到更多内容，输入手机号只是示例文案。"
+      })
+    ).toBeNull();
+  });
+
+  it("does not promote generic API environment warnings into account-risk fuse reasons", () => {
+    expect(inferFailure(400, { msg: "操作频繁，请稍后再试" })).toMatchObject({
+      reason: "TARGET_API_RESPONSE_INVALID"
+    });
+    expect(inferFailure(400, { msg: "环境异常，请稍后再试" })).toMatchObject({
+      reason: "TARGET_API_RESPONSE_INVALID"
+    });
   });
 
   it("classifies high-confidence XHS account safety surfaces", () => {

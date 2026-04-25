@@ -493,9 +493,11 @@ class InMemoryContentScriptRuntime {
                             ? "浏览器环境异常，平台拒绝当前请求"
                             : simulated === "captcha_required"
                                 ? "平台要求额外人机验证，无法继续执行"
-                                : simulated === "signature_entry_missing"
-                                    ? "页面签名入口不可用"
-                                    : spec.failureSummary
+                                : simulated === "generic_api_warning"
+                                    ? `${command} 接口返回了未识别的失败响应`
+                                    : simulated === "signature_entry_missing"
+                                        ? "页面签名入口不可用"
+                                        : spec.failureSummary
             },
             payload: {
                 details: {
@@ -509,9 +511,11 @@ class InMemoryContentScriptRuntime {
                                 ? "BROWSER_ENV_ABNORMAL"
                                 : simulated === "captcha_required"
                                     ? "CAPTCHA_REQUIRED"
-                                    : simulated === "signature_entry_missing"
-                                        ? "SIGNATURE_ENTRY_MISSING"
-                                        : "GATEWAY_INVOKER_FAILED"
+                                    : simulated === "generic_api_warning"
+                                        ? "TARGET_API_RESPONSE_INVALID"
+                                        : simulated === "signature_entry_missing"
+                                            ? "SIGNATURE_ENTRY_MISSING"
+                                            : "GATEWAY_INVOKER_FAILED"
                 },
                 ...gateBundle.payload,
                 observability: {
@@ -539,9 +543,11 @@ class InMemoryContentScriptRuntime {
                                         ? 200
                                         : simulated === "captcha_required"
                                             ? 429
-                                            : simulated === "gateway_invoker_failed"
-                                                ? 500
-                                                : undefined,
+                                            : simulated === "generic_api_warning"
+                                                ? 400
+                                                : simulated === "gateway_invoker_failed"
+                                                    ? 500
+                                                    : undefined,
                                 failure_reason: simulated
                             }
                         ],
