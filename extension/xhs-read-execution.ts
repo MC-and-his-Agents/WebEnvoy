@@ -167,6 +167,8 @@ type ReadRequestContextLookupResult =
       state: "rejected_source";
       reason: RequestContextMissReason;
       shape: ReadRequestShape;
+      statusCode: number | null;
+      platformCode: number | null;
     }
   | {
       state: "error";
@@ -363,27 +365,49 @@ const isCapturedArtifactStale = (value: unknown, now: number): boolean => {
   return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
 };
 
-const resolveRejectedSourceReason = (
+const resolveRejectedSourceDiagnostics = (
   spec: XhsReadCommandSpec,
   artifact: Record<string, unknown>
-): RequestContextMissReason => {
+): {
+  reason: RequestContextMissReason;
+  statusCode: number | null;
+  platformCode: number | null;
+} => {
   const status = resolveCapturedArtifactStatus(artifact);
+  const response = asRecord(artifact.response);
+  const responseBody = response?.body;
+  const responseRecord = asRecord(responseBody);
+  const platformCode = asInteger(responseRecord?.code);
   if (
     status.rejectionReason === "synthetic_request_rejected" ||
     status.rejectionReason === "shape_mismatch"
   ) {
-    return status.rejectionReason;
+    return {
+      reason: status.rejectionReason,
+      statusCode: status.httpStatus,
+      platformCode
+    };
   }
   if (status.rejectionReason === "failed_request_rejected") {
-    const response = asRecord(artifact.response);
-    const responseBody = response?.body;
     const inferred = inferReadFailure(spec, status.httpStatus ?? 0, responseBody);
     if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason as RequestContextMissReason)) {
-      return inferred.reason as RequestContextMissReason;
+      return {
+        reason: inferred.reason as RequestContextMissReason,
+        statusCode: status.httpStatus,
+        platformCode
+      };
     }
-    return "failed_request_rejected";
+    return {
+      reason: "failed_request_rejected",
+      statusCode: status.httpStatus,
+      platformCode
+    };
   }
-  return "failed_request_rejected";
+  return {
+    reason: "failed_request_rejected",
+    statusCode: status.httpStatus,
+    platformCode
+  };
 };
 
 const resolveRejectedSourceMessage = (
@@ -799,10 +823,13 @@ const resolveReadRequestContext = (
           shape: derivedShape ?? expectedShape
         };
       }
+      const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, rejectedObservation);
       return {
         state: "rejected_source",
-        reason: resolveRejectedSourceReason(spec, rejectedObservation),
-        shape: derivedShape ?? expectedShape
+        reason: rejectedDiagnostics.reason,
+        shape: derivedShape ?? expectedShape,
+        statusCode: rejectedDiagnostics.statusCode,
+        platformCode: rejectedDiagnostics.platformCode
       };
     }
     if (incompatibleObservation) {
@@ -868,10 +895,13 @@ const resolveReadRequestContext = (
   }
 
   if (status.rejectionReason) {
+    const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, artifact as Record<string, unknown>);
     return {
       state: "rejected_source",
-      reason: resolveRejectedSourceReason(spec, artifact as Record<string, unknown>),
-      shape: derivedShape
+      reason: rejectedDiagnostics.reason,
+      shape: derivedShape,
+      statusCode: rejectedDiagnostics.statusCode,
+      platformCode: rejectedDiagnostics.platformCode
     };
   }
 
@@ -910,6 +940,14 @@ const failClosedForRequestContext = (
         request_context_miss_reason: input.lookupResult.reason,
         request_context_shape: input.expectedShape,
         request_context_shape_key: serializeReadShape(input.expectedShape),
+        ...(input.lookupResult.state === "rejected_source" &&
+        typeof input.lookupResult.statusCode === "number"
+          ? { status_code: input.lookupResult.statusCode }
+          : {}),
+        ...(input.lookupResult.state === "rejected_source" &&
+        typeof input.lookupResult.platformCode === "number"
+          ? { platform_code: input.lookupResult.platformCode }
+          : {}),
         ...("shape" in input.lookupResult && input.lookupResult.shape
           ? { captured_request_shape: input.lookupResult.shape }
           : {})
@@ -921,12 +959,28 @@ const failClosedForRequestContext = (
         readyState: env.getReadyState(),
         requestId: `req-${env.randomId()}`,
         outcome: "failed",
+        statusCode:
+          input.lookupResult.state === "rejected_source" ? (input.lookupResult.statusCode ?? undefined) : undefined,
         failureReason: input.lookupResult.reason,
-        includeKeyRequest: false,
+        includeKeyRequest:
+          input.lookupResult.state === "rejected_source" &&
+          BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason),
         failureSite: {
-          stage: "execution",
-          component: "page",
-          target: "captured_request_context",
+          stage:
+            input.lookupResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+              ? "request"
+              : "execution",
+          component:
+            input.lookupResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+              ? "network"
+              : "page",
+          target:
+            input.lookupResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+              ? input.spec.endpoint
+              : "captured_request_context",
           summary: input.lookupResult.reason
         }
       }),
@@ -1429,6 +1483,7 @@ const createPageStateFallbackFailure = (
     message: string;
     detail: string;
     statusCode?: number;
+    platformCode?: number;
     requestContextDetails?: JsonRecord;
     requestAttempted?: boolean;
     failureSite?: {
@@ -1449,6 +1504,8 @@ const createPageStateFallbackFailure = (
         ability_id: input.abilityId,
         stage: "execution",
         reason: requestFailure.reason,
+        ...(typeof requestFailure.statusCode === "number" ? { status_code: requestFailure.statusCode } : {}),
+        ...(typeof requestFailure.platformCode === "number" ? { platform_code: requestFailure.platformCode } : {}),
         ...(requestFailure.requestContextDetails ?? {})
       },
       {
@@ -1946,11 +2003,31 @@ const executeXhsRead = async (
         reason: failureSurface.reasonCode,
         message: failureSurface.message,
         detail: requestContextResult.reason,
-        requestAttempted: false,
+        statusCode:
+          requestContextResult.state === "rejected_source" ? (requestContextResult.statusCode ?? undefined) : undefined,
+        platformCode:
+          requestContextResult.state === "rejected_source"
+            ? (requestContextResult.platformCode ?? undefined)
+            : undefined,
+        requestAttempted:
+          requestContextResult.state === "rejected_source" &&
+          BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason),
         failureSite: {
-          stage: "execution",
-          component: "page",
-          target: "captured_request_context",
+          stage:
+            requestContextResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+              ? "request"
+              : "execution",
+          component:
+            requestContextResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+              ? "network"
+              : "page",
+          target:
+            requestContextResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+              ? spec.endpoint
+              : "captured_request_context",
           summary: failureSurface.message
         },
         requestContextDetails: {
@@ -1959,6 +2036,14 @@ const executeXhsRead = async (
           request_context_miss_reason: requestContextResult.reason,
           request_context_shape: expectedShape,
           request_context_shape_key: serializeReadShape(expectedShape),
+          ...(requestContextResult.state === "rejected_source" &&
+          typeof requestContextResult.statusCode === "number"
+            ? { status_code: requestContextResult.statusCode }
+            : {}),
+          ...(requestContextResult.state === "rejected_source" &&
+          typeof requestContextResult.platformCode === "number"
+            ? { platform_code: requestContextResult.platformCode }
+            : {}),
           ...("shape" in requestContextResult && requestContextResult.shape
             ? { captured_request_shape: requestContextResult.shape }
             : {})

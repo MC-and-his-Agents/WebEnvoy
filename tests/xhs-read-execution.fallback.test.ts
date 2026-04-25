@@ -952,15 +952,24 @@ describe("xhs read execution fallback", () => {
       code: "ERR_EXECUTION_FAILED",
       message: "平台要求额外人机验证，无法继续执行"
     });
-    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
-      expect.objectContaining({
-        stage: "page_state_fallback",
-        outcome: "completed",
-        fallback_reason: "CAPTCHA_REQUIRED"
-      })
-    ]);
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "request",
+          outcome: "failed",
+          status_code: 429,
+          failure_reason: "CAPTCHA_REQUIRED"
+        }),
+        expect.objectContaining({
+          stage: "page_state_fallback",
+          outcome: "completed",
+          fallback_reason: "CAPTCHA_REQUIRED"
+        })
+      ])
+    );
     expect(result.payload.details).toMatchObject({
       reason: "CAPTCHA_REQUIRED",
+      status_code: 429,
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
       request_context_miss_reason: "CAPTCHA_REQUIRED"
@@ -1229,19 +1238,110 @@ describe("xhs read execution fallback", () => {
       code: "ERR_EXECUTION_FAILED",
       message: "网关调用失败，当前上下文不足以完成 xhs.user_home 请求"
     });
-    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
-      expect.objectContaining({
-        stage: "page_state_fallback",
-        outcome: "completed",
-        fallback_reason: "GATEWAY_INVOKER_FAILED"
-      })
-    ]);
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "request",
+          outcome: "failed",
+          status_code: 500,
+          failure_reason: "GATEWAY_INVOKER_FAILED"
+        }),
+        expect.objectContaining({
+          stage: "page_state_fallback",
+          outcome: "completed",
+          fallback_reason: "GATEWAY_INVOKER_FAILED"
+        })
+      ])
+    );
     expect(result.payload.details).toMatchObject({
       reason: "GATEWAY_INVOKER_FAILED",
+      status_code: 500,
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
       request_context_miss_reason: "GATEWAY_INVOKER_FAILED"
     });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("preserves account-abnormal status diagnostics for rejected detail request contexts", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-rejected-account-abnormal-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-rejected-account-abnormal-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-rejected-account-abnormal-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-rejected-account-abnormal-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-rejected-account-abnormal-001", {
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 461
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 300011,
+                msg: "account abnormal"
+              }
+            }
+          })
+        ),
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-rejected-account-abnormal-001": {
+                noteId: "note-rejected-account-abnormal-001"
+              }
+            }
+          }
+        }),
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail account-abnormal rejected-context failure envelope");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "账号异常，平台拒绝当前请求"
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "ACCOUNT_ABNORMAL",
+      status_code: 461,
+      platform_code: 300011,
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "ACCOUNT_ABNORMAL"
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "request",
+          outcome: "failed",
+          status_code: 461,
+          failure_reason: "ACCOUNT_ABNORMAL"
+        }),
+        expect.objectContaining({
+          stage: "page_state_fallback",
+          outcome: "completed",
+          fallback_reason: "ACCOUNT_ABNORMAL"
+        })
+      ])
+    );
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
