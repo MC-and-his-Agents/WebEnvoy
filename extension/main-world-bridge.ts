@@ -635,8 +635,8 @@ const isSyntheticRequestInput = (value: unknown): boolean =>
 
 const hasCapturedRequestBusinessFailure = (body: unknown): boolean => {
   const record = asRecord(body);
-  const code = record?.code;
-  return typeof code === "number" && Number.isFinite(code) && code !== 0;
+  const code = asInteger(record?.code);
+  return code !== null && code !== 0;
 };
 
 const createWindowEvent = (type: string, detail: unknown): Event => {
