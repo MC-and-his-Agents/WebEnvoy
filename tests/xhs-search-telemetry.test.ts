@@ -139,4 +139,34 @@ describe("xhs-search telemetry helpers", () => {
       reason: "XHS_LOGIN_REQUIRED"
     });
   });
+
+  it("classifies high-confidence XHS overlays even when the page URL stays unchanged", () => {
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+        title: "小红书 - 你的生活兴趣社区",
+        bodyText: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号 新用户可直接登录"
+      })
+    ).toMatchObject({
+      reason: "XHS_LOGIN_REQUIRED"
+    });
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/explore/note-risk-overlay-001",
+        title: "小红书",
+        bodyText: "当前访问存在安全风险 验证后继续访问"
+      })
+    ).toMatchObject({
+      reason: "XHS_ACCOUNT_RISK_PAGE"
+    });
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/explore/note-captcha-overlay-001",
+        title: "小红书",
+        bodyText: "请完成验证 拖动滑块"
+      })
+    ).toMatchObject({
+      reason: "CAPTCHA_REQUIRED"
+    });
+  });
 });
