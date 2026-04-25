@@ -4363,6 +4363,13 @@ const SEARCH_FAILURE_SEMANTICS = {
         includeKeyRequest: true
     }
 };
+const PAGE_SURFACE_ACCOUNT_SAFETY_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
+    "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
+    "CAPTCHA_REQUIRED",
+    "BROWSER_ENV_ABNORMAL"
+]);
 const extractUrlPath = (href) => {
     try {
         return new URL(href).pathname.toLowerCase();
@@ -4468,12 +4475,23 @@ const classifyXhsAccountSafetySurface = (input) => {
     }
     return null;
 };
-const resolveDiagnosisSemantics = (reason, fallbackCategory) => SEARCH_FAILURE_SEMANTICS[reason] ?? {
-    category: fallbackCategory ?? "request_failed",
-    stage: "request",
-    component: "network",
-    target: SEARCH_ENDPOINT,
-    includeKeyRequest: true
+const resolveDiagnosisSemantics = (reason, fallbackCategory) => {
+    if (fallbackCategory === "page_changed" && PAGE_SURFACE_ACCOUNT_SAFETY_REASONS.has(reason)) {
+        return {
+            category: "page_changed",
+            stage: "action",
+            component: "page",
+            target: "xhs.account_safety_surface",
+            includeKeyRequest: false
+        };
+    }
+    return SEARCH_FAILURE_SEMANTICS[reason] ?? {
+        category: fallbackCategory ?? "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    };
 };
 const createObservability = (input) => ({
     page_state: {
@@ -4704,6 +4722,10 @@ const inferFailure = (status, body) => {
     const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -4728,7 +4750,7 @@ const inferFailure = (status, body) => {
             message: "网关调用失败，当前上下文不足以完成搜索请求"
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -6818,6 +6840,10 @@ const inferReadFailure = (spec, status, body) => {
             ? record.message
             : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -6842,7 +6868,7 @@ const inferReadFailure = (spec, status, body) => {
             message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"

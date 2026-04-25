@@ -220,9 +220,6 @@ const resolveAccountSafetySignal = (payload, fallback) => {
             if (statusCode === 461 || platformCode === 300011) {
                 return "ACCOUNT_ABNORMAL";
             }
-            if (statusCode === 429) {
-                return "CAPTCHA_REQUIRED";
-            }
             if (platformCode === 300015) {
                 return "BROWSER_ENV_ABNORMAL";
             }

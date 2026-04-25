@@ -119,6 +119,14 @@ const SEARCH_FAILURE_SEMANTICS: Record<string, FailureSemantics> = {
   }
 };
 
+const PAGE_SURFACE_ACCOUNT_SAFETY_REASONS = new Set([
+  "XHS_LOGIN_REQUIRED",
+  "ACCOUNT_ABNORMAL",
+  "XHS_ACCOUNT_RISK_PAGE",
+  "CAPTCHA_REQUIRED",
+  "BROWSER_ENV_ABNORMAL"
+]);
+
 const extractUrlPath = (href: string): string => {
   try {
     return new URL(href).pathname.toLowerCase();
@@ -263,14 +271,24 @@ export const classifyXhsAccountSafetySurface = (input: {
 const resolveDiagnosisSemantics = (
   reason: string,
   fallbackCategory?: DiagnosisCategory
-): FailureSemantics =>
-  SEARCH_FAILURE_SEMANTICS[reason] ?? {
+): FailureSemantics => {
+  if (fallbackCategory === "page_changed" && PAGE_SURFACE_ACCOUNT_SAFETY_REASONS.has(reason)) {
+    return {
+      category: "page_changed",
+      stage: "action",
+      component: "page",
+      target: "xhs.account_safety_surface",
+      includeKeyRequest: false
+    };
+  }
+  return SEARCH_FAILURE_SEMANTICS[reason] ?? {
     category: fallbackCategory ?? "request_failed",
     stage: "request",
     component: "network",
     target: SEARCH_ENDPOINT,
     includeKeyRequest: true
   };
+};
 
 export const createObservability = (input: {
   href: string;
@@ -561,6 +579,11 @@ export const inferFailure = (status: number, body: unknown): { reason: string; m
   const businessCode = asInteger(record?.code);
   const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
   const normalized = `${message}`.toLowerCase();
+  const hasCaptchaEvidence =
+    normalized.includes("captcha") ||
+    message.includes("验证码") ||
+    message.includes("人机验证") ||
+    message.includes("滑块");
 
   if (status === 401 || normalized.includes("login")) {
     return {
@@ -586,7 +609,7 @@ export const inferFailure = (status: number, body: unknown): { reason: string; m
       message: "网关调用失败，当前上下文不足以完成搜索请求"
     };
   }
-  if (status === 429 || normalized.includes("captcha")) {
+  if (hasCaptchaEvidence) {
     return {
       reason: "CAPTCHA_REQUIRED",
       message: "平台要求额外人机验证，无法继续执行"

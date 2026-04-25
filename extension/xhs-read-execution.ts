@@ -1190,6 +1190,11 @@ const inferReadFailure = (
         ? record.message
         : "";
   const normalized = `${message}`.toLowerCase();
+  const hasCaptchaEvidence =
+    normalized.includes("captcha") ||
+    message.includes("验证码") ||
+    message.includes("人机验证") ||
+    message.includes("滑块");
 
   if (status === 401 || normalized.includes("login")) {
     return {
@@ -1215,7 +1220,7 @@ const inferReadFailure = (
       message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`
     };
   }
-  if (status === 429 || normalized.includes("captcha")) {
+  if (hasCaptchaEvidence) {
     return {
       reason: "CAPTCHA_REQUIRED",
       message: "平台要求额外人机验证，无法继续执行"

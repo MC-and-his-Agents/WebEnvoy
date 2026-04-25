@@ -299,6 +299,57 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("keeps captcha overlay diagnosis as page_changed before request-context lookup", async () => {
+    const readCapturedRequestContext = vi.fn(async () => null);
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-captcha-overlay-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-captcha-overlay-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-captcha-overlay-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-captcha-overlay-001",
+        getDocumentTitle: () => "小红书 - 你的生活兴趣社区",
+        getAccountSafetyOverlay: () => ({
+          source: "dom_overlay",
+          selector: ".captcha-container",
+          text: "请完成验证 拖动滑块"
+        }),
+        readCapturedRequestContext,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected captcha overlay failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "CAPTCHA_REQUIRED"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "page_changed",
+      stage: "action",
+      component: "page",
+      failure_site: {
+        target: "xhs.account_safety_surface"
+      }
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect(readCapturedRequestContext).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("returns detail success only when the api payload contains the requested note object", async () => {
     const callSignature = vi.fn(async () => ({
       "X-s": "sig",
@@ -1709,6 +1760,53 @@ describe("xhs read execution fallback", () => {
           failure_reason: "TARGET_API_RESPONSE_INVALID"
         })
       ]
+    });
+  });
+
+  it("does not classify bare read api 429 responses as account-risk without captcha evidence", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-generic-429-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-generic-429-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-generic-429-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-generic-429-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-generic-429-001")
+        ),
+        readPageStateRoot: async () => null,
+        fetchJson: async () => ({
+          status: 429,
+          body: {
+            code: -1,
+            msg: "操作频繁，请稍后再试"
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected generic 429 failure envelope");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "TARGET_API_RESPONSE_INVALID",
+      status_code: 429
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "request_failed",
+      failure_site: {
+        target: "/api/sns/web/v1/feed"
+      }
     });
   });
 

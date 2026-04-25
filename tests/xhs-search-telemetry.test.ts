@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPageKind,
   classifyXhsAccountSafetySurface,
+  createDiagnosis,
   createObservability,
   inferFailure
 } from "../extension/xhs-search-telemetry.js";
@@ -108,6 +109,18 @@ describe("xhs-search telemetry helpers", () => {
     expect(inferFailure(400, { msg: "环境异常，请稍后再试" })).toMatchObject({
       reason: "TARGET_API_RESPONSE_INVALID"
     });
+    expect(inferFailure(429, { msg: "操作频繁，请稍后再试" })).toMatchObject({
+      reason: "TARGET_API_RESPONSE_INVALID"
+    });
+  });
+
+  it("requires captcha evidence before classifying 429 responses as CAPTCHA_REQUIRED", () => {
+    expect(inferFailure(429, { msg: "captcha required" })).toMatchObject({
+      reason: "CAPTCHA_REQUIRED"
+    });
+    expect(inferFailure(429, { msg: "请完成人机验证" })).toMatchObject({
+      reason: "CAPTCHA_REQUIRED"
+    });
   });
 
   it("normalizes string platform risk codes before classifying API failures", () => {
@@ -116,6 +129,36 @@ describe("xhs-search telemetry helpers", () => {
     });
     expect(inferFailure(200, { code: "300015", msg: "browser environment abnormal" })).toMatchObject({
       reason: "BROWSER_ENV_ABNORMAL"
+    });
+  });
+
+  it("keeps account-safety overlay diagnosis on the page surface", () => {
+    expect(
+      createDiagnosis({
+        reason: "CAPTCHA_REQUIRED",
+        summary: "平台要求额外人机验证，无法继续执行",
+        category: "page_changed"
+      })
+    ).toMatchObject({
+      category: "page_changed",
+      stage: "action",
+      component: "page",
+      failure_site: {
+        target: "xhs.account_safety_surface"
+      }
+    });
+    expect(
+      createDiagnosis({
+        reason: "ACCOUNT_ABNORMAL",
+        summary: "账号异常，平台拒绝当前请求",
+        category: "page_changed"
+      })
+    ).toMatchObject({
+      category: "page_changed",
+      component: "page",
+      failure_site: {
+        target: "xhs.account_safety_surface"
+      }
     });
   });
 
