@@ -61,6 +61,18 @@ describe("xhs-search telemetry helpers", () => {
     ).toBeNull();
   });
 
+  it("does not classify title text alone as an account-safety surface", () => {
+    for (const title of ["账号异常排查笔记", "安全验证体验记录", "访问异常问题复盘"]) {
+      expect(
+        classifyXhsAccountSafetySurface({
+          href: "https://www.xiaohongshu.com/explore/note-title-text-001",
+          title,
+          bodyText: "普通笔记正文，没有平台拦截 UI。"
+        })
+      ).toBeNull();
+    }
+  });
+
   it("does not promote generic API environment warnings into account-risk fuse reasons", () => {
     expect(inferFailure(400, { msg: "操作频繁，请稍后再试" })).toMatchObject({
       reason: "TARGET_API_RESPONSE_INVALID"

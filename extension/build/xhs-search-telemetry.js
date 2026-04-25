@@ -98,9 +98,8 @@ export const classifyXhsAccountSafetySurface = (input) => {
     const title = normalizeSurfaceText(input.title);
     const bodyText = normalizeSurfaceText(input.bodyText ?? "");
     const text = `${title} ${bodyText}`;
-    if (title.includes("captcha") ||
-        title.includes("人机验证") ||
-        title.includes("请完成验证") ||
+    if (((title.includes("captcha") || title.includes("人机验证") || title.includes("请完成验证")) &&
+        (bodyText.includes("请完成") || bodyText.includes("验证") || bodyText.includes("滑块"))) ||
         (bodyText.includes("请完成验证") &&
             (bodyText.includes("验证码") || bodyText.includes("滑块") || bodyText.includes("人机验证")))) {
         return {
@@ -108,7 +107,7 @@ export const classifyXhsAccountSafetySurface = (input) => {
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (title.includes("账号异常") || text.includes("300011")) {
+    if (text.includes("300011")) {
         return {
             reason: "ACCOUNT_ABNORMAL",
             message: "账号异常，平台拒绝当前请求"
@@ -120,14 +119,15 @@ export const classifyXhsAccountSafetySurface = (input) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
-    if (title.includes("浏览器环境异常") || bodyText.includes("当前浏览器环境异常")) {
+    if (bodyText.includes("当前浏览器环境异常") ||
+        (title.includes("浏览器环境异常") && bodyText.includes("平台拒绝当前请求"))) {
         return {
             reason: "BROWSER_ENV_ABNORMAL",
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
-    if (title.includes("安全验证") ||
-        title.includes("访问异常") ||
+    if (((title.includes("安全验证") || title.includes("访问异常")) &&
+        (bodyText.includes("请完成") || bodyText.includes("继续访问") || bodyText.includes("验证"))) ||
         bodyText.includes("当前访问存在安全风险") ||
         bodyText.includes("账号存在安全风险") ||
         bodyText.includes("请完成安全验证") ||
