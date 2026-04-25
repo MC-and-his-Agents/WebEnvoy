@@ -73,6 +73,16 @@ describe("xhs-search telemetry helpers", () => {
     }
   });
 
+  it("does not classify body-only risk phrases as an account-safety surface", () => {
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/explore/note-body-risk-text-001",
+        title: "普通笔记",
+        bodyText: "当前访问存在安全风险、请完成安全验证、访问异常，请稍后重试，这些只是笔记内容。"
+      })
+    ).toBeNull();
+  });
+
   it("does not promote generic API environment warnings into account-risk fuse reasons", () => {
     expect(inferFailure(400, { msg: "操作频繁，请稍后再试" })).toMatchObject({
       reason: "TARGET_API_RESPONSE_INVALID"

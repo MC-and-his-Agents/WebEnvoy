@@ -179,13 +179,15 @@ export const classifyXhsAccountSafetySurface = (input: {
     };
   }
   if (
+    href.includes("/security") ||
+    href.includes("/risk") ||
     ((title.includes("安全验证") || title.includes("访问异常")) &&
-      (bodyText.includes("请完成") || bodyText.includes("继续访问") || bodyText.includes("验证"))) ||
-    bodyText.includes("当前访问存在安全风险") ||
-    bodyText.includes("账号存在安全风险") ||
-    bodyText.includes("请完成安全验证") ||
-    bodyText.includes("验证后继续访问") ||
-    bodyText.includes("访问异常，请稍后重试")
+      (bodyText.includes("请完成") ||
+        bodyText.includes("继续访问") ||
+        bodyText.includes("验证后继续访问") ||
+        bodyText.includes("当前访问存在安全风险") ||
+        bodyText.includes("账号存在安全风险") ||
+        bodyText.includes("访问异常，请稍后重试")))
   ) {
     return {
       reason: "XHS_ACCOUNT_RISK_PAGE",

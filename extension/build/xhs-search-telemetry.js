@@ -126,13 +126,15 @@ export const classifyXhsAccountSafetySurface = (input) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
-    if (((title.includes("安全验证") || title.includes("访问异常")) &&
-        (bodyText.includes("请完成") || bodyText.includes("继续访问") || bodyText.includes("验证"))) ||
-        bodyText.includes("当前访问存在安全风险") ||
-        bodyText.includes("账号存在安全风险") ||
-        bodyText.includes("请完成安全验证") ||
-        bodyText.includes("验证后继续访问") ||
-        bodyText.includes("访问异常，请稍后重试")) {
+    if (href.includes("/security") ||
+        href.includes("/risk") ||
+        ((title.includes("安全验证") || title.includes("访问异常")) &&
+            (bodyText.includes("请完成") ||
+                bodyText.includes("继续访问") ||
+                bodyText.includes("验证后继续访问") ||
+                bodyText.includes("当前访问存在安全风险") ||
+                bodyText.includes("账号存在安全风险") ||
+                bodyText.includes("访问异常，请稍后重试")))) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
