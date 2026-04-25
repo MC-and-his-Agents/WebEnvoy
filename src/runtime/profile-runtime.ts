@@ -182,6 +182,8 @@ interface BrowserInstanceStateRecord extends Record<string, unknown> {
   runId: string;
   controllerPid: number;
   browserPid: number;
+  headless?: boolean;
+  executionSurface?: "headless_browser" | "real_browser";
 }
 
 interface RuntimeBridgeLike {
@@ -297,10 +299,49 @@ const buildRecoverableSessionSummary = (
 };
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const XHS_TARGET_DOMAIN = "www.xiaohongshu.com";
 
 const readRequestedExecutionMode = (params: JsonObject): string | null => {
   const mode = params.requested_execution_mode;
   return typeof mode === "string" && mode.length > 0 ? mode : null;
+};
+
+const isXhsManagedProfile = (profile: string): boolean =>
+  profile === "xhs_001" || profile.startsWith("xhs_");
+
+const isXhsUrl = (value: unknown): boolean => {
+  if (typeof value !== "string" || value.trim().length === 0 || value.trim() === "about:blank") {
+    return false;
+  }
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.hostname === XHS_TARGET_DOMAIN || parsed.hostname.endsWith(".xiaohongshu.com");
+  } catch {
+    return false;
+  }
+};
+
+const referencesXhsSurface = (profile: string, params: JsonObject): boolean =>
+  isXhsManagedProfile(profile) ||
+  params.target_domain === XHS_TARGET_DOMAIN ||
+  isXhsUrl(params.startUrl);
+
+const ensureXhsRuntimeStartVisible = (input: RuntimeActionInput): void => {
+  if (!referencesXhsSurface(input.profile, input.params) || input.params.headless === false) {
+    return;
+  }
+  throw new CliError("ERR_PROFILE_INVALID", "XHS managed live profile 禁止 headless runtime.start", {
+    details: {
+      ability_id: "runtime.start",
+      stage: "input_validation",
+      reason: "XHS_HEADLESS_RUNTIME_BLOCKED",
+      profile: input.profile,
+      target_domain:
+        typeof input.params.target_domain === "string" ? input.params.target_domain : null,
+      start_url: typeof input.params.startUrl === "string" ? input.params.startUrl : null,
+      required_param: "params.headless=false"
+    }
+  });
 };
 
 const buildRuntimeTargetParams = (params: JsonObject): JsonObject => ({
@@ -537,6 +578,7 @@ export class ProfileRuntimeService {
 
   async start(input: RuntimeActionInput): Promise<JsonObject> {
     const nowIso = isoNow();
+    ensureXhsRuntimeStartVisible(input);
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     await store.ensureProfileDir(input.profile);
@@ -681,6 +723,8 @@ export class ProfileRuntimeService {
         browserPath: browserLaunch.browserPath,
         browserPid: browserLaunch.browserPid,
         controllerPid: browserLaunch.controllerPid,
+        headless: browserLaunch.headless ?? null,
+        executionSurface: browserLaunch.executionSurface ?? null,
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
         fingerprint_runtime: fingerprintRuntime,
         startedAt: nowIso
@@ -962,6 +1006,7 @@ export class ProfileRuntimeService {
     });
     const pinnedControllerPid =
       typeof lock?.controllerPid === "number" ? lock.controllerPid : lock?.ownerPid;
+    const browserInstanceState = await this.#readBrowserInstanceState(profileDir);
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1030,6 +1075,8 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: lock?.ownerPid ?? null,
+      headless: browserInstanceState?.headless ?? null,
+      executionSurface: browserInstanceState?.executionSurface ?? null,
       runtimeTakeoverEvidence,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
@@ -1631,7 +1678,13 @@ export class ProfileRuntimeService {
       return {
         runId: parsed.runId,
         controllerPid,
-        browserPid
+        browserPid,
+        headless: typeof parsed.headless === "boolean" ? parsed.headless : undefined,
+        executionSurface:
+          parsed.executionSurface === "headless_browser" ||
+          parsed.executionSurface === "real_browser"
+            ? parsed.executionSurface
+            : undefined
       };
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
@@ -1656,7 +1709,13 @@ export class ProfileRuntimeService {
         ...parsed,
         runId: parsed.runId,
         controllerPid: parsed.controllerPid as number,
-        browserPid: parsed.browserPid as number
+        browserPid: parsed.browserPid as number,
+        headless: typeof parsed.headless === "boolean" ? parsed.headless : undefined,
+        executionSurface:
+          parsed.executionSurface === "headless_browser" ||
+          parsed.executionSurface === "real_browser"
+            ? parsed.executionSurface
+            : undefined
       };
     } catch {
       return null;
