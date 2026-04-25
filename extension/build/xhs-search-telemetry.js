@@ -87,37 +87,46 @@ const SEARCH_FAILURE_SEMANTICS = {
         includeKeyRequest: true
     }
 };
+const extractUrlPath = (href) => {
+    try {
+        return new URL(href).pathname.toLowerCase();
+    }
+    catch {
+        return href.split(/[?#]/u, 1)[0]?.toLowerCase() ?? "";
+    }
+};
 export const classifyPageKind = (href) => {
-    if (href.includes("/login")) {
+    const path = extractUrlPath(href);
+    if (path.includes("/login")) {
         return "login";
     }
     if (href.includes("creator.xiaohongshu.com/publish")) {
         return "compose";
     }
-    if (href.includes("/search_result")) {
+    if (path.includes("/search_result")) {
         return "search";
     }
-    if (href.includes("/explore/")) {
+    if (path.includes("/explore/")) {
         return "detail";
     }
     return "unknown";
 };
 export const classifyXhsAccountSafetySurface = (input) => {
-    const href = input.href.toLowerCase();
-    if (href.includes("captcha")) {
+    const path = extractUrlPath(input.href);
+    if (path.includes("captcha")) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (href.includes("/security") ||
-        href.includes("/risk")) {
+    if (path.includes("/security") ||
+        path.includes("/risk")) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
-    if (href.includes("/login")) {
+    if (path.includes("/login")) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"

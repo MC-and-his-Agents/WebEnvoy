@@ -61,6 +61,23 @@ describe("xhs-search telemetry helpers", () => {
     ).toBeNull();
   });
 
+  it("does not classify account-safety words from query parameters as risk URLs", () => {
+    for (const href of [
+      "https://www.xiaohongshu.com/search_result?redirect=%2Flogin",
+      "https://www.xiaohongshu.com/explore/note-001?next=/security/verify",
+      "https://www.xiaohongshu.com/explore/note-002?keyword=captcha",
+      "https://www.xiaohongshu.com/explore/note-003#risk"
+    ]) {
+      expect(
+        classifyXhsAccountSafetySurface({
+          href,
+          title: "小红书",
+          bodyText: "普通页面"
+        })
+      ).toBeNull();
+    }
+  });
+
   it("does not classify title text alone as an account-safety surface", () => {
     for (const title of ["账号异常排查笔记", "安全验证体验记录", "访问异常问题复盘"]) {
       expect(
