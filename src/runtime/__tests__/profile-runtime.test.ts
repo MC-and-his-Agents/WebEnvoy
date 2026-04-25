@@ -4995,6 +4995,85 @@ describe("profile-runtime login", () => {
     });
   });
 
+  it("preserves legacy account-safety cooldown when confirming XHS recovery", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-legacy-recovery-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    await service.login({
+      cwd: baseDir,
+      profile: "legacy_recovery_login_profile",
+      runId: "run-runtime-test-legacy-recovery-001",
+      params: {}
+    });
+
+    const metaPath = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "legacy_recovery_login_profile",
+      "__webenvoy_meta.json"
+    );
+    const metaBefore = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...metaBefore,
+          accountSafety: {
+            state: "account_risk_blocked",
+            platform: "xhs",
+            reason: "ACCOUNT_ABNORMAL",
+            observedAt: "2026-04-25T10:00:00.000Z",
+            cooldownUntil: "2099-04-25T10:30:00.000Z",
+            sourceRunId: "run-risk-legacy-recovery-001",
+            sourceCommand: "xhs.search",
+            targetDomain: "www.xiaohongshu.com",
+            targetTabId: 32,
+            pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+            statusCode: 461,
+            platformCode: 300011
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const confirmed = await service.login({
+      cwd: baseDir,
+      profile: "legacy_recovery_login_profile",
+      runId: "run-runtime-test-legacy-recovery-001",
+      params: {
+        confirm: true,
+        account_recovery_confirmed: true
+      }
+    });
+
+    expect(confirmed.account_safety).toMatchObject({
+      state: "clear",
+      live_commands_blocked: false
+    });
+    expect(confirmed.xhs_closeout_rhythm).toMatchObject({
+      state: "cooldown",
+      cooldown_until: "2099-04-25T10:30:00.000Z",
+      single_probe_required: true,
+      full_bundle_blocked: true,
+      reason_codes: expect.arrayContaining(["XHS_CLOSEOUT_COOLDOWN_ACTIVE"])
+    });
+
+    const metaAfter = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    expect(metaAfter.xhsCloseoutRhythm).toMatchObject({
+      cooldownUntil: "2099-04-25T10:30:00.000Z",
+      operatorConfirmedAt: expect.any(String),
+      singleProbeRequired: true,
+      fullBundleBlocked: true
+    });
+  });
+
   it("marks disconnected when confirm arrives after login browser already closed", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-disconnect-"));
     tempDirs.push(baseDir);

@@ -664,12 +664,19 @@ export class ProfileRuntimeService {
                 lastLoginAt: nowIso,
                 localStorageSnapshots: upsertLocalStorageSnapshot(recoveredMeta.localStorageSnapshots, localStorageSnapshot)
             });
+            const recoveryRhythmCurrent = recoveredMeta.xhsCloseoutRhythm ??
+                (recoveredMeta.accountSafety?.state === "account_risk_blocked"
+                    ? buildBlockedXhsCloseoutRhythmRecord({
+                        cooldownUntil: recoveredMeta.accountSafety.cooldownUntil,
+                        reasonCode: recoveredMeta.accountSafety.reason
+                    })
+                    : undefined);
             const nextMeta = confirmAccountRecovery
                 ? {
                     ...nextMetaBase,
                     accountSafety: buildClearAccountSafetyRecord(),
                     xhsCloseoutRhythm: markXhsCloseoutOperatorConfirmed({
-                        current: recoveredMeta.xhsCloseoutRhythm,
+                        current: recoveryRhythmCurrent,
                         confirmedAt: nowIso
                     })
                 }
