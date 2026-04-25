@@ -2782,6 +2782,45 @@ process.stdin.on("data", (chunk) => {
       (((executeBody.error as Record<string, unknown>).details as Record<string, unknown>)
         .audit_record as Record<string, unknown>).session_id
     );
+    const auditProfile = "loopback_profile";
+    const auditProfileDir = path.join(cwd, ".webenvoy", "profiles", auditProfile);
+    await mkdir(auditProfileDir, { recursive: true });
+    await writeFile(
+      path.join(auditProfileDir, "__webenvoy_meta.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: auditProfile,
+          profileDir: auditProfileDir,
+          profileState: "ready",
+          proxyBinding: null,
+          xhsCloseoutRhythm: {
+            state: "single_probe_passed",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: false,
+            singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+            probeRunId: "run-session-audit-probe-001",
+            fullBundleBlocked: true,
+            reasonCodes: ["ANTI_DETECTION_BASELINE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-session-audit-a",
+            canvasNoiseSeed: "seed-session-audit-c"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-04-25T10:00:00.000Z",
+          updatedAt: "2026-04-25T10:40:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: null,
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
 
     const queryResult = runCli([
       "runtime.audit",
@@ -2833,6 +2872,16 @@ process.stdin.on("data", (chunk) => {
             last_event_at: expect.any(String),
             source_event_id: expect.any(String)
           }
+        },
+        session_rhythm_status_view: {
+          source: "profile_meta",
+          platform: "xhs",
+          state: "single_probe_passed",
+          recovery: {
+            probe_run_id: "run-session-audit-probe-001"
+          },
+          full_bundle_blocked: true,
+          reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
         }
       }
     });

@@ -1480,60 +1480,85 @@ export class ProfileRuntimeService {
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     await store.ensureProfileDir(input.profile);
-    const existingMeta =
-      await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
-      this.#buildMinimalProfileMeta({
-        profile: input.profile,
-        profileDir,
-        nowIso: claimedAt
-      });
-    const currentStatus = toXhsCloseoutRhythmStatus({
-      rhythm: existingMeta.xhsCloseoutRhythm,
-      accountSafety: existingMeta.accountSafety
-    });
-    if (
-      existingMeta.accountSafety?.state === "account_risk_blocked" ||
-      currentStatus.state !== "single_probe_required" ||
-      currentStatus.probe_run_id !== null
-    ) {
-      throw new CliError(
-        "ERR_EXECUTION_FAILED",
-        "XHS recovery single-probe budget is not available",
-        {
-          retryable: false,
-          details: {
-            ability_id: "xhs.note.search.v1",
-            stage: "execution",
-            reason:
-              existingMeta.accountSafety?.state === "account_risk_blocked"
-                ? "ACCOUNT_RISK_BLOCKED"
-                : "XHS_CLOSEOUT_RHYTHM_BLOCKED",
-            account_safety: toAccountSafetyStatus(existingMeta.accountSafety),
-            xhs_closeout_rhythm: currentStatus
+    const claimLockPath = join(profileDir, "__webenvoy_xhs_probe_claim.lock");
+    try {
+      await writeFile(claimLockPath, `${input.runId}\n`, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "EEXIST") {
+        throw new CliError(
+          "ERR_EXECUTION_FAILED",
+          "XHS recovery single-probe budget is already being claimed",
+          {
+            retryable: false,
+            details: {
+              ability_id: "xhs.note.search.v1",
+              stage: "execution",
+              reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+            }
           }
-        }
-      );
+        );
+      }
+      throw error;
     }
-    const xhsCloseoutRhythm = claimXhsCloseoutSingleProbe({
-      current: existingMeta.xhsCloseoutRhythm,
-      probeRunId: input.runId
-    });
-    const nextMeta: ProfileMeta = {
-      ...existingMeta,
-      profileName: input.profile,
-      profileDir,
-      xhsCloseoutRhythm,
-      updatedAt: claimedAt
-    };
-    await store.writeMeta(input.profile, nextMeta);
+    try {
+      const existingMeta =
+        await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+        this.#buildMinimalProfileMeta({
+          profile: input.profile,
+          profileDir,
+          nowIso: claimedAt
+        });
+      const currentStatus = toXhsCloseoutRhythmStatus({
+        rhythm: existingMeta.xhsCloseoutRhythm,
+        accountSafety: existingMeta.accountSafety
+      });
+      if (
+        existingMeta.accountSafety?.state === "account_risk_blocked" ||
+        currentStatus.state !== "single_probe_required" ||
+        currentStatus.probe_run_id !== null
+      ) {
+        throw new CliError(
+          "ERR_EXECUTION_FAILED",
+          "XHS recovery single-probe budget is not available",
+          {
+            retryable: false,
+            details: {
+              ability_id: "xhs.note.search.v1",
+              stage: "execution",
+              reason:
+                existingMeta.accountSafety?.state === "account_risk_blocked"
+                  ? "ACCOUNT_RISK_BLOCKED"
+                  : "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+              account_safety: toAccountSafetyStatus(existingMeta.accountSafety),
+              xhs_closeout_rhythm: currentStatus
+            }
+          }
+        );
+      }
+      const xhsCloseoutRhythm = claimXhsCloseoutSingleProbe({
+        current: existingMeta.xhsCloseoutRhythm,
+        probeRunId: input.runId
+      });
+      const nextMeta: ProfileMeta = {
+        ...existingMeta,
+        profileName: input.profile,
+        profileDir,
+        xhsCloseoutRhythm,
+        updatedAt: claimedAt
+      };
+      await store.writeMeta(input.profile, nextMeta);
 
-    return {
-      profile: input.profile,
-      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
-        rhythm: xhsCloseoutRhythm,
-        accountSafety: nextMeta.accountSafety
-      })
-    };
+      return {
+        profile: input.profile,
+        xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+          rhythm: xhsCloseoutRhythm,
+          accountSafety: nextMeta.accountSafety
+        })
+      };
+    } finally {
+      await unlink(claimLockPath).catch(() => undefined);
+    }
   }
 
   async stop(input: RuntimeActionInput): Promise<JsonObject> {

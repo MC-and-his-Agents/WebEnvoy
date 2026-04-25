@@ -296,9 +296,10 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       null,
       enrichedAuditRecords
     );
+    const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
     const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
       context.cwd,
-      profile
+      profile ?? auditProfile
     );
     return {
       query: {

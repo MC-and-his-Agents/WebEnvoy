@@ -728,6 +728,66 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("allows only one concurrent XHS recovery single-probe claim", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-probe-claim-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await store.initializeMeta(
+      "probe_claim_profile",
+      "2026-04-25T10:00:00.000Z",
+      { allowUnsupportedExtensionBrowser: true }
+    );
+    await store.writeMeta("probe_claim_profile", {
+      ...meta,
+      accountSafety: {
+        state: "clear",
+        platform: null,
+        reason: null,
+        observedAt: null,
+        cooldownUntil: null,
+        sourceRunId: null,
+        sourceCommand: null,
+        targetDomain: null,
+        targetTabId: null,
+        pageUrl: null,
+        statusCode: null,
+        platformCode: null
+      },
+      xhsCloseoutRhythm: {
+        state: "single_probe_required",
+        cooldownUntil: "2000-01-01T00:30:00.000Z",
+        operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+        singleProbeRequired: true,
+        singleProbePassedAt: null,
+        probeRunId: null,
+        fullBundleBlocked: true,
+        reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+      }
+    });
+    const service = createTestService();
+
+    const results = await Promise.allSettled([
+      service.claimXhsCloseoutSingleProbe({
+        cwd: baseDir,
+        profile: "probe_claim_profile",
+        runId: "run-probe-claim-001",
+        params: {}
+      }),
+      service.claimXhsCloseoutSingleProbe({
+        cwd: baseDir,
+        profile: "probe_claim_profile",
+        runId: "run-probe-claim-002",
+        params: {}
+      })
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const persisted = await store.readMeta("probe_claim_profile");
+    expect(persisted?.xhsCloseoutRhythm?.probeRunId).toMatch(/^run-probe-claim-00[12]$/u);
+  });
+
   it("surfaces transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
     tempDirs.push(baseDir);

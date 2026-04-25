@@ -219,7 +219,8 @@ const runtimeAuditQuery = async (context) => {
         });
         const enrichedAuditRecords = records.map((record) => enrichAuditRecordWithWriteTier(record));
         const currentRiskState = resolveCurrentRiskState(null, enrichedAuditRecords);
-        const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile);
+        const auditProfile = asString(enrichedAuditRecords[0]?.profile);
+        const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile);
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
