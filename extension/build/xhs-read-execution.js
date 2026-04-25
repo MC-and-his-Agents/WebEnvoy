@@ -1,14 +1,16 @@
 import { createUserHomeRequestShape, createPageContextNamespace } from "./xhs-search-types.js";
 import { createAuditRecord, resolveGate } from "./xhs-search-gate.js";
-import { containsCookie, createDiagnosis, createFailure, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
+import { classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
 const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
 const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
     "SESSION_EXPIRED",
     "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
     "BROWSER_ENV_ABNORMAL",
     "GATEWAY_INVOKER_FAILED",
     "CAPTCHA_REQUIRED",
@@ -176,8 +178,12 @@ const resolveRejectedSourceMessage = (spec, reason) => {
     switch (reason) {
         case "SESSION_EXPIRED":
             return `登录已失效，无法执行 ${spec.command}`;
+        case "XHS_LOGIN_REQUIRED":
+            return "当前页面要求登录小红书，无法继续执行";
         case "ACCOUNT_ABNORMAL":
             return "账号异常，平台拒绝当前请求";
+        case "XHS_ACCOUNT_RISK_PAGE":
+            return "当前页面命中小红书账号风险或安全验证页面";
         case "BROWSER_ENV_ABNORMAL":
             return "浏览器环境异常，平台拒绝当前请求";
         case "GATEWAY_INVOKER_FAILED":
@@ -762,6 +768,16 @@ const inferReadFailure = (spec, status, body) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
+    if (normalized.includes("risk") ||
+        message.includes("安全验证") ||
+        message.includes("访问异常") ||
+        message.includes("环境异常") ||
+        message.includes("操作频繁")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
     if (status >= 500 || normalized.includes("create invoker failed")) {
         return {
             reason: "GATEWAY_INVOKER_FAILED",
@@ -1313,6 +1329,38 @@ const executeXhsRead = async (input, spec, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createReadDiagnosis(spec, {
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
@@ -1475,7 +1523,9 @@ const executeXhsRead = async (input, spec, env) => {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
         }, createReadObservability({
             spec,
             href: env.getLocationHref(),

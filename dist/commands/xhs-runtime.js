@@ -5,6 +5,8 @@ import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
+import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account-safety.js";
+import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { buildCapabilityResult, ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, prepareIssue209LiveReadEnvelopeForContract } from "./xhs-input.js";
@@ -13,7 +15,42 @@ export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const hasOwn = (record, key) => !!record && Object.prototype.hasOwnProperty.call(record, key);
+const LIVE_XHS_EXECUTION_MODES = new Set([
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
+const isLiveXhsExecutionMode = (mode) => LIVE_XHS_EXECUTION_MODES.has(mode);
+const ACCOUNT_SAFETY_REASON_ALIASES = {
+    SESSION_EXPIRED: "SESSION_EXPIRED",
+    XHS_LOGIN_REQUIRED: "XHS_LOGIN_REQUIRED",
+    LOGIN_REQUIRED: "XHS_LOGIN_REQUIRED",
+    ACCOUNT_ABNORMAL: "ACCOUNT_ABNORMAL",
+    XHS_ACCOUNT_RISK_PAGE: "XHS_ACCOUNT_RISK_PAGE",
+    CAPTCHA_REQUIRED: "CAPTCHA_REQUIRED",
+    BROWSER_ENV_ABNORMAL: "BROWSER_ENV_ABNORMAL"
+};
+const normalizeAccountSafetyReason = (value) => {
+    const raw = asString(value);
+    if (!raw) {
+        return null;
+    }
+    const normalized = raw.trim().toUpperCase();
+    const mapped = ACCOUNT_SAFETY_REASON_ALIASES[normalized];
+    return mapped && isAccountSafetyReason(mapped) ? mapped : null;
+};
 const pickCanonicalSummaryField = (payload, key) => {
     const summary = asObject(payload.summary);
     const value = hasOwn(payload, key)
@@ -80,7 +117,10 @@ const pickGateErrorDetails = (payload, details) => {
         "execution_audit",
         "approval_record",
         "audit_record",
-        "risk_state_output"
+        "risk_state_output",
+        "account_safety",
+        "status_code",
+        "platform_code"
     ];
     const picked = {};
     const hasOwn = (record, key) => !!record && Object.prototype.hasOwnProperty.call(record, key);
@@ -144,6 +184,95 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
         reason: error.code
     }
 });
+const firstRecord = (value) => {
+    if (!Array.isArray(value)) {
+        return null;
+    }
+    for (const item of value) {
+        const record = asObject(item);
+        if (record) {
+            return record;
+        }
+    }
+    return null;
+};
+const resolveNestedObject = (record, key) => asObject(record?.[key]);
+const resolveAccountSafetySignal = (payload, fallback) => {
+    const details = asObject(payload.details);
+    const observability = asObject(payload.observability);
+    const pageState = resolveNestedObject(observability, "page_state");
+    const keyRequest = firstRecord(observability?.key_requests);
+    const gateInput = asObject(payload.gate_input) ?? asObject(details?.gate_input);
+    const consumerGateResult = asObject(payload.consumer_gate_result);
+    const auditRecord = asObject(payload.audit_record);
+    const diagnosis = asObject(payload.diagnosis);
+    const diagnosisEvidence = Array.isArray(diagnosis?.evidence) ? diagnosis?.evidence : [];
+    const reason = normalizeAccountSafetyReason(details?.reason) ??
+        normalizeAccountSafetyReason(keyRequest?.failure_reason) ??
+        normalizeAccountSafetyReason(diagnosisEvidence.find((item) => normalizeAccountSafetyReason(item))) ??
+        (() => {
+            const statusCode = asInteger(details?.status_code) ?? asInteger(keyRequest?.status_code);
+            const platformCode = asInteger(details?.platform_code);
+            if (statusCode === 401) {
+                return "SESSION_EXPIRED";
+            }
+            if (statusCode === 461 || platformCode === 300011) {
+                return "ACCOUNT_ABNORMAL";
+            }
+            if (statusCode === 429) {
+                return "CAPTCHA_REQUIRED";
+            }
+            if (platformCode === 300015) {
+                return "BROWSER_ENV_ABNORMAL";
+            }
+            return null;
+        })();
+    if (!reason) {
+        return null;
+    }
+    const targetTabId = asInteger(details?.target_tab_id) ??
+        asInteger(consumerGateResult?.target_tab_id) ??
+        asInteger(gateInput?.target_tab_id) ??
+        asInteger(auditRecord?.target_tab_id) ??
+        fallback.targetTabId;
+    return {
+        reason,
+        sourceCommand: fallback.command,
+        targetDomain: asString(details?.target_domain) ??
+            asString(consumerGateResult?.target_domain) ??
+            asString(gateInput?.target_domain) ??
+            asString(auditRecord?.target_domain) ??
+            fallback.targetDomain,
+        targetTabId,
+        pageUrl: asString(details?.page_url) ??
+            asString(pageState?.url) ??
+            fallback.targetPage,
+        statusCode: asInteger(details?.status_code) ?? asInteger(keyRequest?.status_code),
+        platformCode: asInteger(details?.platform_code)
+    };
+};
+const mergeAccountSafetyIntoFailurePayload = (payload, accountSafety) => {
+    const details = asObject(payload.details) ?? {};
+    payload.details = {
+        ...details,
+        account_safety: accountSafety
+    };
+    payload.account_safety = accountSafety;
+};
+const assertAccountSafetyAllowsLiveCommand = (input) => {
+    if (input.accountSafety.state !== "account_risk_blocked") {
+        return;
+    }
+    throw new CliError("ERR_EXECUTION_FAILED", "XHS account-safety gate blocked current live command", {
+        retryable: false,
+        details: {
+            ability_id: input.ability.id,
+            stage: "execution",
+            reason: "ACCOUNT_RISK_BLOCKED",
+            account_safety: input.accountSafety
+        }
+    });
+};
 export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
     await prepareOfficialChromeRuntime({
         context,
@@ -218,9 +347,16 @@ const xhsReadCommand = async (context, inputConfig) => {
             summary: mapCapabilitySummaryForContract(envelope.ability.id, {})
         };
     }
-    const bridge = resolveRuntimeBridge();
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    if (context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)) {
+        assertAccountSafetyAllowsLiveCommand({
+            ability: envelope.ability,
+            accountSafety: toAccountSafetyStatus(profileMeta?.accountSafety)
+        });
+    }
+    const bridge = resolveRuntimeBridge();
+    const profileRuntime = new ProfileRuntimeService();
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
         requestedExecutionMode: gate.requestedExecutionMode
     });
@@ -279,6 +415,27 @@ const xhsReadCommand = async (context, inputConfig) => {
             params: commandParams
         });
         if (!bridgeResult.ok) {
+            const accountSafetySignal = context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)
+                ? resolveAccountSafetySignal(bridgeResult.payload, {
+                    command: context.command,
+                    targetDomain: gate.targetDomain,
+                    targetTabId: gate.targetTabId,
+                    targetPage: gate.targetPage
+                })
+                : null;
+            if (accountSafetySignal && context.profile) {
+                const accountSafetyResult = await profileRuntime.markAccountSafetyBlocked({
+                    cwd: context.cwd,
+                    profile: context.profile,
+                    runId: context.run_id,
+                    params: {},
+                    signal: accountSafetySignal
+                });
+                const accountSafety = asObject(accountSafetyResult.account_safety);
+                if (accountSafety) {
+                    mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety);
+                }
+            }
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
         }
         const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);

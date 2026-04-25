@@ -151,6 +151,7 @@ export interface XhsSearchEnvironment {
   getDocumentTitle(): string;
   getReadyState(): string;
   getCookie(): string;
+  getBodyText?(): string;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
   readCapturedRequestContext?(

@@ -56,6 +56,20 @@ const SEARCH_FAILURE_SEMANTICS: Record<string, FailureSemantics> = {
     target: "captured_request_context",
     includeKeyRequest: false
   },
+  XHS_LOGIN_REQUIRED: {
+    category: "page_changed",
+    stage: "action",
+    component: "page",
+    target: "xhs.account_safety_surface",
+    includeKeyRequest: false
+  },
+  XHS_ACCOUNT_RISK_PAGE: {
+    category: "page_changed",
+    stage: "action",
+    component: "page",
+    target: "xhs.account_safety_surface",
+    includeKeyRequest: false
+  },
   SESSION_EXPIRED: {
     category: "request_failed",
     stage: "request",
@@ -107,6 +121,78 @@ export const classifyPageKind = (href: string): string => {
     return "detail";
   }
   return "unknown";
+};
+
+export type XhsAccountSafetySurfaceReason =
+  | "XHS_LOGIN_REQUIRED"
+  | "ACCOUNT_ABNORMAL"
+  | "XHS_ACCOUNT_RISK_PAGE"
+  | "CAPTCHA_REQUIRED"
+  | "BROWSER_ENV_ABNORMAL";
+
+export interface XhsAccountSafetySurface {
+  reason: XhsAccountSafetySurfaceReason;
+  message: string;
+}
+
+const normalizeSurfaceText = (value: string): string => value.replace(/\s+/gu, " ").toLowerCase();
+
+export const classifyXhsAccountSafetySurface = (input: {
+  href: string;
+  title: string;
+  bodyText?: string | null;
+}): XhsAccountSafetySurface | null => {
+  const href = input.href.toLowerCase();
+  const text = normalizeSurfaceText(`${input.title} ${input.bodyText ?? ""}`);
+  if (
+    text.includes("验证码") ||
+    text.includes("captcha") ||
+    text.includes("人机验证") ||
+    text.includes("请完成验证")
+  ) {
+    return {
+      reason: "CAPTCHA_REQUIRED",
+      message: "平台要求额外人机验证，无法继续执行"
+    };
+  }
+  if (text.includes("账号异常") || text.includes("300011")) {
+    return {
+      reason: "ACCOUNT_ABNORMAL",
+      message: "账号异常，平台拒绝当前请求"
+    };
+  }
+  if (text.includes("browser environment abnormal") || text.includes("300015")) {
+    return {
+      reason: "BROWSER_ENV_ABNORMAL",
+      message: "浏览器环境异常，平台拒绝当前请求"
+    };
+  }
+  if (
+    text.includes("安全验证") ||
+    text.includes("风险") ||
+    text.includes("访问异常") ||
+    text.includes("环境异常") ||
+    text.includes("操作频繁")
+  ) {
+    return {
+      reason: "XHS_ACCOUNT_RISK_PAGE",
+      message: "当前页面命中小红书账号风险或安全验证页面"
+    };
+  }
+  if (
+    href.includes("/login") ||
+    text.includes("扫码登录") ||
+    text.includes("登录后") ||
+    text.includes("输入手机号") ||
+    text.includes("小红书如何扫码") ||
+    text.includes("登录探索更多内容")
+  ) {
+    return {
+      reason: "XHS_LOGIN_REQUIRED",
+      message: "当前页面要求登录小红书，无法继续执行"
+    };
+  }
+  return null;
 };
 
 const resolveDiagnosisSemantics = (
@@ -421,6 +507,18 @@ export const inferFailure = (status: number, body: unknown): { reason: string; m
     return {
       reason: "BROWSER_ENV_ABNORMAL",
       message: "浏览器环境异常，平台拒绝当前请求"
+    };
+  }
+  if (
+    normalized.includes("risk") ||
+    message.includes("安全验证") ||
+    message.includes("访问异常") ||
+    message.includes("环境异常") ||
+    message.includes("操作频繁")
+  ) {
+    return {
+      reason: "XHS_ACCOUNT_RISK_PAGE",
+      message: "当前页面命中小红书账号风险或安全验证页面"
     };
   }
   if (status >= 500 || normalized.includes("create invoker failed")) {

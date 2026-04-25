@@ -4303,6 +4303,20 @@ const SEARCH_FAILURE_SEMANTICS = {
         target: "captured_request_context",
         includeKeyRequest: false
     },
+    XHS_LOGIN_REQUIRED: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
+        includeKeyRequest: false
+    },
+    XHS_ACCOUNT_RISK_PAGE: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
+        includeKeyRequest: false
+    },
     SESSION_EXPIRED: {
         category: "request_failed",
         stage: "request",
@@ -4353,6 +4367,54 @@ const classifyPageKind = (href) => {
         return "detail";
     }
     return "unknown";
+};
+const normalizeSurfaceText = (value) => value.replace(/\s+/gu, " ").toLowerCase();
+const classifyXhsAccountSafetySurface = (input) => {
+    const href = input.href.toLowerCase();
+    const text = normalizeSurfaceText(`${input.title} ${input.bodyText ?? ""}`);
+    if (text.includes("验证码") ||
+        text.includes("captcha") ||
+        text.includes("人机验证") ||
+        text.includes("请完成验证")) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    if (text.includes("账号异常") || text.includes("300011")) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (text.includes("browser environment abnormal") || text.includes("300015")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        };
+    }
+    if (text.includes("安全验证") ||
+        text.includes("风险") ||
+        text.includes("访问异常") ||
+        text.includes("环境异常") ||
+        text.includes("操作频繁")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
+    if (href.includes("/login") ||
+        text.includes("扫码登录") ||
+        text.includes("登录后") ||
+        text.includes("输入手机号") ||
+        text.includes("小红书如何扫码") ||
+        text.includes("登录探索更多内容")) {
+        return {
+            reason: "XHS_LOGIN_REQUIRED",
+            message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    return null;
 };
 const resolveDiagnosisSemantics = (reason, fallbackCategory) => SEARCH_FAILURE_SEMANTICS[reason] ?? {
     category: fallbackCategory ?? "request_failed",
@@ -4602,6 +4664,16 @@ const inferFailure = (status, body) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
+    if (normalized.includes("risk") ||
+        message.includes("安全验证") ||
+        message.includes("访问异常") ||
+        message.includes("环境异常") ||
+        message.includes("操作频繁")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
     if (status >= 500 || normalized.includes("create invoker failed")) {
         return {
             reason: "GATEWAY_INVOKER_FAILED",
@@ -4647,7 +4719,7 @@ const containsCookie = (cookie, key) => cookie
     .split(";")
     .map((item) => item.trim())
     .some((item) => item.startsWith(`${key}=`));
-return { buildEditorInputEvidence, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
+return { buildEditorInputEvidence, classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
 })();
 const __webenvoy_module_xhs_search_gate = (() => {
 const {
@@ -4902,6 +4974,7 @@ const {
 } = __webenvoy_module_xhs_search_gate;
 const {
   buildEditorInputEvidence,
+  classifyXhsAccountSafetySurface,
   containsCookie,
   createDiagnosis,
   createFailure,
@@ -4917,6 +4990,16 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
@@ -5090,6 +5173,40 @@ const isTransientFailedRequestObservation = (observation) => {
     const requestStatus = asRecord(observationRecord.request_status);
     return requestStatus?.http_status === null;
 };
+const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "SESSION_EXPIRED",
+    "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
+    "BROWSER_ENV_ABNORMAL",
+    "GATEWAY_INVOKER_FAILED",
+    "CAPTCHA_REQUIRED",
+    "TARGET_API_RESPONSE_INVALID"
+]);
+const resolveRejectedSourceDetail = (observation) => {
+    const observationRecord = asRecord(observation);
+    const rejectionReason = observationRecord?.rejection_reason;
+    if (!observationRecord || rejectionReason !== "failed_request_rejected") {
+        return { reason: "synthetic_request_rejected" };
+    }
+    const requestStatus = asRecord(observationRecord.request_status);
+    const statusCode = asInteger(requestStatus?.http_status) ?? asInteger(observationRecord.status);
+    const responseBody = asRecord(asRecord(observationRecord.response)?.body);
+    const platformCode = asInteger(responseBody?.code);
+    const inferred = inferFailure(statusCode ?? 0, responseBody);
+    if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason)) {
+        return {
+            reason: inferred.reason,
+            message: inferred.message,
+            ...(typeof statusCode === "number" ? { statusCode } : {}),
+            ...(typeof platformCode === "number" ? { platformCode } : {})
+        };
+    }
+    return {
+        reason: "failed_request_rejected",
+        ...(typeof statusCode === "number" ? { statusCode } : {}),
+        ...(typeof platformCode === "number" ? { platformCode } : {})
+    };
+};
 const isTrustedIncompatibleObservation = (observation, expected) => {
     const observationRecord = asRecord(observation);
     if (!observationRecord) {
@@ -5219,22 +5336,28 @@ const resolveRequestContextState = async (input, env) => {
         if (rejectedObservation) {
             if (input?.deferTransientMisses === true &&
                 isTransientFailedRequestObservation(rejectedObservation)) {
+                const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
                 return {
                     status: "miss",
                     failureReason: "template_missing",
-                    detailReason: "failed_request_rejected",
+                    detailReason: rejectedDetail.reason,
+                    detailMessage: rejectedDetail.message,
+                    statusCode: rejectedDetail.statusCode,
+                    platformCode: rejectedDetail.platformCode,
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys,
                     observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
                 };
             }
+            const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
             return {
                 status: "miss",
                 failureReason: "rejected_source",
-                detailReason: rejectedObservation.rejection_reason === "failed_request_rejected"
-                    ? "failed_request_rejected"
-                    : "synthetic_request_rejected",
+                detailReason: rejectedDetail.reason,
+                detailMessage: rejectedDetail.message,
+                statusCode: rejectedDetail.statusCode,
+                platformCode: rejectedDetail.platformCode,
                 pageContextNamespace,
                 shapeKey,
                 availableShapeKeys,
@@ -5498,6 +5621,37 @@ const executeXhsSearch = async (input, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createDiagnosis({
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "登录态缺失，无法执行 xhs.search", {
             ability_id: input.abilityId,
@@ -5528,17 +5682,24 @@ const executeXhsSearch = async (input, env) => {
         options: input.options
     }, env);
     if (requestContextState.status !== "hit") {
-        const reason = requestContextState.failureReason === "shape_mismatch" ||
-            requestContextState.failureReason === "rejected_source"
-            ? "REQUEST_CONTEXT_INCOMPATIBLE"
-            : "REQUEST_CONTEXT_MISSING";
+        const backendRejectedReason = requestContextState.detailReason &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextState.detailReason)
+            ? requestContextState.detailReason
+            : null;
+        const reason = backendRejectedReason ??
+            (requestContextState.failureReason === "shape_mismatch" ||
+                requestContextState.failureReason === "rejected_source"
+                ? "REQUEST_CONTEXT_INCOMPATIBLE"
+                : "REQUEST_CONTEXT_MISSING");
         const summaryMap = {
             template_missing: "当前页面现场缺少可复用的搜索请求模板",
             template_stale: "当前页面现场的搜索请求模板已过期",
             shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
             rejected_source: "当前页面现场的搜索请求来源已被拒绝"
         };
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summaryMap[requestContextState.failureReason], {
+        const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
+        const isBackendRejectedSource = backendRejectedReason !== null;
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
             ability_id: input.abilityId,
             stage: "execution",
             reason,
@@ -5548,6 +5709,12 @@ const executeXhsSearch = async (input, env) => {
             available_shape_keys: requestContextState.availableShapeKeys,
             ...(requestContextState.detailReason
                 ? { rejected_source_reason: requestContextState.detailReason }
+                : {}),
+            ...(typeof requestContextState.statusCode === "number"
+                ? { status_code: requestContextState.statusCode }
+                : {}),
+            ...(typeof requestContextState.platformCode === "number"
+                ? { platform_code: requestContextState.platformCode }
                 : {}),
             ...(typeof requestContextState.observedAt === "number"
                 ? { request_context_observed_at: requestContextState.observedAt }
@@ -5559,16 +5726,18 @@ const executeXhsSearch = async (input, env) => {
             requestId: `req-${env.randomId()}`,
             outcome: "failed",
             failureReason: reason,
-            includeKeyRequest: false,
+            includeKeyRequest: isBackendRejectedSource,
+            statusCode: requestContextState.statusCode,
             failureSite: {
-                stage: "action",
-                component: "page",
-                target: "captured_request_context",
-                summary: summaryMap[requestContextState.failureReason]
+                stage: isBackendRejectedSource ? "request" : "action",
+                component: isBackendRejectedSource ? "network" : "page",
+                target: isBackendRejectedSource ? SEARCH_ENDPOINT : "captured_request_context",
+                summary
             }
         }), createDiagnosis({
             reason,
-            summary: summaryMap[requestContextState.failureReason]
+            summary,
+            category: isBackendRejectedSource ? "request_failed" : "page_changed"
         }), gate, auditRecord), gate.execution_audit);
     }
     const headers = {
@@ -5714,7 +5883,9 @@ const executeXhsSearch = async (input, env) => {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
         }, createObservability({
             href: env.getLocationHref(),
             title: env.getDocumentTitle(),
@@ -5795,6 +5966,7 @@ return { executeXhsSearch };
 const __webenvoy_module_xhs_read_execution = (() => {
 const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;
 const {
+  classifyXhsAccountSafetySurface,
   containsCookie,
   createDiagnosis,
   createFailure,
@@ -5807,8 +5979,10 @@ const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
     "SESSION_EXPIRED",
     "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
     "BROWSER_ENV_ABNORMAL",
     "GATEWAY_INVOKER_FAILED",
     "CAPTCHA_REQUIRED",
@@ -5976,8 +6150,12 @@ const resolveRejectedSourceMessage = (spec, reason) => {
     switch (reason) {
         case "SESSION_EXPIRED":
             return `登录已失效，无法执行 ${spec.command}`;
+        case "XHS_LOGIN_REQUIRED":
+            return "当前页面要求登录小红书，无法继续执行";
         case "ACCOUNT_ABNORMAL":
             return "账号异常，平台拒绝当前请求";
+        case "XHS_ACCOUNT_RISK_PAGE":
+            return "当前页面命中小红书账号风险或安全验证页面";
         case "BROWSER_ENV_ABNORMAL":
             return "浏览器环境异常，平台拒绝当前请求";
         case "GATEWAY_INVOKER_FAILED":
@@ -6562,6 +6740,16 @@ const inferReadFailure = (spec, status, body) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
+    if (normalized.includes("risk") ||
+        message.includes("安全验证") ||
+        message.includes("访问异常") ||
+        message.includes("环境异常") ||
+        message.includes("操作频繁")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
     if (status >= 500 || normalized.includes("create invoker failed")) {
         return {
             reason: "GATEWAY_INVOKER_FAILED",
@@ -7113,6 +7301,38 @@ const executeXhsRead = async (input, spec, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createReadDiagnosis(spec, {
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
@@ -7275,7 +7495,9 @@ const executeXhsRead = async (input, spec, env) => {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
         }, createReadObservability({
             spec,
             href: env.getLocationHref(),
@@ -8596,6 +8818,7 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

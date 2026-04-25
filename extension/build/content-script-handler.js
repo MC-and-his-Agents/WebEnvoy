@@ -110,6 +110,7 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -8,6 +10,7 @@ import {
 } from "../xhs.js";
 import { executeCommand } from "../../core/router.js";
 import { createCommandRegistry } from "../index.js";
+import { ProfileStore } from "../../runtime/profile-store.js";
 import type { RuntimeContext } from "../../core/types.js";
 
 const ISSUE209_APPROVAL_CHECKS = {
@@ -1207,6 +1210,193 @@ describe("normalizeGateOptionsForContract", () => {
     );
 
     expect(normalized.requestedExecutionMode).toBe("dry_run");
+  });
+
+  it("blocks XHS live commands before runtime bridge when profile account_safety is blocked", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-account-safety-blocked-"));
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_account_blocked_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_account_blocked_profile", {
+        ...meta,
+        accountSafety: {
+          state: "account_risk_blocked",
+          platform: "xhs",
+          reason: "ACCOUNT_ABNORMAL",
+          observedAt: "2026-04-25T10:01:00.000Z",
+          cooldownUntil: "2026-04-25T10:31:00.000Z",
+          sourceRunId: "run-account-risk-source-001",
+          sourceCommand: "xhs.search",
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+          statusCode: 461,
+          platformCode: 300011
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_account_blocked_profile",
+            run_id: "run-account-risk-blocked-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ACCOUNT_RISK_BLOCKED",
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked",
+            reason: "ACCOUNT_ABNORMAL",
+            live_commands_blocked: true
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("persists account_safety blocked when an XHS live command returns an account-risk failure", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-account-safety-signal-"));
+    const runId = "run-account-risk-signal-001";
+    const requestId = "issue209-account-risk-signal-001";
+    const gateInvocationId = "issue209-gate-account-risk-signal-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_account_signal_profile",
+            run_id: runId,
+            params: {
+              request_id: requestId,
+              gate_invocation_id: gateInvocationId,
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                simulate_result: "account_abnormal",
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+                audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ACCOUNT_ABNORMAL",
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked",
+            reason: "ACCOUNT_ABNORMAL",
+            source_run_id: runId,
+            source_command: "xhs.search",
+            target_tab_id: 32,
+            status_code: 461,
+            live_commands_blocked: true
+          })
+        }
+      });
+
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.readMeta("xhs_account_signal_profile");
+      expect(meta?.accountSafety).toMatchObject({
+        state: "account_risk_blocked",
+        reason: "ACCOUNT_ABNORMAL",
+        sourceRunId: runId,
+        sourceCommand: "xhs.search",
+        targetTabId: 32,
+        statusCode: 461
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
   });
 
   it("preserves anonymous admission signals on the loopback runtime path and exposes request_admission_result plus execution_audit", async () => {

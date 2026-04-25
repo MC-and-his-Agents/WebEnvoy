@@ -248,6 +248,52 @@ const createFallbackExecutionContext = (runId: string) => ({
 });
 
 describe("xhs read execution fallback", () => {
+  it("classifies login modal pages before request-context lookup", async () => {
+    const readCapturedRequestContext = vi.fn(async () => null);
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-login-modal-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-login-modal-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-login-modal-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-login-modal-001",
+        getDocumentTitle: () => "小红书 - 登录",
+        getBodyText: () => "登录后推荐更懂你的笔记 扫码登录 输入手机号",
+        readCapturedRequestContext,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected login modal failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "XHS_LOGIN_REQUIRED",
+      page_url: "https://www.xiaohongshu.com/explore/note-login-modal-001"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "page_changed",
+      failure_site: {
+        target: "xhs.account_safety_surface"
+      }
+    });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect(readCapturedRequestContext).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("returns detail success only when the api payload contains the requested note object", async () => {
     const callSignature = vi.fn(async () => ({
       "X-s": "sig",

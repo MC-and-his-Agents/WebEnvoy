@@ -257,6 +257,7 @@ const buildContentScriptBundle = async () => {
     sourceBody: xhsSearchTelemetrySource,
     exports: [
       "buildEditorInputEvidence",
+      "classifyXhsAccountSafetySurface",
       "containsCookie",
       "createDiagnosis",
       "createFailure",
@@ -308,6 +309,7 @@ const buildContentScriptBundle = async () => {
       "} = __webenvoy_module_xhs_search_gate;",
       "const {",
       "  buildEditorInputEvidence,",
+      "  classifyXhsAccountSafetySurface,",
       "  containsCookie,",
       "  createDiagnosis,",
       "  createFailure,",
@@ -337,6 +339,7 @@ const buildContentScriptBundle = async () => {
     prelude: [
       "const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;",
       "const {",
+      "  classifyXhsAccountSafetySurface,",
       "  containsCookie,",
       "  createDiagnosis,",
       "  createFailure,",

@@ -180,6 +180,20 @@ describe("profile-store", () => {
         browserChannel: "chrome",
         manifestPath: "/tmp/native-host.json"
       },
+      accountSafety: {
+        state: "account_risk_blocked",
+        platform: "xhs",
+        reason: "ACCOUNT_ABNORMAL",
+        observedAt: "2026-03-19T10:00:30.000Z",
+        cooldownUntil: "2026-03-19T10:30:30.000Z",
+        sourceRunId: "run-account-safety-001",
+        sourceCommand: "xhs.search",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+        statusCode: 461,
+        platformCode: 300011
+      },
       fingerprintSeeds: {
         audioNoiseSeed: "seed-a-001",
         canvasNoiseSeed: "seed-c-001"
@@ -207,6 +221,14 @@ describe("profile-store", () => {
       nativeHostName: "com.webenvoy.host",
       browserChannel: "chrome",
       manifestPath: "/tmp/native-host.json"
+    });
+    expect(meta?.accountSafety).toMatchObject({
+      state: "account_risk_blocked",
+      platform: "xhs",
+      reason: "ACCOUNT_ABNORMAL",
+      sourceRunId: "run-account-safety-001",
+      statusCode: 461,
+      platformCode: 300011
     });
     expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
     expect(meta?.fingerprintProfileBundle).toEqual(expectedBundle);

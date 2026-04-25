@@ -127,6 +127,7 @@ const createCapturedSearchContextArtifact = (input: {
   source_kind?: "page_request" | "synthetic_request";
   template_ready?: boolean;
   rejection_reason?: "synthetic_request_rejected" | "failed_request_rejected";
+  rejectedStatus?: number;
   responseBody?: Record<string, unknown>;
   templateUrl?: string;
 }) => {
@@ -201,7 +202,9 @@ const createCapturedSearchContextArtifact = (input: {
             method: "POST",
             path: SEARCH_ENDPOINT,
             url: `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`,
-            status: input.rejection_reason === "failed_request_rejected" ? 500 : 200,
+            status:
+              input.rejectedStatus ??
+              (input.rejection_reason === "failed_request_rejected" ? 500 : 200),
             captured_at: input.captured_at,
             observed_at: input.captured_at,
             page_context_namespace: namespace,
@@ -212,7 +215,9 @@ const createCapturedSearchContextArtifact = (input: {
             rejection_reason: input.rejection_reason,
             request_status: {
               completion: "failed",
-              http_status: input.rejection_reason === "failed_request_rejected" ? 500 : null
+              http_status:
+                input.rejectedStatus ??
+                (input.rejection_reason === "failed_request_rejected" ? 500 : null)
             },
             request: {
               headers: {
@@ -2645,9 +2650,30 @@ describe("extension build contract", () => {
           template_ready: false,
           rejection_reason: "failed_request_rejected"
         }),
-      reason: "REQUEST_CONTEXT_INCOMPATIBLE",
+      reason: "GATEWAY_INVOKER_FAILED",
       requestContextReason: "rejected_source",
-      rejectedSourceReason: "failed_request_rejected"
+      rejectedSourceReason: "GATEWAY_INVOKER_FAILED"
+    },
+    {
+      label: "rejected_source_account_abnormal",
+      lookup: async () =>
+        createCapturedSearchContextArtifact({
+          href: "https://www.xiaohongshu.com/search_result?keyword=account-risk",
+          keyword: "account-risk",
+          captured_at: 1_710_000_000_000,
+          template_ready: false,
+          rejection_reason: "failed_request_rejected",
+          rejectedStatus: 461,
+          responseBody: {
+            code: 300011,
+            msg: "账号异常"
+          }
+        }),
+      reason: "ACCOUNT_ABNORMAL",
+      requestContextReason: "rejected_source",
+      rejectedSourceReason: "ACCOUNT_ABNORMAL",
+      statusCode: 461,
+      platformCode: 300011
     },
     {
       label: "template_stale",
@@ -2685,6 +2711,8 @@ describe("extension build contract", () => {
                   ? "mismatch"
                   : testCase.label === "rejected_source"
                     ? "rejected"
+                    : testCase.label === "rejected_source_account_abnormal"
+                      ? "account-risk"
                     : "stale"
           },
           options: {
@@ -2741,7 +2769,9 @@ describe("extension build contract", () => {
           request_context_reason: testCase.requestContextReason,
           ...(testCase.rejectedSourceReason
             ? { rejected_source_reason: testCase.rejectedSourceReason }
-            : {})
+            : {}),
+          ...(testCase.statusCode ? { status_code: testCase.statusCode } : {}),
+          ...(testCase.platformCode ? { platform_code: testCase.platformCode } : {})
         }
       }
     });

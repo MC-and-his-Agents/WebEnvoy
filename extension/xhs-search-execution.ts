@@ -13,6 +13,7 @@ import {
 import { createAuditRecord, createGateOnlySuccess, resolveGate } from "./xhs-search-gate.js";
 import {
   buildEditorInputEvidence,
+  classifyXhsAccountSafetySurface,
   containsCookie,
   createDiagnosis,
   createFailure,
@@ -32,6 +33,17 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const asInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  return null;
+};
+
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
@@ -41,6 +53,17 @@ type RequestContextFailureReason =
   | "template_stale"
   | "shape_mismatch"
   | "rejected_source";
+
+type RejectedSourceDetailReason =
+  | "synthetic_request_rejected"
+  | "failed_request_rejected"
+  | "SESSION_EXPIRED"
+  | "ACCOUNT_ABNORMAL"
+  | "XHS_ACCOUNT_RISK_PAGE"
+  | "BROWSER_ENV_ABNORMAL"
+  | "GATEWAY_INVOKER_FAILED"
+  | "CAPTCHA_REQUIRED"
+  | "TARGET_API_RESPONSE_INVALID";
 
 type RequestContextState =
   | {
@@ -61,7 +84,10 @@ type RequestContextState =
   | {
       status: "miss";
       failureReason: RequestContextFailureReason;
-      detailReason?: "synthetic_request_rejected" | "failed_request_rejected";
+      detailReason?: RejectedSourceDetailReason;
+      detailMessage?: string;
+      statusCode?: number;
+      platformCode?: number;
       pageContextNamespace: string;
       shapeKey: string;
       availableShapeKeys: string[];
@@ -293,6 +319,49 @@ const isTransientFailedRequestObservation = (observation: unknown): boolean => {
   return requestStatus?.http_status === null;
 };
 
+const BACKEND_REJECTED_SOURCE_REASONS = new Set<RejectedSourceDetailReason>([
+  "SESSION_EXPIRED",
+  "ACCOUNT_ABNORMAL",
+  "XHS_ACCOUNT_RISK_PAGE",
+  "BROWSER_ENV_ABNORMAL",
+  "GATEWAY_INVOKER_FAILED",
+  "CAPTCHA_REQUIRED",
+  "TARGET_API_RESPONSE_INVALID"
+]);
+
+const resolveRejectedSourceDetail = (
+  observation: unknown
+): {
+  reason: RejectedSourceDetailReason;
+  message?: string;
+  statusCode?: number;
+  platformCode?: number;
+} => {
+  const observationRecord = asRecord(observation);
+  const rejectionReason = observationRecord?.rejection_reason;
+  if (!observationRecord || rejectionReason !== "failed_request_rejected") {
+    return { reason: "synthetic_request_rejected" };
+  }
+  const requestStatus = asRecord(observationRecord.request_status);
+  const statusCode = asInteger(requestStatus?.http_status) ?? asInteger(observationRecord.status);
+  const responseBody = asRecord(asRecord(observationRecord.response)?.body);
+  const platformCode = asInteger(responseBody?.code);
+  const inferred = inferFailure(statusCode ?? 0, responseBody);
+  if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason as RejectedSourceDetailReason)) {
+    return {
+      reason: inferred.reason as RejectedSourceDetailReason,
+      message: inferred.message,
+      ...(typeof statusCode === "number" ? { statusCode } : {}),
+      ...(typeof platformCode === "number" ? { platformCode } : {})
+    };
+  }
+  return {
+    reason: "failed_request_rejected",
+    ...(typeof statusCode === "number" ? { statusCode } : {}),
+    ...(typeof platformCode === "number" ? { platformCode } : {})
+  };
+};
+
 const isTrustedIncompatibleObservation = (
   observation: unknown,
   expected: { pageContextNamespace: string; shapeKey: string }
@@ -452,23 +521,28 @@ const resolveRequestContextState = async (
         input?.deferTransientMisses === true &&
         isTransientFailedRequestObservation(rejectedObservation)
       ) {
+        const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
         return {
           status: "miss",
           failureReason: "template_missing",
-          detailReason: "failed_request_rejected",
+          detailReason: rejectedDetail.reason,
+          detailMessage: rejectedDetail.message,
+          statusCode: rejectedDetail.statusCode,
+          platformCode: rejectedDetail.platformCode,
           pageContextNamespace,
           shapeKey,
           availableShapeKeys,
           observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
         };
       }
+      const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
       return {
         status: "miss",
         failureReason: "rejected_source",
-        detailReason:
-          rejectedObservation.rejection_reason === "failed_request_rejected"
-            ? "failed_request_rejected"
-            : "synthetic_request_rejected",
+        detailReason: rejectedDetail.reason,
+        detailMessage: rejectedDetail.message,
+        statusCode: rejectedDetail.statusCode,
+        platformCode: rejectedDetail.platformCode,
         pageContextNamespace,
         shapeKey,
         availableShapeKeys,
@@ -795,6 +869,49 @@ export const executeXhsSearch = async (
     };
   }
 
+  const accountSafetySurface = classifyXhsAccountSafetySurface({
+    href: env.getLocationHref(),
+    title: env.getDocumentTitle(),
+    bodyText: env.getBodyText?.()
+  });
+  if (accountSafetySurface) {
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        accountSafetySurface.message,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: accountSafetySurface.reason,
+          page_url: env.getLocationHref()
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: accountSafetySurface.reason,
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "xhs.account_safety_surface",
+            summary: accountSafetySurface.message
+          }
+        }),
+        createDiagnosis({
+          reason: accountSafetySurface.reason,
+          summary: accountSafetySurface.message,
+          category: "page_changed"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
+    );
+  }
+
   if (!containsCookie(env.getCookie(), "a1")) {
     return withExecutionAuditInFailurePayload(
       createFailure(
@@ -840,21 +957,29 @@ export const executeXhsSearch = async (
     env
   );
   if (requestContextState.status !== "hit") {
+    const backendRejectedReason =
+      requestContextState.detailReason &&
+      BACKEND_REJECTED_SOURCE_REASONS.has(requestContextState.detailReason)
+        ? requestContextState.detailReason
+        : null;
     const reason =
-      requestContextState.failureReason === "shape_mismatch" ||
+      backendRejectedReason ??
+      (requestContextState.failureReason === "shape_mismatch" ||
       requestContextState.failureReason === "rejected_source"
         ? "REQUEST_CONTEXT_INCOMPATIBLE"
-        : "REQUEST_CONTEXT_MISSING";
+        : "REQUEST_CONTEXT_MISSING");
     const summaryMap: Record<RequestContextFailureReason, string> = {
       template_missing: "当前页面现场缺少可复用的搜索请求模板",
       template_stale: "当前页面现场的搜索请求模板已过期",
       shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
       rejected_source: "当前页面现场的搜索请求来源已被拒绝"
     };
+    const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
+    const isBackendRejectedSource = backendRejectedReason !== null;
     return withExecutionAuditInFailurePayload(
       createFailure(
         "ERR_EXECUTION_FAILED",
-        summaryMap[requestContextState.failureReason],
+        summary,
         {
           ability_id: input.abilityId,
           stage: "execution",
@@ -865,6 +990,12 @@ export const executeXhsSearch = async (
           available_shape_keys: requestContextState.availableShapeKeys,
           ...(requestContextState.detailReason
             ? { rejected_source_reason: requestContextState.detailReason }
+            : {}),
+          ...(typeof requestContextState.statusCode === "number"
+            ? { status_code: requestContextState.statusCode }
+            : {}),
+          ...(typeof requestContextState.platformCode === "number"
+            ? { platform_code: requestContextState.platformCode }
             : {}),
           ...(typeof requestContextState.observedAt === "number"
             ? { request_context_observed_at: requestContextState.observedAt }
@@ -877,17 +1008,19 @@ export const executeXhsSearch = async (
           requestId: `req-${env.randomId()}`,
           outcome: "failed",
           failureReason: reason,
-          includeKeyRequest: false,
+          includeKeyRequest: isBackendRejectedSource,
+          statusCode: requestContextState.statusCode,
           failureSite: {
-            stage: "action",
-            component: "page",
-            target: "captured_request_context",
-            summary: summaryMap[requestContextState.failureReason]
+            stage: isBackendRejectedSource ? "request" : "action",
+            component: isBackendRejectedSource ? "network" : "page",
+            target: isBackendRejectedSource ? SEARCH_ENDPOINT : "captured_request_context",
+            summary
           }
         }),
         createDiagnosis({
           reason,
-          summary: summaryMap[requestContextState.failureReason]
+          summary,
+          category: isBackendRejectedSource ? "request_failed" : "page_changed"
         }),
         gate,
         auditRecord
@@ -1089,7 +1222,9 @@ export const executeXhsSearch = async (
         {
           ability_id: input.abilityId,
           stage: "execution",
-          reason: failure.reason
+          reason: failure.reason,
+          status_code: response.status,
+          ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
         },
         createObservability({
           href: env.getLocationHref(),

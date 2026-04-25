@@ -13,6 +13,10 @@ import {
   assertPersistentExtensionBindingShape,
   type PersistentExtensionBinding
 } from "./persistent-extension-binding.js";
+import {
+  assertAccountSafetyRecordShape,
+  type AccountSafetyRecord
+} from "./account-safety.js";
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
@@ -46,6 +50,7 @@ export interface ProfileMeta {
   profileState: ProfileState;
   proxyBinding: ProxyBinding | null;
   persistentExtensionBinding?: PersistentExtensionBinding;
+  accountSafety?: AccountSafetyRecord;
   fingerprintSeeds: FingerprintSeeds;
   fingerprintProfileBundle?: FingerprintProfileBundle;
   localStorageSnapshots: LocalStorageSnapshot[];
@@ -236,6 +241,9 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   }
   if (value.persistentExtensionBinding !== undefined) {
     assertPersistentExtensionBindingShape(value.persistentExtensionBinding);
+  }
+  if (value.accountSafety !== undefined) {
+    assertAccountSafetyRecordShape(value.accountSafety);
   }
 
   if (!isObjectRecord(value.fingerprintSeeds)) {
