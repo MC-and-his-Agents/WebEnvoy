@@ -17,6 +17,10 @@ import {
   assertAccountSafetyRecordShape,
   type AccountSafetyRecord
 } from "./account-safety.js";
+import {
+  assertXhsCloseoutRhythmRecordShape,
+  type XhsCloseoutRhythmRecord
+} from "./xhs-closeout-rhythm.js";
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
@@ -51,6 +55,7 @@ export interface ProfileMeta {
   proxyBinding: ProxyBinding | null;
   persistentExtensionBinding?: PersistentExtensionBinding;
   accountSafety?: AccountSafetyRecord;
+  xhsCloseoutRhythm?: XhsCloseoutRhythmRecord;
   fingerprintSeeds: FingerprintSeeds;
   fingerprintProfileBundle?: FingerprintProfileBundle;
   localStorageSnapshots: LocalStorageSnapshot[];
@@ -244,6 +249,9 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   }
   if (value.accountSafety !== undefined) {
     assertAccountSafetyRecordShape(value.accountSafety);
+  }
+  if (value.xhsCloseoutRhythm !== undefined) {
+    assertXhsCloseoutRhythmRecordShape(value.xhsCloseoutRhythm);
   }
 
   if (!isObjectRecord(value.fingerprintSeeds)) {

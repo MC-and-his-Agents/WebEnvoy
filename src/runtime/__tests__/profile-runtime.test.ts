@@ -629,7 +629,7 @@ describe("profile-runtime identity preflight", () => {
         platform: "xhs",
         reason: "XHS_LOGIN_REQUIRED",
         observedAt: "2026-04-25T10:01:00.000Z",
-        cooldownUntil: "2026-04-25T10:31:00.000Z",
+        cooldownUntil: "2099-04-25T10:31:00.000Z",
         sourceRunId: "run-account-safety-status-001",
         sourceCommand: "xhs.search",
         targetDomain: "www.xiaohongshu.com",
@@ -653,13 +653,20 @@ describe("profile-runtime identity preflight", () => {
       platform: "xhs",
       reason: "XHS_LOGIN_REQUIRED",
       observed_at: "2026-04-25T10:01:00.000Z",
-      cooldown_until: "2026-04-25T10:31:00.000Z",
+      cooldown_until: "2099-04-25T10:31:00.000Z",
       source_run_id: "run-account-safety-status-001",
       source_command: "xhs.search",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,
       page_url: "https://www.xiaohongshu.com/explore",
       live_commands_blocked: true
+    });
+    expect(status.xhs_closeout_rhythm).toMatchObject({
+      state: "cooldown",
+      cooldown_until: "2099-04-25T10:31:00.000Z",
+      single_probe_required: true,
+      full_bundle_blocked: true,
+      reason_codes: expect.arrayContaining(["ACCOUNT_RISK_BLOCKED"])
     });
   });
 
@@ -694,6 +701,12 @@ describe("profile-runtime identity preflight", () => {
       platform_code: 300011,
       live_commands_blocked: true
     });
+    expect(result.xhs_closeout_rhythm).toMatchObject({
+      state: "cooldown",
+      single_probe_required: true,
+      full_bundle_blocked: true,
+      reason_codes: expect.arrayContaining(["ACCOUNT_ABNORMAL"])
+    });
     expect(result.runtime_stop).toMatchObject({
       attempted: true,
       outcome: "failed",
@@ -707,6 +720,11 @@ describe("profile-runtime identity preflight", () => {
       reason: "ACCOUNT_ABNORMAL",
       statusCode: 461,
       platformCode: 300011
+    });
+    expect(meta?.xhsCloseoutRhythm).toMatchObject({
+      state: "cooldown",
+      singleProbeRequired: true,
+      fullBundleBlocked: true
     });
   });
 
@@ -4887,6 +4905,94 @@ describe("profile-runtime login", () => {
         entries: [{ key: "session", value: "token-1" }]
       }
     ]);
+  });
+
+  it("records XHS account recovery confirmation without releasing the closeout bundle", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-recovery-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    await service.login({
+      cwd: baseDir,
+      profile: "recovery_login_profile",
+      runId: "run-runtime-test-recovery-001",
+      params: {}
+    });
+
+    const metaPath = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "recovery_login_profile",
+      "__webenvoy_meta.json"
+    );
+    const metaBefore = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...metaBefore,
+          accountSafety: {
+            state: "account_risk_blocked",
+            platform: "xhs",
+            reason: "ACCOUNT_ABNORMAL",
+            observedAt: "2026-04-25T10:00:00.000Z",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            sourceRunId: "run-risk-before-recovery-001",
+            sourceCommand: "xhs.search",
+            targetDomain: "www.xiaohongshu.com",
+            targetTabId: 32,
+            pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+            statusCode: 461,
+            platformCode: 300011
+          },
+          xhsCloseoutRhythm: {
+            state: "operator_confirmation_required",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: null,
+            singleProbeRequired: true,
+            singleProbePassedAt: null,
+            probeRunId: null,
+            fullBundleBlocked: true,
+            reasonCodes: ["ACCOUNT_RISK_BLOCKED", "XHS_RECOVERY_OPERATOR_CONFIRMATION_REQUIRED"]
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const confirmed = await service.login({
+      cwd: baseDir,
+      profile: "recovery_login_profile",
+      runId: "run-runtime-test-recovery-001",
+      params: {
+        confirm: true,
+        account_recovery_confirmed: true
+      }
+    });
+
+    expect(confirmed.account_safety).toMatchObject({
+      state: "clear",
+      live_commands_blocked: false
+    });
+    expect(confirmed.xhs_closeout_rhythm).toMatchObject({
+      state: "single_probe_required",
+      single_probe_required: true,
+      full_bundle_blocked: true,
+      reason_codes: expect.arrayContaining(["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"])
+    });
+
+    const metaAfter = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    expect(metaAfter.accountSafety).toMatchObject({ state: "clear" });
+    expect(metaAfter.xhsCloseoutRhythm).toMatchObject({
+      state: "single_probe_required",
+      singleProbeRequired: true,
+      fullBundleBlocked: true
+    });
   });
 
   it("marks disconnected when confirm arrives after login browser already closed", async () => {

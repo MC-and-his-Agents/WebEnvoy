@@ -51,10 +51,17 @@ import {
   type BridgeCommandResult
 } from "./native-messaging/bridge.js";
 import {
+  buildClearAccountSafetyRecord,
   buildBlockedAccountSafetyRecord,
   toAccountSafetyStatus,
   type AccountSafetyReason
 } from "./account-safety.js";
+import {
+  buildBlockedXhsCloseoutRhythmRecord,
+  markXhsCloseoutOperatorConfirmed,
+  markXhsCloseoutSingleProbePassed,
+  toXhsCloseoutRhythmStatus
+} from "./xhs-closeout-rhythm.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
@@ -155,6 +162,8 @@ export interface MarkAccountSafetyBlockedInput extends RuntimeActionInput {
     platformCode: number | null;
   };
 }
+
+export interface MarkXhsCloseoutSingleProbePassedInput extends RuntimeActionInput {}
 
 interface ProfileStoreLike {
   ensureProfileDir(profileName: string): Promise<string>;
@@ -315,6 +324,8 @@ const buildRecoverableSessionSummary = (
   };
 };
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
+const shouldConfirmAccountRecovery = (params: JsonObject): boolean =>
+  params.account_recovery_confirmed === true;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const XHS_TARGET_DOMAINS = new Set(["www.xiaohongshu.com", "creator.xiaohongshu.com"]);
 
@@ -786,6 +797,7 @@ export class ProfileRuntimeService {
     await store.ensureProfileDir(input.profile);
     const lockPath = this.#getLockPath(profileDir);
     const confirmLogin = shouldConfirmLogin(input.params);
+    const confirmAccountRecovery = confirmLogin && shouldConfirmAccountRecovery(input.params);
     const lockAcquireResult = await this.#acquireProfileLockAtomically({
       profileName: input.profile,
       profileDir,
@@ -975,7 +987,7 @@ export class ProfileRuntimeService {
             identityPreflight,
             profileState: session.profileState
           });
-      const nextMeta = this.#patchMeta(recoveredMeta, {
+      const nextMetaBase = this.#patchMeta(recoveredMeta, {
         profileName: input.profile,
         profileDir,
         profileState: session.profileState,
@@ -992,6 +1004,16 @@ export class ProfileRuntimeService {
           localStorageSnapshot
         )
       });
+      const nextMeta: ProfileMeta = confirmAccountRecovery
+        ? {
+            ...nextMetaBase,
+            accountSafety: buildClearAccountSafetyRecord(),
+            xhsCloseoutRhythm: markXhsCloseoutOperatorConfirmed({
+              current: recoveredMeta.xhsCloseoutRhythm,
+              confirmedAt: nowIso
+            })
+          }
+        : nextMetaBase;
       await store.writeMeta(
         input.profile,
         nextMeta
@@ -1012,7 +1034,16 @@ export class ProfileRuntimeService {
         identityPreflight: buildIdentityPreflightOutput(identityPreflight),
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
         fingerprint_runtime: fingerprintRuntime,
-        lastLoginAt: nowIso
+        lastLoginAt: nowIso,
+        ...(confirmAccountRecovery
+          ? {
+              account_safety: toAccountSafetyStatus(nextMeta.accountSafety),
+              xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+                rhythm: nextMeta.xhsCloseoutRhythm,
+                accountSafety: nextMeta.accountSafety
+              })
+            }
+          : {})
       };
     } catch (error) {
       throw mapRuntimeError(error);
@@ -1124,6 +1155,10 @@ export class ProfileRuntimeService {
       runtimeTakeoverEvidence,
       recoverableSession: buildRecoverableSessionSummary(meta),
       account_safety: toAccountSafetyStatus(meta?.accountSafety),
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: meta?.xhsCloseoutRhythm,
+        accountSafety: meta?.accountSafety
+      }),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: meta?.updatedAt ?? null
     };
@@ -1349,6 +1384,10 @@ export class ProfileRuntimeService {
       profileName: input.profile,
       profileDir,
       accountSafety,
+      xhsCloseoutRhythm: buildBlockedXhsCloseoutRhythmRecord({
+        cooldownUntil: accountSafety.cooldownUntil,
+        reasonCode: input.signal.reason
+      }),
       updatedAt: observedAt
     };
     await store.writeMeta(input.profile, nextMeta);
@@ -1381,7 +1420,48 @@ export class ProfileRuntimeService {
     return {
       profile: input.profile,
       account_safety: toAccountSafetyStatus(accountSafety),
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: nextMeta.xhsCloseoutRhythm,
+        accountSafety
+      }),
       runtime_stop: stopAttempt
+    };
+  }
+
+  async markXhsCloseoutSingleProbePassed(
+    input: MarkXhsCloseoutSingleProbePassedInput
+  ): Promise<JsonObject> {
+    const passedAt = isoNow();
+    const store = this.#createStore(input.cwd);
+    const profileDir = this.#resolveProfileDir(store, input.profile);
+    await store.ensureProfileDir(input.profile);
+    const existingMeta =
+      await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+      this.#buildMinimalProfileMeta({
+        profile: input.profile,
+        profileDir,
+        nowIso: passedAt
+      });
+    const xhsCloseoutRhythm = markXhsCloseoutSingleProbePassed({
+      current: existingMeta.xhsCloseoutRhythm,
+      passedAt,
+      probeRunId: input.runId
+    });
+    const nextMeta: ProfileMeta = {
+      ...existingMeta,
+      profileName: input.profile,
+      profileDir,
+      xhsCloseoutRhythm,
+      updatedAt: passedAt
+    };
+    await store.writeMeta(input.profile, nextMeta);
+
+    return {
+      profile: input.profile,
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: xhsCloseoutRhythm,
+        accountSafety: nextMeta.accountSafety
+      })
     };
   }
 

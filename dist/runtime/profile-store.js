@@ -5,6 +5,7 @@ import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 import { assertPersistentExtensionBindingShape } from "./persistent-extension-binding.js";
 import { assertAccountSafetyRecordShape } from "./account-safety.js";
+import { assertXhsCloseoutRhythmRecordShape } from "./xhs-closeout-rhythm.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
@@ -151,6 +152,9 @@ function assertProfileMeta(value) {
     }
     if (value.accountSafety !== undefined) {
         assertAccountSafetyRecordShape(value.accountSafety);
+    }
+    if (value.xhsCloseoutRhythm !== undefined) {
+        assertXhsCloseoutRhythmRecordShape(value.xhsCloseoutRhythm);
     }
     if (!isObjectRecord(value.fingerprintSeeds)) {
         throw new Error("Invalid profile meta structure: fingerprintSeeds");

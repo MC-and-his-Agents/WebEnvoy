@@ -2842,6 +2842,98 @@ process.stdin.on("data", (chunk) => {
     ).toEqual(expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"]));
   });
 
+  itWithSqlite("projects XHS closeout rhythm state in runtime.audit profile queries", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_rhythm_audit_profile";
+    const profileDir = path.join(cwd, ".webenvoy", "profiles", profile);
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, "__webenvoy_meta.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: profile,
+          profileDir,
+          profileState: "ready",
+          proxyBinding: null,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_passed",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: false,
+            singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+            probeRunId: "run-rhythm-audit-probe-001",
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-audit-a",
+            canvasNoiseSeed: "seed-audit-c"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-04-25T10:00:00.000Z",
+          updatedAt: "2026-04-25T10:40:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: null,
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-rhythm-status-view-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        limit: 1
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          profile,
+          limit: 1
+        },
+        session_rhythm_status_view: {
+          source: "profile_meta",
+          platform: "xhs",
+          state: "single_probe_passed",
+          recovery: {
+            single_probe_required: false,
+            single_probe_passed_at: "2026-04-25T10:40:00.000Z",
+            probe_run_id: "run-rhythm-audit-probe-001"
+          },
+          full_bundle_blocked: true,
+          reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+        }
+      }
+    });
+  });
+
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-issue-scope-208-001";

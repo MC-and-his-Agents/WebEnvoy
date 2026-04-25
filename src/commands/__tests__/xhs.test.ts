@@ -1382,6 +1382,210 @@ describe("normalizeGateOptionsForContract", () => {
         targetTabId: 32,
         statusCode: 461
       });
+      expect(meta?.xhsCloseoutRhythm).toMatchObject({
+        state: "cooldown",
+        singleProbeRequired: true,
+        fullBundleBlocked: true,
+        reasonCodes: expect.arrayContaining(["ACCOUNT_ABNORMAL"])
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("blocks the XHS closeout bundle until a recovery single-probe is requested", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-blocked-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_blocked_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_blocked_profile", {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_required",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: true,
+          singleProbePassedAt: null,
+          probeRunId: null,
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile: "xhs_rhythm_blocked_profile",
+            run_id: "run-rhythm-blocked-001",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-rhythm-001"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "single_probe_required",
+            full_bundle_blocked: true
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a marked xhs.search recovery single-probe and records the passed probe", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-"));
+    const runId = "run-rhythm-probe-001";
+    const requestId = "issue209-rhythm-probe-001";
+    const gateInvocationId = "issue209-gate-rhythm-probe-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_probe_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_probe_profile", {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_required",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: true,
+          singleProbePassedAt: null,
+          probeRunId: null,
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+        }
+      });
+
+      const result = await executeCommand(
+        {
+          cwd,
+          command: "xhs.search",
+          profile: "xhs_rhythm_probe_profile",
+          run_id: runId,
+          params: {
+            request_id: requestId,
+            gate_invocation_id: gateInvocationId,
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              xhs_recovery_probe: true,
+              simulate_result: "success",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed",
+              approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+              audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(result.summary).toMatchObject({
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          outcome: "success"
+        }
+      });
+      const persisted = await profileStore.readMeta("xhs_rhythm_probe_profile");
+      expect(persisted?.xhsCloseoutRhythm).toMatchObject({
+        state: "single_probe_passed",
+        singleProbeRequired: false,
+        probeRunId: runId,
+        fullBundleBlocked: true,
+        reasonCodes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+      });
     } finally {
       await rm(cwd, { recursive: true, force: true });
       if (previousTransport === undefined) {
