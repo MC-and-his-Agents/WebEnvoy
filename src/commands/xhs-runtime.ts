@@ -567,18 +567,6 @@ const xhsReadCommand = async (
       gateInvocationId: envelope.gateInvocationId,
       runId: context.run_id
     });
-    if (
-      context.profile &&
-      isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
-      recoveryProbeRequested
-    ) {
-      await profileRuntime.claimXhsCloseoutSingleProbe({
-        cwd: context.cwd,
-        profile: context.profile,
-        runId: context.run_id,
-        params: {}
-      });
-    }
     await ensureOfficialChromeRuntimeReady(
       context,
       envelope.ability,
@@ -593,6 +581,18 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
+    if (
+      context.profile &&
+      isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
+      recoveryProbeRequested
+    ) {
+      await profileRuntime.claimXhsCloseoutSingleProbe({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: {}
+      });
+    }
     const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
     const {
       __anonymous_isolation_verified: anonymousIsolationVerified,

@@ -410,6 +410,13 @@ const xhsReadCommand = async (context, inputConfig) => {
             gateInvocationId: envelope.gateInvocationId,
             runId: context.run_id
         });
+        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {
+            ...gate,
+            targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
+        });
+        const bridgeSessionId = await bridge.ensureSession({
+            profile: context.profile
+        });
         if (context.profile &&
             isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
             recoveryProbeRequested) {
@@ -420,13 +427,6 @@ const xhsReadCommand = async (context, inputConfig) => {
                 params: {}
             });
         }
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {
-            ...gate,
-            targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
-        });
-        const bridgeSessionId = await bridge.ensureSession({
-            profile: context.profile
-        });
         const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
         const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
         const runtimeGateOptions = {

@@ -1606,6 +1606,110 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("does not consume the recovery probe budget when runtime readiness fails first", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-readiness-"));
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_probe_readiness_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_probe_readiness_profile", {
+        ...meta,
+        profileState: "logging_in",
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_required",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: true,
+          singleProbePassedAt: null,
+          probeRunId: null,
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_rhythm_probe_readiness_profile",
+            run_id: "run-rhythm-probe-readiness-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                xhs_recovery_probe: true,
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_RUNTIME_UNAVAILABLE"
+      });
+
+      const persisted = await profileStore.readMeta("xhs_rhythm_probe_readiness_profile");
+      expect(persisted?.xhsCloseoutRhythm).toMatchObject({
+        state: "single_probe_required",
+        probeRunId: null,
+        singleProbePassedAt: null
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
   it("keeps the recovery single-probe blocked until the cooldown expires", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-cooldown-"));
     try {
