@@ -299,7 +299,7 @@ const buildRecoverableSessionSummary = (
 };
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
-const XHS_TARGET_DOMAIN = "www.xiaohongshu.com";
+const XHS_TARGET_DOMAINS = new Set(["www.xiaohongshu.com", "creator.xiaohongshu.com"]);
 
 const readRequestedExecutionMode = (params: JsonObject): string | null => {
   const mode = params.requested_execution_mode;
@@ -315,16 +315,37 @@ const isXhsUrl = (value: unknown): boolean => {
   }
   try {
     const parsed = new URL(value.trim());
-    return parsed.hostname === XHS_TARGET_DOMAIN || parsed.hostname.endsWith(".xiaohongshu.com");
+    return XHS_TARGET_DOMAINS.has(parsed.hostname) || parsed.hostname.endsWith(".xiaohongshu.com");
   } catch {
     return false;
   }
 };
 
+const isXhsTargetDomain = (value: unknown): boolean =>
+  typeof value === "string" && XHS_TARGET_DOMAINS.has(value.trim().toLowerCase());
+
 const referencesXhsSurface = (profile: string, params: JsonObject): boolean =>
   isXhsManagedProfile(profile) ||
-  params.target_domain === XHS_TARGET_DOMAIN ||
+  isXhsTargetDomain(params.target_domain) ||
   isXhsUrl(params.startUrl);
+
+const resolveActiveBrowserInstanceState = (input: {
+  state: BrowserInstanceStateSnapshot | null;
+  observedRunId: string;
+  pinnedControllerPid: number | null | undefined;
+  healthyLock: boolean;
+}): BrowserInstanceStateSnapshot | null => {
+  if (!input.healthyLock || input.state === null || input.state.runId !== input.observedRunId) {
+    return null;
+  }
+  if (
+    Number.isInteger(input.pinnedControllerPid) &&
+    input.state.controllerPid !== input.pinnedControllerPid
+  ) {
+    return null;
+  }
+  return input.state;
+};
 
 const ensureXhsRuntimeStartVisible = (input: RuntimeActionInput): void => {
   if (!referencesXhsSurface(input.profile, input.params) || input.params.headless === false) {
@@ -1007,6 +1028,12 @@ export class ProfileRuntimeService {
     const pinnedControllerPid =
       typeof lock?.controllerPid === "number" ? lock.controllerPid : lock?.ownerPid;
     const browserInstanceState = await this.#readBrowserInstanceState(profileDir);
+    const activeBrowserInstanceState = resolveActiveBrowserInstanceState({
+      state: browserInstanceState,
+      observedRunId: accessState.observedRunId,
+      pinnedControllerPid,
+      healthyLock: accessState.healthyLock
+    });
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1075,8 +1102,8 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: lock?.ownerPid ?? null,
-      headless: browserInstanceState?.headless ?? null,
-      executionSurface: browserInstanceState?.executionSurface ?? null,
+      headless: activeBrowserInstanceState?.headless ?? null,
+      executionSurface: activeBrowserInstanceState?.executionSurface ?? null,
       runtimeTakeoverEvidence,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
