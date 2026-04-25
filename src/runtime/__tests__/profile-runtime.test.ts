@@ -5074,6 +5074,88 @@ describe("profile-runtime login", () => {
     });
   });
 
+  it("does not reissue a consumed XHS recovery probe budget on reconfirmation", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-reconfirm-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
+
+    await service.login({
+      cwd: baseDir,
+      profile: "reconfirm_recovery_login_profile",
+      runId: "run-runtime-test-reconfirm-001",
+      params: {}
+    });
+
+    const metaPath = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "reconfirm_recovery_login_profile",
+      "__webenvoy_meta.json"
+    );
+    const metaBefore = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...metaBefore,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_required",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: true,
+            singleProbePassedAt: null,
+            probeRunId: "run-consumed-probe-before-reconfirm-001",
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_CLAIMED"]
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const confirmed = await service.login({
+      cwd: baseDir,
+      profile: "reconfirm_recovery_login_profile",
+      runId: "run-runtime-test-reconfirm-001",
+      params: {
+        confirm: true,
+        account_recovery_confirmed: true
+      }
+    });
+
+    expect(confirmed.xhs_closeout_rhythm).toMatchObject({
+      state: "single_probe_required",
+      probe_run_id: "run-consumed-probe-before-reconfirm-001",
+      full_bundle_blocked: true,
+      reason_codes: expect.arrayContaining(["XHS_RECOVERY_OPERATOR_RECONFIRMED"])
+    });
+
+    const metaAfter = JSON.parse(await readFile(metaPath, "utf8")) as ProfileMeta;
+    expect(metaAfter.xhsCloseoutRhythm).toMatchObject({
+      probeRunId: "run-consumed-probe-before-reconfirm-001",
+      singleProbePassedAt: null
+    });
+  });
+
   it("marks disconnected when confirm arrives after login browser already closed", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-disconnect-"));
     tempDirs.push(baseDir);

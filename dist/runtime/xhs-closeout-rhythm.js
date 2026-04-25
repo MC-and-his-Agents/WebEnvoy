@@ -35,20 +35,31 @@ export const buildBlockedXhsCloseoutRhythmRecord = (input) => ({
         input.reasonCode ?? ""
     ])
 });
-export const markXhsCloseoutOperatorConfirmed = (input) => ({
-    ...normalizeXhsCloseoutRhythmRecord(input.current),
-    state: "single_probe_required",
-    operatorConfirmedAt: input.confirmedAt,
-    singleProbeRequired: true,
-    singleProbePassedAt: null,
-    probeRunId: null,
-    fullBundleBlocked: true,
-    reasonCodes: uniqueReasons([
-        ...normalizeXhsCloseoutRhythmRecord(input.current).reasonCodes,
-        "XHS_RECOVERY_OPERATOR_CONFIRMED",
-        "XHS_RECOVERY_SINGLE_PROBE_REQUIRED"
-    ])
-});
+export const markXhsCloseoutOperatorConfirmed = (input) => {
+    const current = normalizeXhsCloseoutRhythmRecord(input.current);
+    if (current.probeRunId || current.singleProbePassedAt) {
+        return {
+            ...current,
+            operatorConfirmedAt: input.confirmedAt,
+            fullBundleBlocked: true,
+            reasonCodes: uniqueReasons([...current.reasonCodes, "XHS_RECOVERY_OPERATOR_RECONFIRMED"])
+        };
+    }
+    return {
+        ...current,
+        state: "single_probe_required",
+        operatorConfirmedAt: input.confirmedAt,
+        singleProbeRequired: true,
+        singleProbePassedAt: null,
+        probeRunId: null,
+        fullBundleBlocked: true,
+        reasonCodes: uniqueReasons([
+            ...current.reasonCodes,
+            "XHS_RECOVERY_OPERATOR_CONFIRMED",
+            "XHS_RECOVERY_SINGLE_PROBE_REQUIRED"
+        ])
+    };
+};
 export const markXhsCloseoutSingleProbePassed = (input) => ({
     ...normalizeXhsCloseoutRhythmRecord(input.current),
     state: "single_probe_passed",
