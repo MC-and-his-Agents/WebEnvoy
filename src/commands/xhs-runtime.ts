@@ -14,6 +14,7 @@ import {
   toAccountSafetyStatus,
   type AccountSafetyReason
 } from "../runtime/account-safety.js";
+import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
@@ -171,6 +172,7 @@ const pickGateErrorDetails = (
     "audit_record",
     "risk_state_output",
     "account_safety",
+    "xhs_closeout_rhythm",
     "runtime_stop",
     "status_code",
     "platform_code"
@@ -342,34 +344,73 @@ const resolveAccountSafetySignal = (
 const mergeAccountSafetyIntoFailurePayload = (
   payload: Record<string, unknown>,
   accountSafety: JsonObject,
+  xhsCloseoutRhythm?: JsonObject | null,
   runtimeStop?: JsonObject | null
 ): void => {
   const details = asObject(payload.details) ?? {};
   payload.details = {
     ...details,
     account_safety: accountSafety,
+    ...(xhsCloseoutRhythm ? { xhs_closeout_rhythm: xhsCloseoutRhythm } : {}),
     ...(runtimeStop ? { runtime_stop: runtimeStop } : {})
   };
   payload.account_safety = accountSafety;
+  if (xhsCloseoutRhythm) {
+    payload.xhs_closeout_rhythm = xhsCloseoutRhythm;
+  }
   if (runtimeStop) {
     payload.runtime_stop = runtimeStop;
   }
 };
 
-const assertAccountSafetyAllowsLiveCommand = (input: {
+const isXhsRecoveryProbe = (input: {
+  command: string;
+  ability: AbilityRef;
+  options: JsonObject;
+}): boolean =>
+  input.command === "xhs.search" &&
+  input.ability.id === "xhs.note.search.v1" &&
+  input.options.xhs_recovery_probe === true;
+
+const assertXhsLivePreflightAllowsCommand = (input: {
+  command: string;
   ability: AbilityRef;
   accountSafety: JsonObject;
+  xhsCloseoutRhythm: JsonObject;
+  options: JsonObject;
+  requestedExecutionMode: XhsExecutionMode;
 }): void => {
-  if (input.accountSafety.state !== "account_risk_blocked") {
+  const recoveryProbe = isXhsRecoveryProbe(input);
+  const rhythmState = asString(input.xhsCloseoutRhythm.state);
+  const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
+  const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
+  const probeRunId = asString(input.xhsCloseoutRhythm.probe_run_id);
+
+  if (
+    recoveryProbe &&
+    input.requestedExecutionMode === "recon" &&
+    rhythmState === "single_probe_required" &&
+    input.accountSafety.state !== "account_risk_blocked" &&
+    probeRunId === null
+  ) {
     return;
   }
+
   throw new CliError("ERR_EXECUTION_FAILED", "XHS account-safety gate blocked current live command", {
     retryable: false,
     details: {
       ability_id: input.ability.id,
       stage: "execution",
-      reason: "ACCOUNT_RISK_BLOCKED",
-      account_safety: input.accountSafety
+      reason:
+        input.accountSafety.state === "account_risk_blocked"
+          ? "ACCOUNT_RISK_BLOCKED"
+          : recoveryProbe && input.requestedExecutionMode !== "recon"
+            ? "XHS_RECOVERY_PROBE_MODE_INVALID"
+          : fullBundleBlocked || singleProbeRequired
+            ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+            : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
+      account_safety: input.accountSafety,
+      xhs_closeout_rhythm: input.xhsCloseoutRhythm
     }
   });
 };
@@ -492,14 +533,38 @@ const xhsReadCommand = async (
 
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
   const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
-  if (context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)) {
-    assertAccountSafetyAllowsLiveCommand({
-      ability: envelope.ability,
-      accountSafety: toAccountSafetyStatus(profileMeta?.accountSafety)
-    });
+  const accountSafetyStatus = toAccountSafetyStatus(profileMeta?.accountSafety);
+  const xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
+    rhythm: profileMeta?.xhsCloseoutRhythm,
+    accountSafety: profileMeta?.accountSafety
+  });
+  const profileRuntime = new ProfileRuntimeService();
+  const recoveryProbeRequested = isXhsRecoveryProbe({
+    command: context.command,
+    ability: envelope.ability,
+    options: gate.options
+  });
+  if (
+    context.profile &&
+    (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
+  ) {
+    const rhythmState = asString(xhsCloseoutRhythmStatus.state);
+    const shouldRunRhythmGate =
+      recoveryProbeRequested ||
+      accountSafetyStatus.state === "account_risk_blocked" ||
+      (rhythmState !== null && rhythmState !== "not_required");
+    if (shouldRunRhythmGate) {
+      assertXhsLivePreflightAllowsCommand({
+        command: context.command,
+        ability: envelope.ability,
+        accountSafety: accountSafetyStatus,
+        xhsCloseoutRhythm: xhsCloseoutRhythmStatus,
+        options: gate.options,
+        requestedExecutionMode: gate.requestedExecutionMode
+      });
+    }
   }
   const bridge = resolveRuntimeBridge();
-  const profileRuntime = new ProfileRuntimeService();
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
@@ -524,6 +589,17 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
+    if (
+      context.profile &&
+      recoveryProbeRequested
+    ) {
+      await profileRuntime.claimXhsCloseoutSingleProbe({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: {}
+      });
+    }
     const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
     const {
       __anonymous_isolation_verified: anonymousIsolationVerified,
@@ -574,7 +650,7 @@ const xhsReadCommand = async (
 
     if (!bridgeResult.ok) {
       const accountSafetySignal =
-        context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)
+        context.profile && (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
           ? resolveAccountSafetySignal(bridgeResult.payload, {
               command: context.command,
               targetDomain: gate.targetDomain,
@@ -591,15 +667,56 @@ const xhsReadCommand = async (
           signal: accountSafetySignal
         });
         const accountSafety = asObject(accountSafetyResult.account_safety);
+        const xhsCloseoutRhythm = asObject(accountSafetyResult.xhs_closeout_rhythm);
         const runtimeStop = asObject(accountSafetyResult.runtime_stop);
         if (accountSafety) {
-          mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety, runtimeStop);
+          mergeAccountSafetyIntoFailurePayload(
+            bridgeResult.payload,
+            accountSafety,
+            xhsCloseoutRhythm,
+            runtimeStop
+          );
         }
       }
       throw toCliExecutionError(
         envelope.ability,
         bridgeResult.payload,
         bridgeResult.error.message
+      );
+    }
+
+    const recoveryProbeRiskSignal =
+      context.profile && recoveryProbeRequested
+        ? resolveAccountSafetySignal(bridgeResult.payload, {
+            command: context.command,
+            targetDomain: gate.targetDomain,
+            targetTabId: gate.targetTabId,
+            targetPage: gate.targetPage
+          })
+        : null;
+    if (recoveryProbeRiskSignal && context.profile) {
+      const accountSafetyResult = await profileRuntime.markAccountSafetyBlocked({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: {},
+        signal: recoveryProbeRiskSignal
+      });
+      const accountSafety = asObject(accountSafetyResult.account_safety);
+      const xhsCloseoutRhythm = asObject(accountSafetyResult.xhs_closeout_rhythm);
+      const runtimeStop = asObject(accountSafetyResult.runtime_stop);
+      if (accountSafety) {
+        mergeAccountSafetyIntoFailurePayload(
+          bridgeResult.payload,
+          accountSafety,
+          xhsCloseoutRhythm,
+          runtimeStop
+        );
+      }
+      throw toCliExecutionError(
+        envelope.ability,
+        bridgeResult.payload,
+        "XHS recovery probe detected account-safety risk"
       );
     }
 
@@ -620,6 +737,18 @@ const xhsReadCommand = async (
         : {}),
       ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
     });
+
+    if (
+      context.profile &&
+      recoveryProbeRequested
+    ) {
+      await profileRuntime.markXhsCloseoutSingleProbePassed({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: {}
+      });
+    }
 
     return {
       summary,

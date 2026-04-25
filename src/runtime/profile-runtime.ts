@@ -51,10 +51,18 @@ import {
   type BridgeCommandResult
 } from "./native-messaging/bridge.js";
 import {
+  buildClearAccountSafetyRecord,
   buildBlockedAccountSafetyRecord,
   toAccountSafetyStatus,
   type AccountSafetyReason
 } from "./account-safety.js";
+import {
+  buildBlockedXhsCloseoutRhythmRecord,
+  claimXhsCloseoutSingleProbe,
+  markXhsCloseoutOperatorConfirmed,
+  markXhsCloseoutSingleProbePassed,
+  toXhsCloseoutRhythmStatus
+} from "./xhs-closeout-rhythm.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
@@ -155,6 +163,9 @@ export interface MarkAccountSafetyBlockedInput extends RuntimeActionInput {
     platformCode: number | null;
   };
 }
+
+export interface MarkXhsCloseoutSingleProbePassedInput extends RuntimeActionInput {}
+export interface ClaimXhsCloseoutSingleProbeInput extends RuntimeActionInput {}
 
 interface ProfileStoreLike {
   ensureProfileDir(profileName: string): Promise<string>;
@@ -315,6 +326,8 @@ const buildRecoverableSessionSummary = (
   };
 };
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
+const shouldConfirmAccountRecovery = (params: JsonObject): boolean =>
+  params.account_recovery_confirmed === true;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const XHS_TARGET_DOMAINS = new Set(["www.xiaohongshu.com", "creator.xiaohongshu.com"]);
 
@@ -786,6 +799,7 @@ export class ProfileRuntimeService {
     await store.ensureProfileDir(input.profile);
     const lockPath = this.#getLockPath(profileDir);
     const confirmLogin = shouldConfirmLogin(input.params);
+    const confirmAccountRecovery = confirmLogin && shouldConfirmAccountRecovery(input.params);
     const lockAcquireResult = await this.#acquireProfileLockAtomically({
       profileName: input.profile,
       profileDir,
@@ -975,7 +989,7 @@ export class ProfileRuntimeService {
             identityPreflight,
             profileState: session.profileState
           });
-      const nextMeta = this.#patchMeta(recoveredMeta, {
+      const nextMetaBase = this.#patchMeta(recoveredMeta, {
         profileName: input.profile,
         profileDir,
         profileState: session.profileState,
@@ -992,6 +1006,24 @@ export class ProfileRuntimeService {
           localStorageSnapshot
         )
       });
+      const recoveryRhythmCurrent =
+        recoveredMeta.xhsCloseoutRhythm ??
+        (recoveredMeta.accountSafety?.state === "account_risk_blocked"
+          ? buildBlockedXhsCloseoutRhythmRecord({
+              cooldownUntil: recoveredMeta.accountSafety.cooldownUntil,
+              reasonCode: recoveredMeta.accountSafety.reason
+            })
+          : undefined);
+      const nextMeta: ProfileMeta = confirmAccountRecovery
+        ? {
+            ...nextMetaBase,
+            accountSafety: buildClearAccountSafetyRecord(),
+            xhsCloseoutRhythm: markXhsCloseoutOperatorConfirmed({
+              current: recoveryRhythmCurrent,
+              confirmedAt: nowIso
+            })
+          }
+        : nextMetaBase;
       await store.writeMeta(
         input.profile,
         nextMeta
@@ -1012,7 +1044,16 @@ export class ProfileRuntimeService {
         identityPreflight: buildIdentityPreflightOutput(identityPreflight),
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
         fingerprint_runtime: fingerprintRuntime,
-        lastLoginAt: nowIso
+        lastLoginAt: nowIso,
+        ...(confirmAccountRecovery
+          ? {
+              account_safety: toAccountSafetyStatus(nextMeta.accountSafety),
+              xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+                rhythm: nextMeta.xhsCloseoutRhythm,
+                accountSafety: nextMeta.accountSafety
+              })
+            }
+          : {})
       };
     } catch (error) {
       throw mapRuntimeError(error);
@@ -1124,6 +1165,10 @@ export class ProfileRuntimeService {
       runtimeTakeoverEvidence,
       recoverableSession: buildRecoverableSessionSummary(meta),
       account_safety: toAccountSafetyStatus(meta?.accountSafety),
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: meta?.xhsCloseoutRhythm,
+        accountSafety: meta?.accountSafety
+      }),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: meta?.updatedAt ?? null
     };
@@ -1349,6 +1394,10 @@ export class ProfileRuntimeService {
       profileName: input.profile,
       profileDir,
       accountSafety,
+      xhsCloseoutRhythm: buildBlockedXhsCloseoutRhythmRecord({
+        cooldownUntil: accountSafety.cooldownUntil,
+        reasonCode: input.signal.reason
+      }),
       updatedAt: observedAt
     };
     await store.writeMeta(input.profile, nextMeta);
@@ -1381,8 +1430,135 @@ export class ProfileRuntimeService {
     return {
       profile: input.profile,
       account_safety: toAccountSafetyStatus(accountSafety),
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: nextMeta.xhsCloseoutRhythm,
+        accountSafety
+      }),
       runtime_stop: stopAttempt
     };
+  }
+
+  async markXhsCloseoutSingleProbePassed(
+    input: MarkXhsCloseoutSingleProbePassedInput
+  ): Promise<JsonObject> {
+    const passedAt = isoNow();
+    const store = this.#createStore(input.cwd);
+    const profileDir = this.#resolveProfileDir(store, input.profile);
+    await store.ensureProfileDir(input.profile);
+    const existingMeta =
+      await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+      this.#buildMinimalProfileMeta({
+        profile: input.profile,
+        profileDir,
+        nowIso: passedAt
+      });
+    const xhsCloseoutRhythm = markXhsCloseoutSingleProbePassed({
+      current: existingMeta.xhsCloseoutRhythm,
+      passedAt,
+      probeRunId: input.runId
+    });
+    const nextMeta: ProfileMeta = {
+      ...existingMeta,
+      profileName: input.profile,
+      profileDir,
+      xhsCloseoutRhythm,
+      updatedAt: passedAt
+    };
+    await store.writeMeta(input.profile, nextMeta);
+
+    return {
+      profile: input.profile,
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: xhsCloseoutRhythm,
+        accountSafety: nextMeta.accountSafety
+      })
+    };
+  }
+
+  async claimXhsCloseoutSingleProbe(input: ClaimXhsCloseoutSingleProbeInput): Promise<JsonObject> {
+    const claimedAt = isoNow();
+    const store = this.#createStore(input.cwd);
+    const profileDir = this.#resolveProfileDir(store, input.profile);
+    await store.ensureProfileDir(input.profile);
+    const claimLockPath = join(profileDir, "__webenvoy_xhs_probe_claim.lock");
+    try {
+      await writeFile(claimLockPath, `${input.runId}\n`, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "EEXIST") {
+        throw new CliError(
+          "ERR_EXECUTION_FAILED",
+          "XHS recovery single-probe budget is already being claimed",
+          {
+            retryable: false,
+            details: {
+              ability_id: "xhs.note.search.v1",
+              stage: "execution",
+              reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+            }
+          }
+        );
+      }
+      throw error;
+    }
+    try {
+      const existingMeta =
+        await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+        this.#buildMinimalProfileMeta({
+          profile: input.profile,
+          profileDir,
+          nowIso: claimedAt
+        });
+      const currentStatus = toXhsCloseoutRhythmStatus({
+        rhythm: existingMeta.xhsCloseoutRhythm,
+        accountSafety: existingMeta.accountSafety
+      });
+      if (
+        existingMeta.accountSafety?.state === "account_risk_blocked" ||
+        currentStatus.state !== "single_probe_required" ||
+        currentStatus.probe_run_id !== null
+      ) {
+        throw new CliError(
+          "ERR_EXECUTION_FAILED",
+          "XHS recovery single-probe budget is not available",
+          {
+            retryable: false,
+            details: {
+              ability_id: "xhs.note.search.v1",
+              stage: "execution",
+              reason:
+                existingMeta.accountSafety?.state === "account_risk_blocked"
+                  ? "ACCOUNT_RISK_BLOCKED"
+                  : "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+              account_safety: toAccountSafetyStatus(existingMeta.accountSafety),
+              xhs_closeout_rhythm: currentStatus
+            }
+          }
+        );
+      }
+      const xhsCloseoutRhythm = claimXhsCloseoutSingleProbe({
+        current: existingMeta.xhsCloseoutRhythm,
+        probeRunId: input.runId
+      });
+      const nextMeta: ProfileMeta = {
+        ...existingMeta,
+        profileName: input.profile,
+        profileDir,
+        xhsCloseoutRhythm,
+        updatedAt: claimedAt
+      };
+      await store.writeMeta(input.profile, nextMeta);
+
+      return {
+        profile: input.profile,
+        xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+          rhythm: xhsCloseoutRhythm,
+          accountSafety: nextMeta.accountSafety
+        })
+      };
+    } finally {
+      await unlink(claimLockPath).catch(() => undefined);
+    }
   }
 
   async stop(input: RuntimeActionInput): Promise<JsonObject> {

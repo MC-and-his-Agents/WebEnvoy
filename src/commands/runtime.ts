@@ -16,6 +16,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
+import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   buildUnifiedRiskStateOutput,
@@ -86,6 +87,22 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
     write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null,
     write_action_matrix_decisions: writeActionMatrixDecisions
   };
+};
+
+const buildSessionRhythmStatusViewForProfile = async (
+  cwd: string,
+  profile: string | null
+): Promise<Record<string, unknown> | null> => {
+  if (!profile) {
+    return null;
+  }
+  const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
+  const meta = await profileStore.readMeta(profile, { mode: "readonly" });
+  return toSessionRhythmStatusView({
+    profile,
+    rhythm: meta?.xhsCloseoutRhythm,
+    accountSafety: meta?.accountSafety
+  });
 };
 
 const resolveCurrentRiskState = (
@@ -246,6 +263,11 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         asObject(trail.approvalRecord),
         enrichedAuditRecords
       );
+      const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
+      const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
+        context.cwd,
+        auditProfile
+      );
       return {
         query: {
           run_id: runId
@@ -258,7 +280,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
             ?.write_action_matrix_decisions ?? null,
         risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
           auditRecords: enrichedAuditRecords
-        })
+        }),
+        session_rhythm_status_view: sessionRhythmStatusView
       };
     }
 
@@ -274,6 +297,11 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       null,
       enrichedAuditRecords
     );
+    const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
+    const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
+      context.cwd,
+      profile ?? auditProfile
+    );
     return {
       query: {
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -285,7 +313,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       write_action_matrix_decisions: null,
       risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
         auditRecords: enrichedAuditRecords
-      })
+      }),
+      session_rhythm_status_view: sessionRhythmStatusView
     };
   } catch (error) {
     if (error instanceof RuntimeStoreError) {

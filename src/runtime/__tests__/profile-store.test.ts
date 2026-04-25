@@ -194,6 +194,16 @@ describe("profile-store", () => {
         statusCode: 461,
         platformCode: 300011
       },
+      xhsCloseoutRhythm: {
+        state: "cooldown",
+        cooldownUntil: "2026-03-19T10:30:30.000Z",
+        operatorConfirmedAt: null,
+        singleProbeRequired: true,
+        singleProbePassedAt: null,
+        probeRunId: null,
+        fullBundleBlocked: true,
+        reasonCodes: ["ACCOUNT_RISK_RECOVERY_REQUIRED", "XHS_CLOSEOUT_COOLDOWN_ACTIVE"]
+      },
       fingerprintSeeds: {
         audioNoiseSeed: "seed-a-001",
         canvasNoiseSeed: "seed-c-001"
@@ -229,6 +239,12 @@ describe("profile-store", () => {
       sourceRunId: "run-account-safety-001",
       statusCode: 461,
       platformCode: 300011
+    });
+    expect(meta?.xhsCloseoutRhythm).toMatchObject({
+      state: "cooldown",
+      cooldownUntil: "2026-03-19T10:30:30.000Z",
+      singleProbeRequired: true,
+      fullBundleBlocked: true
     });
     expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
     expect(meta?.fingerprintProfileBundle).toEqual(expectedBundle);
