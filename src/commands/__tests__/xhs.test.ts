@@ -1365,6 +1365,9 @@ describe("normalizeGateOptionsForContract", () => {
             target_tab_id: 32,
             status_code: 461,
             live_commands_blocked: true
+          }),
+          runtime_stop: expect.objectContaining({
+            attempted: true
           })
         }
       });

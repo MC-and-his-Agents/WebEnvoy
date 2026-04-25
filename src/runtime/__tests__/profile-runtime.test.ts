@@ -695,7 +695,10 @@ describe("profile-runtime identity preflight", () => {
       live_commands_blocked: true
     });
     expect(result.runtime_stop).toMatchObject({
-      attempted: true
+      attempted: true,
+      outcome: "failed",
+      error_code: "ERR_PROFILE_STATE_CONFLICT",
+      message: "profile 当前未持锁或未启动"
     });
     const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await store.readMeta("account_safety_mark_profile");

@@ -119,6 +119,7 @@ const pickGateErrorDetails = (payload, details) => {
         "audit_record",
         "risk_state_output",
         "account_safety",
+        "runtime_stop",
         "status_code",
         "platform_code"
     ];
@@ -251,13 +252,17 @@ const resolveAccountSafetySignal = (payload, fallback) => {
         platformCode: asInteger(details?.platform_code)
     };
 };
-const mergeAccountSafetyIntoFailurePayload = (payload, accountSafety) => {
+const mergeAccountSafetyIntoFailurePayload = (payload, accountSafety, runtimeStop) => {
     const details = asObject(payload.details) ?? {};
     payload.details = {
         ...details,
-        account_safety: accountSafety
+        account_safety: accountSafety,
+        ...(runtimeStop ? { runtime_stop: runtimeStop } : {})
     };
     payload.account_safety = accountSafety;
+    if (runtimeStop) {
+        payload.runtime_stop = runtimeStop;
+    }
 };
 const assertAccountSafetyAllowsLiveCommand = (input) => {
     if (input.accountSafety.state !== "account_risk_blocked") {
@@ -432,8 +437,9 @@ const xhsReadCommand = async (context, inputConfig) => {
                     signal: accountSafetySignal
                 });
                 const accountSafety = asObject(accountSafetyResult.account_safety);
+                const runtimeStop = asObject(accountSafetyResult.runtime_stop);
                 if (accountSafety) {
-                    mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety);
+                    mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety, runtimeStop);
                 }
             }
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
