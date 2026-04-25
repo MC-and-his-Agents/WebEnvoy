@@ -188,6 +188,20 @@ export const resolveXhsCloseoutRhythmRecord = (input: {
     }
   }
 
+  if (
+    rhythm.state !== "not_required" &&
+    rhythm.cooldownUntil !== null &&
+    Date.parse(rhythm.cooldownUntil) > nowMs
+  ) {
+    return {
+      ...rhythm,
+      state: "cooldown",
+      singleProbeRequired: true,
+      fullBundleBlocked: true,
+      reasonCodes: uniqueReasons([...rhythm.reasonCodes, "XHS_CLOSEOUT_COOLDOWN_ACTIVE"])
+    };
+  }
+
   if (rhythm.state === "cooldown") {
     const cooldownActive = rhythm.cooldownUntil !== null && Date.parse(rhythm.cooldownUntil) > nowMs;
     if (cooldownActive) {
