@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, mkdtemp, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, resolveRuntimeStorePath, type DatabaseSyncCtor } from "./cli.contract.shared.js";
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
+  const isolatedProfileSalt = `${process.pid}_${Date.now()}`;
+  const isolatedProfile = (name: string): string => `xhs_${name}_${isolatedProfileSalt}`;
+
   const createAllowedHighRiskAuditRecord = (
     overrides: Record<string, unknown> & { runId?: string; requestId?: string } = {}
   ): Record<string, unknown> => {
@@ -3262,10 +3265,11 @@ process.stdin.on("data", (chunk) => {
       keyRequestCount
     }) => {
       const runId = `run-sim-${simulateResult}`;
+      const profile = isolatedProfile(`account_sim_${simulateResult}`);
       const result = runCli([
         "xhs.search",
         "--profile",
-        "xhs_account_001",
+        profile,
       "--run-id",
       runId,
       "--params",
@@ -3351,7 +3355,7 @@ process.stdin.on("data", (chunk) => {
     const result = runCli([
       "xhs.search",
       "--profile",
-      "xhs_account_001",
+      isolatedProfile("account_output_bad"),
       "--run-id",
       runId,
       "--params",
@@ -3416,7 +3420,7 @@ process.stdin.on("data", (chunk) => {
     const result = runCli([
       "xhs.search",
       "--profile",
-      "xhs_account_001",
+      isolatedProfile("account_missing_capability"),
       "--run-id",
       runId,
       "--params",
@@ -3486,7 +3490,7 @@ process.stdin.on("data", (chunk) => {
     const result = runCli([
       "xhs.search",
       "--profile",
-      "xhs_account_001",
+      isolatedProfile("account_invalid_capability"),
       "--run-id",
       runId,
       "--params",
