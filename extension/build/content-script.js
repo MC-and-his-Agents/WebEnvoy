@@ -4406,8 +4406,7 @@ const classifyXhsAccountSafetySurface = (input) => {
             message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
-    if (bodyText.includes("当前浏览器环境异常") ||
-        (title.includes("浏览器环境异常") && bodyText.includes("平台拒绝当前请求"))) {
+    if ((title.includes("浏览器环境异常") && bodyText.includes("平台拒绝当前请求"))) {
         return {
             reason: "BROWSER_ENV_ABNORMAL",
             message: "浏览器环境异常，平台拒绝当前请求"
