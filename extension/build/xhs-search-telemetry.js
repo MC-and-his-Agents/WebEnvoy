@@ -4,6 +4,16 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const SEARCH_FAILURE_SEMANTICS = {
     SIGNATURE_ENTRY_MISSING: {
@@ -25,6 +35,20 @@ const SEARCH_FAILURE_SEMANTICS = {
         stage: "action",
         component: "page",
         target: "captured_request_context",
+        includeKeyRequest: false
+    },
+    XHS_LOGIN_REQUIRED: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
+        includeKeyRequest: false
+    },
+    XHS_ACCOUNT_RISK_PAGE: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
         includeKeyRequest: false
     },
     SESSION_EXPIRED: {
@@ -63,27 +87,135 @@ const SEARCH_FAILURE_SEMANTICS = {
         includeKeyRequest: true
     }
 };
+const PAGE_SURFACE_ACCOUNT_SAFETY_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
+    "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
+    "CAPTCHA_REQUIRED",
+    "BROWSER_ENV_ABNORMAL"
+]);
+const extractUrlPath = (href) => {
+    try {
+        return new URL(href).pathname.toLowerCase();
+    }
+    catch {
+        return href.split(/[?#]/u, 1)[0]?.toLowerCase() ?? "";
+    }
+};
 export const classifyPageKind = (href) => {
-    if (href.includes("/login")) {
+    const path = extractUrlPath(href);
+    if (path.includes("/login")) {
         return "login";
     }
     if (href.includes("creator.xiaohongshu.com/publish")) {
         return "compose";
     }
-    if (href.includes("/search_result")) {
+    if (path.includes("/search_result")) {
         return "search";
     }
-    if (href.includes("/explore/")) {
+    if (path.includes("/explore/")) {
         return "detail";
     }
     return "unknown";
 };
-const resolveDiagnosisSemantics = (reason, fallbackCategory) => SEARCH_FAILURE_SEMANTICS[reason] ?? {
-    category: fallbackCategory ?? "request_failed",
-    stage: "request",
-    component: "network",
-    target: SEARCH_ENDPOINT,
-    includeKeyRequest: true
+const normalizeSurfaceText = (value) => (value ?? "").replace(/\s+/gu, "");
+const hasSpecificOverlaySelector = (selector) => typeof selector === "string" &&
+    selector.length > 0 &&
+    selector !== '[role="dialog"]' &&
+    selector !== '[aria-modal="true"]';
+export const hasXhsAccountSafetyOverlaySignal = (value) => {
+    const overlayText = normalizeSurfaceText(value);
+    return ((overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") ||
+            overlayText.includes("验证码") ||
+            overlayText.includes("人机验证"))) ||
+        (overlayText.includes("当前访问存在安全风险") &&
+            (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) ||
+        (overlayText.includes("登录后推荐更懂你的笔记") &&
+            overlayText.includes("扫码") &&
+            overlayText.includes("输入手机号")) ||
+        overlayText.includes("账号异常") ||
+        overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal"));
+};
+export const classifyXhsAccountSafetySurface = (input) => {
+    const path = extractUrlPath(input.href);
+    const overlayText = hasSpecificOverlaySelector(input.overlay?.selector)
+        ? normalizeSurfaceText(input.overlay?.text)
+        : "";
+    if (path.includes("captcha")) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    if (overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") || overlayText.includes("验证码") || overlayText.includes("人机验证"))) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    if (path.includes("/security") ||
+        path.includes("/risk")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
+    if (overlayText.includes("当前访问存在安全风险") &&
+        (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
+    if (path.includes("/login")) {
+        return {
+            reason: "XHS_LOGIN_REQUIRED",
+            message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    if (overlayText.includes("登录后推荐更懂你的笔记") &&
+        overlayText.includes("扫码") &&
+        overlayText.includes("输入手机号")) {
+        return {
+            reason: "XHS_LOGIN_REQUIRED",
+            message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    if (overlayText.includes("账号异常")) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        };
+    }
+    return null;
+};
+const resolveDiagnosisSemantics = (reason, fallbackCategory) => {
+    if (fallbackCategory === "page_changed" && PAGE_SURFACE_ACCOUNT_SAFETY_REASONS.has(reason)) {
+        return {
+            category: "page_changed",
+            stage: "action",
+            component: "page",
+            target: "xhs.account_safety_surface",
+            includeKeyRequest: false
+        };
+    }
+    return SEARCH_FAILURE_SEMANTICS[reason] ?? {
+        category: fallbackCategory ?? "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    };
 };
 export const createObservability = (input) => ({
     page_state: {
@@ -244,6 +376,10 @@ export const resolveSimulatedResult = (simulated, params, options, env) => {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         },
+        generic_api_warning: {
+            reason: "TARGET_API_RESPONSE_INVALID",
+            message: "搜索接口返回了未识别的失败响应"
+        },
         gateway_invoker_failed: {
             reason: "GATEWAY_INVOKER_FAILED",
             message: "网关调用失败，当前上下文不足以完成搜索请求"
@@ -263,9 +399,11 @@ export const resolveSimulatedResult = (simulated, params, options, env) => {
                 ? 200
                 : simulated === "captcha_required"
                     ? 429
-                    : simulated === "gateway_invoker_failed"
-                        ? 500
-                        : undefined,
+                    : simulated === "generic_api_warning"
+                        ? 400
+                        : simulated === "gateway_invoker_failed"
+                            ? 500
+                            : undefined,
         failureReason: simulated,
         includeKeyRequest: semantics.includeKeyRequest,
         failureSite: {
@@ -305,9 +443,13 @@ export const parseCount = (body) => {
 };
 export const inferFailure = (status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -332,7 +474,7 @@ export const inferFailure = (status, body) => {
             message: "网关调用失败，当前上下文不足以完成搜索请求"
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"

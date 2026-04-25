@@ -612,6 +612,104 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("surfaces persisted account_safety in runtime.status", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-account-safety-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await store.initializeMeta(
+      "account_safety_profile",
+      "2026-04-25T10:00:00.000Z",
+      { allowUnsupportedExtensionBrowser: true }
+    );
+    await store.writeMeta("account_safety_profile", {
+      ...meta,
+      accountSafety: {
+        state: "account_risk_blocked",
+        platform: "xhs",
+        reason: "XHS_LOGIN_REQUIRED",
+        observedAt: "2026-04-25T10:01:00.000Z",
+        cooldownUntil: "2026-04-25T10:31:00.000Z",
+        sourceRunId: "run-account-safety-status-001",
+        sourceCommand: "xhs.search",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        pageUrl: "https://www.xiaohongshu.com/explore",
+        statusCode: null,
+        platformCode: null
+      }
+    });
+    const service = createTestService();
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "account_safety_profile",
+      runId: "run-account-safety-status-reader-001",
+      params: {}
+    });
+
+    expect(status.account_safety).toMatchObject({
+      state: "account_risk_blocked",
+      platform: "xhs",
+      reason: "XHS_LOGIN_REQUIRED",
+      observed_at: "2026-04-25T10:01:00.000Z",
+      cooldown_until: "2026-04-25T10:31:00.000Z",
+      source_run_id: "run-account-safety-status-001",
+      source_command: "xhs.search",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      page_url: "https://www.xiaohongshu.com/explore",
+      live_commands_blocked: true
+    });
+  });
+
+  it("persists account_safety blocked and attempts a best-effort runtime stop", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-account-safety-mark-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+
+    const result = await service.markAccountSafetyBlocked({
+      cwd: baseDir,
+      profile: "account_safety_mark_profile",
+      runId: "run-account-safety-mark-001",
+      params: {},
+      signal: {
+        reason: "ACCOUNT_ABNORMAL",
+        sourceCommand: "xhs.search",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+        statusCode: 461,
+        platformCode: 300011
+      }
+    });
+
+    expect(result.account_safety).toMatchObject({
+      state: "account_risk_blocked",
+      reason: "ACCOUNT_ABNORMAL",
+      source_run_id: "run-account-safety-mark-001",
+      source_command: "xhs.search",
+      status_code: 461,
+      platform_code: 300011,
+      live_commands_blocked: true
+    });
+    expect(result.runtime_stop).toMatchObject({
+      attempted: true,
+      outcome: "failed",
+      error_code: "ERR_PROFILE_STATE_CONFLICT",
+      message: "profile 当前未持锁或未启动"
+    });
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await store.readMeta("account_safety_mark_profile");
+    expect(meta?.accountSafety).toMatchObject({
+      state: "account_risk_blocked",
+      reason: "ACCOUNT_ABNORMAL",
+      statusCode: 461,
+      platformCode: 300011
+    });
+  });
+
   it("surfaces transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
     tempDirs.push(baseDir);

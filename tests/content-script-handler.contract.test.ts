@@ -1778,6 +1778,211 @@ describe("content-script handler contract", () => {
     }
   );
 
+  it("classifies xhs.search login overlay separately from request-context missing", async () => {
+    await withMockMainWorld(async () => {
+      const readCapturedRequestContext = vi.fn(async () => null);
+      const fetchJson = vi.fn(async () => ({
+        status: 200,
+        body: {
+          code: 0,
+          data: {
+            items: []
+          }
+        }
+      }));
+      const handler = new ContentScriptHandler({
+        xhsEnv: {
+          now: () => Date.now(),
+          randomId: () => "req-login-modal-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "小红书 - 你的生活兴趣社区",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=cookie-token",
+          getBodyText: () => "登录后推荐更懂你的笔记 扫码登录 输入手机号",
+          getAccountSafetyOverlay: () => ({
+            source: "dom_overlay",
+            selector: '.login-modal',
+            text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号"
+          }),
+          readCapturedRequestContext,
+          callSignature: async () => ({
+            "X-s": "signature",
+            "X-t": "1700000000"
+          }),
+          fetchJson
+        }
+      });
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+      const issue209Linkage = createIssue209InvocationLinkage(
+        "run-xhs-login-modal-001",
+        "login-modal"
+      );
+
+    handler.onBackgroundMessage({
+      kind: "forward",
+      id: "run-xhs-login-modal-001",
+      runId: "run-xhs-login-modal-001",
+      tabId: 1,
+      profile: "profile-a",
+      cwd: "/workspace/WebEnvoy",
+      timeoutMs: 1_000,
+      command: "xhs.search",
+      params: {
+        session_id: "nm-session-001"
+      },
+      commandParams: {
+        request_id: "issue209-login-modal-001",
+        gate_invocation_id: issue209Linkage.gateInvocationId,
+        requested_execution_mode: "live_read_limited",
+        ability: {
+          id: "xhs.search",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营"
+        },
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 1,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecord({
+            runId: "run-xhs-login-modal-001",
+            requestId: "run-xhs-login-modal-001",
+            commandRequestId: "issue209-login-modal-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          }),
+          admission_context: createApprovedReadAdmissionContext({
+            runId: "run-xhs-login-modal-001",
+            requestId: "run-xhs-login-modal-001",
+            commandRequestId: "issue209-login-modal-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          })
+        }
+      },
+      fingerprintContext: createFingerprintContext()
+    });
+
+    await waitForResult(results);
+
+    expect(results[0]?.ok).toBe(false);
+    const payload = results[0]?.payload as Record<string, unknown>;
+    const details = payload?.details as Record<string, unknown>;
+    const observability = payload?.observability as Record<string, unknown>;
+    expect(details?.reason).toBe("XHS_LOGIN_REQUIRED");
+    expect(details?.reason).not.toBe("REQUEST_CONTEXT_MISSING");
+    expect((observability?.failure_site as Record<string, unknown>)?.target).toBe(
+      "xhs.account_safety_surface"
+    );
+    expect(observability?.key_requests).toEqual([]);
+    expect(readCapturedRequestContext).not.toHaveBeenCalled();
+      expect(fetchJson).not.toHaveBeenCalled();
+    });
+  });
+
+  it("continues scanning visible overlays until an account-safety container is found", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const createOverlay = (text: string, matchedSelector: string) => ({
+        innerText: text,
+        textContent: text,
+        getBoundingClientRect: () => ({ width: 320, height: 240 }),
+        matches: (selector: string) => selector === matchedSelector
+      });
+      (globalThis.document as Document & {
+        querySelectorAll?: (selector: string) => unknown[];
+        cookie?: string;
+      }).querySelectorAll = () => [
+        createOverlay("普通提示弹层", '[role="dialog"]'),
+        createOverlay("登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号", ".login-modal")
+      ];
+      (globalThis.document as Document & { cookie?: string }).cookie = "a1=cookie-token";
+      (mockWindow as Window & {
+        getComputedStyle?: () => { display: string; visibility: string; opacity: string };
+      }).getComputedStyle = () => ({
+        display: "block",
+        visibility: "visible",
+        opacity: "1"
+      });
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+      const issue209Linkage = createIssue209InvocationLinkage(
+        "run-xhs-login-overlay-scan-001",
+        "login-overlay-scan"
+      );
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-login-overlay-scan-001",
+        runId: "run-xhs-login-overlay-scan-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-001"
+        },
+        commandParams: {
+          request_id: "issue209-login-overlay-scan-001",
+          gate_invocation_id: issue209Linkage.gateInvocationId,
+          requested_execution_mode: "live_read_limited",
+          ability: {
+            id: "xhs.search",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 1,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            limited_read_rollout_ready_true: true,
+            approval_record: createApprovedReadApprovalRecord(),
+            audit_record: createApprovedReadAuditRecord({
+              runId: "run-xhs-login-overlay-scan-001",
+              requestId: "run-xhs-login-overlay-scan-001",
+              commandRequestId: "issue209-login-overlay-scan-001",
+              gateInvocationId: issue209Linkage.gateInvocationId
+            }),
+            admission_context: createApprovedReadAdmissionContext({
+              runId: "run-xhs-login-overlay-scan-001",
+              requestId: "run-xhs-login-overlay-scan-001",
+              commandRequestId: "issue209-login-overlay-scan-001",
+              gateInvocationId: issue209Linkage.gateInvocationId
+            })
+          }
+        },
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      expect(results[0]?.ok).toBe(false);
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const details = payload?.details as Record<string, unknown>;
+      expect(details?.reason).toBe("XHS_LOGIN_REQUIRED");
+    });
+  });
+
   it("keeps audio noise stable across repeated runtime.ping fingerprint installs", async () => {
     await withMockMainWorld(async ({ mockWindow }) => {
       const handler = new ContentScriptHandler();

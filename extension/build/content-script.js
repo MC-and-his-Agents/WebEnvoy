@@ -4280,6 +4280,16 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const SEARCH_FAILURE_SEMANTICS = {
     SIGNATURE_ENTRY_MISSING: {
@@ -4301,6 +4311,20 @@ const SEARCH_FAILURE_SEMANTICS = {
         stage: "action",
         component: "page",
         target: "captured_request_context",
+        includeKeyRequest: false
+    },
+    XHS_LOGIN_REQUIRED: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
+        includeKeyRequest: false
+    },
+    XHS_ACCOUNT_RISK_PAGE: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "xhs.account_safety_surface",
         includeKeyRequest: false
     },
     SESSION_EXPIRED: {
@@ -4339,27 +4363,135 @@ const SEARCH_FAILURE_SEMANTICS = {
         includeKeyRequest: true
     }
 };
+const PAGE_SURFACE_ACCOUNT_SAFETY_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
+    "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
+    "CAPTCHA_REQUIRED",
+    "BROWSER_ENV_ABNORMAL"
+]);
+const extractUrlPath = (href) => {
+    try {
+        return new URL(href).pathname.toLowerCase();
+    }
+    catch {
+        return href.split(/[?#]/u, 1)[0]?.toLowerCase() ?? "";
+    }
+};
 const classifyPageKind = (href) => {
-    if (href.includes("/login")) {
+    const path = extractUrlPath(href);
+    if (path.includes("/login")) {
         return "login";
     }
     if (href.includes("creator.xiaohongshu.com/publish")) {
         return "compose";
     }
-    if (href.includes("/search_result")) {
+    if (path.includes("/search_result")) {
         return "search";
     }
-    if (href.includes("/explore/")) {
+    if (path.includes("/explore/")) {
         return "detail";
     }
     return "unknown";
 };
-const resolveDiagnosisSemantics = (reason, fallbackCategory) => SEARCH_FAILURE_SEMANTICS[reason] ?? {
-    category: fallbackCategory ?? "request_failed",
-    stage: "request",
-    component: "network",
-    target: SEARCH_ENDPOINT,
-    includeKeyRequest: true
+const normalizeSurfaceText = (value) => (value ?? "").replace(/\s+/gu, "");
+const hasSpecificOverlaySelector = (selector) => typeof selector === "string" &&
+    selector.length > 0 &&
+    selector !== '[role="dialog"]' &&
+    selector !== '[aria-modal="true"]';
+const hasXhsAccountSafetyOverlaySignal = (value) => {
+    const overlayText = normalizeSurfaceText(value);
+    return ((overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") ||
+            overlayText.includes("验证码") ||
+            overlayText.includes("人机验证"))) ||
+        (overlayText.includes("当前访问存在安全风险") &&
+            (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) ||
+        (overlayText.includes("登录后推荐更懂你的笔记") &&
+            overlayText.includes("扫码") &&
+            overlayText.includes("输入手机号")) ||
+        overlayText.includes("账号异常") ||
+        overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal"));
+};
+const classifyXhsAccountSafetySurface = (input) => {
+    const path = extractUrlPath(input.href);
+    const overlayText = hasSpecificOverlaySelector(input.overlay?.selector)
+        ? normalizeSurfaceText(input.overlay?.text)
+        : "";
+    if (path.includes("captcha")) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    if (overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") || overlayText.includes("验证码") || overlayText.includes("人机验证"))) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    if (path.includes("/security") ||
+        path.includes("/risk")) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
+    if (overlayText.includes("当前访问存在安全风险") &&
+        (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) {
+        return {
+            reason: "XHS_ACCOUNT_RISK_PAGE",
+            message: "当前页面命中小红书账号风险或安全验证页面"
+        };
+    }
+    if (path.includes("/login")) {
+        return {
+            reason: "XHS_LOGIN_REQUIRED",
+            message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    if (overlayText.includes("登录后推荐更懂你的笔记") &&
+        overlayText.includes("扫码") &&
+        overlayText.includes("输入手机号")) {
+        return {
+            reason: "XHS_LOGIN_REQUIRED",
+            message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    if (overlayText.includes("账号异常")) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        };
+    }
+    return null;
+};
+const resolveDiagnosisSemantics = (reason, fallbackCategory) => {
+    if (fallbackCategory === "page_changed" && PAGE_SURFACE_ACCOUNT_SAFETY_REASONS.has(reason)) {
+        return {
+            category: "page_changed",
+            stage: "action",
+            component: "page",
+            target: "xhs.account_safety_surface",
+            includeKeyRequest: false
+        };
+    }
+    return SEARCH_FAILURE_SEMANTICS[reason] ?? {
+        category: fallbackCategory ?? "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    };
 };
 const createObservability = (input) => ({
     page_state: {
@@ -4520,6 +4652,10 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         },
+        generic_api_warning: {
+            reason: "TARGET_API_RESPONSE_INVALID",
+            message: "搜索接口返回了未识别的失败响应"
+        },
         gateway_invoker_failed: {
             reason: "GATEWAY_INVOKER_FAILED",
             message: "网关调用失败，当前上下文不足以完成搜索请求"
@@ -4539,9 +4675,11 @@ const resolveSimulatedResult = (simulated, params, options, env) => {
                 ? 200
                 : simulated === "captcha_required"
                     ? 429
-                    : simulated === "gateway_invoker_failed"
-                        ? 500
-                        : undefined,
+                    : simulated === "generic_api_warning"
+                        ? 400
+                        : simulated === "gateway_invoker_failed"
+                            ? 500
+                            : undefined,
         failureReason: simulated,
         includeKeyRequest: semantics.includeKeyRequest,
         failureSite: {
@@ -4581,9 +4719,13 @@ const parseCount = (body) => {
 };
 const inferFailure = (status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -4608,7 +4750,7 @@ const inferFailure = (status, body) => {
             message: "网关调用失败，当前上下文不足以完成搜索请求"
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -4647,7 +4789,7 @@ const containsCookie = (cookie, key) => cookie
     .split(";")
     .map((item) => item.trim())
     .some((item) => item.startsWith(`${key}=`));
-return { buildEditorInputEvidence, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
+return { buildEditorInputEvidence, classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, createObservability, hasXhsAccountSafetyOverlaySignal, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
 })();
 const __webenvoy_module_xhs_search_gate = (() => {
 const {
@@ -4902,6 +5044,7 @@ const {
 } = __webenvoy_module_xhs_search_gate;
 const {
   buildEditorInputEvidence,
+  classifyXhsAccountSafetySurface,
   containsCookie,
   createDiagnosis,
   createFailure,
@@ -4917,6 +5060,16 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
@@ -5090,6 +5243,40 @@ const isTransientFailedRequestObservation = (observation) => {
     const requestStatus = asRecord(observationRecord.request_status);
     return requestStatus?.http_status === null;
 };
+const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "SESSION_EXPIRED",
+    "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
+    "BROWSER_ENV_ABNORMAL",
+    "GATEWAY_INVOKER_FAILED",
+    "CAPTCHA_REQUIRED",
+    "TARGET_API_RESPONSE_INVALID"
+]);
+const resolveRejectedSourceDetail = (observation) => {
+    const observationRecord = asRecord(observation);
+    const rejectionReason = observationRecord?.rejection_reason;
+    if (!observationRecord || rejectionReason !== "failed_request_rejected") {
+        return { reason: "synthetic_request_rejected" };
+    }
+    const requestStatus = asRecord(observationRecord.request_status);
+    const statusCode = asInteger(requestStatus?.http_status) ?? asInteger(observationRecord.status);
+    const responseBody = asRecord(asRecord(observationRecord.response)?.body);
+    const platformCode = asInteger(responseBody?.code);
+    const inferred = inferFailure(statusCode ?? 0, responseBody);
+    if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason)) {
+        return {
+            reason: inferred.reason,
+            message: inferred.message,
+            ...(typeof statusCode === "number" ? { statusCode } : {}),
+            ...(typeof platformCode === "number" ? { platformCode } : {})
+        };
+    }
+    return {
+        reason: "failed_request_rejected",
+        ...(typeof statusCode === "number" ? { statusCode } : {}),
+        ...(typeof platformCode === "number" ? { platformCode } : {})
+    };
+};
 const isTrustedIncompatibleObservation = (observation, expected) => {
     const observationRecord = asRecord(observation);
     if (!observationRecord) {
@@ -5219,22 +5406,28 @@ const resolveRequestContextState = async (input, env) => {
         if (rejectedObservation) {
             if (input?.deferTransientMisses === true &&
                 isTransientFailedRequestObservation(rejectedObservation)) {
+                const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
                 return {
                     status: "miss",
                     failureReason: "template_missing",
-                    detailReason: "failed_request_rejected",
+                    detailReason: rejectedDetail.reason,
+                    detailMessage: rejectedDetail.message,
+                    statusCode: rejectedDetail.statusCode,
+                    platformCode: rejectedDetail.platformCode,
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys,
                     observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
                 };
             }
+            const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
             return {
                 status: "miss",
                 failureReason: "rejected_source",
-                detailReason: rejectedObservation.rejection_reason === "failed_request_rejected"
-                    ? "failed_request_rejected"
-                    : "synthetic_request_rejected",
+                detailReason: rejectedDetail.reason,
+                detailMessage: rejectedDetail.message,
+                statusCode: rejectedDetail.statusCode,
+                platformCode: rejectedDetail.platformCode,
                 pageContextNamespace,
                 shapeKey,
                 availableShapeKeys,
@@ -5498,6 +5691,38 @@ const executeXhsSearch = async (input, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createDiagnosis({
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "登录态缺失，无法执行 xhs.search", {
             ability_id: input.abilityId,
@@ -5528,17 +5753,24 @@ const executeXhsSearch = async (input, env) => {
         options: input.options
     }, env);
     if (requestContextState.status !== "hit") {
-        const reason = requestContextState.failureReason === "shape_mismatch" ||
-            requestContextState.failureReason === "rejected_source"
-            ? "REQUEST_CONTEXT_INCOMPATIBLE"
-            : "REQUEST_CONTEXT_MISSING";
+        const backendRejectedReason = requestContextState.detailReason &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextState.detailReason)
+            ? requestContextState.detailReason
+            : null;
+        const reason = backendRejectedReason ??
+            (requestContextState.failureReason === "shape_mismatch" ||
+                requestContextState.failureReason === "rejected_source"
+                ? "REQUEST_CONTEXT_INCOMPATIBLE"
+                : "REQUEST_CONTEXT_MISSING");
         const summaryMap = {
             template_missing: "当前页面现场缺少可复用的搜索请求模板",
             template_stale: "当前页面现场的搜索请求模板已过期",
             shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
             rejected_source: "当前页面现场的搜索请求来源已被拒绝"
         };
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summaryMap[requestContextState.failureReason], {
+        const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
+        const isBackendRejectedSource = backendRejectedReason !== null;
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
             ability_id: input.abilityId,
             stage: "execution",
             reason,
@@ -5548,6 +5780,12 @@ const executeXhsSearch = async (input, env) => {
             available_shape_keys: requestContextState.availableShapeKeys,
             ...(requestContextState.detailReason
                 ? { rejected_source_reason: requestContextState.detailReason }
+                : {}),
+            ...(typeof requestContextState.statusCode === "number"
+                ? { status_code: requestContextState.statusCode }
+                : {}),
+            ...(typeof requestContextState.platformCode === "number"
+                ? { platform_code: requestContextState.platformCode }
                 : {}),
             ...(typeof requestContextState.observedAt === "number"
                 ? { request_context_observed_at: requestContextState.observedAt }
@@ -5559,16 +5797,18 @@ const executeXhsSearch = async (input, env) => {
             requestId: `req-${env.randomId()}`,
             outcome: "failed",
             failureReason: reason,
-            includeKeyRequest: false,
+            includeKeyRequest: isBackendRejectedSource,
+            statusCode: requestContextState.statusCode,
             failureSite: {
-                stage: "action",
-                component: "page",
-                target: "captured_request_context",
-                summary: summaryMap[requestContextState.failureReason]
+                stage: isBackendRejectedSource ? "request" : "action",
+                component: isBackendRejectedSource ? "network" : "page",
+                target: isBackendRejectedSource ? SEARCH_ENDPOINT : "captured_request_context",
+                summary
             }
         }), createDiagnosis({
             reason,
-            summary: summaryMap[requestContextState.failureReason]
+            summary,
+            category: isBackendRejectedSource ? "request_failed" : "page_changed"
         }), gate, auditRecord), gate.execution_audit);
     }
     const headers = {
@@ -5708,13 +5948,15 @@ const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
-    const businessCode = responseRecord?.code;
-    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+    const businessCode = asInteger(responseRecord?.code);
+    if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
         const failure = inferFailure(response.status, response.body);
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(businessCode !== null ? { platform_code: businessCode } : {})
         }, createObservability({
             href: env.getLocationHref(),
             title: env.getDocumentTitle(),
@@ -5795,6 +6037,7 @@ return { executeXhsSearch };
 const __webenvoy_module_xhs_read_execution = (() => {
 const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;
 const {
+  classifyXhsAccountSafetySurface,
   containsCookie,
   createDiagnosis,
   createFailure,
@@ -5807,8 +6050,10 @@ const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
     "SESSION_EXPIRED",
     "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
     "BROWSER_ENV_ABNORMAL",
     "GATEWAY_INVOKER_FAILED",
     "CAPTCHA_REQUIRED",
@@ -5955,29 +6200,51 @@ const isCapturedArtifactStale = (value, now) => {
     const observedAt = resolveCapturedArtifactObservedAt(value);
     return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
 };
-const resolveRejectedSourceReason = (spec, artifact) => {
+const resolveRejectedSourceDiagnostics = (spec, artifact) => {
     const status = resolveCapturedArtifactStatus(artifact);
+    const response = asRecord(artifact.response);
+    const responseBody = response?.body;
+    const responseRecord = asRecord(responseBody);
+    const platformCode = asInteger(responseRecord?.code);
     if (status.rejectionReason === "synthetic_request_rejected" ||
         status.rejectionReason === "shape_mismatch") {
-        return status.rejectionReason;
+        return {
+            reason: status.rejectionReason,
+            statusCode: status.httpStatus,
+            platformCode
+        };
     }
     if (status.rejectionReason === "failed_request_rejected") {
-        const response = asRecord(artifact.response);
-        const responseBody = response?.body;
         const inferred = inferReadFailure(spec, status.httpStatus ?? 0, responseBody);
         if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason)) {
-            return inferred.reason;
+            return {
+                reason: inferred.reason,
+                statusCode: status.httpStatus,
+                platformCode
+            };
         }
-        return "failed_request_rejected";
+        return {
+            reason: "failed_request_rejected",
+            statusCode: status.httpStatus,
+            platformCode
+        };
     }
-    return "failed_request_rejected";
+    return {
+        reason: "failed_request_rejected",
+        statusCode: status.httpStatus,
+        platformCode
+    };
 };
 const resolveRejectedSourceMessage = (spec, reason) => {
     switch (reason) {
         case "SESSION_EXPIRED":
             return `登录已失效，无法执行 ${spec.command}`;
+        case "XHS_LOGIN_REQUIRED":
+            return "当前页面要求登录小红书，无法继续执行";
         case "ACCOUNT_ABNORMAL":
             return "账号异常，平台拒绝当前请求";
+        case "XHS_ACCOUNT_RISK_PAGE":
+            return "当前页面命中小红书账号风险或安全验证页面";
         case "BROWSER_ENV_ABNORMAL":
             return "浏览器环境异常，平台拒绝当前请求";
         case "GATEWAY_INVOKER_FAILED":
@@ -5990,6 +6257,9 @@ const resolveRejectedSourceMessage = (spec, reason) => {
             return null;
     }
 };
+const isBackendRejectedSourceLookup = (lookupResult) => lookupResult.state === "rejected_source" &&
+    (BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason) ||
+        lookupResult.reason === "failed_request_rejected");
 const waitForRequestContextRetry = async (env, ms) => {
     if (typeof env.sleep === "function") {
         await env.sleep(ms);
@@ -6304,10 +6574,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                     shape: derivedShape ?? expectedShape
                 };
             }
+            const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, rejectedObservation);
             return {
                 state: "rejected_source",
-                reason: resolveRejectedSourceReason(spec, rejectedObservation),
-                shape: derivedShape ?? expectedShape
+                reason: rejectedDiagnostics.reason,
+                shape: derivedShape ?? expectedShape,
+                statusCode: rejectedDiagnostics.statusCode,
+                platformCode: rejectedDiagnostics.platformCode
             };
         }
         if (incompatibleObservation) {
@@ -6364,10 +6637,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         };
     }
     if (status.rejectionReason) {
+        const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, artifact);
         return {
             state: "rejected_source",
-            reason: resolveRejectedSourceReason(spec, artifact),
-            shape: derivedShape
+            reason: rejectedDiagnostics.reason,
+            shape: derivedShape,
+            statusCode: rejectedDiagnostics.statusCode,
+            platformCode: rejectedDiagnostics.platformCode
         };
     }
     return {
@@ -6381,6 +6657,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
 };
 const failClosedForRequestContext = (input, env) => {
     const failureSurface = resolveRequestContextFailureSurface(input.spec, input.lookupResult);
+    const backendRejectedSource = isBackendRejectedSourceLookup(input.lookupResult);
     return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failureSurface.message, {
         ability_id: input.abilityId,
         stage: "execution",
@@ -6390,6 +6667,14 @@ const failClosedForRequestContext = (input, env) => {
         request_context_miss_reason: input.lookupResult.reason,
         request_context_shape: input.expectedShape,
         request_context_shape_key: serializeReadShape(input.expectedShape),
+        ...(input.lookupResult.state === "rejected_source" &&
+            typeof input.lookupResult.statusCode === "number"
+            ? { status_code: input.lookupResult.statusCode }
+            : {}),
+        ...(input.lookupResult.state === "rejected_source" &&
+            typeof input.lookupResult.platformCode === "number"
+            ? { platform_code: input.lookupResult.platformCode }
+            : {}),
         ...("shape" in input.lookupResult && input.lookupResult.shape
             ? { captured_request_shape: input.lookupResult.shape }
             : {})
@@ -6400,18 +6685,29 @@ const failClosedForRequestContext = (input, env) => {
         readyState: env.getReadyState(),
         requestId: `req-${env.randomId()}`,
         outcome: "failed",
+        statusCode: input.lookupResult.state === "rejected_source" ? (input.lookupResult.statusCode ?? undefined) : undefined,
         failureReason: input.lookupResult.reason,
-        includeKeyRequest: false,
+        includeKeyRequest: input.lookupResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason),
         failureSite: {
-            stage: "execution",
-            component: "page",
-            target: "captured_request_context",
+            stage: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? "request"
+                : "execution",
+            component: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? "network"
+                : "page",
+            target: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? input.spec.endpoint
+                : "captured_request_context",
             summary: input.lookupResult.reason
         }
     }), createReadDiagnosis(input.spec, {
         reason: input.lookupResult.reason,
         summary: failureSurface.message,
-        category: "page_changed"
+        category: backendRejectedSource ? "request_failed" : "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
 const resolveRequestContextFailureSurface = (spec, lookupResult) => {
@@ -6537,13 +6833,17 @@ const createReadObservability = (input) => ({
 });
 const inferReadFailure = (spec, status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string"
         ? record.msg
         : typeof record?.message === "string"
             ? record.message
             : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -6568,7 +6868,7 @@ const inferReadFailure = (spec, status, body) => {
             message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -6774,6 +7074,8 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
         ability_id: input.abilityId,
         stage: "execution",
         reason: requestFailure.reason,
+        ...(typeof requestFailure.statusCode === "number" ? { status_code: requestFailure.statusCode } : {}),
+        ...(typeof requestFailure.platformCode === "number" ? { platform_code: requestFailure.platformCode } : {}),
         ...(requestFailure.requestContextDetails ?? {})
     }, {
         page_state: {
@@ -7113,6 +7415,39 @@ const executeXhsRead = async (input, spec, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createReadDiagnosis(spec, {
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
@@ -7141,11 +7476,25 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failureSurface.reasonCode,
                 message: failureSurface.message,
                 detail: requestContextResult.reason,
-                requestAttempted: false,
+                statusCode: requestContextResult.state === "rejected_source" ? (requestContextResult.statusCode ?? undefined) : undefined,
+                platformCode: requestContextResult.state === "rejected_source"
+                    ? (requestContextResult.platformCode ?? undefined)
+                    : undefined,
+                requestAttempted: requestContextResult.state === "rejected_source" &&
+                    BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason),
                 failureSite: {
-                    stage: "execution",
-                    component: "page",
-                    target: "captured_request_context",
+                    stage: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? "request"
+                        : "execution",
+                    component: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? "network"
+                        : "page",
+                    target: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? spec.endpoint
+                        : "captured_request_context",
                     summary: failureSurface.message
                 },
                 requestContextDetails: {
@@ -7154,6 +7503,14 @@ const executeXhsRead = async (input, spec, env) => {
                     request_context_miss_reason: requestContextResult.reason,
                     request_context_shape: expectedShape,
                     request_context_shape_key: serializeReadShape(expectedShape),
+                    ...(requestContextResult.state === "rejected_source" &&
+                        typeof requestContextResult.statusCode === "number"
+                        ? { status_code: requestContextResult.statusCode }
+                        : {}),
+                    ...(requestContextResult.state === "rejected_source" &&
+                        typeof requestContextResult.platformCode === "number"
+                        ? { platform_code: requestContextResult.platformCode }
+                        : {}),
                     ...("shape" in requestContextResult && requestContextResult.shape
                         ? { captured_request_shape: requestContextResult.shape }
                         : {})
@@ -7260,8 +7617,8 @@ const executeXhsRead = async (input, spec, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
-    const businessCode = responseRecord?.code;
-    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+    const businessCode = asInteger(responseRecord?.code);
+    if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
         const failure = inferReadFailure(spec, response.status, response.body);
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
@@ -7269,13 +7626,16 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failure.reason,
                 message: failure.message,
                 detail: failure.message,
-                statusCode: response.status
+                statusCode: response.status,
+                platformCode: businessCode ?? undefined
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(businessCode !== null ? { platform_code: businessCode } : {})
         }, createReadObservability({
             spec,
             href: env.getLocationHref(),
@@ -8483,7 +8843,7 @@ const {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } = __webenvoy_module_xhs_command_contract;
-const { containsCookie } = __webenvoy_module_xhs_search_telemetry;
+const { containsCookie, hasXhsAccountSafetyOverlaySignal } = __webenvoy_module_xhs_search_telemetry;
 const {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
@@ -8587,6 +8947,69 @@ const buildRuntimeBootstrapAckPayload = (input) => ({
     runtime_bootstrap_attested: input.attested,
     ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
+const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
+    ".login-modal",
+    ".login-container",
+    ".login-wrapper",
+    ".reds-login-container",
+    ".captcha-container",
+    ".verify-container",
+    ".security-verify",
+    ".risk-page",
+    ".risk-modal",
+    '[class*="login"]',
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[class*="security"]',
+    '[class*="risk"]',
+    '[id*="login"]',
+    '[id*="captcha"]',
+    '[id*="verify"]',
+    '[id*="security"]',
+    '[id*="risk"]',
+    '[role="dialog"]',
+    '[aria-modal="true"]'
+];
+const GENERIC_OVERLAY_SELECTORS = new Set(['[role="dialog"]', '[aria-modal="true"]']);
+const isVisibleElement = (element) => {
+    const candidate = element;
+    if (typeof candidate.getBoundingClientRect !== "function") {
+        return false;
+    }
+    if (typeof window.getComputedStyle !== "function") {
+        return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+        return false;
+    }
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+const readAccountSafetyOverlay = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    for (const element of Array.from(document.querySelectorAll(ACCOUNT_SAFETY_OVERLAY_SELECTORS.join(",")))) {
+        if (!isVisibleElement(element)) {
+            continue;
+        }
+        const text = (element.innerText || element.textContent || "").trim();
+        if (!text || !hasXhsAccountSafetyOverlaySignal(text)) {
+            continue;
+        }
+        const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+        if (!selector || GENERIC_OVERLAY_SELECTORS.has(selector)) {
+            continue;
+        }
+        return {
+            source: "dom_overlay",
+            selector,
+            text: text.slice(0, 2000)
+        };
+    }
+    return null;
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -8596,6 +9019,8 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
+    getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

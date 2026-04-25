@@ -6,7 +6,7 @@ import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.j
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
 import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
-import { containsCookie } from "./xhs-search-telemetry.js";
+import { containsCookie, hasXhsAccountSafetyOverlaySignal } from "./xhs-search-telemetry.js";
 export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -101,6 +101,69 @@ const buildRuntimeBootstrapAckPayload = (input) => ({
     runtime_bootstrap_attested: input.attested,
     ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
+const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
+    ".login-modal",
+    ".login-container",
+    ".login-wrapper",
+    ".reds-login-container",
+    ".captcha-container",
+    ".verify-container",
+    ".security-verify",
+    ".risk-page",
+    ".risk-modal",
+    '[class*="login"]',
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[class*="security"]',
+    '[class*="risk"]',
+    '[id*="login"]',
+    '[id*="captcha"]',
+    '[id*="verify"]',
+    '[id*="security"]',
+    '[id*="risk"]',
+    '[role="dialog"]',
+    '[aria-modal="true"]'
+];
+const GENERIC_OVERLAY_SELECTORS = new Set(['[role="dialog"]', '[aria-modal="true"]']);
+const isVisibleElement = (element) => {
+    const candidate = element;
+    if (typeof candidate.getBoundingClientRect !== "function") {
+        return false;
+    }
+    if (typeof window.getComputedStyle !== "function") {
+        return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+        return false;
+    }
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+const readAccountSafetyOverlay = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    for (const element of Array.from(document.querySelectorAll(ACCOUNT_SAFETY_OVERLAY_SELECTORS.join(",")))) {
+        if (!isVisibleElement(element)) {
+            continue;
+        }
+        const text = (element.innerText || element.textContent || "").trim();
+        if (!text || !hasXhsAccountSafetyOverlaySignal(text)) {
+            continue;
+        }
+        const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+        if (!selector || GENERIC_OVERLAY_SELECTORS.has(selector)) {
+            continue;
+        }
+        return {
+            source: "dom_overlay",
+            selector,
+            text: text.slice(0, 2000)
+        };
+    }
+    return null;
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -110,6 +173,8 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
+    getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

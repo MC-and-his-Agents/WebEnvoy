@@ -572,8 +572,8 @@ const isSyntheticRequestInput = (value) => typeof value === "object" &&
     value[SYNTHETIC_REQUEST_SYMBOL] === true;
 const hasCapturedRequestBusinessFailure = (body) => {
     const record = asRecord(body);
-    const code = record?.code;
-    return typeof code === "number" && Number.isFinite(code) && code !== 0;
+    const code = asInteger(record?.code);
+    return code !== null && code !== 0;
 };
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {

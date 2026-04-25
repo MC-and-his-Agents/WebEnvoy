@@ -9,6 +9,7 @@ import { inspectProfileLock, isLoginableProfileState, isRuntimeActiveProfileStat
 import { buildIdentityPreflightError, runIdentityPreflight } from "./persistent-extension-identity.js";
 import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-messaging/bridge.js";
+import { buildBlockedAccountSafetyRecord, toAccountSafetyStatus } from "./account-safety.js";
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
@@ -782,6 +783,7 @@ export class ProfileRuntimeService {
             executionSurface: activeBrowserInstanceState?.executionSurface ?? null,
             runtimeTakeoverEvidence,
             recoverableSession: buildRecoverableSessionSummary(meta),
+            account_safety: toAccountSafetyStatus(meta?.accountSafety),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: meta?.updatedAt ?? null
         };
@@ -952,6 +954,67 @@ export class ProfileRuntimeService {
             recoverableSession: buildRecoverableSessionSummary(nextMeta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: nextMeta?.updatedAt ?? null
+        };
+    }
+    async markAccountSafetyBlocked(input) {
+        const observedAt = isoNow();
+        const store = this.#createStore(input.cwd);
+        const profileDir = this.#resolveProfileDir(store, input.profile);
+        await store.ensureProfileDir(input.profile);
+        const existingMeta = await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+            this.#buildMinimalProfileMeta({
+                profile: input.profile,
+                profileDir,
+                nowIso: observedAt
+            });
+        const accountSafety = buildBlockedAccountSafetyRecord({
+            reason: input.signal.reason,
+            observedAt,
+            sourceRunId: input.runId,
+            sourceCommand: input.signal.sourceCommand,
+            targetDomain: input.signal.targetDomain,
+            targetTabId: input.signal.targetTabId,
+            pageUrl: input.signal.pageUrl,
+            statusCode: input.signal.statusCode,
+            platformCode: input.signal.platformCode
+        });
+        const nextMeta = {
+            ...existingMeta,
+            profileName: input.profile,
+            profileDir,
+            accountSafety,
+            updatedAt: observedAt
+        };
+        await store.writeMeta(input.profile, nextMeta);
+        let stopAttempt = {
+            attempted: true,
+            outcome: "skipped"
+        };
+        try {
+            const stopResult = await this.stop({
+                cwd: input.cwd,
+                profile: input.profile,
+                runId: input.runId,
+                params: {}
+            });
+            stopAttempt = {
+                attempted: true,
+                outcome: "stopped",
+                profile_state: stopResult.profileState ?? null
+            };
+        }
+        catch (error) {
+            stopAttempt = {
+                attempted: true,
+                outcome: "failed",
+                error_code: error instanceof CliError ? error.code : "ERR_RUNTIME_STOP_FAILED",
+                message: error instanceof Error ? error.message : String(error)
+            };
+        }
+        return {
+            profile: input.profile,
+            account_safety: toAccountSafetyStatus(accountSafety),
+            runtime_stop: stopAttempt
         };
     }
     async stop(input) {

@@ -1,14 +1,16 @@
 import { createUserHomeRequestShape, createPageContextNamespace } from "./xhs-search-types.js";
 import { createAuditRecord, resolveGate } from "./xhs-search-gate.js";
-import { containsCookie, createDiagnosis, createFailure, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
+import { classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
 const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
 const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const BACKEND_REJECTED_SOURCE_REASONS = new Set([
+    "XHS_LOGIN_REQUIRED",
     "SESSION_EXPIRED",
     "ACCOUNT_ABNORMAL",
+    "XHS_ACCOUNT_RISK_PAGE",
     "BROWSER_ENV_ABNORMAL",
     "GATEWAY_INVOKER_FAILED",
     "CAPTCHA_REQUIRED",
@@ -155,29 +157,51 @@ const isCapturedArtifactStale = (value, now) => {
     const observedAt = resolveCapturedArtifactObservedAt(value);
     return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
 };
-const resolveRejectedSourceReason = (spec, artifact) => {
+const resolveRejectedSourceDiagnostics = (spec, artifact) => {
     const status = resolveCapturedArtifactStatus(artifact);
+    const response = asRecord(artifact.response);
+    const responseBody = response?.body;
+    const responseRecord = asRecord(responseBody);
+    const platformCode = asInteger(responseRecord?.code);
     if (status.rejectionReason === "synthetic_request_rejected" ||
         status.rejectionReason === "shape_mismatch") {
-        return status.rejectionReason;
+        return {
+            reason: status.rejectionReason,
+            statusCode: status.httpStatus,
+            platformCode
+        };
     }
     if (status.rejectionReason === "failed_request_rejected") {
-        const response = asRecord(artifact.response);
-        const responseBody = response?.body;
         const inferred = inferReadFailure(spec, status.httpStatus ?? 0, responseBody);
         if (BACKEND_REJECTED_SOURCE_REASONS.has(inferred.reason)) {
-            return inferred.reason;
+            return {
+                reason: inferred.reason,
+                statusCode: status.httpStatus,
+                platformCode
+            };
         }
-        return "failed_request_rejected";
+        return {
+            reason: "failed_request_rejected",
+            statusCode: status.httpStatus,
+            platformCode
+        };
     }
-    return "failed_request_rejected";
+    return {
+        reason: "failed_request_rejected",
+        statusCode: status.httpStatus,
+        platformCode
+    };
 };
 const resolveRejectedSourceMessage = (spec, reason) => {
     switch (reason) {
         case "SESSION_EXPIRED":
             return `登录已失效，无法执行 ${spec.command}`;
+        case "XHS_LOGIN_REQUIRED":
+            return "当前页面要求登录小红书，无法继续执行";
         case "ACCOUNT_ABNORMAL":
             return "账号异常，平台拒绝当前请求";
+        case "XHS_ACCOUNT_RISK_PAGE":
+            return "当前页面命中小红书账号风险或安全验证页面";
         case "BROWSER_ENV_ABNORMAL":
             return "浏览器环境异常，平台拒绝当前请求";
         case "GATEWAY_INVOKER_FAILED":
@@ -190,6 +214,9 @@ const resolveRejectedSourceMessage = (spec, reason) => {
             return null;
     }
 };
+const isBackendRejectedSourceLookup = (lookupResult) => lookupResult.state === "rejected_source" &&
+    (BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason) ||
+        lookupResult.reason === "failed_request_rejected");
 const waitForRequestContextRetry = async (env, ms) => {
     if (typeof env.sleep === "function") {
         await env.sleep(ms);
@@ -504,10 +531,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                     shape: derivedShape ?? expectedShape
                 };
             }
+            const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, rejectedObservation);
             return {
                 state: "rejected_source",
-                reason: resolveRejectedSourceReason(spec, rejectedObservation),
-                shape: derivedShape ?? expectedShape
+                reason: rejectedDiagnostics.reason,
+                shape: derivedShape ?? expectedShape,
+                statusCode: rejectedDiagnostics.statusCode,
+                platformCode: rejectedDiagnostics.platformCode
             };
         }
         if (incompatibleObservation) {
@@ -564,10 +594,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         };
     }
     if (status.rejectionReason) {
+        const rejectedDiagnostics = resolveRejectedSourceDiagnostics(spec, artifact);
         return {
             state: "rejected_source",
-            reason: resolveRejectedSourceReason(spec, artifact),
-            shape: derivedShape
+            reason: rejectedDiagnostics.reason,
+            shape: derivedShape,
+            statusCode: rejectedDiagnostics.statusCode,
+            platformCode: rejectedDiagnostics.platformCode
         };
     }
     return {
@@ -581,6 +614,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
 };
 const failClosedForRequestContext = (input, env) => {
     const failureSurface = resolveRequestContextFailureSurface(input.spec, input.lookupResult);
+    const backendRejectedSource = isBackendRejectedSourceLookup(input.lookupResult);
     return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failureSurface.message, {
         ability_id: input.abilityId,
         stage: "execution",
@@ -590,6 +624,14 @@ const failClosedForRequestContext = (input, env) => {
         request_context_miss_reason: input.lookupResult.reason,
         request_context_shape: input.expectedShape,
         request_context_shape_key: serializeReadShape(input.expectedShape),
+        ...(input.lookupResult.state === "rejected_source" &&
+            typeof input.lookupResult.statusCode === "number"
+            ? { status_code: input.lookupResult.statusCode }
+            : {}),
+        ...(input.lookupResult.state === "rejected_source" &&
+            typeof input.lookupResult.platformCode === "number"
+            ? { platform_code: input.lookupResult.platformCode }
+            : {}),
         ...("shape" in input.lookupResult && input.lookupResult.shape
             ? { captured_request_shape: input.lookupResult.shape }
             : {})
@@ -600,18 +642,29 @@ const failClosedForRequestContext = (input, env) => {
         readyState: env.getReadyState(),
         requestId: `req-${env.randomId()}`,
         outcome: "failed",
+        statusCode: input.lookupResult.state === "rejected_source" ? (input.lookupResult.statusCode ?? undefined) : undefined,
         failureReason: input.lookupResult.reason,
-        includeKeyRequest: false,
+        includeKeyRequest: input.lookupResult.state === "rejected_source" &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason),
         failureSite: {
-            stage: "execution",
-            component: "page",
-            target: "captured_request_context",
+            stage: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? "request"
+                : "execution",
+            component: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? "network"
+                : "page",
+            target: input.lookupResult.state === "rejected_source" &&
+                BACKEND_REJECTED_SOURCE_REASONS.has(input.lookupResult.reason)
+                ? input.spec.endpoint
+                : "captured_request_context",
             summary: input.lookupResult.reason
         }
     }), createReadDiagnosis(input.spec, {
         reason: input.lookupResult.reason,
         summary: failureSurface.message,
-        category: "page_changed"
+        category: backendRejectedSource ? "request_failed" : "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
 const resolveRequestContextFailureSurface = (spec, lookupResult) => {
@@ -737,13 +790,17 @@ const createReadObservability = (input) => ({
 });
 const inferReadFailure = (spec, status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string"
         ? record.msg
         : typeof record?.message === "string"
             ? record.message
             : "";
     const normalized = `${message}`.toLowerCase();
+    const hasCaptchaEvidence = normalized.includes("captcha") ||
+        message.includes("验证码") ||
+        message.includes("人机验证") ||
+        message.includes("滑块");
     if (status === 401 || normalized.includes("login")) {
         return {
             reason: "SESSION_EXPIRED",
@@ -768,7 +825,7 @@ const inferReadFailure = (spec, status, body) => {
             message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`
         };
     }
-    if (status === 429 || normalized.includes("captcha")) {
+    if (hasCaptchaEvidence) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -974,6 +1031,8 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
         ability_id: input.abilityId,
         stage: "execution",
         reason: requestFailure.reason,
+        ...(typeof requestFailure.statusCode === "number" ? { status_code: requestFailure.statusCode } : {}),
+        ...(typeof requestFailure.platformCode === "number" ? { platform_code: requestFailure.platformCode } : {}),
         ...(requestFailure.requestContextDetails ?? {})
     }, {
         page_state: {
@@ -1313,6 +1372,39 @@ const executeXhsRead = async (input, spec, env) => {
             }
         };
     }
+    const accountSafetySurface = classifyXhsAccountSafetySurface({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
+    });
+    if (accountSafetySurface) {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: accountSafetySurface.reason,
+            page_url: env.getLocationHref()
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: accountSafetySurface.reason,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "xhs.account_safety_surface",
+                summary: accountSafetySurface.message
+            }
+        }), createReadDiagnosis(spec, {
+            reason: accountSafetySurface.reason,
+            summary: accountSafetySurface.message,
+            category: "page_changed"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     if (!containsCookie(env.getCookie(), "a1")) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
@@ -1341,11 +1433,25 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failureSurface.reasonCode,
                 message: failureSurface.message,
                 detail: requestContextResult.reason,
-                requestAttempted: false,
+                statusCode: requestContextResult.state === "rejected_source" ? (requestContextResult.statusCode ?? undefined) : undefined,
+                platformCode: requestContextResult.state === "rejected_source"
+                    ? (requestContextResult.platformCode ?? undefined)
+                    : undefined,
+                requestAttempted: requestContextResult.state === "rejected_source" &&
+                    BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason),
                 failureSite: {
-                    stage: "execution",
-                    component: "page",
-                    target: "captured_request_context",
+                    stage: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? "request"
+                        : "execution",
+                    component: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? "network"
+                        : "page",
+                    target: requestContextResult.state === "rejected_source" &&
+                        BACKEND_REJECTED_SOURCE_REASONS.has(requestContextResult.reason)
+                        ? spec.endpoint
+                        : "captured_request_context",
                     summary: failureSurface.message
                 },
                 requestContextDetails: {
@@ -1354,6 +1460,14 @@ const executeXhsRead = async (input, spec, env) => {
                     request_context_miss_reason: requestContextResult.reason,
                     request_context_shape: expectedShape,
                     request_context_shape_key: serializeReadShape(expectedShape),
+                    ...(requestContextResult.state === "rejected_source" &&
+                        typeof requestContextResult.statusCode === "number"
+                        ? { status_code: requestContextResult.statusCode }
+                        : {}),
+                    ...(requestContextResult.state === "rejected_source" &&
+                        typeof requestContextResult.platformCode === "number"
+                        ? { platform_code: requestContextResult.platformCode }
+                        : {}),
                     ...("shape" in requestContextResult && requestContextResult.shape
                         ? { captured_request_shape: requestContextResult.shape }
                         : {})
@@ -1460,8 +1574,8 @@ const executeXhsRead = async (input, spec, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
-    const businessCode = responseRecord?.code;
-    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+    const businessCode = asInteger(responseRecord?.code);
+    if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
         const failure = inferReadFailure(spec, response.status, response.body);
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
@@ -1469,13 +1583,16 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failure.reason,
                 message: failure.message,
                 detail: failure.message,
-                statusCode: response.status
+                statusCode: response.status,
+                platformCode: businessCode ?? undefined
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: failure.reason
+            reason: failure.reason,
+            status_code: response.status,
+            ...(businessCode !== null ? { platform_code: businessCode } : {})
         }, createReadObservability({
             spec,
             href: env.getLocationHref(),

@@ -1228,6 +1228,57 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("rejects captured templates when response platform code is a string failure", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: "300011", msg: "account abnormal" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "露营" })
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "露营" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "page_request",
+          template_ready: false,
+          rejection_reason: "failed_request_rejected",
+          response: {
+            body: {
+              code: "300011"
+            }
+          }
+        }
+      }
+    });
+  });
+
   it("returns shape_mismatch only from admitted sibling shapes", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({
