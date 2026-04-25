@@ -297,6 +297,25 @@ export class InMemoryContentScriptRuntime {
             }
             if (consumerGateResult.effective_execution_mode === "dry_run" ||
                 consumerGateResult.effective_execution_mode === "recon") {
+                if (options.xhs_recovery_probe === true && simulated === "account_abnormal") {
+                    return buildSuccessfulResult({
+                        ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
+                        layer: String(ability.layer ?? "L3"),
+                        action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                        outcome: "partial",
+                        data_ref: commandSpec.successDataRef,
+                        metrics: {
+                            count: 0
+                        }
+                    }, {
+                        key_requests: [
+                            {
+                                failure_reason: "ACCOUNT_ABNORMAL",
+                                status_code: 461
+                            }
+                        ]
+                    });
+                }
                 return buildSuccessfulResult({
                     ability_id: String(ability.id ?? commandSpec.defaultAbilityId),
                     layer: String(ability.layer ?? "L3"),

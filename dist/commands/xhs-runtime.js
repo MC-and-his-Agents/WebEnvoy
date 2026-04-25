@@ -472,7 +472,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             params: commandParams
         });
         if (!bridgeResult.ok) {
-            const accountSafetySignal = context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)
+            const accountSafetySignal = context.profile && (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
                 ? resolveAccountSafetySignal(bridgeResult.payload, {
                     command: context.command,
                     targetDomain: gate.targetDomain,
@@ -496,6 +496,30 @@ const xhsReadCommand = async (context, inputConfig) => {
                 }
             }
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
+        }
+        const recoveryProbeRiskSignal = context.profile && recoveryProbeRequested
+            ? resolveAccountSafetySignal(bridgeResult.payload, {
+                command: context.command,
+                targetDomain: gate.targetDomain,
+                targetTabId: gate.targetTabId,
+                targetPage: gate.targetPage
+            })
+            : null;
+        if (recoveryProbeRiskSignal && context.profile) {
+            const accountSafetyResult = await profileRuntime.markAccountSafetyBlocked({
+                cwd: context.cwd,
+                profile: context.profile,
+                runId: context.run_id,
+                params: {},
+                signal: recoveryProbeRiskSignal
+            });
+            const accountSafety = asObject(accountSafetyResult.account_safety);
+            const xhsCloseoutRhythm = asObject(accountSafetyResult.xhs_closeout_rhythm);
+            const runtimeStop = asObject(accountSafetyResult.runtime_stop);
+            if (accountSafety) {
+                mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety, xhsCloseoutRhythm, runtimeStop);
+            }
+            throw toCliExecutionError(envelope.ability, bridgeResult.payload, "XHS recovery probe detected account-safety risk");
         }
         const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
         const requestAdmissionResult = pickCanonicalSummaryField(bridgeResult.payload, "request_admission_result");
