@@ -1094,7 +1094,7 @@ export class SQLiteRuntimeStore {
     });
     try {
       const existing = this.#getOptionalAntiDetectionBaselineSnapshotByRef(input.baselineRef);
-      if (existing && !antiDetectionScopeMatches(existing, input)) {
+      if (existing) {
         invalidRuntimeStoreInput(
           "baseline_ref conflicts with an existing anti-detection baseline"
         );
@@ -1124,18 +1124,6 @@ export class SQLiteRuntimeStore {
             source_sample_refs,
             source_run_ids
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(baseline_ref) DO UPDATE SET
-            target_fr_ref = excluded.target_fr_ref,
-            validation_scope = excluded.validation_scope,
-            probe_bundle_ref = excluded.probe_bundle_ref,
-            profile_ref = excluded.profile_ref,
-            browser_channel = excluded.browser_channel,
-            execution_surface = excluded.execution_surface,
-            effective_execution_mode = excluded.effective_execution_mode,
-            signal_vector = excluded.signal_vector,
-            captured_at = excluded.captured_at,
-            source_sample_refs = excluded.source_sample_refs,
-            source_run_ids = excluded.source_run_ids
         `
         )
         .run(
@@ -1285,22 +1273,6 @@ export class SQLiteRuntimeStore {
             run_id,
             validated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(record_ref) DO UPDATE SET
-            request_ref = excluded.request_ref,
-            target_fr_ref = excluded.target_fr_ref,
-            validation_scope = excluded.validation_scope,
-            profile_ref = excluded.profile_ref,
-            browser_channel = excluded.browser_channel,
-            execution_surface = excluded.execution_surface,
-            effective_execution_mode = excluded.effective_execution_mode,
-            probe_bundle_ref = excluded.probe_bundle_ref,
-            sample_ref = excluded.sample_ref,
-            baseline_ref = excluded.baseline_ref,
-            result_state = excluded.result_state,
-            drift_state = excluded.drift_state,
-            failure_class = excluded.failure_class,
-            run_id = excluded.run_id,
-            validated_at = excluded.validated_at
         `
         )
         .run(
