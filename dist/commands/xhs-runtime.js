@@ -295,7 +295,7 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
         return;
     }
     if (!recoveryProbe &&
-        isLiveXhsExecutionMode(input.requestedExecutionMode) &&
+        isIssue209LiveReadCloseoutCommand(input) &&
         input.accountSafety.state === "clear" &&
         rhythmState === "single_probe_passed" &&
         input.antiDetectionValidationView?.all_required_ready === true) {
@@ -310,7 +310,7 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
                 ? "ACCOUNT_RISK_BLOCKED"
                 : recoveryProbe && input.requestedExecutionMode !== "recon"
                     ? "XHS_RECOVERY_PROBE_MODE_INVALID"
-                    : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
+                    : !recoveryProbe && isIssue209LiveReadCloseoutCommand(input) && rhythmState === "single_probe_passed"
                         ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
                         : fullBundleBlocked || singleProbeRequired
                             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
@@ -422,15 +422,15 @@ const xhsReadCommand = async (context, inputConfig) => {
         (liveXhsCommandRequested || recoveryProbeRequested);
     let antiDetectionValidationGate = null;
     if (context.profile &&
-        (liveXhsCommandRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)) {
+        (issue209LiveReadCloseoutRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)) {
         const rhythmState = asString(xhsCloseoutRhythmStatus.state);
         const shouldRunRhythmGate = recoveryProbeRequested ||
-            liveXhsCommandRequested ||
+            issue209LiveReadCloseoutRequested ||
             accountSafetyBlockedLiveCommand ||
             (rhythmState !== null && rhythmState !== "not_required");
         if (shouldRunRhythmGate) {
             if (!recoveryProbeRequested &&
-                liveXhsCommandRequested &&
+                issue209LiveReadCloseoutRequested &&
                 rhythmState === "single_probe_passed") {
                 let store = null;
                 try {

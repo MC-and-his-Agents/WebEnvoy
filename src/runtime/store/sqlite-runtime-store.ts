@@ -1021,7 +1021,7 @@ export class SQLiteRuntimeStore {
     });
     try {
       const existing = this.#getOptionalAntiDetectionStructuredSampleByRef(input.sampleRef);
-      if (existing && !antiDetectionScopeMatches(existing, input)) {
+      if (existing) {
         invalidRuntimeStoreInput("sample_ref conflicts with an existing anti-detection sample");
       }
       const request = this.#getAntiDetectionValidationRequestByRef(input.requestRef);
@@ -1048,19 +1048,6 @@ export class SQLiteRuntimeStore {
             structured_payload,
             artifact_refs
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(sample_ref) DO UPDATE SET
-            request_ref = excluded.request_ref,
-            target_fr_ref = excluded.target_fr_ref,
-            validation_scope = excluded.validation_scope,
-            profile_ref = excluded.profile_ref,
-            browser_channel = excluded.browser_channel,
-            execution_surface = excluded.execution_surface,
-            effective_execution_mode = excluded.effective_execution_mode,
-            probe_bundle_ref = excluded.probe_bundle_ref,
-            run_id = excluded.run_id,
-            captured_at = excluded.captured_at,
-            structured_payload = excluded.structured_payload,
-            artifact_refs = excluded.artifact_refs
         `
         )
         .run(

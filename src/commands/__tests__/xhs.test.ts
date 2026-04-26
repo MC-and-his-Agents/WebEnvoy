@@ -1707,60 +1707,6 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
-  it("blocks non-closeout XHS live commands when rhythm recovery is unavailable", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-live-write-"));
-    try {
-      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
-      await profileStore.initializeMeta(
-        "xhs_rhythm_live_write_profile",
-        "2026-04-25T10:00:00.000Z",
-        { allowUnsupportedExtensionBrowser: true }
-      );
-
-      await expect(
-        executeCommand(
-          {
-            cwd,
-            command: "xhs.search",
-            profile: "xhs_rhythm_live_write_profile",
-            run_id: "run-rhythm-live-write-001",
-            params: {
-              ability: {
-                id: "xhs.note.search.v1",
-                layer: "L3",
-                action: "write"
-              },
-              input: {
-                query: "露营装备"
-              },
-              options: {
-                issue_scope: "issue_208",
-                target_domain: "creator.xiaohongshu.com",
-                target_tab_id: 32,
-                target_page: "creator_publish_tab",
-                action_type: "write",
-                requested_execution_mode: "live_write",
-                validation_action: "editor_input",
-                risk_state: "allowed"
-              }
-            }
-          } as RuntimeContext,
-          createCommandRegistry()
-        )
-      ).rejects.toMatchObject({
-        code: "ERR_EXECUTION_FAILED",
-        details: {
-          reason: "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
-          xhs_closeout_rhythm: expect.objectContaining({
-            state: "not_required"
-          })
-        }
-      });
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
-  });
-
   it("allows a marked xhs.search recovery single-probe and records the passed probe", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-"));
     const runId = "run-rhythm-probe-001";
