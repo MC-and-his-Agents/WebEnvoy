@@ -718,7 +718,7 @@ AI 发出第一条操作命令
 | 层级 | GitHub 当前 canonical 挂接 | formal suite 当前收口状态 |
 | --- | --- | --- |
 | `Phase 1.x` | `#426 -> #215/#230/#231/#435` | `FR-0015` formal suite 在 cleanup PR 合入前仍以 `#281/#361` 承接 implementation-prep 主线叙述 |
-| `Phase 2` | `#427 -> #265/#267/#266/#239/#552` | 相关 formal suites 在 cleanup PR 合入前仍以 `#232/#233/#368` 作为 formal 参考锚点；`#552 / FR-0029` 承接 XHS closeout recovery admission |
+| `Phase 2` | `#427 -> #265/#267/#266/#239` | 相关 formal suites 在 cleanup PR 合入前仍以 `#232/#233/#368` 作为 formal 参考锚点 |
 | `Phase 4` | `#423 -> #238` | `FR-0022` formal suite 已合入；不再需要旧父级过渡说明 |
 
 ### 11.5 哪些能力进入近期 backlog，哪些只冻结在蓝图
@@ -729,7 +729,6 @@ AI 发出第一条操作命令
 - Layer 2 事件级拟人模拟增强（`Phase 2 / #427 -> #267`）
 - Layer 3 完整 session 行为节律引擎（`Phase 2 / #427 -> #266`）
 - 反风控验证与基线评估（`Phase 2 / #427 -> #239`）
-- XHS closeout recovery admission（`Phase 2 / #427 -> #552`）
 
 **进入后层扩展，但现在就冻结到蓝图：**
 

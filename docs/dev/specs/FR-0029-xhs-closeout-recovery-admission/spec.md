@@ -133,6 +133,7 @@ Canonical Issue: #552
 系统必须冻结：只有当以下条件全部满足时，才允许进入 `closeout_bundle_allowed`：
 
 - recon recovery probe 已通过
+- closeout admission live probe 已通过
 - `runtime.status.account_safety.state = clear`
 - `runtime.status.xhs_closeout_rhythm` 已允许进入 live admission probe 之后的 bundle escalation
 - `runtime.audit.anti_detection_validation_view` 对以下三条 scope 同时满足：
@@ -211,6 +212,7 @@ And 只允许继续评估 live admission probe
 ### 场景 3：live admission probe 必须满足三层 validation 与 gate 条件
 
 Given recon recovery probe 已通过
+And closeout admission live probe 已通过
 And `runtime.status.account_safety.state=clear`
 And `runtime.status.xhs_closeout_rhythm` 允许进入 live admission 阶段
 And `FR-0012/0013/0014` 三条 validation view 都是 `ready + verified + no_drift`
@@ -218,20 +220,28 @@ When 系统评估 `closeout_admission_probe_live`
 Then 才允许进入 live admission probe
 And probe bundle 必须固定为 `probe-bundle/xhs-closeout-min-v1`
 
-### 场景 4：detail/user_home 在 live admission probe 成功前不得恢复
+### 场景 4：live admission probe 未通过时不得进入 bundle
+
+Given recon recovery probe 已通过
+And closeout admission live probe 尚未通过
+When 系统判断是否允许进入 `closeout_bundle_allowed`
+Then 必须继续保持阻断
+And 不得恢复 `#445` full bundle
+
+### 场景 5：detail/user_home 在 live admission probe 成功前不得恢复
 
 Given `closeout_admission_probe_live` 尚未成功
 When 调用方尝试把 `xhs.detail` 或 `xhs.user_home` 恢复到 `#445` rerun
 Then 系统必须保持阻断
 And 只能从 `xhs.search` round 1 重启 closeout lane
 
-### 场景 5：跨 site / 跨 profile / 跨 bundle / 跨 mode 证据不能替代 XHS closeout admission
+### 场景 6：跨 site / 跨 profile / 跨 bundle / 跨 mode 证据不能替代 XHS closeout admission
 
 Given 存在 low-risk site、stub、fake_host、非 XHS profile、错误 probe bundle 或错误 execution mode 下的 validation 证据
 When 系统评估 `#445` 恢复准入
 Then 这些证据都不得替代 XHS closeout admission scope
 
-### 场景 6：Layer 4 默认不是最小前置
+### 场景 7：Layer 4 默认不是最小前置
 
 Given `#238 / FR-0022` 仍处于 open 或未被 truth-sync 升级
 When reviewer 检查 current v1 recovery contract
@@ -242,10 +252,11 @@ And 只有显式 truth-sync 后，才允许升级为新的恢复门
 
 1. recon probe 成功，但 validation view 未 ready：不得进入 live admission probe。
 2. validation view ready，但 account safety 不 clear：不得进入 live admission probe。
-3. live admission probe 成功前尝试直接运行 `xhs.detail` / `xhs.user_home`：必须继续阻断。
-4. probe bundle 错误或 scope 混用：必须视为 admission invalid。
-5. 企图把具体 profile 名字写成 formal contract 常量：视为 scope 污染。
-6. 未经 truth-sync 就把 `#238` 升为硬前置：视为阻断性违规。
+3. recon probe 成功，但 live admission probe 未通过：仍不得进入 `closeout_bundle_allowed`。
+4. live admission probe 成功前尝试直接运行 `xhs.detail` / `xhs.user_home`：必须继续阻断。
+5. probe bundle 错误或 scope 混用：必须视为 admission invalid。
+6. 企图把具体 profile 名字写成 formal contract 常量：视为 scope 污染。
+7. 未经 truth-sync 就把 `#238` 升为硬前置：视为阻断性违规。
 
 ## 验收标准
 

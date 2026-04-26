@@ -113,6 +113,7 @@ type RequiredCloseoutValidationScopeV1 = {
 ```ts
 type XhsCloseoutBundleAdmissionPredicateV1 = {
   recon_probe_passed: true;
+  live_admission_probe_passed: true;
   account_safety_state: "clear";
   rhythm_stage_allows_escalation: true;
   validation_requirements_satisfied: true;
@@ -122,9 +123,10 @@ type XhsCloseoutBundleAdmissionPredicateV1 = {
 当前 v1 进入 `closeout_bundle_allowed` 的正式条件固定为：
 
 1. recon recovery probe 已通过
-2. `runtime.status.account_safety.state = clear`
-3. `runtime.status.xhs_closeout_rhythm` 已允许从 recovery probe 进入 live admission 之后的 bundle escalation
-4. `FR-0012/0013/0014` 三条 validation view 全部满足 `ready + verified + no_drift`
+2. closeout admission live probe 已通过
+3. `runtime.status.account_safety.state = clear`
+4. `runtime.status.xhs_closeout_rhythm` 已允许从 recovery probe 进入 live admission 之后的 bundle escalation
+5. `FR-0012/0013/0014` 三条 validation view 全部满足 `ready + verified + no_drift`
 
 其中任一条件不满足，都不得进入 `closeout_bundle_allowed`。
 
