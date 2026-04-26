@@ -433,6 +433,9 @@ export class SQLiteRuntimeStore {
                     invalidRuntimeStoreInput("anti-detection request_state transition is not allowed");
                 }
             }
+            else if (input.requestState === "completed" || input.requestState === "aborted") {
+                invalidRuntimeStoreInput("anti-detection request_state terminal state requires an existing request");
+            }
             this.#db
                 .prepare(`
           INSERT INTO anti_detection_validation_request(
@@ -604,6 +607,9 @@ export class SQLiteRuntimeStore {
                 invalidRuntimeStoreInput("anti-detection validation record scope does not match request scope");
             }
             const sample = this.#getAntiDetectionStructuredSampleByRef(input.sampleRef);
+            if (sample.request_ref !== input.requestRef) {
+                invalidRuntimeStoreInput("anti-detection validation record sample does not belong to request");
+            }
             if (!antiDetectionScopeMatches(sample, input)) {
                 invalidRuntimeStoreInput("anti-detection validation record scope does not match sample scope");
             }

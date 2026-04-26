@@ -169,6 +169,19 @@ const seedXhsCloseoutReady = async (input: {
         sampleGoal: `capture ${targetFrRef} closeout baseline`,
         requestedExecutionMode: effectiveExecutionMode,
         probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+        requestState: "accepted",
+        requestedAt: observedAt
+      });
+      await store.upsertAntiDetectionValidationRequest({
+        requestRef,
+        validationScope,
+        targetFrRef,
+        profileRef: `profile/${input.profile}`,
+        browserChannel: "Google Chrome stable",
+        executionSurface: "real_browser",
+        sampleGoal: `capture ${targetFrRef} closeout baseline`,
+        requestedExecutionMode: effectiveExecutionMode,
+        probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
         requestState: "completed",
         requestedAt: observedAt
       });

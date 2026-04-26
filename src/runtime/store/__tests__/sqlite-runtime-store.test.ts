@@ -137,6 +137,19 @@ const seedAntiDetectionValidationRecord = async (
     sampleGoal: `capture ${targetFrRef} closeout baseline`,
     requestedExecutionMode: effectiveExecutionMode,
     probeBundleRef,
+    requestState: "accepted",
+    requestedAt: "2026-04-25T10:00:00.000Z"
+  });
+  await store.upsertAntiDetectionValidationRequest({
+    requestRef,
+    validationScope,
+    targetFrRef,
+    profileRef,
+    browserChannel: "Google Chrome stable",
+    executionSurface: "real_browser",
+    sampleGoal: `capture ${targetFrRef} closeout baseline`,
+    requestedExecutionMode: effectiveExecutionMode,
+    probeBundleRef,
     requestState: "completed",
     requestedAt: "2026-04-25T10:00:00.000Z"
   });
@@ -306,7 +319,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
       sampleGoal: "capture invalid stub baseline",
       requestedExecutionMode: "live_read_high_risk",
       probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
-      requestState: "completed",
+      requestState: "accepted",
       requestedAt: "2026-04-25T10:00:00.000Z"
     });
 
@@ -365,7 +378,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
       sampleGoal: "capture other profile baseline",
       requestedExecutionMode: "live_read_high_risk",
       probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
-      requestState: "completed",
+      requestState: "accepted",
       requestedAt: "2026-04-25T10:20:00.000Z"
     });
 
@@ -503,6 +516,74 @@ describeWithSqlite("sqlite-runtime-store", () => {
         capturedAt: "2026-04-25T10:30:00.000Z",
         structuredPayload: { target_fr_ref: "FR-0012", rewritten: true },
         artifactRefs: []
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
+  it("rejects initial terminal anti-detection validation request states", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+
+    await expect(
+      store.upsertAntiDetectionValidationRequest({
+        requestRef: "validation-request/FR-0012/terminal",
+        validationScope: "layer1_consistency",
+        targetFrRef: "FR-0012",
+        profileRef: "profile/xhs_001",
+        browserChannel: "Google Chrome stable",
+        executionSurface: "real_browser",
+        sampleGoal: "capture terminal baseline",
+        requestedExecutionMode: "live_read_high_risk",
+        probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+        requestState: "completed",
+        requestedAt: "2026-04-25T10:00:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
+  it("rejects validation records that link samples from another request", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store);
+    const otherRequestRef = "validation-request/FR-0012/other-request";
+    const otherSampleRef = "validation-sample/FR-0012/other-request";
+
+    await store.upsertAntiDetectionValidationRequest({
+      ...scope,
+      requestRef: otherRequestRef,
+      sampleGoal: "capture other request baseline",
+      requestedExecutionMode: "live_read_high_risk",
+      requestState: "accepted",
+      requestedAt: "2026-04-25T10:30:00.000Z"
+    });
+    await store.insertAntiDetectionStructuredSample({
+      ...scope,
+      sampleRef: otherSampleRef,
+      requestRef: otherRequestRef,
+      runId: "run-validation-other-request-sample-001",
+      capturedAt: "2026-04-25T10:31:00.000Z",
+      structuredPayload: { target_fr_ref: "FR-0012", other_request: true },
+      artifactRefs: []
+    });
+
+    await expect(
+      store.insertAntiDetectionValidationRecord({
+        ...scope,
+        recordRef: "validation-record/FR-0012/request-mismatch",
+        requestRef: "validation-request/FR-0012/001",
+        sampleRef: otherSampleRef,
+        baselineRef: "baseline/FR-0012/001",
+        resultState: "verified",
+        driftState: "no_drift",
+        failureClass: null,
+        runId: "run-validation-request-mismatch-001",
+        validatedAt: "2026-04-25T10:32:00.000Z"
       })
     ).rejects.toMatchObject({
       code: "ERR_RUNTIME_STORE_INVALID_INPUT"
