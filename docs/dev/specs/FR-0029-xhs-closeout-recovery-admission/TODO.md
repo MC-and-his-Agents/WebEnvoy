@@ -6,6 +6,7 @@
 - [ ] reviewer 确认 current v1 恢复阶段已冻结为 `recovery_probe_recon`、`closeout_admission_probe_live`、`closeout_bundle_allowed`
 - [ ] reviewer 确认 `xhs.search + options.xhs_recovery_probe=true + requested_execution_mode=recon` 仍只属于 recon recovery probe，不得替代 live admission
 - [ ] reviewer 确认 `xhs.search + requested_execution_mode=live_read_high_risk` 已被冻结为当前唯一 closeout admission live probe
+- [ ] reviewer 确认开始 `closeout_admission_probe_live` 前，必须先满足 recon probe、account safety、rhythm live-admission gate 与三条 validation view
 - [ ] reviewer 确认进入 `closeout_bundle_allowed` 前，除了 recon probe 之外还必须显式通过 live admission probe
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 不参与恢复 single-probe，并在 live admission probe 成功前不得恢复
 - [ ] reviewer 确认 `FR-0012`、`FR-0013`、`FR-0014` 三条 validation view 已被显式绑定为 `ready + verified + no_drift`

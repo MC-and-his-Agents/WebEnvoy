@@ -144,6 +144,22 @@
 
 ## Admission Predicate
 
+### 1. `closeout_admission_probe_live` 进入条件
+
+开始 `closeout_admission_probe_live` 的正式判断输入必须同时满足：
+
+- `recon_probe_passed = true`
+- `account_safety_state = clear`
+- `rhythm_stage_allows_live_admission_probe = true`
+- `validation_requirements_satisfied = true`
+
+其中：
+
+- `validation_requirements_satisfied` 指三条 validation view 全部满足 `ready + verified + no_drift`
+- 这一层只决定“是否允许开始 live admission probe”，不等价于“已经允许进入 `#445` full bundle”
+
+### 2. `closeout_bundle_allowed` 进入条件
+
 `closeout_bundle_allowed` 的正式判断输入必须同时满足：
 
 - `recon_probe_passed = true`
