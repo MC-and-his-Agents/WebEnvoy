@@ -10,6 +10,7 @@
 - [ ] reviewer 确认进入 `closeout_bundle_allowed` 前，除了 recon probe 之外还必须显式通过 live admission probe
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 不参与恢复 single-probe，并在 live admission probe 成功前不得恢复
 - [ ] reviewer 确认 `FR-0012`、`FR-0013`、`FR-0014` 三条 validation view 已被显式绑定为 `ready + verified + no_drift`
+- [ ] reviewer 确认三条 validation view 还被显式绑定到当前 `profile_ref / browser_channel / execution_surface / effective_execution_mode=live_read_high_risk / probe_bundle_ref=probe-bundle/xhs-closeout-min-v1`
 - [ ] reviewer 确认 `probe-bundle/xhs-recovery-recon-v1` 与 `probe-bundle/xhs-closeout-min-v1` 已被冻结为两条独立 formal bundle
 - [ ] reviewer 确认不同 bundle / execution mode / profile_ref / execution_surface 不得互相替代
 - [ ] reviewer 确认 `data-model.md` 只复用既有 formal object family，没有发明新的持久化真相源

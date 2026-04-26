@@ -88,6 +88,11 @@ type RequiredCloseoutValidationScopeV1 = {
     | "layer1_consistency"
     | "layer2_interaction"
     | "layer3_session_rhythm";
+  profile_ref: string;
+  browser_channel: "Google Chrome stable";
+  execution_surface: "real_browser";
+  effective_execution_mode: "live_read_high_risk";
+  probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1";
   baseline_status: "ready";
   current_result_state: "verified";
   current_drift_state: "no_drift";
@@ -100,7 +105,15 @@ type RequiredCloseoutValidationScopeV1 = {
 - `FR-0013 + layer2_interaction`
 - `FR-0014 + layer3_session_rhythm`
 
-上述三条 validation view 必须同时满足：
+上述三条 validation view 还必须同时绑定当前 closeout admission scope：
+
+- `profile_ref = XhsCloseoutRecoveryScopeV1.profile_ref`
+- `browser_channel = XhsCloseoutRecoveryScopeV1.browser_channel`
+- `execution_surface = XhsCloseoutRecoveryScopeV1.execution_surface`
+- `effective_execution_mode = live_read_high_risk`
+- `probe_bundle_ref = probe-bundle/xhs-closeout-min-v1`
+
+并且必须同时满足：
 
 - `baseline_status=ready`
 - `current_result_state=verified`

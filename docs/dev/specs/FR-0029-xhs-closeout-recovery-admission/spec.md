@@ -145,6 +145,12 @@ Canonical Issue: #552
   - `target_fr_ref=FR-0012` + `validation_scope=layer1_consistency`
   - `target_fr_ref=FR-0013` + `validation_scope=layer2_interaction`
   - `target_fr_ref=FR-0014` + `validation_scope=layer3_session_rhythm`
+- 对上述三条 scope，对应的 validation view 还必须同时绑定当前 closeout admission scope 键：
+  - `profile_ref =` 当前 `XhsCloseoutRecoveryScopeV1.profile_ref`
+  - `browser_channel = Google Chrome stable`
+  - `execution_surface = real_browser`
+  - `effective_execution_mode = live_read_high_risk`
+  - `probe_bundle_ref = probe-bundle/xhs-closeout-min-v1`
 - 对上述三条 scope，当前都必须满足：
   - `baseline_status=ready`
   - `current_result_state=verified`
@@ -220,6 +226,7 @@ Given recon recovery probe 已通过
 And `runtime.status.account_safety.state=clear`
 And `runtime.status.xhs_closeout_rhythm` 允许进入 live admission 阶段
 And `FR-0012/0013/0014` 三条 validation view 都是 `ready + verified + no_drift`
+And 这三条 validation view 都绑定当前 `profile_ref / browser_channel / execution_surface / effective_execution_mode=live_read_high_risk / probe_bundle_ref=probe-bundle/xhs-closeout-min-v1`
 When 系统评估 `closeout_admission_probe_live`
 Then 才允许进入 live admission probe
 And probe bundle 必须固定为 `probe-bundle/xhs-closeout-min-v1`

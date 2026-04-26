@@ -83,6 +83,12 @@
   - `FR-0012 + layer1_consistency`
   - `FR-0013 + layer2_interaction`
   - `FR-0014 + layer3_session_rhythm`
+- 对这三条 view，`FR-0029` 还要求它们必须绑定当前 closeout admission scope：
+  - `profile_ref = XhsCloseoutRecoveryScopeV1.profile_ref`
+  - `browser_channel = Google Chrome stable`
+  - `execution_surface = real_browser`
+  - `effective_execution_mode = live_read_high_risk`
+  - `probe_bundle_ref = probe-bundle/xhs-closeout-min-v1`
 - 这三条 scope 都必须满足：
   - `baseline_status=ready`
   - `current_result_state=verified`
