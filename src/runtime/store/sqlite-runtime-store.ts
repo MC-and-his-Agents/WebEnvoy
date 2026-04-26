@@ -1241,7 +1241,7 @@ export class SQLiteRuntimeStore {
     });
     try {
       const existing = this.#getOptionalAntiDetectionValidationRecordByRef(input.recordRef);
-      if (existing && !antiDetectionScopeMatches(existing, input)) {
+      if (existing) {
         invalidRuntimeStoreInput("record_ref conflicts with an existing anti-detection record");
       }
       const request = this.#getAntiDetectionValidationRequestByRef(input.requestRef);

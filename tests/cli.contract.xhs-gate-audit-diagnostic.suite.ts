@@ -26,10 +26,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   const seedReadyAntiDetectionValidationViews = async (input: {
     cwd: string;
     profile: string;
-    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "recon";
+    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "live_write" | "recon";
   }): Promise<void> => {
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
     const effectiveExecutionMode = input.effectiveExecutionMode ?? "live_read_high_risk";
+    const safeProfile = input.profile.replace(/[^a-z0-9_-]+/gi, "-");
     const scopes = [
       ["FR-0012", "layer1_consistency"],
       ["FR-0013", "layer2_interaction"],
@@ -37,10 +38,13 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     ] as const;
     try {
       for (const [targetFrRef, validationScope] of scopes) {
-        const requestRef = `validation-request/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
-        const sampleRef = `validation-sample/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
-        const baselineRef = `baseline/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
-        const recordRef = `validation-record/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
+        const uniqueRef = `${safeProfile}/${effectiveExecutionMode}/${process.hrtime.bigint()}`;
+        const requestRef = `validation-request/${targetFrRef}/${uniqueRef}`;
+        const sampleRef = `validation-sample/${targetFrRef}/${uniqueRef}`;
+        const baselineRef = `baseline/${targetFrRef}/${uniqueRef}`;
+        const recordRef = `validation-record/${targetFrRef}/${uniqueRef}`;
+        const runId = `run-${targetFrRef}-${safeProfile}-${effectiveExecutionMode}`;
+        const observedAt = new Date().toISOString();
         const scope = {
           targetFrRef,
           validationScope,
@@ -61,14 +65,14 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           requestedExecutionMode: effectiveExecutionMode,
           probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
           requestState: "completed",
-          requestedAt: "2026-04-25T10:00:00.000Z"
+          requestedAt: observedAt
         });
         await store.insertAntiDetectionStructuredSample({
           ...scope,
           sampleRef,
           requestRef,
-          runId: `run-${targetFrRef}-${input.profile}`,
-          capturedAt: "2026-04-25T12:05:00.000Z",
+          runId,
+          capturedAt: observedAt,
           structuredPayload: { target_fr_ref: targetFrRef, stable: true },
           artifactRefs: []
         });
@@ -76,9 +80,9 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           ...scope,
           baselineRef,
           signalVector: { stable: true },
-          capturedAt: "2026-04-25T12:06:00.000Z",
+          capturedAt: observedAt,
           sourceSampleRefs: [sampleRef],
-          sourceRunIds: [`run-${targetFrRef}-${input.profile}`]
+          sourceRunIds: [runId]
         });
         await store.insertAntiDetectionValidationRecord({
           ...scope,
@@ -89,15 +93,15 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           resultState: "verified",
           driftState: "no_drift",
           failureClass: null,
-          runId: `run-${targetFrRef}-${input.profile}`,
-          validatedAt: "2026-04-25T12:10:00.000Z"
+          runId,
+          validatedAt: observedAt
         });
         await store.upsertAntiDetectionBaselineRegistryEntry({
           ...scope,
           activeBaselineRef: baselineRef,
           supersededBaselineRefs: [],
           replacementReason: "initial_seed",
-          updatedAt: "2026-04-25T12:11:00.000Z"
+          updatedAt: observedAt
         });
       }
     } finally {
@@ -108,7 +112,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   const seedXhsCloseoutReadyProfile = async (input: {
     cwd: string;
     profile: string;
-    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "recon";
+    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "live_write" | "recon";
   }): Promise<void> => {
     const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile);
     const metaPath = path.join(profileDir, "__webenvoy_meta.json");
@@ -177,11 +181,21 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       profile: "xhs_account_001",
       effectiveExecutionMode: "live_read_limited"
     });
+    await seedXhsCloseoutReadyProfile({
+      cwd: repoRoot,
+      profile: "xhs_account_001",
+      effectiveExecutionMode: "live_write"
+    });
     await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "loopback_profile" });
     await seedXhsCloseoutReadyProfile({
       cwd: repoRoot,
       profile: "loopback_profile",
       effectiveExecutionMode: "live_read_limited"
+    });
+    await seedXhsCloseoutReadyProfile({
+      cwd: repoRoot,
+      profile: "loopback_profile",
+      effectiveExecutionMode: "live_write"
     });
     await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "anon-cli-profile-001" });
     await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "profile-session-001" });
@@ -855,6 +869,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   itWithSqlite("persists null write matrix decisions when xhs.search action_type is omitted", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-missing-action-type-xhs-001";
+    await seedXhsCloseoutReadyProfile({
+      cwd,
+      profile: "xhs_account_001",
+      effectiveExecutionMode: "live_write"
+    });
 
     const executeResult = runCli([
       "xhs.search",

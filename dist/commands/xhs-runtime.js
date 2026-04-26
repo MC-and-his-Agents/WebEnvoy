@@ -283,7 +283,6 @@ const isIssue209LiveReadCloseoutCommand = (input) => (input.command === "xhs.sea
     isLiveXhsExecutionMode(input.requestedExecutionMode);
 const assertXhsLivePreflightAllowsCommand = (input) => {
     const recoveryProbe = isXhsRecoveryProbe(input);
-    const issue209LiveReadCloseout = isIssue209LiveReadCloseoutCommand(input);
     const rhythmState = asString(input.xhsCloseoutRhythm.state);
     const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
     const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
@@ -296,7 +295,7 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
         return;
     }
     if (!recoveryProbe &&
-        issue209LiveReadCloseout &&
+        isLiveXhsExecutionMode(input.requestedExecutionMode) &&
         input.accountSafety.state === "clear" &&
         rhythmState === "single_probe_passed" &&
         input.antiDetectionValidationView?.all_required_ready === true) {
@@ -311,7 +310,7 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
                 ? "ACCOUNT_RISK_BLOCKED"
                 : recoveryProbe && input.requestedExecutionMode !== "recon"
                     ? "XHS_RECOVERY_PROBE_MODE_INVALID"
-                    : !recoveryProbe && issue209LiveReadCloseout && rhythmState === "single_probe_passed"
+                    : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
                         ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
                         : fullBundleBlocked || singleProbeRequired
                             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
@@ -413,24 +412,25 @@ const xhsReadCommand = async (context, inputConfig) => {
         ability: envelope.ability,
         options: gate.options
     });
+    const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
     const issue209LiveReadCloseoutRequested = isIssue209LiveReadCloseoutCommand({
         command: context.command,
         options: gate.options,
         requestedExecutionMode: gate.requestedExecutionMode
     });
     const accountSafetyBlockedLiveCommand = accountSafetyStatus.state === "account_risk_blocked" &&
-        (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested);
+        (liveXhsCommandRequested || recoveryProbeRequested);
     let antiDetectionValidationGate = null;
     if (context.profile &&
-        (issue209LiveReadCloseoutRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)) {
+        (liveXhsCommandRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)) {
         const rhythmState = asString(xhsCloseoutRhythmStatus.state);
         const shouldRunRhythmGate = recoveryProbeRequested ||
-            issue209LiveReadCloseoutRequested ||
+            liveXhsCommandRequested ||
             accountSafetyBlockedLiveCommand ||
             (rhythmState !== null && rhythmState !== "not_required");
         if (shouldRunRhythmGate) {
             if (!recoveryProbeRequested &&
-                issue209LiveReadCloseoutRequested &&
+                liveXhsCommandRequested &&
                 rhythmState === "single_probe_passed") {
                 let store = null;
                 try {

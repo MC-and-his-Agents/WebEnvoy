@@ -445,6 +445,30 @@ describeWithSqlite("sqlite-runtime-store", () => {
     store.close();
   });
 
+  it("keeps anti-detection validation records append-only for the same record_ref", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store);
+
+    await expect(
+      store.insertAntiDetectionValidationRecord({
+        ...scope,
+        recordRef: "validation-record/FR-0012/001",
+        requestRef: "validation-request/FR-0012/001",
+        sampleRef: "validation-sample/FR-0012/001",
+        baselineRef: "baseline/FR-0012/001",
+        resultState: "verified",
+        driftState: "no_drift",
+        failureClass: null,
+        runId: "run-validation-record-rewrite-001",
+        validatedAt: "2026-04-25T10:30:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
   it("upserts run idempotently", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
