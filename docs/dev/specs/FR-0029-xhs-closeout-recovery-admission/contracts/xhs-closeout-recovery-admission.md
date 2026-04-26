@@ -60,6 +60,29 @@ type XhsRecoveryReconProbeV1 = {
 - 它通过后，只能解锁 live admission probe 的尝试资格。
 - 它不得直接解锁 `#445` full bundle。
 
+### `XhsRecoveryReconProbeSuccessV1`
+
+```ts
+type XhsRecoveryReconProbeSuccessV1 = {
+  producer_command: "xhs.search";
+  producer_run_id: string;
+  profile_ref: string;
+  target_domain: "www.xiaohongshu.com";
+  browser_channel: "Google Chrome stable";
+  execution_surface: "real_browser";
+  effective_execution_mode: "recon";
+  probe_bundle_ref: "probe-bundle/xhs-recovery-recon-v1";
+  runtime_audit_run_id: string;
+};
+```
+
+约束：
+
+- `producer_run_id` 只允许来自当前 `recovery_probe_recon` 的 producer run。
+- `runtime_audit_run_id` 必须与 `producer_run_id` 相同，不得引用 live admission probe 或其他命令 run。
+- `profile_ref`、`target_domain`、`browser_channel`、`execution_surface`、`effective_execution_mode`、`probe_bundle_ref` 必须与当前 `XhsCloseoutRecoveryScopeV1` 和 recon probe 定义一致。
+- 若缺少同 run 的 `runtime.audit` 追溯入口，或 run identity 与 scope 键不一致，则不得成立 `recon success`。
+
 ### `closeout_admission_probe_live`
 
 ```ts
@@ -148,7 +171,7 @@ type RequiredCloseoutValidationScopeV1 = {
 
 ```ts
 type XhsCloseoutAdmissionLiveProbeGateV1 = {
-  recon_probe_passed: true;
+  recon_probe_success: XhsRecoveryReconProbeSuccessV1;
   account_safety_state: "clear";
   rhythm_stage_allows_live_admission_probe: true;
   validation_requirements_satisfied: true;
@@ -157,7 +180,7 @@ type XhsCloseoutAdmissionLiveProbeGateV1 = {
 
 当前 v1 允许开始 `closeout_admission_probe_live` 的正式条件固定为：
 
-1. recon recovery probe 已通过
+1. 存在一条 `XhsRecoveryReconProbeSuccessV1`
 2. `runtime.status.account_safety.state = clear`
 3. `runtime.status.xhs_closeout_rhythm` 已允许进入 live admission probe 阶段
 4. `FR-0012/0013/0014` 三条 validation view 全部满足 `ready + verified + no_drift`
@@ -168,7 +191,7 @@ type XhsCloseoutAdmissionLiveProbeGateV1 = {
 
 ```ts
 type XhsCloseoutBundleAdmissionPredicateV1 = {
-  recon_probe_passed: true;
+  recon_probe_success: XhsRecoveryReconProbeSuccessV1;
   live_admission_probe_success: XhsCloseoutAdmissionProbeSuccessV1;
   account_safety_state: "clear";
   rhythm_stage_allows_escalation: true;
@@ -178,7 +201,7 @@ type XhsCloseoutBundleAdmissionPredicateV1 = {
 
 当前 v1 进入 `closeout_bundle_allowed` 的正式条件固定为：
 
-1. recon recovery probe 已通过
+1. 存在一条 `XhsRecoveryReconProbeSuccessV1`
 2. 存在一条 `XhsCloseoutAdmissionProbeSuccessV1`
 3. `runtime.status.account_safety.state = clear`
 4. `runtime.status.xhs_closeout_rhythm` 已允许从 live admission probe 进入 bundle escalation

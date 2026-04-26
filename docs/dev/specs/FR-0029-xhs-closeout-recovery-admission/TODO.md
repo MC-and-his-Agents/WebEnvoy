@@ -5,6 +5,7 @@
 - [ ] reviewer 确认 current v1 recovery contract 只复用现有 public surface：`xhs.search`、`xhs.detail`、`xhs.user_home`、`runtime.status.account_safety`、`runtime.status.xhs_closeout_rhythm`、`runtime.audit.anti_detection_validation_view`、`options.xhs_recovery_probe=true`
 - [ ] reviewer 确认 current v1 恢复阶段已冻结为 `recovery_probe_recon`、`closeout_admission_probe_live`、`closeout_bundle_allowed`
 - [ ] reviewer 确认 `xhs.search + options.xhs_recovery_probe=true + requested_execution_mode=recon` 仍只属于 recon recovery probe，不得替代 live admission
+- [ ] reviewer 确认 `recon success` 已被冻结为带 producer `run_id`、scope 键与同 run `runtime.audit` 追溯入口的正式来源，而不是裸布尔值
 - [ ] reviewer 确认 `xhs.search + requested_execution_mode=live_read_high_risk` 已被冻结为当前唯一 closeout admission live probe
 - [ ] reviewer 确认开始 `closeout_admission_probe_live` 前，必须先满足 recon probe、account safety、rhythm live-admission gate 与三条 validation view
 - [ ] reviewer 确认进入 `closeout_bundle_allowed` 前，除了 recon probe 之外还必须显式通过 live admission probe
