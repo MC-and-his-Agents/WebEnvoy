@@ -23,7 +23,7 @@ Canonical Issue: #552
 2. 冻结从 account-safety gate 恢复到 `#445` full bundle 之间的三段恢复阶段。
 3. 冻结 recon recovery probe 与 closeout admission live probe 的正式分工。
 4. 冻结 `FR-0012/0013/0014/0020` 在 XHS closeout admission 场景中的最小绑定方式。
-5. 冻结 `probe_bundle/xhs-recovery-recon-v1` 与 `probe-bundle/xhs-closeout-min-v1` 的 formal 隔离边界。
+5. 冻结 `probe-bundle/xhs-recovery-recon-v1` 与 `probe-bundle/xhs-closeout-min-v1` 的 formal 隔离边界。
 
 ## 非目标
 
