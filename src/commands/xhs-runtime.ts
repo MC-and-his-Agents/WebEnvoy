@@ -195,10 +195,33 @@ const readPersistedSessionRhythmBlockStatus = async (input: {
       issueScope: input.issueScope ?? "issue_209"
     });
     const windowState = persisted?.window_state;
+    const persistedDecision = persisted?.decision;
+    const persistedDecisionValue = asString(persistedDecision?.decision);
+    const event = persisted?.event;
     if (
       asString(windowState?.current_phase) !== "cooldown" &&
       asString(windowState?.risk_state) !== "paused"
     ) {
+      if (persistedDecisionValue && persistedDecisionValue !== "allowed") {
+        return {
+          state: "operator_confirmation_required",
+          cooldown_until: null,
+          operator_confirmed_at: null,
+          single_probe_required: true,
+          single_probe_passed_at: null,
+          probe_run_id: null,
+          full_bundle_blocked: true,
+          reason_codes:
+            Array.isArray(persistedDecision?.reason_codes) &&
+            persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+              ? persistedDecision.reason_codes
+              : [
+                  asString(event?.reason) ??
+                    asString(windowState?.last_event_id) ??
+                    "PERSISTED_SESSION_RHYTHM_BLOCKED"
+                ]
+        };
+      }
       return null;
     }
     const cooldownUntil = asString(windowState?.cooldown_until);
@@ -209,7 +232,6 @@ const readPersistedSessionRhythmBlockStatus = async (input: {
     ) {
       return null;
     }
-    const event = persisted?.event;
     return {
       state: "cooldown",
       cooldown_until: cooldownUntil,

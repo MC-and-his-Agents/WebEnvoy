@@ -2043,6 +2043,119 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("preserves persisted recovery-probe blocks when profile rhythm metadata is missing", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-recovery-block-"));
+    try {
+      const profile = "xhs_persisted_recovery_block_profile";
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            current_phase: "recovery_probe",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:40:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: "2026-04-25T10:40:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_recovery_block",
+            source_run_id: "run-persisted-recovery-block",
+            updated_at: "2026-04-25T10:35:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_recovery_block",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "recovery_probe_started",
+            phase_before: "cooldown",
+            phase_after: "recovery_probe",
+            risk_state_before: "paused",
+            risk_state_after: "limited",
+            source_audit_event_id: null,
+            reason: "PERSISTED_RECOVERY_PROBE_BLOCKED",
+            recorded_at: "2026-04-25T10:35:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_recovery_block",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-recovery-block",
+            session_id: "nm-session-persisted-recovery",
+            profile,
+            current_phase: "recovery_probe",
+            current_risk_state: "limited",
+            next_phase: "recovery_probe",
+            next_risk_state: "limited",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["PERSISTED_RECOVERY_PROBE_BLOCKED"],
+            requires: ["operator_confirmation_required"],
+            decided_at: "2026-04-25T10:35:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile,
+            run_id: "run-persisted-recovery-block-current",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "operator_confirmation_required",
+            reason_codes: expect.arrayContaining(["PERSISTED_RECOVERY_PROBE_BLOCKED"])
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("blocks non-closeout XHS live commands after recovery probe until validation baseline is ready", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-live-write-baseline-"));
     try {
