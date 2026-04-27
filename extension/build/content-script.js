@@ -9632,9 +9632,22 @@ class ContentScriptHandler {
                     ...(typeof options.target_page === "string"
                         ? { target_page: options.target_page }
                         : {}),
+                    ...(typeof options.actual_target_domain === "string"
+                        ? { actual_target_domain: options.actual_target_domain }
+                        : actualTargetDomain
+                            ? { actual_target_domain: actualTargetDomain }
+                            : {}),
+                    ...(typeof options.actual_target_tab_id === "number"
+                        ? { actual_target_tab_id: options.actual_target_tab_id }
+                        : typeof message.tabId === "number"
+                            ? { actual_target_tab_id: message.tabId }
+                            : {}),
+                    ...(typeof options.actual_target_page === "string"
+                        ? { actual_target_page: options.actual_target_page }
+                        : actualTargetPage
+                            ? { actual_target_page: actualTargetPage }
+                            : {}),
                     ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
-                    ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
-                    ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
                     ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
                     ...(typeof options.action_type === "string"
                         ? { action_type: options.action_type }
@@ -9657,6 +9670,7 @@ class ContentScriptHandler {
                     ...(options.limited_read_rollout_ready_true === true
                         ? { limited_read_rollout_ready_true: true }
                         : {}),
+                    ...(options.xhs_recovery_probe === true ? { xhs_recovery_probe: true } : {}),
                     ...(typeof options.validation_action === "string"
                         ? { validation_action: options.validation_action }
                         : {}),
