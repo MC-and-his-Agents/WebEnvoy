@@ -10,6 +10,7 @@ import {
   SQLiteRuntimeStore,
   resolveRuntimeStorePath
 } from "../sqlite-runtime-store.js";
+import { toSessionRhythmStatusView } from "../../xhs-closeout-rhythm.js";
 
 const tempDirs: string[] = [];
 type DatabaseSyncCtor = new (path: string) => {
@@ -43,6 +44,25 @@ const createTempCwd = async (): Promise<string> => {
   const cwd = await mkdtemp(path.join(tmpdir(), "webenvoy-runtime-store-"));
   tempDirs.push(cwd);
   return cwd;
+};
+
+const getGeneratedSessionRhythmWindowId = (input: {
+  profile: string;
+  sessionId: string;
+  sourceRunId: string;
+}): string | undefined => {
+  const view = toSessionRhythmStatusView({
+    profile: input.profile,
+    issueScope: "issue_209",
+    sessionId: input.sessionId,
+    sourceRunId: input.sourceRunId,
+    effectiveExecutionMode: "live_read_high_risk"
+  }) as {
+    session_rhythm_window_state?: {
+      window_id?: string;
+    };
+  };
+  return view.session_rhythm_window_state?.window_id;
 };
 
 const expectLegacyMigrationAllowsNullActionTypeWrite = async (
@@ -206,6 +226,22 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
+  it("generates FR-0014 rhythm window ids per runtime session", () => {
+    const firstWindowId = getGeneratedSessionRhythmWindowId({
+      profile: "xhs_001",
+      sessionId: "nm-session-001",
+      sourceRunId: "run-session-window-001"
+    });
+    const secondWindowId = getGeneratedSessionRhythmWindowId({
+      profile: "xhs_001",
+      sessionId: "nm-session-002",
+      sourceRunId: "run-session-window-002"
+    });
+
+    expect(firstWindowId).toBe("rhythm_win_xhs_001_issue_209_nm-session-001");
+    expect(secondWindowId).toBe("rhythm_win_xhs_001_issue_209_nm-session-002");
+  });
+
   it("persists FR-0014 session rhythm window event and decision view", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
