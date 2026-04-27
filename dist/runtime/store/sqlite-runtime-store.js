@@ -9,6 +9,29 @@ const LIVE_APPROVAL_EXECUTION_MODES = new Set([
     "live_read_high_risk",
     "live_write"
 ]);
+const EXECUTION_MODES = new Set([
+    "dry_run",
+    "recon",
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
+const SESSION_RHYTHM_PHASES = new Set([
+    "warmup",
+    "steady",
+    "cooldown",
+    "recovery_probe",
+    "afterglow_hook"
+]);
+const SESSION_RHYTHM_EVENT_TYPES = new Set([
+    "risk_signal",
+    "risk_signal_detected",
+    "cooldown_started",
+    "recovery_probe_started",
+    "recovery_probe_passed",
+    "stability_window_passed"
+]);
+const SESSION_RHYTHM_DECISIONS = new Set(["allowed", "blocked", "deferred"]);
 const SESSION_RHYTHM_RISK_STATES = new Set(["paused", "limited", "allowed"]);
 const isAllowedLiveAuditRecord = (record) => record.gate_decision === "allowed" &&
     LIVE_APPROVAL_EXECUTION_MODES.has(record.effective_execution_mode);
@@ -83,6 +106,13 @@ const asSessionRhythmRiskState = (value, fieldName) => {
         invalidRuntimeStoreInput(`${fieldName} must be one of ${[...SESSION_RHYTHM_RISK_STATES].join(", ")}`);
     }
     return riskState;
+};
+const asEnumRuntimeStoreString = (value, fieldName, allowedValues) => {
+    const enumValue = asNonEmptyRuntimeStoreString(value, fieldName);
+    if (!allowedValues.has(enumValue)) {
+        invalidRuntimeStoreInput(`${fieldName} must be one of ${[...allowedValues].join(", ")}`);
+    }
+    return enumValue;
 };
 const parseJsonArray = (value) => {
     if (typeof value !== "string") {
@@ -487,8 +517,9 @@ export class SQLiteRuntimeStore {
             last_event_id = excluded.last_event_id,
             source_run_id = excluded.source_run_id,
             updated_at = excluded.updated_at
+          WHERE excluded.updated_at >= session_rhythm_window_state.updated_at
         `)
-                .run(windowId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"), asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"), asSessionRhythmRiskState(windowState.risk_state, "risk_state"), asNullableRuntimeStoreString(windowState.window_started_at), asNullableRuntimeStoreString(windowState.window_deadline_at), asNullableRuntimeStoreString(windowState.cooldown_until), asNullableRuntimeStoreString(windowState.recovery_probe_due_at), asNullableRuntimeStoreString(windowState.stability_window_until), Number.isInteger(windowState.risk_signal_count)
+                .run(windowId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"), asEnumRuntimeStoreString(windowState.current_phase, "current_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(windowState.risk_state, "risk_state"), asNullableRuntimeStoreString(windowState.window_started_at), asNullableRuntimeStoreString(windowState.window_deadline_at), asNullableRuntimeStoreString(windowState.cooldown_until), asNullableRuntimeStoreString(windowState.recovery_probe_due_at), asNullableRuntimeStoreString(windowState.stability_window_until), Number.isInteger(windowState.risk_signal_count)
                 ? windowState.risk_signal_count
                 : 0, asNullableRuntimeStoreString(windowState.last_event_id), asNonEmptyRuntimeStoreString(windowState.source_run_id, "window_state.source_run_id"), updatedAt);
             this.#db
@@ -504,7 +535,7 @@ export class SQLiteRuntimeStore {
               excluded.source_audit_event_id
             )
         `)
-                .run(eventId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"), windowId, asNonEmptyRuntimeStoreString(event.event_type, "event_type"), asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"), asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"), asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"), asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
+                .run(eventId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"), windowId, asEnumRuntimeStoreString(event.event_type, "event_type", SESSION_RHYTHM_EVENT_TYPES), asEnumRuntimeStoreString(event.phase_before, "phase_before", SESSION_RHYTHM_PHASES), asEnumRuntimeStoreString(event.phase_after, "phase_after", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"), asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
             this.#db
                 .prepare(`
           INSERT INTO session_rhythm_decision(
@@ -514,7 +545,7 @@ export class SQLiteRuntimeStore {
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(decision_id) DO NOTHING
         `)
-                .run(decisionId, windowId, asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"), asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"), input.profile, asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"), asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"), asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"), asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"), asNonEmptyRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode"), asNonEmptyRuntimeStoreString(decision.decision, "decision"), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
+                .run(decisionId, windowId, asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"), asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"), input.profile, asEnumRuntimeStoreString(decision.current_phase, "current_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"), asEnumRuntimeStoreString(decision.next_phase, "next_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"), asEnumRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode", EXECUTION_MODES), asEnumRuntimeStoreString(decision.decision, "decision", SESSION_RHYTHM_DECISIONS), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
             return this.getSessionRhythmStatusView({
                 profile: input.profile,
                 platform: input.platform,

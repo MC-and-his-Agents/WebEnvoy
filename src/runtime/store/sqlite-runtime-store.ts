@@ -366,6 +366,33 @@ const LIVE_APPROVAL_EXECUTION_MODES = new Set([
   "live_write"
 ]);
 
+const EXECUTION_MODES = new Set([
+  "dry_run",
+  "recon",
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
+
+const SESSION_RHYTHM_PHASES = new Set([
+  "warmup",
+  "steady",
+  "cooldown",
+  "recovery_probe",
+  "afterglow_hook"
+]);
+
+const SESSION_RHYTHM_EVENT_TYPES = new Set([
+  "risk_signal",
+  "risk_signal_detected",
+  "cooldown_started",
+  "recovery_probe_started",
+  "recovery_probe_passed",
+  "stability_window_passed"
+]);
+
+const SESSION_RHYTHM_DECISIONS = new Set(["allowed", "blocked", "deferred"]);
+
 const SESSION_RHYTHM_RISK_STATES = new Set(["paused", "limited", "allowed"]);
 
 const isAllowedLiveAuditRecord = (record: GateAuditRecord): boolean =>
@@ -516,6 +543,18 @@ const asSessionRhythmRiskState = (value: unknown, fieldName: string): string => 
     );
   }
   return riskState;
+};
+
+const asEnumRuntimeStoreString = (
+  value: unknown,
+  fieldName: string,
+  allowedValues: Set<string>
+): string => {
+  const enumValue = asNonEmptyRuntimeStoreString(value, fieldName);
+  if (!allowedValues.has(enumValue)) {
+    invalidRuntimeStoreInput(`${fieldName} must be one of ${[...allowedValues].join(", ")}`);
+  }
+  return enumValue;
 };
 
 const parseJsonArray = (value: unknown): unknown[] => {
@@ -1058,6 +1097,7 @@ export class SQLiteRuntimeStore {
             last_event_id = excluded.last_event_id,
             source_run_id = excluded.source_run_id,
             updated_at = excluded.updated_at
+          WHERE excluded.updated_at >= session_rhythm_window_state.updated_at
         `
         )
         .run(
@@ -1066,7 +1106,7 @@ export class SQLiteRuntimeStore {
           input.platform,
           input.issueScope,
           asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"),
-          asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"),
+          asEnumRuntimeStoreString(windowState.current_phase, "current_phase", SESSION_RHYTHM_PHASES),
           asSessionRhythmRiskState(windowState.risk_state, "risk_state"),
           asNullableRuntimeStoreString(windowState.window_started_at),
           asNullableRuntimeStoreString(windowState.window_deadline_at),
@@ -1102,9 +1142,9 @@ export class SQLiteRuntimeStore {
           input.issueScope,
           asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"),
           windowId,
-          asNonEmptyRuntimeStoreString(event.event_type, "event_type"),
-          asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"),
-          asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"),
+          asEnumRuntimeStoreString(event.event_type, "event_type", SESSION_RHYTHM_EVENT_TYPES),
+          asEnumRuntimeStoreString(event.phase_before, "phase_before", SESSION_RHYTHM_PHASES),
+          asEnumRuntimeStoreString(event.phase_after, "phase_after", SESSION_RHYTHM_PHASES),
           asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"),
           asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"),
           asNullableRuntimeStoreString(event.source_audit_event_id),
@@ -1128,12 +1168,12 @@ export class SQLiteRuntimeStore {
           asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"),
           asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"),
           input.profile,
-          asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"),
+          asEnumRuntimeStoreString(decision.current_phase, "current_phase", SESSION_RHYTHM_PHASES),
           asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"),
-          asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"),
+          asEnumRuntimeStoreString(decision.next_phase, "next_phase", SESSION_RHYTHM_PHASES),
           asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"),
-          asNonEmptyRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode"),
-          asNonEmptyRuntimeStoreString(decision.decision, "decision"),
+          asEnumRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode", EXECUTION_MODES),
+          asEnumRuntimeStoreString(decision.decision, "decision", SESSION_RHYTHM_DECISIONS),
           JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []),
           JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []),
           decidedAt

@@ -625,6 +625,151 @@ describeWithSqlite("sqlite-runtime-store", () => {
           }
         })
       ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          windowState: {
+            ...baseInput.windowState,
+            current_phase: "paused"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          event: {
+            ...baseInput.event,
+            event_type: "manual_override"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          decision: {
+            ...baseInput.decision,
+            decision: "rollback"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("preserves newer conservative FR-0014 rhythm windows from stale overwrites", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const conservativeInput = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-newer",
+        current_phase: "cooldown",
+        risk_state: "paused",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T11:05:00.000Z",
+        cooldown_until: "2026-04-25T11:05:00.000Z",
+        recovery_probe_due_at: "2026-04-25T11:05:00.000Z",
+        stability_window_until: null,
+        risk_signal_count: 1,
+        last_event_id: "rhythm_evt_newer_cooldown",
+        source_run_id: "run-newer-cooldown",
+        updated_at: "2026-04-25T10:45:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_newer_cooldown",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-newer",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "cooldown_started",
+        phase_before: "steady",
+        phase_after: "cooldown",
+        risk_state_before: "limited",
+        risk_state_after: "paused",
+        source_audit_event_id: "gate_evt_newer_cooldown",
+        reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+        recorded_at: "2026-04-25T10:45:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_newer_cooldown",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-newer-cooldown",
+        session_id: "nm-session-newer",
+        profile: "xhs_001",
+        current_phase: "cooldown",
+        current_risk_state: "paused",
+        next_phase: "cooldown",
+        next_risk_state: "paused",
+        effective_execution_mode: "recon",
+        decision: "blocked",
+        reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+        requires: ["cooldown_until_elapsed"],
+        decided_at: "2026-04-25T10:45:00.000Z"
+      }
+    };
+    try {
+      await store.recordSessionRhythmStatusView(conservativeInput);
+      await store.recordSessionRhythmStatusView({
+        ...conservativeInput,
+        windowState: {
+          ...conservativeInput.windowState,
+          session_id: "nm-session-stale",
+          current_phase: "steady",
+          risk_state: "limited",
+          cooldown_until: null,
+          last_event_id: "rhythm_evt_stale_steady",
+          source_run_id: "run-stale-steady",
+          updated_at: "2026-04-25T10:40:00.000Z"
+        },
+        event: {
+          ...conservativeInput.event,
+          event_id: "rhythm_evt_stale_steady",
+          session_id: "nm-session-stale",
+          event_type: "stability_window_passed",
+          phase_before: "steady",
+          phase_after: "steady",
+          risk_state_before: "limited",
+          risk_state_after: "limited",
+          reason: "STALE_STEADY_WRITE",
+          recorded_at: "2026-04-25T10:40:00.000Z"
+        },
+        decision: {
+          ...conservativeInput.decision,
+          decision_id: "rhythm_decision_stale_steady",
+          run_id: "run-stale-steady",
+          session_id: "nm-session-stale",
+          current_phase: "steady",
+          current_risk_state: "limited",
+          next_phase: "steady",
+          next_risk_state: "limited",
+          decision: "allowed",
+          reason_codes: ["STALE_STEADY_WRITE"],
+          requires: [],
+          decided_at: "2026-04-25T10:40:00.000Z"
+        }
+      });
+
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        window_state: {
+          current_phase: "cooldown",
+          risk_state: "paused",
+          last_event_id: "rhythm_evt_newer_cooldown"
+        }
+      });
     } finally {
       store.close();
     }
