@@ -19,6 +19,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
     if (!input.profile) {
         return null;
@@ -54,21 +55,33 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
         if (!windowId || !currentWindowState || !currentEvent || !currentDecision) {
             return null;
         }
+        const currentSourceKey = toSessionRhythmIdPart(input.runId);
+        const currentEventId = `rhythm_evt_${currentSourceKey}`;
+        const currentDecisionId = `rhythm_decision_${currentSourceKey}`;
         await store.recordSessionRhythmStatusView({
             profile: input.profile,
             platform: "xhs",
             issueScope,
             windowState: {
                 ...currentWindowState,
-                window_id: windowId
+                window_id: windowId,
+                last_event_id: currentEventId,
+                source_run_id: input.runId
             },
             event: {
                 ...currentEvent,
-                window_id: windowId
+                event_id: currentEventId,
+                session_id: input.sessionId,
+                window_id: windowId,
+                source_audit_event_id: null
             },
             decision: {
                 ...currentDecision,
-                window_id: windowId
+                decision_id: currentDecisionId,
+                window_id: windowId,
+                run_id: input.runId,
+                session_id: input.sessionId,
+                profile: input.profile
             }
         });
         const current = await store.getSessionRhythmStatusView({
@@ -125,10 +138,17 @@ const readPersistedSessionRhythmBlockStatus = async (input) => {
             asString(windowState?.risk_state) !== "paused") {
             return null;
         }
+        const cooldownUntil = asString(windowState?.cooldown_until);
+        const operatorConfirmedAt = asString(input.profileMeta?.xhsCloseoutRhythm?.operatorConfirmedAt);
+        if (cooldownUntil &&
+            Date.parse(cooldownUntil) <= Date.now() &&
+            operatorConfirmedAt) {
+            return null;
+        }
         const event = persisted?.event;
         return {
             state: "cooldown",
-            cooldown_until: windowState?.cooldown_until ?? null,
+            cooldown_until: cooldownUntil,
             operator_confirmed_at: null,
             single_probe_required: true,
             single_probe_passed_at: null,
@@ -565,7 +585,8 @@ const xhsReadCommand = async (context, inputConfig) => {
         (await readPersistedSessionRhythmBlockStatus({
             cwd: context.cwd,
             profile: context.profile,
-            issueScope: asString(gate.options.issue_scope)
+            issueScope: asString(gate.options.issue_scope),
+            profileMeta
         })) ?? xhsCloseoutRhythmStatus;
     const profileRuntime = new ProfileRuntimeService();
     const recoveryProbeRequested = isXhsRecoveryProbe({
