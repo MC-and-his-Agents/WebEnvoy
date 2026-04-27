@@ -2853,9 +2853,9 @@ describe("normalizeGateOptionsForContract", () => {
           decision: {
             decision_id: `rhythm_decision_preflight_${runId}`,
             run_id: runId,
-            decision: "allowed",
-            reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
-            requires: []
+            decision: "deferred",
+            reason_codes: ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"],
+            requires: ["execution_audit_appended"]
           }
         });
       } finally {
@@ -3907,7 +3907,7 @@ describe("normalizeGateOptionsForContract", () => {
             approval_admission_ref: approvalAdmissionRef,
             audit_admission_ref: auditAdmissionRef,
             session_rhythm_window_id: "rhythm_win_persisted_issue_209",
-            session_rhythm_decision_id: `rhythm_decision_preflight_${runId}`
+            session_rhythm_decision_id: null
           }
         }
       });
@@ -3923,7 +3923,10 @@ describe("normalizeGateOptionsForContract", () => {
           decision_id: `rhythm_decision_preflight_${runId}`,
           run_id: runId,
           session_id: expect.any(String),
-          effective_execution_mode: "live_read_high_risk"
+          effective_execution_mode: "live_read_high_risk",
+          decision: "deferred",
+          reason_codes: ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"],
+          requires: ["execution_audit_appended"]
         });
       } finally {
         verificationStore.close();

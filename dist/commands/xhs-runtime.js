@@ -63,8 +63,7 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
         if (!windowId || !windowStateForRecord || !eventForRecord || !decisionForRecord) {
             return null;
         }
-        const liveRunAdmittedAfterDeferredProbe = isLiveXhsExecutionMode(input.gate.requestedExecutionMode) &&
-            asString(decisionForRecord.decision) === "deferred";
+        const liveRunPendingExecutionAudit = isLiveXhsExecutionMode(input.gate.requestedExecutionMode);
         const currentSourceKey = toSessionRhythmIdPart(input.runId);
         const currentEventId = `rhythm_evt_preflight_${currentSourceKey}`;
         const currentDecisionId = `rhythm_decision_preflight_${currentSourceKey}`;
@@ -105,16 +104,16 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
                     asString(decisionForRecord.next_risk_state) ??
                     "paused",
                 effective_execution_mode: input.gate.requestedExecutionMode,
-                decision: liveRunAdmittedAfterDeferredProbe
-                    ? "allowed"
+                decision: liveRunPendingExecutionAudit
+                    ? "deferred"
                     : (asString(decisionForRecord.decision) ?? "blocked"),
-                reason_codes: liveRunAdmittedAfterDeferredProbe
-                    ? ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"]
+                reason_codes: liveRunPendingExecutionAudit
+                    ? ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"]
                     : Array.isArray(decisionForRecord.reason_codes)
                         ? decisionForRecord.reason_codes
                         : [],
-                requires: liveRunAdmittedAfterDeferredProbe
-                    ? []
+                requires: liveRunPendingExecutionAudit
+                    ? ["execution_audit_appended"]
                     : Array.isArray(decisionForRecord.requires)
                         ? decisionForRecord.requires
                         : []
@@ -128,7 +127,8 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             runId: input.runId
         });
         const currentWindowId = asString(current?.window_state.window_id);
-        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId
+        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId &&
+            asString(current?.decision.decision) === "allowed"
             ? asString(current?.decision.decision_id)
             : null;
         if (currentWindowId || currentDecisionIdFromStore) {
