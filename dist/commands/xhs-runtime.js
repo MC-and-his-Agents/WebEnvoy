@@ -19,7 +19,6 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
     if (!input.profile) {
         return null;
@@ -33,58 +32,43 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             platform: "xhs",
             issueScope
         });
-        const fallbackView = !persisted &&
-            (input.profileMeta?.xhsCloseoutRhythm ||
-                input.profileMeta?.accountSafety?.state === "account_risk_blocked")
-            ? toSessionRhythmStatusView({
-                profile: input.profile,
-                rhythm: input.profileMeta?.xhsCloseoutRhythm,
-                accountSafety: input.profileMeta?.accountSafety,
-                issueScope,
-                sessionId: input.sessionId,
-                sourceRunId: input.runId,
-                effectiveExecutionMode: input.gate.requestedExecutionMode
-            })
-            : null;
-        const sourceWindowState = persisted?.window_state ?? asObject(fallbackView?.session_rhythm_window_state);
-        const sourceEvent = persisted?.event ?? asObject(fallbackView?.session_rhythm_event);
-        const sourceDecision = persisted?.decision ?? asObject(fallbackView?.session_rhythm_decision);
-        const windowId = asString(sourceWindowState?.window_id);
-        if (!windowId || !sourceEvent || !sourceDecision) {
+        const shouldWriteCurrentDecision = !!persisted ||
+            !!input.profileMeta?.xhsCloseoutRhythm ||
+            input.profileMeta?.accountSafety?.state === "account_risk_blocked";
+        if (!shouldWriteCurrentDecision) {
             return null;
         }
-        const now = new Date().toISOString();
-        const currentSourceKey = toSessionRhythmIdPart(input.runId);
-        const currentEventId = `rhythm_evt_${currentSourceKey}`;
-        const currentDecisionId = `rhythm_decision_${currentSourceKey}`;
+        const currentView = toSessionRhythmStatusView({
+            profile: input.profile,
+            rhythm: input.profileMeta?.xhsCloseoutRhythm,
+            accountSafety: input.profileMeta?.accountSafety,
+            issueScope,
+            sessionId: input.sessionId,
+            sourceRunId: input.runId,
+            effectiveExecutionMode: input.gate.requestedExecutionMode
+        });
+        const currentWindowState = asObject(currentView.session_rhythm_window_state);
+        const currentEvent = asObject(currentView.session_rhythm_event);
+        const currentDecision = asObject(currentView.session_rhythm_decision);
+        const windowId = asString(persisted?.window_state.window_id) ?? asString(currentWindowState?.window_id);
+        if (!windowId || !currentWindowState || !currentEvent || !currentDecision) {
+            return null;
+        }
         await store.recordSessionRhythmStatusView({
             profile: input.profile,
             platform: "xhs",
             issueScope,
             windowState: {
-                ...sourceWindowState,
-                session_id: input.sessionId,
-                last_event_id: currentEventId,
-                source_run_id: input.runId,
-                updated_at: now
+                ...currentWindowState,
+                window_id: windowId
             },
             event: {
-                ...sourceEvent,
-                event_id: currentEventId,
-                session_id: input.sessionId,
-                window_id: windowId,
-                source_audit_event_id: null,
-                recorded_at: now
+                ...currentEvent,
+                window_id: windowId
             },
             decision: {
-                ...sourceDecision,
-                decision_id: currentDecisionId,
-                window_id: windowId,
-                run_id: input.runId,
-                session_id: input.sessionId,
-                profile: input.profile,
-                effective_execution_mode: input.gate.requestedExecutionMode,
-                decided_at: now
+                ...currentDecision,
+                window_id: windowId
             }
         });
         const current = await store.getSessionRhythmStatusView({
