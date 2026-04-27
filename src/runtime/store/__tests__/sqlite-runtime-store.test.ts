@@ -503,7 +503,12 @@ describeWithSqlite("sqlite-runtime-store", () => {
           issueScope: "issue_209",
           sessionId: "nm-session-legacy-001"
         })
-      ).resolves.toBeNull();
+      ).resolves.toMatchObject({
+        window_state: {
+          window_id: "rhythm_win_legacy_session_002",
+          session_id: "nm-session-legacy-002"
+        }
+      });
       await expect(
         store.getSessionRhythmStatusView({
           profile: "xhs_001",

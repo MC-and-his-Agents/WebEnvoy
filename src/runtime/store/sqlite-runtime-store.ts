@@ -1159,7 +1159,6 @@ export class SQLiteRuntimeStore {
   ): Promise<SessionRhythmStatusViewRecord | null> {
     const platform = input.platform ?? "xhs";
     const issueScope = input.issueScope ?? "issue_209";
-    const sessionId = asNullableRuntimeStoreString(input.sessionId);
     const runId = asNullableRuntimeStoreString(input.runId);
     const row = this.#db
       .prepare(
@@ -1184,7 +1183,6 @@ export class SQLiteRuntimeStore {
         LEFT JOIN session_rhythm_event e ON e.event_id = w.last_event_id
         LEFT JOIN session_rhythm_decision d ON d.window_id = w.window_id
         WHERE w.profile = ? AND w.platform = ? AND w.issue_scope = ?
-          AND (? IS NULL OR w.session_id = ? OR d.session_id = ?)
         ORDER BY
           CASE WHEN ? IS NOT NULL AND d.run_id = ? THEN 0 ELSE 1 END,
           CASE
@@ -1199,9 +1197,6 @@ export class SQLiteRuntimeStore {
         input.profile,
         platform,
         issueScope,
-        sessionId,
-        sessionId,
-        sessionId,
         runId,
         runId
       ) as Record<string, unknown> | undefined;
