@@ -5171,10 +5171,10 @@ const buildLayer2InteractionEvidence = (input) => {
     const selectedPath = blockedBy ? "blocked" : strategy.preferred_path;
     const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
     const settledWaitResult = selectedPath === "blocked"
-        ? "failed"
+        ? "skipped"
         : settledWaitApplied
-            ? input.settledWaitResult ?? "not_observed"
-            : "not_required";
+            ? input.settledWaitResult ?? "timeout"
+            : "skipped";
     return {
         event_strategy_profile: strategy,
         event_chain_policy: chain,

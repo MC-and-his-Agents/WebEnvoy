@@ -36,7 +36,7 @@ describe("FR-0013 layer2 humanized events", () => {
       action_kind: "keyboard_input",
       selected_path: "mixed_input",
       settled_wait_applied: true,
-      settled_wait_result: "not_observed",
+      settled_wait_result: "timeout",
       failure_category: null
     });
   });
@@ -66,7 +66,8 @@ describe("FR-0013 layer2 humanized events", () => {
     });
     expect(evidence.execution_trace).toMatchObject({
       selected_path: "blocked",
-      settled_wait_result: "failed",
+      settled_wait_applied: false,
+      settled_wait_result: "skipped",
       failure_category: "blocked_by_fr0011"
     });
   });
@@ -84,7 +85,7 @@ describe("FR-0013 layer2 humanized events", () => {
     });
     expect(evidence.execution_trace).toMatchObject({
       settled_wait_applied: true,
-      settled_wait_result: "not_observed"
+      settled_wait_result: "timeout"
     });
   });
 

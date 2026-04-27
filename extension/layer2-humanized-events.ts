@@ -64,7 +64,7 @@ export interface ExecutionTrace {
   event_chain: string;
   rhythm_profile_source: Layer2RhythmProfileSource;
   settled_wait_applied: boolean;
-  settled_wait_result: "settled" | "not_required" | "not_observed" | "failed";
+  settled_wait_result: "settled" | "timeout" | "skipped";
   failure_category: Layer2FailureCategory | null;
 }
 
@@ -213,7 +213,7 @@ export const buildLayer2InteractionEvidence = (input: {
   actionKind: Layer2ActionKind;
   writeInteractionTierName?: string | null;
   rhythmProfileSource?: Layer2RhythmProfileSource;
-  settledWaitResult?: "settled" | "not_required" | "not_observed" | "failed";
+  settledWaitResult?: "settled" | "timeout" | "skipped";
 }): Layer2InteractionEvidence => {
   const strategy = clone(STRATEGY_PROFILES[input.actionKind]);
   const chain = clone(EVENT_CHAINS[input.actionKind]);
@@ -227,10 +227,10 @@ export const buildLayer2InteractionEvidence = (input: {
   const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
   const settledWaitResult =
     selectedPath === "blocked"
-      ? "failed"
+      ? "skipped"
       : settledWaitApplied
-        ? input.settledWaitResult ?? "not_observed"
-        : "not_required";
+        ? input.settledWaitResult ?? "timeout"
+        : "skipped";
 
   return {
     event_strategy_profile: strategy,
