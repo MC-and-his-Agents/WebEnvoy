@@ -1081,6 +1081,29 @@ export class SQLiteRuntimeStore {
     try {
       this.#db.exec("BEGIN IMMEDIATE");
       transactionStarted = true;
+      const existingWindow = this.#db
+        .prepare(
+          `
+          SELECT window_id, updated_at
+          FROM session_rhythm_window_state
+          WHERE profile = ? AND platform = ? AND issue_scope = ?
+        `
+        )
+        .get(input.profile, input.platform, input.issueScope) as
+        | { window_id?: unknown; updated_at?: unknown }
+        | undefined;
+      if (
+        typeof existingWindow?.updated_at === "string" &&
+        existingWindow.updated_at > updatedAt
+      ) {
+        this.#db.exec("COMMIT");
+        transactionStarted = false;
+        return this.getSessionRhythmStatusView({
+          profile: input.profile,
+          platform: input.platform,
+          issueScope: input.issueScope
+        }) as Promise<SessionRhythmStatusViewRecord>;
+      }
       this.#db
         .prepare(
           `
@@ -1089,7 +1112,7 @@ export class SQLiteRuntimeStore {
             window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
             stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(profile, platform, issue_scope, session_id) DO UPDATE SET
+          ON CONFLICT(profile, platform, issue_scope) DO UPDATE SET
             window_id = excluded.window_id,
             session_id = excluded.session_id,
             current_phase = excluded.current_phase,
@@ -1238,9 +1261,9 @@ export class SQLiteRuntimeStore {
         LEFT JOIN session_rhythm_event e ON e.event_id = w.last_event_id
         LEFT JOIN session_rhythm_decision d ON d.window_id = w.window_id
         WHERE w.profile = ? AND w.platform = ? AND w.issue_scope = ?
-          AND (? IS NULL OR w.session_id = ?)
         ORDER BY
           CASE WHEN ? IS NOT NULL AND d.run_id = ? THEN 0 ELSE 1 END,
+          CASE WHEN ? IS NOT NULL AND d.session_id = ? THEN 0 ELSE 1 END,
           CASE
             WHEN d.decision_id LIKE 'rhythm_decision_preflight_%' THEN 1
             ELSE 0
@@ -1253,10 +1276,10 @@ export class SQLiteRuntimeStore {
         input.profile,
         platform,
         issueScope,
-        asNullableRuntimeStoreString(input.sessionId),
-        asNullableRuntimeStoreString(input.sessionId),
         runId,
-        runId
+        runId,
+        asNullableRuntimeStoreString(input.sessionId),
+        asNullableRuntimeStoreString(input.sessionId)
       ) as Record<string, unknown> | undefined;
     if (!row) {
       return null;

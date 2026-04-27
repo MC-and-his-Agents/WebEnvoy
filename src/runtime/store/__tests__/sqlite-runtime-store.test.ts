@@ -226,7 +226,7 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
-  it("keeps FR-0014 rhythm windows session-bound and only emits formal objects with run/session ids", () => {
+  it("keeps FR-0014 rhythm windows profile-scoped while retaining run/session ids", () => {
     const firstView = getGeneratedSessionRhythmView({
       profile: "xhs_001",
       sessionId: "nm-session-001",
@@ -244,10 +244,10 @@ describeWithSqlite("sqlite-runtime-store", () => {
     });
 
     expect(firstView.session_rhythm_window_state?.window_id).toBe(
-      "rhythm_win_xhs_001_issue_209_nm-session-001"
+      "rhythm_win_xhs_001_issue_209"
     );
     expect(secondView.session_rhythm_window_state?.window_id).toBe(
-      "rhythm_win_xhs_001_issue_209_nm-session-002"
+      "rhythm_win_xhs_001_issue_209"
     );
     expect(missingIdsView.session_rhythm_window_state).toBeUndefined();
     expect(missingIdsView.session_rhythm_event).toBeUndefined();
@@ -410,7 +410,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     }
   });
 
-  it("migrates v12 rhythm windows into session-bound writable windows", async () => {
+  it("migrates v12 rhythm windows into profile-scoped writable windows", async () => {
     const DatabaseSyncCtor = DatabaseSync;
     expect(DatabaseSyncCtor).toBeTruthy();
     if (!DatabaseSyncCtor) {
@@ -529,8 +529,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
         })
       ).resolves.toMatchObject({
         window_state: {
-          window_id: "rhythm_win_legacy_session_001",
-          session_id: "nm-session-legacy-001"
+          window_id: "rhythm_win_legacy_session_002",
+          session_id: "nm-session-legacy-002"
         }
       });
       await expect(

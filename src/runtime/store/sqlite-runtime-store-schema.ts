@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 interface InitializeRuntimeStoreSchemaInput {
   db: DatabaseSync;
@@ -416,10 +416,13 @@ const migrateV12ToV13 = (db: DatabaseSync): void => {
   );
 };
 
-const migrateV13ToV14 = (db: DatabaseSync): void => {
+const rebuildSessionRhythmWindowStateAsProfileScoped = (
+  db: DatabaseSync,
+  schemaVersion: number
+): void => {
   db.exec(`
     PRAGMA foreign_keys = OFF;
-    CREATE TABLE session_rhythm_window_state_v14 (
+    CREATE TABLE session_rhythm_window_state_profile_scoped (
       window_id TEXT PRIMARY KEY,
       profile TEXT NOT NULL,
       platform TEXT NOT NULL,
@@ -436,9 +439,9 @@ const migrateV13ToV14 = (db: DatabaseSync): void => {
       last_event_id TEXT,
       source_run_id TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(profile, platform, issue_scope, session_id)
+      UNIQUE(profile, platform, issue_scope)
     );
-    INSERT INTO session_rhythm_window_state_v14(
+    INSERT INTO session_rhythm_window_state_profile_scoped(
       window_id, profile, platform, issue_scope, session_id, current_phase, risk_state,
       window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
       stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
@@ -449,14 +452,31 @@ const migrateV13ToV14 = (db: DatabaseSync): void => {
       current_phase, risk_state, window_started_at, window_deadline_at, cooldown_until,
       recovery_probe_due_at, stability_window_until, risk_signal_count, last_event_id,
       source_run_id, updated_at
-    FROM session_rhythm_window_state;
+    FROM session_rhythm_window_state old
+    WHERE old.rowid = (
+      SELECT newer.rowid
+      FROM session_rhythm_window_state newer
+      WHERE newer.profile = old.profile
+        AND newer.platform = old.platform
+        AND newer.issue_scope = old.issue_scope
+      ORDER BY newer.updated_at DESC, newer.rowid DESC
+      LIMIT 1
+    );
     DROP TABLE session_rhythm_window_state;
-    ALTER TABLE session_rhythm_window_state_v14 RENAME TO session_rhythm_window_state;
+    ALTER TABLE session_rhythm_window_state_profile_scoped RENAME TO session_rhythm_window_state;
     PRAGMA foreign_keys = ON;
   `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
-    String(SCHEMA_VERSION)
+    String(schemaVersion)
   );
+};
+
+const migrateV13ToV14 = (db: DatabaseSync): void => {
+  rebuildSessionRhythmWindowStateAsProfileScoped(db, 14);
+};
+
+const migrateV14ToV15 = (db: DatabaseSync): void => {
+  rebuildSessionRhythmWindowStateAsProfileScoped(db, 15);
 };
 
 export const initializeRuntimeStoreSchema = ({
@@ -559,7 +579,7 @@ export const initializeRuntimeStoreSchema = ({
       last_event_id TEXT,
       source_run_id TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(profile, platform, issue_scope, session_id)
+      UNIQUE(profile, platform, issue_scope)
     );
     CREATE TABLE IF NOT EXISTS session_rhythm_event (
       event_id TEXT PRIMARY KEY,
@@ -596,7 +616,7 @@ export const initializeRuntimeStoreSchema = ({
       FOREIGN KEY(window_id) REFERENCES session_rhythm_window_state(window_id)
     );
     CREATE INDEX IF NOT EXISTS idx_session_rhythm_window_scope
-      ON session_rhythm_window_state(profile, platform, issue_scope, session_id);
+      ON session_rhythm_window_state(profile, platform, issue_scope);
     CREATE INDEX IF NOT EXISTS idx_session_rhythm_event_window_recorded
       ON session_rhythm_event(window_id, recorded_at DESC);
     CREATE TABLE IF NOT EXISTS anti_detection_validation_request (
@@ -883,6 +903,11 @@ export const initializeRuntimeStoreSchema = ({
     if (currentVersion === 13) {
       migrateV13ToV14(db);
       currentVersion = 14;
+      continue;
+    }
+    if (currentVersion === 14) {
+      migrateV14ToV15(db);
+      currentVersion = 15;
       continue;
     }
     break;

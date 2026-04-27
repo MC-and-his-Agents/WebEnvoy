@@ -3488,7 +3488,7 @@ describe("normalizeGateOptionsForContract", () => {
           platform: "xhs",
           issueScope: "issue_209",
           windowState: {
-            window_id: "rhythm_win_persisted_issue_209_nm-session-001",
+            window_id: "rhythm_win_persisted_issue_209",
             profile,
             platform: "xhs",
             issue_scope: "issue_209",
@@ -3511,7 +3511,7 @@ describe("normalizeGateOptionsForContract", () => {
             platform: "xhs",
             issue_scope: "issue_209",
             session_id: "nm-session-001",
-            window_id: "rhythm_win_persisted_issue_209_nm-session-001",
+            window_id: "rhythm_win_persisted_issue_209",
             event_type: "recovery_probe_passed",
             phase_before: "recovery_probe",
             phase_after: "steady",
@@ -3523,7 +3523,7 @@ describe("normalizeGateOptionsForContract", () => {
           },
           decision: {
             decision_id: "rhythm_decision_persisted_refs",
-            window_id: "rhythm_win_persisted_issue_209_nm-session-001",
+            window_id: "rhythm_win_persisted_issue_209",
             run_id: "run-recovery-probe-persisted",
             session_id: "nm-session-001",
             profile,
@@ -3623,7 +3623,7 @@ describe("normalizeGateOptionsForContract", () => {
           compatibility_refs: {
             approval_admission_ref: approvalAdmissionRef,
             audit_admission_ref: auditAdmissionRef,
-            session_rhythm_window_id: "rhythm_win_persisted_issue_209_nm-session-001",
+            session_rhythm_window_id: "rhythm_win_persisted_issue_209",
             session_rhythm_decision_id: `rhythm_decision_preflight_${runId}`
           }
         }
