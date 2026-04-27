@@ -238,13 +238,38 @@ const readPersistedSessionRhythmBlockStatus = async (input: {
     const persistedDecisionValue = asString(persistedDecision?.decision);
     const event = persisted?.event;
     const profileRhythmState = asString(input.profileMeta?.xhsCloseoutRhythm?.state);
+    const persistedPhase = asString(windowState?.current_phase);
+    const fallbackAllowed = !profileRhythmState || profileRhythmState === "not_required";
     if (
-      asString(windowState?.current_phase) !== "cooldown" &&
+      fallbackAllowed &&
+      (persistedPhase === "recovery_probe" || persistedPhase === "warmup")
+    ) {
+      return {
+        state: "single_probe_required",
+        cooldown_until: asString(windowState?.cooldown_until),
+        operator_confirmed_at: null,
+        single_probe_required: true,
+        single_probe_passed_at: null,
+        probe_run_id: asString(windowState?.source_run_id),
+        full_bundle_blocked: true,
+        reason_codes:
+          Array.isArray(persistedDecision?.reason_codes) &&
+          persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+            ? persistedDecision.reason_codes
+            : [
+                asString(event?.reason) ??
+                  asString(windowState?.last_event_id) ??
+                  "PERSISTED_SESSION_RHYTHM_RECOVERY_REQUIRED"
+              ]
+      };
+    }
+    if (
+      persistedPhase !== "cooldown" &&
       asString(windowState?.risk_state) !== "paused"
     ) {
       if (
         persistedDecisionValue === "deferred" &&
-        (!profileRhythmState || profileRhythmState === "not_required")
+        fallbackAllowed
       ) {
         const reasonCodes =
           Array.isArray(persistedDecision?.reason_codes) &&
@@ -271,7 +296,7 @@ const readPersistedSessionRhythmBlockStatus = async (input: {
       if (
         persistedDecisionValue &&
         persistedDecisionValue !== "allowed" &&
-        (!profileRhythmState || profileRhythmState === "not_required")
+        fallbackAllowed
       ) {
         return {
           state: "operator_confirmation_required",

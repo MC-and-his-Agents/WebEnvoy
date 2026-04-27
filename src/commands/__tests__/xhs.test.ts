@@ -2146,7 +2146,8 @@ describe("normalizeGateOptionsForContract", () => {
         details: {
           reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
           xhs_closeout_rhythm: expect.objectContaining({
-            state: "operator_confirmation_required",
+            state: "single_probe_required",
+            single_probe_required: true,
             reason_codes: expect.arrayContaining(["PERSISTED_RECOVERY_PROBE_BLOCKED"])
           })
         }
@@ -2640,6 +2641,137 @@ describe("normalizeGateOptionsForContract", () => {
           xhs_closeout_rhythm: expect.objectContaining({
             state: "single_probe_passed",
             probe_run_id: "run-persisted-probe-passed"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks live reads while persisted rhythm is still in recovery probe", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-recovery-probe-"));
+    const profile = "xhs_persisted_recovery_probe_profile";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        }
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            current_phase: "recovery_probe",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:55:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: "2026-04-25T10:35:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_recovery_probe",
+            source_run_id: "run-persisted-recovery-probe",
+            updated_at: "2026-04-25T10:36:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_recovery_probe",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "recovery_probe_started",
+            phase_before: "warmup",
+            phase_after: "recovery_probe",
+            risk_state_before: "limited",
+            risk_state_after: "limited",
+            source_audit_event_id: null,
+            reason: "XHS_RECOVERY_SINGLE_PROBE_REQUIRED",
+            recorded_at: "2026-04-25T10:36:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_recovery_probe",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-recovery-probe",
+            session_id: "nm-session-persisted-recovery",
+            profile,
+            current_phase: "recovery_probe",
+            current_risk_state: "limited",
+            next_phase: "recovery_probe",
+            next_risk_state: "limited",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"],
+            requires: ["xhs.search_recon_probe"],
+            decided_at: "2026-04-25T10:36:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile,
+            run_id: "run-persisted-recovery-live-read-001",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-persisted-recovery-001"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 33,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "single_probe_required",
+            single_probe_required: true,
+            probe_run_id: "run-persisted-recovery-probe"
           })
         }
       });
