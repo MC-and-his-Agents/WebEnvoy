@@ -144,9 +144,8 @@ const readPersistedSessionRhythmBlockStatus = async (input) => {
         }
         const cooldownUntil = asString(windowState?.cooldown_until);
         const operatorConfirmedAt = asString(input.profileMeta?.xhsCloseoutRhythm?.operatorConfirmedAt);
-        if (cooldownUntil &&
-            Date.parse(cooldownUntil) <= Date.now() &&
-            operatorConfirmedAt) {
+        if (operatorConfirmedAt &&
+            (!cooldownUntil || Date.parse(cooldownUntil) <= Date.now())) {
             return null;
         }
         const event = persisted?.event;

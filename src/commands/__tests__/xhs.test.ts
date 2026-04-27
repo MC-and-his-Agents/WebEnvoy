@@ -2172,6 +2172,66 @@ describe("normalizeGateOptionsForContract", () => {
           reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
         }
       });
+      const rhythmStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await rhythmStore.recordSessionRhythmStatusView({
+          profile: "xhs_rhythm_probe_profile",
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-previous",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:00:00.000Z",
+            window_deadline_at: null,
+            cooldown_until: null,
+            recovery_probe_due_at: null,
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_previous_paused_no_cooldown",
+            source_run_id: "run-previous-paused-no-cooldown",
+            updated_at: "2026-04-25T10:00:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_previous_paused_no_cooldown",
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-previous",
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            event_type: "risk_signal_detected",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: null,
+            reason: "PERSISTED_SESSION_RHYTHM_PAUSED",
+            recorded_at: "2026-04-25T10:00:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_previous_paused_no_cooldown",
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            run_id: "run-previous-paused-no-cooldown",
+            session_id: "nm-session-previous",
+            profile: "xhs_rhythm_probe_profile",
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["PERSISTED_SESSION_RHYTHM_PAUSED"],
+            requires: ["operator_confirmation_required"],
+            decided_at: "2026-04-25T10:00:00.000Z"
+          }
+        });
+      } finally {
+        rhythmStore.close();
+      }
 
       const result = await executeCommand(
         {
