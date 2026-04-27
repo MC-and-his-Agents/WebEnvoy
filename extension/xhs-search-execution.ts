@@ -27,6 +27,10 @@ import {
   resolveXsCommon
 } from "./xhs-search-telemetry.js";
 import type { EditorInputValidationResult } from "./xhs-editor-input.js";
+import {
+  buildXhsSearchLayer2InteractionEvidence,
+  type Layer2InteractionEvidence
+} from "./layer2-humanized-events.js";
 
 const asRecord = (value: unknown): JsonRecord | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -128,6 +132,29 @@ const withExecutionAuditInFailurePayload = (
     payload: {
       ...result.payload,
       execution_audit: executionAudit
+    }
+  };
+};
+
+const withLayer2InteractionInSuccessPayload = (
+  result: SearchExecutionResult,
+  layer2Interaction: Layer2InteractionEvidence
+): SearchExecutionResult => {
+  if (!result.ok) {
+    return result;
+  }
+  const summary = asRecord(result.payload.summary);
+  if (!summary) {
+    return result;
+  }
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      summary: {
+        ...summary,
+        layer2_interaction: layer2Interaction
+      }
     }
   };
 };
@@ -613,6 +640,11 @@ export const executeXhsSearch = async (
 ): Promise<SearchExecutionResult> => {
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
+  const layer2Interaction = buildXhsSearchLayer2InteractionEvidence({
+    writeInteractionTierName: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+    requestedExecutionMode: input.options.requested_execution_mode,
+    recoveryProbe: input.options.xhs_recovery_probe === true
+  });
   const startedAt = env.now();
   if (gate.consumer_gate_result.gate_decision === "blocked") {
     return withExecutionAuditInFailurePayload(
@@ -653,7 +685,10 @@ export const executeXhsSearch = async (
     gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
     gate.consumer_gate_result.effective_execution_mode === "recon"
   ) {
-    return createGateOnlySuccess(input, gate, auditRecord, env) as SearchExecutionResult;
+    return withLayer2InteractionInSuccessPayload(
+      createGateOnlySuccess(input, gate, auditRecord, env) as SearchExecutionResult,
+      layer2Interaction
+    );
   }
 
   if (
@@ -802,6 +837,7 @@ export const executeXhsSearch = async (
           approval_record: gate.approval_record,
           risk_state_output: resolveRiskStateOutput(gate, auditRecord),
           audit_record: auditRecord,
+          layer2_interaction: layer2Interaction,
           interaction_result: buildEditorInputEvidence(validationResult)
         },
         observability: createObservability({
@@ -844,7 +880,8 @@ export const executeXhsSearch = async (
             execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-            audit_record: auditRecord
+            audit_record: auditRecord,
+            layer2_interaction: layer2Interaction
           }
         }
       };
@@ -1285,6 +1322,7 @@ export const executeXhsSearch = async (
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord,
+        layer2_interaction: layer2Interaction,
         request_context: {
           status: "exact_hit",
           page_context_namespace: requestContextState.pageContextNamespace,

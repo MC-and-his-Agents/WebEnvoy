@@ -5030,6 +5030,183 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
 });
 return { createAuditRecord, createGateOnlySuccess, resolveGate };
 })();
+const __webenvoy_module_layer2_humanized_events = (() => {
+const DEFAULT_RHYTHM_PROFILE = {
+    profile_name: "default_layer2",
+    hover_confirm_min_ms: 80,
+    hover_confirm_max_ms: 200,
+    click_jitter_min_px: 2,
+    click_jitter_max_px: 8,
+    typing_delay_min_ms: 60,
+    typing_delay_max_ms: 220,
+    punctuation_pause_multiplier: 1.8,
+    long_pause_probability: 0.08,
+    scroll_segment_min_px: 120,
+    scroll_segment_max_px: 480,
+    lookback_probability: 0.12
+};
+const STRATEGY_PROFILES = {
+    click: {
+        action_kind: "click",
+        preferred_path: "real_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: false,
+        requires_hover_confirm: true,
+        requires_settled_wait: true,
+        blocked_when_tier: ["irreversible_write"]
+    },
+    focus: {
+        action_kind: "focus",
+        preferred_path: "real_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: true,
+        requires_hover_confirm: false,
+        requires_settled_wait: true,
+        blocked_when_tier: ["irreversible_write"]
+    },
+    keyboard_input: {
+        action_kind: "keyboard_input",
+        preferred_path: "mixed_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: true,
+        requires_hover_confirm: false,
+        requires_settled_wait: true,
+        blocked_when_tier: ["irreversible_write"]
+    },
+    composition_input: {
+        action_kind: "composition_input",
+        preferred_path: "mixed_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: true,
+        requires_hover_confirm: false,
+        requires_settled_wait: true,
+        blocked_when_tier: ["irreversible_write"]
+    },
+    hover: {
+        action_kind: "hover",
+        preferred_path: "real_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: false,
+        requires_hover_confirm: true,
+        requires_settled_wait: false,
+        blocked_when_tier: []
+    },
+    scroll: {
+        action_kind: "scroll",
+        preferred_path: "real_input",
+        fallback_path: "synthetic_chain",
+        requires_focus: false,
+        requires_hover_confirm: false,
+        requires_settled_wait: true,
+        blocked_when_tier: []
+    }
+};
+const EVENT_CHAINS = {
+    click: {
+        chain_name: "hover_click",
+        action_kind: "click",
+        required_events: ["mousemove", "mouseover", "mousedown", "mouseup", "click"],
+        optional_events: ["pointermove", "pointerdown", "pointerup"],
+        completion_signal: ["dom_settled"],
+        requires_settled_wait: true
+    },
+    focus: {
+        chain_name: "focus_acquire",
+        action_kind: "focus",
+        required_events: ["focus"],
+        optional_events: ["mousedown", "mouseup", "click"],
+        completion_signal: ["document_active_element_matched"],
+        requires_settled_wait: true
+    },
+    keyboard_input: {
+        chain_name: "keyboard_input",
+        action_kind: "keyboard_input",
+        required_events: ["focus", "keydown", "input", "keyup", "change", "blur"],
+        optional_events: ["mousedown", "mouseup", "click"],
+        completion_signal: ["dom_settled", "framework_value_updated"],
+        requires_settled_wait: true
+    },
+    composition_input: {
+        chain_name: "composition_input",
+        action_kind: "composition_input",
+        required_events: [
+            "focus",
+            "compositionstart",
+            "compositionupdate",
+            "compositionend",
+            "input",
+            "change",
+            "blur"
+        ],
+        optional_events: ["mousedown", "mouseup", "click"],
+        completion_signal: ["dom_settled", "framework_value_updated"],
+        requires_settled_wait: true
+    },
+    hover: {
+        chain_name: "hover_confirm",
+        action_kind: "hover",
+        required_events: ["mousemove", "mouseover"],
+        optional_events: ["pointermove"],
+        completion_signal: ["hover_confirmed"],
+        requires_settled_wait: false
+    },
+    scroll: {
+        chain_name: "scroll_segment",
+        action_kind: "scroll",
+        required_events: ["wheel", "scroll"],
+        optional_events: ["mousemove"],
+        completion_signal: ["viewport_position_changed", "dom_settled"],
+        requires_settled_wait: true
+    }
+};
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const buildLayer2InteractionEvidence = (input) => {
+    const strategy = clone(STRATEGY_PROFILES[input.actionKind]);
+    const chain = clone(EVENT_CHAINS[input.actionKind]);
+    const rhythm = clone(DEFAULT_RHYTHM_PROFILE);
+    const blockedBy = input.writeInteractionTierName &&
+        strategy.blocked_when_tier.includes(input.writeInteractionTierName)
+        ? "FR-0011.write_interaction_tier"
+        : null;
+    const selectedPath = blockedBy ? "blocked" : strategy.preferred_path;
+    const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
+    const settledWaitResult = selectedPath === "blocked"
+        ? "failed"
+        : settledWaitApplied
+            ? input.settledWaitResult ?? "settled"
+            : "not_required";
+    return {
+        event_strategy_profile: strategy,
+        event_chain_policy: chain,
+        rhythm_profile: rhythm,
+        strategy_selection: {
+            action_kind: input.actionKind,
+            selected_path: selectedPath,
+            strategy_profile: `${input.actionKind}_default`,
+            event_chain: chain.chain_name,
+            rhythm_profile: rhythm.profile_name,
+            fallback_reason: null,
+            blocked_by: blockedBy
+        },
+        execution_trace: {
+            action_kind: input.actionKind,
+            selected_path: selectedPath,
+            event_chain: chain.chain_name,
+            rhythm_profile_source: input.rhythmProfileSource ?? "default",
+            settled_wait_applied: settledWaitApplied,
+            settled_wait_result: settledWaitResult,
+            failure_category: blockedBy ? "blocked_by_fr0011" : null
+        }
+    };
+};
+const buildXhsSearchLayer2InteractionEvidence = (input) => buildLayer2InteractionEvidence({
+    actionKind: input.recoveryProbe || input.requestedExecutionMode === "recon"
+        ? "scroll"
+        : "keyboard_input",
+    writeInteractionTierName: input.writeInteractionTierName ?? null
+});
+return { buildLayer2InteractionEvidence, buildXhsSearchLayer2InteractionEvidence };
+})();
 const __webenvoy_module_xhs_search_execution = (() => {
 const {
   SEARCH_ENDPOINT,
@@ -5057,6 +5234,9 @@ const {
   resolveRiskStateOutput,
   resolveXsCommon
 } = __webenvoy_module_xhs_search_telemetry;
+const {
+  buildXhsSearchLayer2InteractionEvidence
+} = __webenvoy_module_layer2_humanized_events;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -5097,6 +5277,25 @@ const withExecutionAuditInFailurePayload = (result, executionAudit) => {
         payload: {
             ...result.payload,
             execution_audit: executionAudit
+        }
+    };
+};
+const withLayer2InteractionInSuccessPayload = (result, layer2Interaction) => {
+    if (!result.ok) {
+        return result;
+    }
+    const summary = asRecord(result.payload.summary);
+    if (!summary) {
+        return result;
+    }
+    return {
+        ...result,
+        payload: {
+            ...result.payload,
+            summary: {
+                ...summary,
+                layer2_interaction: layer2Interaction
+            }
         }
     };
 };
@@ -5478,6 +5677,11 @@ const resolveRequestContextState = async (input, env) => {
 const executeXhsSearch = async (input, env) => {
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
+    const layer2Interaction = buildXhsSearchLayer2InteractionEvidence({
+        writeInteractionTierName: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+        requestedExecutionMode: input.options.requested_execution_mode,
+        recoveryProbe: input.options.xhs_recovery_probe === true
+    });
     const startedAt = env.now();
     if (gate.consumer_gate_result.gate_decision === "blocked") {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
@@ -5504,7 +5708,7 @@ const executeXhsSearch = async (input, env) => {
     }
     if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
         gate.consumer_gate_result.effective_execution_mode === "recon") {
-        return createGateOnlySuccess(input, gate, auditRecord, env);
+        return withLayer2InteractionInSuccessPayload(createGateOnlySuccess(input, gate, auditRecord, env), layer2Interaction);
     }
     if (input.options.validation_action === "editor_input" &&
         input.options.issue_scope === "issue_208" &&
@@ -5627,6 +5831,7 @@ const executeXhsSearch = async (input, env) => {
                     approval_record: gate.approval_record,
                     risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                     audit_record: auditRecord,
+                    layer2_interaction: layer2Interaction,
                     interaction_result: buildEditorInputEvidence(validationResult)
                 },
                 observability: createObservability({
@@ -5668,7 +5873,8 @@ const executeXhsSearch = async (input, env) => {
                         execution_audit: gate.execution_audit,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-                        audit_record: auditRecord
+                        audit_record: auditRecord,
+                        layer2_interaction: layer2Interaction
                     }
                 }
             };
@@ -6007,6 +6213,7 @@ const executeXhsSearch = async (input, env) => {
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord,
+                layer2_interaction: layer2Interaction,
                 request_context: {
                     status: "exact_hit",
                     page_context_namespace: requestContextState.pageContextNamespace,

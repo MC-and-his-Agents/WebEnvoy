@@ -959,6 +959,19 @@ describe("extension build contract", () => {
           request_context: {
             status: "exact_hit"
           },
+          layer2_interaction: {
+            event_strategy_profile: {
+              action_kind: "keyboard_input"
+            },
+            strategy_selection: {
+              selected_path: "mixed_input",
+              event_chain: "keyboard_input"
+            },
+            execution_trace: {
+              settled_wait_applied: true,
+              settled_wait_result: "settled"
+            }
+          },
           execution_audit: {
             request_admission_decision: "allowed"
           }
