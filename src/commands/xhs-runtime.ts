@@ -61,9 +61,6 @@ const asObject = (value: unknown): JsonObject | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const toSessionRhythmIdPart = (value: string): string =>
-  value.replace(/[^A-Za-z0-9._-]+/gu, "_");
-
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
   cwd: string;
   profile: string | null;
@@ -85,10 +82,7 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
     const windowId = asString(persisted?.window_state.window_id);
     const persistedDecisionRunId = asString(persisted?.decision.run_id);
     const persistedDecisionId = asString(persisted?.decision.decision_id);
-    const decisionId =
-      persistedDecisionRunId === input.runId
-        ? persistedDecisionId
-        : `rhythm_decision_${toSessionRhythmIdPart(input.runId)}`;
+    const decisionId = persistedDecisionRunId === input.runId ? persistedDecisionId : null;
     if (windowId || decisionId) {
       return {
         ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
@@ -125,15 +119,12 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
     effectiveExecutionMode: input.gate.requestedExecutionMode
   });
   const windowState = asObject(view.session_rhythm_window_state);
-  const decision = asObject(view.session_rhythm_decision);
   const windowId = asString(windowState?.window_id);
-  const decisionId = asString(decision?.decision_id);
-  if (!windowId && !decisionId) {
+  if (!windowId) {
     return null;
   }
   return {
-    ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
-    ...(decisionId ? { __session_rhythm_decision_id: decisionId } : {})
+    __session_rhythm_window_id: windowId
   };
 };
 
