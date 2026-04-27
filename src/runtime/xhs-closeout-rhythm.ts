@@ -409,6 +409,8 @@ export const buildSessionRhythmFormalView = (input: {
       : state === "single_probe_passed"
         ? "deferred"
         : "allowed";
+  const eventPhaseBefore = state === "single_probe_passed" ? "recovery_probe" : phase;
+  const eventPhaseAfter = state === "single_probe_passed" ? "steady" : phase;
 
   return {
     windowState: {
@@ -441,8 +443,8 @@ export const buildSessionRhythmFormalView = (input: {
         phase,
         accountSafety: input.accountSafety
       }),
-      phase_before: phase,
-      phase_after: phase,
+      phase_before: eventPhaseBefore,
+      phase_after: eventPhaseAfter,
       risk_state_before: riskState,
       risk_state_after: riskState,
       source_audit_event_id: input.sourceAuditEventId ?? null,

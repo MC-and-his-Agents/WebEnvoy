@@ -639,7 +639,7 @@ const xhsReadCommand = async (
   }
 
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
-  const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+  let profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const accountSafetyStatus = toAccountSafetyStatus(profileMeta?.accountSafety);
   const xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
     rhythm: profileMeta?.xhsCloseoutRhythm,
@@ -756,6 +756,7 @@ const xhsReadCommand = async (
         runId: context.run_id,
         params: {}
       });
+      profileMeta = await profileStore.readMeta(context.profile);
     }
     const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
     const {

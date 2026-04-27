@@ -443,7 +443,7 @@ const xhsReadCommand = async (context, inputConfig) => {
         };
     }
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
-    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    let profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const accountSafetyStatus = toAccountSafetyStatus(profileMeta?.accountSafety);
     const xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
         rhythm: profileMeta?.xhsCloseoutRhythm,
@@ -548,6 +548,7 @@ const xhsReadCommand = async (context, inputConfig) => {
                 runId: context.run_id,
                 params: {}
             });
+            profileMeta = await profileStore.readMeta(context.profile);
         }
         const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
         const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
