@@ -505,7 +505,7 @@ export const toSessionRhythmStatusView = (input: {
     current_risk_state: riskState,
     window_state: phase === "steady" ? "stability" : phase,
     cooldown_until: status.cooldown_until,
-    stability_window_until: null,
+    stability_window_until: formalView.windowState.stability_window_until,
     latest_event_id: formalView.event.event_id,
     latest_reason: reasonCodes[reasonCodes.length - 1] ?? null,
     derived_at: now.toISOString(),

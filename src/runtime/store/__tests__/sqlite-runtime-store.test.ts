@@ -62,6 +62,7 @@ const getGeneratedSessionRhythmView = (input: {
     };
     session_rhythm_event?: Record<string, unknown>;
     session_rhythm_decision?: Record<string, unknown>;
+    stability_window_until?: string | null;
   };
 
 const expectLegacyMigrationAllowsNullActionTypeWrite = async (
@@ -247,6 +248,25 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(missingIdsView.session_rhythm_window_state).toBeUndefined();
     expect(missingIdsView.session_rhythm_event).toBeUndefined();
     expect(missingIdsView.session_rhythm_decision).toBeUndefined();
+    const steadyView = toSessionRhythmStatusView({
+      profile: "xhs_001",
+      issueScope: "issue_209",
+      sessionId: "nm-session-003",
+      sourceRunId: "run-session-window-003",
+      effectiveExecutionMode: "live_read_high_risk",
+      rhythm: {
+        state: "single_probe_passed",
+        cooldownUntil: null,
+        operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+        singleProbeRequired: false,
+        singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+        probeRunId: "run-session-window-003",
+        fullBundleBlocked: true,
+        reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+      },
+      now: new Date("2026-04-25T10:45:00.000Z")
+    }) as { stability_window_until?: string | null };
+    expect(steadyView.stability_window_until).toBe("2026-04-25T11:00:00.000Z");
   });
 
   it("persists FR-0014 session rhythm window event and decision view", async () => {
