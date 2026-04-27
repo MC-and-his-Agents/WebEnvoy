@@ -12,7 +12,7 @@ describe("FR-0013 layer2 humanized events", () => {
 
     expect(evidence.event_strategy_profile).toMatchObject({
       action_kind: "keyboard_input",
-      preferred_path: "mixed_input",
+      preferred_path: "real_input",
       fallback_path: "synthetic_chain",
       requires_focus: true,
       requires_settled_wait: true
@@ -28,14 +28,14 @@ describe("FR-0013 layer2 humanized events", () => {
       typing_delay_max_ms: 220
     });
     expect(evidence.strategy_selection).toMatchObject({
-      selected_path: "mixed_input",
+      selected_path: "real_input",
       event_chain: "keyboard_input",
       rhythm_profile: "default_layer2",
       blocked_by: null
     });
     expect(evidence.execution_trace).toMatchObject({
       action_kind: "keyboard_input",
-      selected_path: "mixed_input",
+      selected_path: "real_input",
       settled_wait_applied: true,
       settled_wait_result: "timeout",
       failure_category: null

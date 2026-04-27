@@ -5066,7 +5066,7 @@ const STRATEGY_PROFILES = {
     },
     keyboard_input: {
         action_kind: "keyboard_input",
-        preferred_path: "mixed_input",
+        preferred_path: "real_input",
         fallback_path: "synthetic_chain",
         requires_focus: true,
         requires_hover_confirm: false,
