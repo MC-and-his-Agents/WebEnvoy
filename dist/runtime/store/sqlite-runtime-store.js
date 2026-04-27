@@ -9,6 +9,33 @@ const LIVE_APPROVAL_EXECUTION_MODES = new Set([
     "live_read_high_risk",
     "live_write"
 ]);
+const EXECUTION_MODES = new Set([
+    "dry_run",
+    "recon",
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
+const SESSION_RHYTHM_PHASES = new Set([
+    "warmup",
+    "steady",
+    "cooldown",
+    "recovery_probe",
+    "afterglow_hook"
+]);
+const SESSION_RHYTHM_EVENT_TYPES = new Set([
+    "risk_signal",
+    "cooldown_started",
+    "cooldown_extended",
+    "recovery_probe_started",
+    "recovery_probe_passed",
+    "recovery_probe_failed",
+    "stability_window_passed",
+    "manual_approval_recorded",
+    "window_closed"
+]);
+const SESSION_RHYTHM_DECISIONS = new Set(["allowed", "blocked", "deferred"]);
+const SESSION_RHYTHM_RISK_STATES = new Set(["paused", "limited", "allowed"]);
 const isAllowedLiveAuditRecord = (record) => record.gate_decision === "allowed" &&
     LIVE_APPROVAL_EXECUTION_MODES.has(record.effective_execution_mode);
 export class RuntimeStoreError extends Error {
@@ -68,6 +95,39 @@ const sleepSync = (ms) => {
 };
 const invalidRuntimeStoreInput = (message) => {
     throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", message);
+};
+const asNonEmptyRuntimeStoreString = (value, fieldName) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        invalidRuntimeStoreInput(`${fieldName} is required`);
+    }
+    return value.trim();
+};
+const asNullableRuntimeStoreString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asSessionRhythmRiskState = (value, fieldName) => {
+    const riskState = asNonEmptyRuntimeStoreString(value, fieldName);
+    if (!SESSION_RHYTHM_RISK_STATES.has(riskState)) {
+        invalidRuntimeStoreInput(`${fieldName} must be one of ${[...SESSION_RHYTHM_RISK_STATES].join(", ")}`);
+    }
+    return riskState;
+};
+const asEnumRuntimeStoreString = (value, fieldName, allowedValues) => {
+    const enumValue = asNonEmptyRuntimeStoreString(value, fieldName);
+    if (!allowedValues.has(enumValue)) {
+        invalidRuntimeStoreInput(`${fieldName} must be one of ${[...allowedValues].join(", ")}`);
+    }
+    return enumValue;
+};
+const parseJsonArray = (value) => {
+    if (typeof value !== "string") {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
 };
 const REQUEST_STATE_TRANSITIONS = {
     accepted: ["accepted", "sampling", "completed", "aborted"],
@@ -427,6 +487,203 @@ export class SQLiteRuntimeStore {
             profile: input.profile,
             limit: input.limit
         });
+    }
+    async recordSessionRhythmStatusView(input) {
+        const windowState = input.windowState;
+        const event = input.event;
+        const decision = input.decision;
+        const windowId = asNonEmptyRuntimeStoreString(windowState.window_id, "window_id");
+        const eventId = asNonEmptyRuntimeStoreString(event.event_id, "event_id");
+        const decisionId = asNonEmptyRuntimeStoreString(decision.decision_id, "decision_id");
+        const updatedAt = asNonEmptyRuntimeStoreString(windowState.updated_at, "updated_at");
+        const recordedAt = asNonEmptyRuntimeStoreString(event.recorded_at, "recorded_at");
+        const decidedAt = asNonEmptyRuntimeStoreString(decision.decided_at, "decided_at");
+        let transactionStarted = false;
+        try {
+            this.#db.exec("BEGIN IMMEDIATE");
+            transactionStarted = true;
+            const existingWindow = this.#db
+                .prepare(`
+          SELECT window_id, updated_at
+          FROM session_rhythm_window_state
+          WHERE profile = ? AND platform = ? AND issue_scope = ?
+        `)
+                .get(input.profile, input.platform, input.issueScope);
+            if (typeof existingWindow?.updated_at === "string" &&
+                existingWindow.updated_at > updatedAt) {
+                this.#db.exec("COMMIT");
+                transactionStarted = false;
+                return this.getSessionRhythmStatusView({
+                    profile: input.profile,
+                    platform: input.platform,
+                    issueScope: input.issueScope
+                });
+            }
+            this.#db
+                .prepare(`
+          INSERT INTO session_rhythm_window_state(
+            window_id, profile, platform, issue_scope, session_id, current_phase, risk_state,
+            window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
+            stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(profile, platform, issue_scope) DO UPDATE SET
+            window_id = excluded.window_id,
+            session_id = excluded.session_id,
+            current_phase = excluded.current_phase,
+            risk_state = excluded.risk_state,
+            window_started_at = excluded.window_started_at,
+            window_deadline_at = excluded.window_deadline_at,
+            cooldown_until = excluded.cooldown_until,
+            recovery_probe_due_at = excluded.recovery_probe_due_at,
+            stability_window_until = excluded.stability_window_until,
+            risk_signal_count = excluded.risk_signal_count,
+            last_event_id = excluded.last_event_id,
+            source_run_id = excluded.source_run_id,
+            updated_at = excluded.updated_at
+          WHERE excluded.updated_at >= session_rhythm_window_state.updated_at
+        `)
+                .run(windowId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"), asEnumRuntimeStoreString(windowState.current_phase, "current_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(windowState.risk_state, "risk_state"), asNullableRuntimeStoreString(windowState.window_started_at), asNullableRuntimeStoreString(windowState.window_deadline_at), asNullableRuntimeStoreString(windowState.cooldown_until), asNullableRuntimeStoreString(windowState.recovery_probe_due_at), asNullableRuntimeStoreString(windowState.stability_window_until), Number.isInteger(windowState.risk_signal_count)
+                ? windowState.risk_signal_count
+                : 0, asNullableRuntimeStoreString(windowState.last_event_id), asNonEmptyRuntimeStoreString(windowState.source_run_id, "window_state.source_run_id"), updatedAt);
+            this.#db
+                .prepare(`
+          INSERT INTO session_rhythm_event(
+            event_id, profile, platform, issue_scope, session_id, window_id, event_type,
+            phase_before, phase_after, risk_state_before, risk_state_after,
+            source_audit_event_id, reason, recorded_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(event_id) DO UPDATE SET
+            source_audit_event_id = COALESCE(
+              session_rhythm_event.source_audit_event_id,
+              excluded.source_audit_event_id
+            )
+        `)
+                .run(eventId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"), windowId, asEnumRuntimeStoreString(event.event_type, "event_type", SESSION_RHYTHM_EVENT_TYPES), asEnumRuntimeStoreString(event.phase_before, "phase_before", SESSION_RHYTHM_PHASES), asEnumRuntimeStoreString(event.phase_after, "phase_after", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"), asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
+            this.#db
+                .prepare(`
+          INSERT INTO session_rhythm_decision(
+            decision_id, window_id, run_id, session_id, profile, current_phase,
+            current_risk_state, next_phase, next_risk_state, effective_execution_mode,
+            decision, reason_codes_json, requires_json, decided_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(decision_id) DO NOTHING
+        `)
+                .run(decisionId, windowId, asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"), asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"), input.profile, asEnumRuntimeStoreString(decision.current_phase, "current_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"), asEnumRuntimeStoreString(decision.next_phase, "next_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"), asEnumRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode", EXECUTION_MODES), asEnumRuntimeStoreString(decision.decision, "decision", SESSION_RHYTHM_DECISIONS), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
+            this.#db.exec("COMMIT");
+            transactionStarted = false;
+            return this.getSessionRhythmStatusView({
+                profile: input.profile,
+                platform: input.platform,
+                issueScope: input.issueScope
+            });
+        }
+        catch (error) {
+            if (transactionStarted) {
+                try {
+                    this.#db.exec("ROLLBACK");
+                }
+                catch {
+                    // Preserve the original write failure; SQLite may already have closed the transaction.
+                }
+            }
+            throw this.#toStoreDbError(error);
+        }
+    }
+    async upsertSessionRhythmStatusView(input) {
+        return this.recordSessionRhythmStatusView(input);
+    }
+    async getSessionRhythmStatusView(input) {
+        const platform = input.platform ?? "xhs";
+        const issueScope = input.issueScope ?? "issue_209";
+        const runId = asNullableRuntimeStoreString(input.runId);
+        const row = this.#db
+            .prepare(`
+        SELECT
+          w.window_id, w.profile, w.platform, w.issue_scope, w.session_id,
+          w.current_phase, w.risk_state, w.window_started_at, w.window_deadline_at,
+          w.cooldown_until, w.recovery_probe_due_at, w.stability_window_until,
+          w.risk_signal_count, w.last_event_id, w.source_run_id, w.updated_at,
+          e.event_id, e.profile AS event_profile, e.platform AS event_platform,
+          e.issue_scope AS event_issue_scope, e.session_id AS event_session_id,
+          e.window_id AS event_window_id, e.event_type, e.phase_before,
+          e.phase_after, e.risk_state_before, e.risk_state_after,
+          e.source_audit_event_id, e.reason, e.recorded_at,
+          d.decision_id, d.window_id AS decision_window_id,
+          d.run_id AS decision_run_id, d.session_id AS decision_session_id,
+          d.profile AS decision_profile, d.current_phase AS decision_current_phase,
+          d.current_risk_state, d.next_phase, d.next_risk_state,
+          d.effective_execution_mode, d.decision, d.reason_codes_json,
+          d.requires_json, d.decided_at
+        FROM session_rhythm_window_state w
+        LEFT JOIN session_rhythm_event e ON e.event_id = w.last_event_id
+        LEFT JOIN session_rhythm_decision d ON d.window_id = w.window_id
+        WHERE w.profile = ? AND w.platform = ? AND w.issue_scope = ?
+        ORDER BY
+          CASE WHEN ? IS NOT NULL AND d.run_id = ? THEN 0 ELSE 1 END,
+          CASE WHEN ? IS NOT NULL AND d.session_id = ? THEN 0 ELSE 1 END,
+          CASE
+            WHEN d.decision_id LIKE 'rhythm_decision_preflight_%' THEN 1
+            ELSE 0
+          END,
+          d.decided_at DESC
+        LIMIT 1
+      `)
+            .get(input.profile, platform, issueScope, runId, runId, asNullableRuntimeStoreString(input.sessionId), asNullableRuntimeStoreString(input.sessionId));
+        if (!row) {
+            return null;
+        }
+        return {
+            window_state: {
+                window_id: row.window_id,
+                profile: row.profile,
+                platform: row.platform,
+                issue_scope: row.issue_scope,
+                session_id: row.session_id,
+                current_phase: row.current_phase,
+                risk_state: row.risk_state,
+                window_started_at: row.window_started_at,
+                window_deadline_at: row.window_deadline_at,
+                cooldown_until: row.cooldown_until,
+                recovery_probe_due_at: row.recovery_probe_due_at,
+                stability_window_until: row.stability_window_until,
+                risk_signal_count: row.risk_signal_count,
+                last_event_id: row.last_event_id,
+                source_run_id: row.source_run_id,
+                updated_at: row.updated_at
+            },
+            event: {
+                event_id: row.event_id,
+                profile: row.event_profile,
+                platform: row.event_platform,
+                issue_scope: row.event_issue_scope,
+                session_id: row.event_session_id,
+                window_id: row.event_window_id,
+                event_type: row.event_type,
+                phase_before: row.phase_before,
+                phase_after: row.phase_after,
+                risk_state_before: row.risk_state_before,
+                risk_state_after: row.risk_state_after,
+                source_audit_event_id: row.source_audit_event_id,
+                reason: row.reason,
+                recorded_at: row.recorded_at
+            },
+            decision: {
+                decision_id: row.decision_id,
+                window_id: row.decision_window_id,
+                run_id: row.decision_run_id,
+                session_id: row.decision_session_id,
+                profile: row.decision_profile,
+                current_phase: row.decision_current_phase,
+                current_risk_state: row.current_risk_state,
+                next_phase: row.next_phase,
+                next_risk_state: row.next_risk_state,
+                effective_execution_mode: row.effective_execution_mode,
+                decision: row.decision,
+                reason_codes: parseJsonArray(row.reason_codes_json),
+                requires: parseJsonArray(row.requires_json),
+                decided_at: row.decided_at
+            }
+        };
     }
     async upsertAntiDetectionValidationRequest(input) {
         assertUpsertAntiDetectionValidationRequestInput(input, {

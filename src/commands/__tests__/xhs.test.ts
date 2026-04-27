@@ -2043,6 +2043,120 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("preserves persisted recovery-probe blocks when profile rhythm metadata is missing", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-recovery-block-"));
+    try {
+      const profile = "xhs_persisted_recovery_block_profile";
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            current_phase: "recovery_probe",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:40:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: "2026-04-25T10:40:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_recovery_block",
+            source_run_id: "run-persisted-recovery-block",
+            updated_at: "2026-04-25T10:35:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_recovery_block",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "recovery_probe_started",
+            phase_before: "cooldown",
+            phase_after: "recovery_probe",
+            risk_state_before: "paused",
+            risk_state_after: "limited",
+            source_audit_event_id: null,
+            reason: "PERSISTED_RECOVERY_PROBE_BLOCKED",
+            recorded_at: "2026-04-25T10:35:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_recovery_block",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-recovery-block",
+            session_id: "nm-session-persisted-recovery",
+            profile,
+            current_phase: "recovery_probe",
+            current_risk_state: "limited",
+            next_phase: "recovery_probe",
+            next_risk_state: "limited",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["PERSISTED_RECOVERY_PROBE_BLOCKED"],
+            requires: ["operator_confirmation_required"],
+            decided_at: "2026-04-25T10:35:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile,
+            run_id: "run-persisted-recovery-block-current",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "single_probe_required",
+            single_probe_required: true,
+            reason_codes: expect.arrayContaining(["PERSISTED_RECOVERY_PROBE_BLOCKED"])
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("blocks non-closeout XHS live commands after recovery probe until validation baseline is ready", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-live-write-baseline-"));
     try {
@@ -2172,6 +2286,66 @@ describe("normalizeGateOptionsForContract", () => {
           reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
         }
       });
+      const rhythmStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await rhythmStore.recordSessionRhythmStatusView({
+          profile: "xhs_rhythm_probe_profile",
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-previous",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:00:00.000Z",
+            window_deadline_at: null,
+            cooldown_until: null,
+            recovery_probe_due_at: null,
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_previous_paused_no_cooldown",
+            source_run_id: "run-previous-paused-no-cooldown",
+            updated_at: "2026-04-25T10:00:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_previous_paused_no_cooldown",
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-previous",
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            event_type: "risk_signal",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: null,
+            reason: "PERSISTED_SESSION_RHYTHM_PAUSED",
+            recorded_at: "2026-04-25T10:00:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_previous_paused_no_cooldown",
+            window_id: "rhythm_win_xhs_rhythm_probe_profile_issue_209",
+            run_id: "run-previous-paused-no-cooldown",
+            session_id: "nm-session-previous",
+            profile: "xhs_rhythm_probe_profile",
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["PERSISTED_SESSION_RHYTHM_PAUSED"],
+            requires: ["operator_confirmation_required"],
+            decided_at: "2026-04-25T10:00:00.000Z"
+          }
+        });
+      } finally {
+        rhythmStore.close();
+      }
 
       const result = await executeCommand(
         {
@@ -2222,6 +2396,29 @@ describe("normalizeGateOptionsForContract", () => {
         fullBundleBlocked: true,
         reasonCodes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
       });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await expect(
+          verificationStore.getSessionRhythmStatusView({
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issueScope: "issue_209",
+            runId
+          })
+        ).resolves.toMatchObject({
+          event: {
+            event_id: `rhythm_evt_${runId}`,
+            event_type: "recovery_probe_passed"
+          },
+          decision: {
+            decision_id: `rhythm_decision_${runId}`,
+            decision: "deferred",
+            reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+          }
+        });
+      } finally {
+        verificationStore.close();
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
       if (previousTransport === undefined) {
@@ -2322,6 +2519,267 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("preserves persisted recovery-probe passed rhythm state before live reads", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-probe-passed-"));
+    const profile = "xhs_persisted_probe_passed_profile";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        }
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-probe",
+            current_phase: "steady",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T11:00:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: null,
+            stability_window_until: "2026-04-25T11:00:00.000Z",
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_probe_passed",
+            source_run_id: "run-persisted-probe-passed",
+            updated_at: "2026-04-25T10:40:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_probe_passed",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-probe",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "recovery_probe_passed",
+            phase_before: "recovery_probe",
+            phase_after: "steady",
+            risk_state_before: "limited",
+            risk_state_after: "limited",
+            source_audit_event_id: null,
+            reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+            recorded_at: "2026-04-25T10:40:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_probe_passed",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-probe-passed",
+            session_id: "nm-session-persisted-probe",
+            profile,
+            current_phase: "steady",
+            current_risk_state: "limited",
+            next_phase: "steady",
+            next_risk_state: "limited",
+            effective_execution_mode: "live_read_high_risk",
+            decision: "deferred",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+            requires: ["anti_detection_validation_view_ready"],
+            decided_at: "2026-04-25T10:40:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile,
+            run_id: "run-persisted-probe-live-read-001",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-persisted-probe-001"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 33,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "single_probe_passed",
+            probe_run_id: "run-persisted-probe-passed"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks live reads while persisted rhythm is still in recovery probe", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-recovery-probe-"));
+    const profile = "xhs_persisted_recovery_probe_profile";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        }
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            current_phase: "recovery_probe",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:55:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: "2026-04-25T10:35:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_recovery_probe",
+            source_run_id: "run-persisted-recovery-probe",
+            updated_at: "2026-04-25T10:36:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_recovery_probe",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-recovery",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "recovery_probe_started",
+            phase_before: "warmup",
+            phase_after: "recovery_probe",
+            risk_state_before: "limited",
+            risk_state_after: "limited",
+            source_audit_event_id: null,
+            reason: "XHS_RECOVERY_SINGLE_PROBE_REQUIRED",
+            recorded_at: "2026-04-25T10:36:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_recovery_probe",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-recovery-probe",
+            session_id: "nm-session-persisted-recovery",
+            profile,
+            current_phase: "recovery_probe",
+            current_risk_state: "limited",
+            next_phase: "recovery_probe",
+            next_risk_state: "limited",
+            effective_execution_mode: "recon",
+            decision: "blocked",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"],
+            requires: ["xhs.search_recon_probe"],
+            decided_at: "2026-04-25T10:36:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile,
+            run_id: "run-persisted-recovery-live-read-001",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-persisted-recovery-001"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 33,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "single_probe_required",
+            single_probe_required: true,
+            probe_run_id: "run-persisted-recovery-probe"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("allows XHS closeout live reads through preflight after probe and FR-0020 baselines pass", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-validation-ready-"));
     const runId = "run-validation-ready-user-home-001";
@@ -2382,6 +2840,27 @@ describe("normalizeGateOptionsForContract", () => {
           admission_decision: "allowed"
         }
       });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await expect(
+          verificationStore.getSessionRhythmStatusView({
+            profile: "xhs_validation_ready_profile",
+            platform: "xhs",
+            issueScope: "issue_209",
+            runId
+          })
+        ).resolves.toMatchObject({
+          decision: {
+            decision_id: `rhythm_decision_preflight_${runId}`,
+            run_id: runId,
+            decision: "deferred",
+            reason_codes: ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"],
+            requires: ["execution_audit_appended"]
+          }
+        });
+      } finally {
+        verificationStore.close();
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
       if (previousTransport === undefined) {
@@ -2399,6 +2878,116 @@ describe("normalizeGateOptionsForContract", () => {
       } else {
         process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
       }
+    }
+  });
+
+  it("preserves persisted cooldown before XHS closeout live execution", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-cooldown-"));
+    const profile = "xhs_persisted_cooldown_profile";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-cooldown",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2099-04-25T11:05:00.000Z",
+            cooldown_until: "2099-04-25T11:05:00.000Z",
+            recovery_probe_due_at: "2099-04-25T11:05:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_persisted_cooldown",
+            source_run_id: "run-persisted-cooldown-source",
+            updated_at: "2026-04-25T10:35:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_cooldown",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-cooldown",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "risk_signal",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: "gate_evt_persisted_cooldown",
+            reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+            recorded_at: "2026-04-25T10:35:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_cooldown",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-cooldown-source",
+            session_id: "nm-session-cooldown",
+            profile,
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "live_read_high_risk",
+            decision: "blocked",
+            reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+            requires: ["cooldown_until_elapsed"],
+            decided_at: "2026-04-25T10:35:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile,
+            run_id: "run-persisted-cooldown-current",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-persisted-cooldown"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 33,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "cooldown",
+            full_bundle_blocked: true
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
     }
   });
 
@@ -3135,6 +3724,226 @@ describe("normalizeGateOptionsForContract", () => {
       } else {
         process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
       }
+    }
+  });
+
+  it("reads session rhythm compatibility refs from the persisted rhythm store before profile meta fallback", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-rhythm-"));
+    const profile = "profile-persisted-rhythm-refs-001";
+    const runId = "run-persisted-rhythm-refs-001";
+    const requestId = "req-persisted-rhythm-refs-001";
+    const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
+    const auditAdmissionRef = `audit_admission_${runId}_${requestId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: undefined
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_persisted_issue_209",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-001",
+            current_phase: "steady",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:40:00.000Z",
+            window_deadline_at: "2026-04-25T11:00:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: null,
+            stability_window_until: "2026-04-25T11:00:00.000Z",
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_refs",
+            source_run_id: "run-recovery-probe-persisted",
+            updated_at: "2026-04-25T10:41:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_refs",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-001",
+            window_id: "rhythm_win_persisted_issue_209",
+            event_type: "recovery_probe_passed",
+            phase_before: "recovery_probe",
+            phase_after: "steady",
+            risk_state_before: "limited",
+            risk_state_after: "limited",
+            source_audit_event_id: "gate_evt_persisted_refs",
+            reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+            recorded_at: "2026-04-25T10:41:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_refs",
+            window_id: "rhythm_win_persisted_issue_209",
+            run_id: "run-recovery-probe-persisted",
+            session_id: "nm-session-001",
+            profile,
+            current_phase: "steady",
+            current_risk_state: "limited",
+            next_phase: "steady",
+            next_risk_state: "limited",
+            effective_execution_mode: "live_read_high_risk",
+            decision: "allowed",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+            requires: [],
+            decided_at: "2026-04-25T10:41:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      const execution = await executeCommand(
+        {
+          cwd,
+          command: "xhs.detail",
+          profile,
+          run_id: runId,
+          params: {
+            request_id: requestId,
+            ability: {
+              id: "xhs.note.detail.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              note_id: "abc123"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "explore_detail_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed",
+              upstream_authorization_request: {
+                action_request: {
+                  request_ref: "upstream_req_persisted_refs_001",
+                  action_name: "xhs.read_note_detail",
+                  action_category: "read"
+                },
+                resource_binding: {
+                  binding_ref: "binding_persisted_refs_001",
+                  resource_kind: "anonymous_context",
+                  profile_ref: null,
+                  binding_constraints: {
+                    anonymous_required: true,
+                    reuse_logged_in_context_forbidden: true
+                  }
+                },
+                authorization_grant: {
+                  grant_ref: "grant_persisted_refs_001",
+                  allowed_actions: ["xhs.read_note_detail"],
+                  binding_scope: {
+                    allowed_resource_kinds: ["anonymous_context"],
+                    allowed_profile_refs: []
+                  },
+                  target_scope: {
+                    allowed_domains: ["www.xiaohongshu.com"],
+                    allowed_pages: ["explore_detail_tab"]
+                  },
+                  resource_state_snapshot: "active",
+                  approval_refs: [approvalAdmissionRef],
+                  audit_refs: [auditAdmissionRef]
+                },
+                runtime_target: {
+                  target_ref: "target_persisted_refs_001",
+                  domain: "www.xiaohongshu.com",
+                  page: "explore_detail_tab",
+                  tab_id: 32
+                }
+              },
+              approval_record: {
+                approved: true,
+                approver: "qa-reviewer",
+                approved_at: "2026-03-23T10:00:00Z",
+                checks: ISSUE209_APPROVAL_CHECKS
+              },
+              admission_context: createApprovedAnonymousReadAdmissionContext(runId, requestId),
+              __anonymous_isolation_verified: true,
+              target_site_logged_in: false
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        execution_audit: {
+          compatibility_refs: {
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef,
+            session_rhythm_window_id: "rhythm_win_persisted_issue_209",
+            session_rhythm_decision_id: `rhythm_decision_preflight_${runId}`
+          }
+        }
+      });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        const persistedRhythm = await verificationStore.getSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          runId
+        });
+        expect(persistedRhythm?.decision).toMatchObject({
+          decision_id: `rhythm_decision_preflight_${runId}`,
+          run_id: runId,
+          session_id: expect.any(String),
+          effective_execution_mode: "live_read_high_risk",
+          decision: "deferred",
+          reason_codes: ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"],
+          requires: ["execution_audit_appended"]
+        });
+      } finally {
+        verificationStore.close();
+      }
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+      await rm(cwd, { recursive: true, force: true });
     }
   });
 

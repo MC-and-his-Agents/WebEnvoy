@@ -10,6 +10,7 @@ import {
   SQLiteRuntimeStore,
   resolveRuntimeStorePath
 } from "../sqlite-runtime-store.js";
+import { toSessionRhythmStatusView } from "../../xhs-closeout-rhythm.js";
 
 const tempDirs: string[] = [];
 type DatabaseSyncCtor = new (path: string) => {
@@ -44,6 +45,25 @@ const createTempCwd = async (): Promise<string> => {
   tempDirs.push(cwd);
   return cwd;
 };
+
+const getGeneratedSessionRhythmView = (input: {
+  profile: string;
+  sessionId?: string | null;
+  sourceRunId?: string | null;
+}) => toSessionRhythmStatusView({
+    profile: input.profile,
+    issueScope: "issue_209",
+    sessionId: input.sessionId,
+    sourceRunId: input.sourceRunId,
+    effectiveExecutionMode: "live_read_high_risk"
+  }) as {
+    session_rhythm_window_state?: {
+      window_id?: string;
+    };
+    session_rhythm_event?: Record<string, unknown>;
+    session_rhythm_decision?: Record<string, unknown>;
+    stability_window_until?: string | null;
+  };
 
 const expectLegacyMigrationAllowsNullActionTypeWrite = async (
   store: SQLiteRuntimeStore,
@@ -206,6 +226,331 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
+  it("keeps FR-0014 rhythm windows profile-scoped while retaining run/session ids", () => {
+    const firstView = getGeneratedSessionRhythmView({
+      profile: "xhs_001",
+      sessionId: "nm-session-001",
+      sourceRunId: "run-session-window-001"
+    });
+    const secondView = getGeneratedSessionRhythmView({
+      profile: "xhs_001",
+      sessionId: "nm-session-002",
+      sourceRunId: "run-session-window-002"
+    });
+    const missingIdsView = getGeneratedSessionRhythmView({
+      profile: "xhs_001",
+      sessionId: null,
+      sourceRunId: null
+    });
+
+    expect(firstView.session_rhythm_window_state?.window_id).toBe(
+      "rhythm_win_xhs_001_issue_209"
+    );
+    expect(secondView.session_rhythm_window_state?.window_id).toBe(
+      "rhythm_win_xhs_001_issue_209"
+    );
+    expect(missingIdsView.session_rhythm_window_state).toBeUndefined();
+    expect(missingIdsView.session_rhythm_event).toBeUndefined();
+    expect(missingIdsView.session_rhythm_decision).toBeUndefined();
+    const steadyView = toSessionRhythmStatusView({
+      profile: "xhs_001",
+      issueScope: "issue_209",
+      sessionId: "nm-session-003",
+      sourceRunId: "run-session-window-003",
+      effectiveExecutionMode: "live_read_high_risk",
+      rhythm: {
+        state: "single_probe_passed",
+        cooldownUntil: null,
+        operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+        singleProbeRequired: false,
+        singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+        probeRunId: "run-session-window-003",
+        fullBundleBlocked: true,
+        reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+      },
+      now: new Date("2026-04-25T10:45:00.000Z")
+    }) as { stability_window_until?: string | null };
+    expect(steadyView.stability_window_until).toBe("2026-04-25T11:00:00.000Z");
+  });
+
+  it("persists FR-0014 session rhythm window event and decision view", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      const view = await store.recordSessionRhythmStatusView({
+        profile: "xhs_001",
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          window_id: "rhythm_win_xhs_001_issue_209",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-001",
+          current_phase: "recovery_probe",
+          risk_state: "limited",
+          window_started_at: "2026-04-25T10:35:00.000Z",
+          window_deadline_at: "2026-04-25T10:55:00.000Z",
+          cooldown_until: null,
+          recovery_probe_due_at: "2026-04-25T10:35:00.000Z",
+          stability_window_until: "2026-04-25T11:00:00.000Z",
+          risk_signal_count: 0,
+          last_event_id: "rhythm_evt_run-probe-001",
+          source_run_id: "run-probe-001",
+          updated_at: "2026-04-25T10:40:00.000Z"
+        },
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-001",
+          window_id: "rhythm_win_xhs_001_issue_209",
+          event_type: "recovery_probe_passed",
+          phase_before: "recovery_probe",
+          phase_after: "steady",
+          risk_state_before: "limited",
+          risk_state_after: "limited",
+          source_audit_event_id: "gate_evt_probe",
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+          recorded_at: "2026-04-25T10:40:00.000Z"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          window_id: "rhythm_win_xhs_001_issue_209",
+          run_id: "run-probe-001",
+          session_id: "nm-session-001",
+          profile: "xhs_001",
+          current_phase: "recovery_probe",
+          current_risk_state: "limited",
+          next_phase: "steady",
+          next_risk_state: "limited",
+          effective_execution_mode: "recon",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+          requires: ["audit_record_present"],
+          decided_at: "2026-04-25T10:40:00.000Z"
+        }
+      });
+
+      expect(view).toMatchObject({
+        window_state: {
+          window_id: "rhythm_win_xhs_001_issue_209",
+          source_run_id: "run-probe-001"
+        },
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          source_audit_event_id: "gate_evt_probe"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject(view);
+
+      await store.recordSessionRhythmStatusView({
+        profile: "xhs_001",
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          ...view.window_state,
+          session_id: "nm-session-001",
+          current_phase: "steady",
+          updated_at: "2026-04-25T10:45:00.000Z"
+        },
+        event: {
+          ...view.event,
+          source_audit_event_id: "gate_evt_probe_overwrite_attempt",
+          reason: "OVERWRITE_ATTEMPT",
+          recorded_at: "2026-04-25T10:45:00.000Z"
+        },
+        decision: {
+          ...view.decision,
+          decision: "blocked",
+          reason_codes: ["OVERWRITE_ATTEMPT"],
+          requires: ["should_not_replace_existing_decision"],
+          decided_at: "2026-04-25T10:45:00.000Z"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        window_state: {
+          session_id: "nm-session-001",
+          current_phase: "steady"
+        },
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          session_id: "nm-session-001",
+          source_audit_event_id: "gate_evt_probe",
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          session_id: "nm-session-001",
+          current_phase: "recovery_probe",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+        }
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("migrates v12 rhythm windows into profile-scoped writable windows", async () => {
+    const DatabaseSyncCtor = DatabaseSync;
+    expect(DatabaseSyncCtor).toBeTruthy();
+    if (!DatabaseSyncCtor) {
+      return;
+    }
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE runtime_store_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '12');
+        CREATE TABLE session_rhythm_window_state (
+          window_id TEXT PRIMARY KEY,
+          profile TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          issue_scope TEXT NOT NULL,
+          session_id TEXT,
+          current_phase TEXT NOT NULL,
+          risk_state TEXT NOT NULL,
+          window_started_at TEXT,
+          window_deadline_at TEXT,
+          cooldown_until TEXT,
+          recovery_probe_due_at TEXT,
+          stability_window_until TEXT,
+          risk_signal_count INTEGER NOT NULL DEFAULT 0,
+          last_event_id TEXT,
+          source_run_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(profile, platform, issue_scope)
+        );
+        INSERT INTO session_rhythm_window_state(
+          window_id, profile, platform, issue_scope, session_id, current_phase, risk_state,
+          window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
+          stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
+        ) VALUES(
+          'rhythm_win_legacy_session_001', 'xhs_001', 'xhs', 'issue_209',
+          'nm-session-legacy-001', 'steady', 'limited',
+          '2026-04-25T10:00:00.000Z', '2026-04-25T10:30:00.000Z',
+          NULL, NULL, '2026-04-25T10:30:00.000Z', 0, NULL,
+          'run-legacy-session-001', '2026-04-25T10:00:00.000Z'
+        );
+      `);
+    } finally {
+      db.close();
+    }
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    try {
+      await store.recordSessionRhythmStatusView({
+        profile: "xhs_001",
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          window_id: "rhythm_win_legacy_session_002",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-legacy-002",
+          current_phase: "recovery_probe",
+          risk_state: "limited",
+          window_started_at: "2026-04-25T10:35:00.000Z",
+          window_deadline_at: "2026-04-25T10:55:00.000Z",
+          cooldown_until: null,
+          recovery_probe_due_at: "2026-04-25T10:35:00.000Z",
+          stability_window_until: "2026-04-25T11:00:00.000Z",
+          risk_signal_count: 0,
+          last_event_id: "rhythm_evt_legacy_session_002",
+          source_run_id: "run-legacy-session-002",
+          updated_at: "2026-04-25T10:40:00.000Z"
+        },
+        event: {
+          event_id: "rhythm_evt_legacy_session_002",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-legacy-002",
+          window_id: "rhythm_win_legacy_session_002",
+          event_type: "recovery_probe_passed",
+          phase_before: "recovery_probe",
+          phase_after: "steady",
+          risk_state_before: "limited",
+          risk_state_after: "limited",
+          source_audit_event_id: null,
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+          recorded_at: "2026-04-25T10:40:00.000Z"
+        },
+        decision: {
+          decision_id: "rhythm_decision_legacy_session_002",
+          window_id: "rhythm_win_legacy_session_002",
+          run_id: "run-legacy-session-002",
+          session_id: "nm-session-legacy-002",
+          profile: "xhs_001",
+          current_phase: "recovery_probe",
+          current_risk_state: "limited",
+          next_phase: "steady",
+          next_risk_state: "limited",
+          effective_execution_mode: "live_read_high_risk",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+          requires: [],
+          decided_at: "2026-04-25T10:40:00.000Z"
+        }
+      });
+
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209",
+          sessionId: "nm-session-legacy-001"
+        })
+      ).resolves.toMatchObject({
+        window_state: {
+          window_id: "rhythm_win_legacy_session_002",
+          session_id: "nm-session-legacy-002"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209",
+          sessionId: "nm-session-legacy-002"
+        })
+      ).resolves.toMatchObject({
+        window_state: {
+          window_id: "rhythm_win_legacy_session_002",
+          session_id: "nm-session-legacy-002"
+        }
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
@@ -225,6 +570,414 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const sqliteHeader = await readFile(dbPath, { encoding: "utf8" });
     expect(sqliteHeader.slice(0, 16)).toBe("SQLite format 3\u0000");
+  });
+
+  it("rejects non-contract FR-0014 risk states and missing decision effective mode", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const baseInput = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        current_phase: "cooldown",
+        risk_state: "paused",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T10:55:00.000Z",
+        cooldown_until: "2026-04-25T10:55:00.000Z",
+        recovery_probe_due_at: "2026-04-25T10:55:00.000Z",
+        stability_window_until: null,
+        risk_signal_count: 1,
+        last_event_id: "rhythm_evt_risk-001",
+        source_run_id: "run-risk-001",
+        updated_at: "2026-04-25T10:40:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_risk-001",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "risk_signal",
+        phase_before: "steady",
+        phase_after: "cooldown",
+        risk_state_before: "limited",
+        risk_state_after: "paused",
+        source_audit_event_id: "gate_evt_risk",
+        reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+        recorded_at: "2026-04-25T10:40:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_risk-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-risk-001",
+        session_id: "nm-session-001",
+        profile: "xhs_001",
+        current_phase: "cooldown",
+        current_risk_state: "paused",
+        next_phase: "cooldown",
+        next_risk_state: "paused",
+        effective_execution_mode: "live_read_high_risk",
+        decision: "blocked",
+        reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+        requires: ["cooldown_until_elapsed"],
+        decided_at: "2026-04-25T10:40:00.000Z"
+      }
+    };
+    try {
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          windowState: {
+            ...baseInput.windowState,
+            risk_state: "blocked"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          decision: {
+            ...baseInput.decision,
+            effective_execution_mode: null
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          windowState: {
+            ...baseInput.windowState,
+            current_phase: "paused"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          event: {
+            ...baseInput.event,
+            event_type: "manual_override"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          decision: {
+            ...baseInput.decision,
+            decision: "rollback"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rolls back FR-0014 rhythm writes when the decision row is invalid", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await expect(
+        store.recordSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_atomic_issue_209",
+            profile: "xhs_001",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-atomic",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:55:00.000Z",
+            cooldown_until: "2026-04-25T10:55:00.000Z",
+            recovery_probe_due_at: "2026-04-25T10:55:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_atomic",
+            source_run_id: "run-atomic",
+            updated_at: "2026-04-25T10:40:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_atomic",
+            profile: "xhs_001",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-atomic",
+            window_id: "rhythm_win_atomic_issue_209",
+            event_type: "risk_signal",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: "gate_evt_atomic",
+            reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+            recorded_at: "2026-04-25T10:40:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_atomic",
+            window_id: "rhythm_win_atomic_issue_209",
+            run_id: "run-atomic",
+            session_id: "nm-session-atomic",
+            profile: "xhs_001",
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "invalid_mode",
+            decision: "blocked",
+            reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+            requires: ["cooldown_until_elapsed"],
+            decided_at: "2026-04-25T10:40:00.000Z"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("preserves newer conservative FR-0014 rhythm windows from stale overwrites", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const conservativeInput = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-newer",
+        current_phase: "cooldown",
+        risk_state: "paused",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T11:05:00.000Z",
+        cooldown_until: "2026-04-25T11:05:00.000Z",
+        recovery_probe_due_at: "2026-04-25T11:05:00.000Z",
+        stability_window_until: null,
+        risk_signal_count: 1,
+        last_event_id: "rhythm_evt_newer_cooldown",
+        source_run_id: "run-newer-cooldown",
+        updated_at: "2026-04-25T10:45:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_newer_cooldown",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-newer",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "cooldown_started",
+        phase_before: "steady",
+        phase_after: "cooldown",
+        risk_state_before: "limited",
+        risk_state_after: "paused",
+        source_audit_event_id: "gate_evt_newer_cooldown",
+        reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+        recorded_at: "2026-04-25T10:45:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_newer_cooldown",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-newer-cooldown",
+        session_id: "nm-session-newer",
+        profile: "xhs_001",
+        current_phase: "cooldown",
+        current_risk_state: "paused",
+        next_phase: "cooldown",
+        next_risk_state: "paused",
+        effective_execution_mode: "recon",
+        decision: "blocked",
+        reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+        requires: ["cooldown_until_elapsed"],
+        decided_at: "2026-04-25T10:45:00.000Z"
+      }
+    };
+    try {
+      await store.recordSessionRhythmStatusView(conservativeInput);
+      await store.recordSessionRhythmStatusView({
+        ...conservativeInput,
+        windowState: {
+          ...conservativeInput.windowState,
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
+          session_id: "nm-session-stale",
+          current_phase: "steady",
+          risk_state: "limited",
+          cooldown_until: null,
+          last_event_id: "rhythm_evt_stale_steady",
+          source_run_id: "run-stale-steady",
+          updated_at: "2026-04-25T10:40:00.000Z"
+        },
+        event: {
+          ...conservativeInput.event,
+          event_id: "rhythm_evt_stale_steady",
+          session_id: "nm-session-stale",
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
+          event_type: "stability_window_passed",
+          phase_before: "steady",
+          phase_after: "steady",
+          risk_state_before: "limited",
+          risk_state_after: "limited",
+          reason: "STALE_STEADY_WRITE",
+          recorded_at: "2026-04-25T10:40:00.000Z"
+        },
+        decision: {
+          ...conservativeInput.decision,
+          decision_id: "rhythm_decision_stale_steady",
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
+          run_id: "run-stale-steady",
+          session_id: "nm-session-stale",
+          current_phase: "steady",
+          current_risk_state: "limited",
+          next_phase: "steady",
+          next_risk_state: "limited",
+          decision: "allowed",
+          reason_codes: ["STALE_STEADY_WRITE"],
+          requires: [],
+          decided_at: "2026-04-25T10:40:00.000Z"
+        }
+      });
+
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        window_state: {
+          current_phase: "cooldown",
+          risk_state: "paused",
+          last_event_id: "rhythm_evt_newer_cooldown"
+        }
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("backfills missing FR-0014 rhythm event audit links without overwriting existing links", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const input = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        current_phase: "steady",
+        risk_state: "limited",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T10:55:00.000Z",
+        cooldown_until: null,
+        recovery_probe_due_at: null,
+        stability_window_until: "2026-04-25T10:55:00.000Z",
+        risk_signal_count: 0,
+        last_event_id: "rhythm_evt_run-current-001",
+        source_run_id: "run-current-001",
+        updated_at: "2026-04-25T10:40:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_run-current-001",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "stability_window_passed",
+        phase_before: "steady",
+        phase_after: "steady",
+        risk_state_before: "limited",
+        risk_state_after: "limited",
+        source_audit_event_id: null,
+        reason: "SESSION_RHYTHM_STATUS_OBSERVED",
+        recorded_at: "2026-04-25T10:40:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_run-current-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-current-001",
+        session_id: "nm-session-001",
+        profile: "xhs_001",
+        current_phase: "steady",
+        current_risk_state: "limited",
+        next_phase: "steady",
+        next_risk_state: "limited",
+        effective_execution_mode: "live_read_high_risk",
+        decision: "allowed",
+        reason_codes: ["SESSION_RHYTHM_STATUS_OBSERVED"],
+        requires: [],
+        decided_at: "2026-04-25T10:40:00.000Z"
+      }
+    };
+    try {
+      await store.recordSessionRhythmStatusView(input);
+      await store.recordSessionRhythmStatusView({
+        ...input,
+        event: {
+          ...input.event,
+          source_audit_event_id: "gate_evt_current",
+          reason: "OVERWRITE_ATTEMPT"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        event: {
+          event_id: "rhythm_evt_run-current-001",
+          source_audit_event_id: "gate_evt_current",
+          reason: "SESSION_RHYTHM_STATUS_OBSERVED"
+        }
+      });
+      await store.recordSessionRhythmStatusView({
+        ...input,
+        event: {
+          ...input.event,
+          source_audit_event_id: "gate_evt_late_overwrite"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        event: {
+          source_audit_event_id: "gate_evt_current"
+        }
+      });
+    } finally {
+      store.close();
+    }
   });
 
   it("projects FR-0020 anti-detection validation views from exact scoped records", async () => {

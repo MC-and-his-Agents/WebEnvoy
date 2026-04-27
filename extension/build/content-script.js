@@ -2241,8 +2241,10 @@ const buildIssue209ExecutionAudit = (input) => {
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),
       audit_record_ref: asString(input.auditRecord?.event_id),
-      session_rhythm_window_id: null,
-      session_rhythm_decision_id: null
+      session_rhythm_window_id:
+        asString(input.gate?.gate_input?.session_rhythm_window_id) ?? null,
+      session_rhythm_decision_id: asString(input.gate?.gate_input?.session_rhythm_decision_id) ??
+        null
     },
     request_admission_decision: requestAdmissionResult.admission_decision,
     risk_signals: riskSignals,
@@ -4060,6 +4062,8 @@ const evaluateXhsGate = (input) => {
       action_type: state.actionType,
       requested_execution_mode: state.requestedExecutionMode,
       risk_state: state.riskState,
+      session_rhythm_window_id: asString(input.sessionRhythmWindowId ?? input.__session_rhythm_window_id),
+      session_rhythm_decision_id: asString(input.sessionRhythmDecisionId ?? input.__session_rhythm_decision_id),
       admission_context: admissionContext
     },
     gate_outcome: {
@@ -4876,6 +4880,8 @@ const resolveGate = (options, context, actualTargetUrl) => {
         requestedExecutionMode: options.requested_execution_mode,
         legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
         runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
+        sessionRhythmWindowId: options.__session_rhythm_window_id,
+        sessionRhythmDecisionId: options.__session_rhythm_decision_id,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
         ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
         ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),

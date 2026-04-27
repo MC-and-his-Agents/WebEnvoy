@@ -6,7 +6,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account-safety.js";
-import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
+import { toSessionRhythmStatusView, toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
@@ -19,6 +19,269 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
+const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
+    if (!input.profile) {
+        return null;
+    }
+    let store = null;
+    try {
+        store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+        const issueScope = asString(input.gate.options.issue_scope) ?? "issue_209";
+        const persisted = await store.getSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope,
+            sessionId: input.sessionId,
+            runId: input.runId
+        });
+        const shouldWriteCurrentDecision = !!persisted ||
+            !!input.profileMeta?.xhsCloseoutRhythm ||
+            input.profileMeta?.accountSafety?.state === "account_risk_blocked";
+        if (!shouldWriteCurrentDecision) {
+            return null;
+        }
+        const currentView = toSessionRhythmStatusView({
+            profile: input.profile,
+            rhythm: input.profileMeta?.xhsCloseoutRhythm,
+            accountSafety: input.profileMeta?.accountSafety,
+            issueScope,
+            sessionId: input.sessionId,
+            sourceRunId: input.runId,
+            effectiveExecutionMode: input.gate.requestedExecutionMode
+        });
+        const currentWindowState = asObject(currentView.session_rhythm_window_state);
+        const currentEvent = asObject(currentView.session_rhythm_event);
+        const currentDecision = asObject(currentView.session_rhythm_decision);
+        const persistedWindowState = persisted?.window_state;
+        const persistedEvent = persisted?.event;
+        const persistedDecision = persisted?.decision;
+        const windowId = asString(persistedWindowState?.window_id) ?? asString(currentWindowState?.window_id);
+        const windowStateForRecord = persistedWindowState ?? currentWindowState;
+        const eventForRecord = persistedEvent ?? currentEvent;
+        const decisionForRecord = persistedDecision ?? currentDecision;
+        if (!windowId || !windowStateForRecord || !eventForRecord || !decisionForRecord) {
+            return null;
+        }
+        const liveRunPendingExecutionAudit = isLiveXhsExecutionMode(input.gate.requestedExecutionMode);
+        const currentSourceKey = toSessionRhythmIdPart(input.runId);
+        const currentEventId = `rhythm_evt_preflight_${currentSourceKey}`;
+        const currentDecisionId = `rhythm_decision_preflight_${currentSourceKey}`;
+        await store.recordSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope,
+            windowState: {
+                ...windowStateForRecord,
+                window_id: windowId,
+                last_event_id: asString(persistedWindowState?.last_event_id) ?? currentEventId,
+                source_run_id: asString(persistedWindowState?.source_run_id) ?? input.runId
+            },
+            event: {
+                ...eventForRecord,
+                event_id: asString(persistedEvent?.event_id) ?? currentEventId,
+                session_id: asString(persistedEvent?.session_id) ?? input.sessionId,
+                window_id: windowId,
+                source_audit_event_id: asString(persistedEvent?.source_audit_event_id)
+            },
+            decision: {
+                ...decisionForRecord,
+                decision_id: currentDecisionId,
+                window_id: windowId,
+                run_id: input.runId,
+                session_id: input.sessionId,
+                profile: input.profile,
+                current_phase: asString(windowStateForRecord.current_phase) ??
+                    asString(decisionForRecord.current_phase) ??
+                    "warmup",
+                current_risk_state: asString(windowStateForRecord.risk_state) ??
+                    asString(decisionForRecord.current_risk_state) ??
+                    "paused",
+                next_phase: asString(windowStateForRecord.current_phase) ??
+                    asString(decisionForRecord.next_phase) ??
+                    "warmup",
+                next_risk_state: asString(windowStateForRecord.risk_state) ??
+                    asString(decisionForRecord.next_risk_state) ??
+                    "paused",
+                effective_execution_mode: input.gate.requestedExecutionMode,
+                decision: liveRunPendingExecutionAudit
+                    ? "deferred"
+                    : (asString(decisionForRecord.decision) ?? "blocked"),
+                reason_codes: liveRunPendingExecutionAudit
+                    ? ["XHS_LIVE_ADMISSION_PENDING_EXECUTION_AUDIT"]
+                    : Array.isArray(decisionForRecord.reason_codes)
+                        ? decisionForRecord.reason_codes
+                        : [],
+                requires: liveRunPendingExecutionAudit
+                    ? ["execution_audit_appended"]
+                    : Array.isArray(decisionForRecord.requires)
+                        ? decisionForRecord.requires
+                        : []
+            }
+        });
+        const current = await store.getSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope,
+            sessionId: input.sessionId,
+            runId: input.runId
+        });
+        const currentWindowId = asString(current?.window_state.window_id);
+        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId
+            ? asString(current?.decision.decision_id)
+            : null;
+        if (currentWindowId || currentDecisionIdFromStore) {
+            return {
+                ...(currentWindowId ? { __session_rhythm_window_id: currentWindowId } : {}),
+                ...(currentDecisionIdFromStore
+                    ? { __session_rhythm_decision_id: currentDecisionIdFromStore }
+                    : {})
+            };
+        }
+    }
+    catch (error) {
+        if (error instanceof RuntimeStoreError) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+                retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+                cause: error
+            });
+        }
+        throw error;
+    }
+    finally {
+        try {
+            store?.close();
+        }
+        catch {
+            // Compatibility refs are best-effort read-only after the query finishes.
+        }
+    }
+    return null;
+};
+const readPersistedSessionRhythmBlockStatus = async (input) => {
+    if (!input.profile) {
+        return null;
+    }
+    let store = null;
+    try {
+        store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+        const persisted = await store.getSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope: input.issueScope ?? "issue_209"
+        });
+        const windowState = persisted?.window_state;
+        const persistedDecision = persisted?.decision;
+        const persistedDecisionValue = asString(persistedDecision?.decision);
+        const event = persisted?.event;
+        const profileRhythmState = asString(input.profileMeta?.xhsCloseoutRhythm?.state);
+        const persistedPhase = asString(windowState?.current_phase);
+        const fallbackAllowed = !profileRhythmState || profileRhythmState === "not_required";
+        if (fallbackAllowed &&
+            (persistedPhase === "recovery_probe" || persistedPhase === "warmup")) {
+            return {
+                state: "single_probe_required",
+                cooldown_until: asString(windowState?.cooldown_until),
+                operator_confirmed_at: null,
+                single_probe_required: true,
+                single_probe_passed_at: null,
+                probe_run_id: asString(windowState?.source_run_id),
+                full_bundle_blocked: true,
+                reason_codes: Array.isArray(persistedDecision?.reason_codes) &&
+                    persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+                    ? persistedDecision.reason_codes
+                    : [
+                        asString(event?.reason) ??
+                            asString(windowState?.last_event_id) ??
+                            "PERSISTED_SESSION_RHYTHM_RECOVERY_REQUIRED"
+                    ]
+            };
+        }
+        if (persistedPhase !== "cooldown" &&
+            asString(windowState?.risk_state) !== "paused") {
+            if (persistedDecisionValue === "deferred" &&
+                fallbackAllowed) {
+                const reasonCodes = Array.isArray(persistedDecision?.reason_codes) &&
+                    persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+                    ? persistedDecision.reason_codes
+                    : [
+                        asString(event?.reason) ??
+                            asString(windowState?.last_event_id) ??
+                            "XHS_RECOVERY_SINGLE_PROBE_PASSED"
+                    ];
+                return {
+                    state: "single_probe_passed",
+                    cooldown_until: asString(windowState?.cooldown_until),
+                    operator_confirmed_at: null,
+                    single_probe_required: false,
+                    single_probe_passed_at: asString(persistedDecision?.decided_at) ?? asString(event?.recorded_at),
+                    probe_run_id: asString(persistedDecision?.run_id) ?? asString(windowState?.source_run_id),
+                    full_bundle_blocked: true,
+                    reason_codes: reasonCodes
+                };
+            }
+            if (persistedDecisionValue &&
+                persistedDecisionValue !== "allowed" &&
+                fallbackAllowed) {
+                return {
+                    state: "operator_confirmation_required",
+                    cooldown_until: null,
+                    operator_confirmed_at: null,
+                    single_probe_required: true,
+                    single_probe_passed_at: null,
+                    probe_run_id: null,
+                    full_bundle_blocked: true,
+                    reason_codes: Array.isArray(persistedDecision?.reason_codes) &&
+                        persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+                        ? persistedDecision.reason_codes
+                        : [
+                            asString(event?.reason) ??
+                                asString(windowState?.last_event_id) ??
+                                "PERSISTED_SESSION_RHYTHM_BLOCKED"
+                        ]
+                };
+            }
+            return null;
+        }
+        const cooldownUntil = asString(windowState?.cooldown_until);
+        const operatorConfirmedAt = asString(input.profileMeta?.xhsCloseoutRhythm?.operatorConfirmedAt);
+        if (operatorConfirmedAt &&
+            (!cooldownUntil || Date.parse(cooldownUntil) <= Date.now())) {
+            return null;
+        }
+        return {
+            state: "cooldown",
+            cooldown_until: cooldownUntil,
+            operator_confirmed_at: null,
+            single_probe_required: true,
+            single_probe_passed_at: null,
+            probe_run_id: null,
+            full_bundle_blocked: true,
+            reason_codes: [
+                asString(event?.reason) ??
+                    asString(windowState?.last_event_id) ??
+                    "PERSISTED_SESSION_RHYTHM_PAUSED"
+            ]
+        };
+    }
+    catch (error) {
+        if (error instanceof RuntimeStoreError) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+                retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+                cause: error
+            });
+        }
+        throw error;
+    }
+    finally {
+        try {
+            store?.close();
+        }
+        catch {
+            // Read-only preflight best-effort close.
+        }
+    }
+};
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
         return Math.trunc(value);
@@ -415,12 +678,19 @@ const xhsReadCommand = async (context, inputConfig) => {
         };
     }
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
-    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    let profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const accountSafetyStatus = toAccountSafetyStatus(profileMeta?.accountSafety);
-    const xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
+    let xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
         rhythm: profileMeta?.xhsCloseoutRhythm,
         accountSafety: profileMeta?.accountSafety
     });
+    xhsCloseoutRhythmStatus =
+        (await readPersistedSessionRhythmBlockStatus({
+            cwd: context.cwd,
+            profile: context.profile,
+            issueScope: asString(gate.options.issue_scope),
+            profileMeta
+        })) ?? xhsCloseoutRhythmStatus;
     const profileRuntime = new ProfileRuntimeService();
     const recoveryProbeRequested = isXhsRecoveryProbe({
         command: context.command,
@@ -520,11 +790,21 @@ const xhsReadCommand = async (context, inputConfig) => {
                 runId: context.run_id,
                 params: {}
             });
+            profileMeta = await profileStore.readMeta(context.profile);
         }
         const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
         const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
+        const sessionRhythmCompatibilityRefs = await buildSessionRhythmCompatibilityRefsForRuntime({
+            cwd: context.cwd,
+            profile: context.profile,
+            runId: context.run_id,
+            sessionId: bridgeSessionId,
+            profileMeta,
+            gate
+        });
         const runtimeGateOptions = {
             ...preparedGateOptions,
+            ...(sessionRhythmCompatibilityRefs ?? {}),
             ...(transportIsLoopback && typeof anonymousIsolationVerified === "boolean"
                 ? { __anonymous_isolation_verified: anonymousIsolationVerified }
                 : {}),
@@ -616,6 +896,8 @@ const xhsReadCommand = async (context, inputConfig) => {
         const executionAudit = pickCanonicalSummaryField(bridgeResult.payload, "execution_audit");
         const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
             ...(asObject(bridgeResult.payload.summary) ?? {}),
+            session_id: bridgeSessionId,
+            requested_execution_mode: gate.requestedExecutionMode,
             ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
             ...(requestAdmissionResult !== undefined
                 ? { request_admission_result: requestAdmissionResult }
@@ -624,12 +906,46 @@ const xhsReadCommand = async (context, inputConfig) => {
         });
         if (context.profile &&
             recoveryProbeRequested) {
-            await profileRuntime.markXhsCloseoutSingleProbePassed({
+            const recoveryStatus = await profileRuntime.markXhsCloseoutSingleProbePassed({
                 cwd: context.cwd,
                 profile: context.profile,
                 runId: context.run_id,
                 params: {}
             });
+            const xhsCloseoutRhythm = asObject(recoveryStatus.xhs_closeout_rhythm);
+            if (xhsCloseoutRhythm) {
+                summary.xhs_closeout_rhythm = xhsCloseoutRhythm;
+            }
+            const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+            const latestMeta = await profileStore.readMeta(context.profile, { mode: "readonly" });
+            const recoveryRhythmView = toSessionRhythmStatusView({
+                profile: context.profile,
+                rhythm: latestMeta?.xhsCloseoutRhythm,
+                accountSafety: latestMeta?.accountSafety,
+                issueScope: asString(gate.options.issue_scope) ?? "issue_209",
+                sessionId: bridgeSessionId,
+                sourceRunId: context.run_id,
+                effectiveExecutionMode: gate.requestedExecutionMode
+            });
+            const windowState = asObject(recoveryRhythmView.session_rhythm_window_state);
+            const event = asObject(recoveryRhythmView.session_rhythm_event);
+            const decision = asObject(recoveryRhythmView.session_rhythm_decision);
+            if (windowState && event && decision) {
+                const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+                try {
+                    await store.recordSessionRhythmStatusView({
+                        profile: context.profile,
+                        platform: "xhs",
+                        issueScope: asString(gate.options.issue_scope) ?? "issue_209",
+                        windowState,
+                        event,
+                        decision
+                    });
+                }
+                finally {
+                    store.close();
+                }
+            }
         }
         return {
             summary,

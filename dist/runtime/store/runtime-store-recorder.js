@@ -1,5 +1,8 @@
 import { diagnosisFromCliError } from "../cli-diagnosis.js";
 import { buildDiagnosis } from "../diagnostics.js";
+import { ProfileStore } from "../profile-store.js";
+import { toSessionRhythmStatusView } from "../xhs-closeout-rhythm.js";
+import { resolveRuntimeProfileRoot } from "../worktree-root.js";
 import { APPROVAL_CHECK_KEYS, getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath, sanitizeRuntimeEventSummary } from "./sqlite-runtime-store.js";
 const resolveSessionId = (summary) => {
@@ -25,6 +28,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
 const REQUIRED_APPROVAL_CHECK_KEYS = APPROVAL_CHECK_KEYS;
@@ -231,10 +235,17 @@ const extractGateAuditRecordInput = (source) => {
         recordedAt
     };
 };
+const hasSessionRhythmCompatibilityRefs = (summary) => {
+    const compatibilityRefs = asObject(asObject(summary.execution_audit)?.compatibility_refs);
+    return (asString(compatibilityRefs?.session_rhythm_window_id) !== null ||
+        asString(compatibilityRefs?.session_rhythm_decision_id) !== null);
+};
 export class RuntimeStoreRecorder {
     #store;
+    #cwd;
     #startedAtByRunId = new Map();
     constructor(cwd, store) {
+        this.#cwd = cwd;
         this.#store = store ?? new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
     }
     close() {
@@ -273,8 +284,95 @@ export class RuntimeStoreRecorder {
             if (approvalRequired && !persistedApprovalId) {
                 throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "persisted approval_id is required for allowed live audit records");
             }
-            await this.#store.appendGateAuditRecord(auditInput);
+            const persistedAuditRecord = asObject(await this.#store.appendGateAuditRecord(auditInput));
+            await this.#recordSessionRhythmArtifacts({
+                profile: auditInput.profile,
+                issueScope: auditInput.issueScope,
+                sessionId: auditInput.sessionId,
+                runId: auditInput.runId,
+                sourceAuditEventId: auditInput.eventId,
+                effectiveExecutionMode: auditInput.effectiveExecutionMode
+            }, persistedAuditRecord);
         }
+    }
+    async #recordSessionRhythmArtifacts(input, persistedAuditRecord) {
+        if (!this.#store.recordSessionRhythmStatusView) {
+            return;
+        }
+        const profile = input.profile;
+        if (!profile) {
+            return;
+        }
+        if (!input.runId || !input.sessionId) {
+            return;
+        }
+        const profileStore = new ProfileStore(resolveRuntimeProfileRoot(this.#cwd));
+        const meta = await profileStore.readMeta(profile, { mode: "readonly" });
+        const rhythmReasonCodes = Array.isArray(meta?.xhsCloseoutRhythm?.reasonCodes)
+            ? meta.xhsCloseoutRhythm.reasonCodes
+            : [];
+        if (input.force !== true &&
+            !meta?.xhsCloseoutRhythm &&
+            meta?.accountSafety?.state !== "account_risk_blocked" &&
+            rhythmReasonCodes.length === 0) {
+            return;
+        }
+        const view = toSessionRhythmStatusView({
+            profile,
+            rhythm: meta?.xhsCloseoutRhythm,
+            accountSafety: meta?.accountSafety,
+            issueScope: input.issueScope ?? "issue_209",
+            sessionId: input.sessionId ?? null,
+            sourceRunId: input.runId,
+            sourceAuditEventId: asString(persistedAuditRecord?.event_id) ?? input.sourceAuditEventId ?? null,
+            effectiveExecutionMode: input.effectiveExecutionMode ?? null
+        });
+        const windowState = asObject(view.session_rhythm_window_state);
+        const event = asObject(view.session_rhythm_event);
+        const decision = asObject(view.session_rhythm_decision);
+        if (!windowState || !event || !decision) {
+            return;
+        }
+        const liveRunAdmittedAfterDeferredProbe = (input.effectiveExecutionMode === "live_read_limited" ||
+            input.effectiveExecutionMode === "live_read_high_risk" ||
+            input.effectiveExecutionMode === "live_write") &&
+            asString(decision.decision) === "deferred";
+        const currentLiveRunKey = toSessionRhythmIdPart(input.runId);
+        const currentLiveEventId = `rhythm_evt_${currentLiveRunKey}`;
+        const currentLiveDecisionId = `rhythm_decision_${currentLiveRunKey}`;
+        await this.#store.recordSessionRhythmStatusView({
+            profile,
+            platform: "xhs",
+            issueScope: input.issueScope ?? "issue_209",
+            windowState: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...windowState,
+                    session_id: input.sessionId,
+                    last_event_id: currentLiveEventId,
+                    source_run_id: input.runId
+                }
+                : windowState,
+            event: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...event,
+                    event_id: currentLiveEventId,
+                    session_id: input.sessionId,
+                    source_audit_event_id: asString(persistedAuditRecord?.event_id) ?? input.sourceAuditEventId ?? null,
+                    reason: "XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"
+                }
+                : event,
+            decision: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...decision,
+                    decision_id: currentLiveDecisionId,
+                    run_id: input.runId,
+                    session_id: input.sessionId,
+                    decision: "allowed",
+                    reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
+                    requires: []
+                }
+                : decision
+        });
     }
     async recordStart(context) {
         await this.#store.upsertRun({
@@ -317,6 +415,20 @@ export class RuntimeStoreRecorder {
                 ...buildSummaryProjection(toSummaryText(summary))
             }));
             await this.#recordGateArtifacts(summary);
+            if (context.profile &&
+                (summary.xhs_closeout_rhythm ||
+                    summary.account_safety ||
+                    hasSessionRhythmCompatibilityRefs(summary))) {
+                await this.#recordSessionRhythmArtifacts({
+                    profile: context.profile,
+                    issueScope: "issue_209",
+                    sessionId: resolveSessionId(summary),
+                    runId: context.run_id,
+                    sourceAuditEventId: null,
+                    effectiveExecutionMode: asString(summary.requested_execution_mode),
+                    force: true
+                }, null);
+            }
         }
         finally {
             this.#startedAtByRunId.delete(context.run_id);
