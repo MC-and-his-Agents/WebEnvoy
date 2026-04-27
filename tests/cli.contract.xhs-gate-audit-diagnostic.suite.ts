@@ -3160,6 +3160,66 @@ process.stdin.on("data", (chunk) => {
       )}\n`,
       "utf8"
     );
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await store.recordSessionRhythmStatusView({
+        profile,
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          window_id: `rhythm_win_${profile}_issue_209`,
+          profile,
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-persisted-rhythm",
+          current_phase: "cooldown",
+          risk_state: "blocked",
+          window_started_at: "2026-04-25T10:50:00.000Z",
+          window_deadline_at: "2026-04-25T11:20:00.000Z",
+          cooldown_until: "2026-04-25T11:20:00.000Z",
+          recovery_probe_due_at: "2026-04-25T11:20:00.000Z",
+          stability_window_until: null,
+          risk_signal_count: 1,
+          last_event_id: "rhythm_evt_persisted_block",
+          source_run_id: "run-persisted-block",
+          updated_at: "2026-04-25T10:51:00.000Z"
+        },
+        event: {
+          event_id: "rhythm_evt_persisted_block",
+          profile,
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-persisted-rhythm",
+          window_id: `rhythm_win_${profile}_issue_209`,
+          event_type: "risk_signal_detected",
+          phase_before: "steady",
+          phase_after: "cooldown",
+          risk_state_before: "limited",
+          risk_state_after: "blocked",
+          source_audit_event_id: "gate_evt_persisted_block",
+          reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+          recorded_at: "2026-04-25T10:51:00.000Z"
+        },
+        decision: {
+          decision_id: "rhythm_decision_persisted_block",
+          window_id: `rhythm_win_${profile}_issue_209`,
+          run_id: "run-persisted-block",
+          session_id: "nm-session-persisted-rhythm",
+          profile,
+          current_phase: "cooldown",
+          current_risk_state: "blocked",
+          next_phase: "cooldown",
+          next_risk_state: "blocked",
+          effective_execution_mode: "live_read_high_risk",
+          decision: "blocked",
+          reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+          requires: ["cooldown_until_elapsed"],
+          decided_at: "2026-04-25T10:51:00.000Z"
+        }
+      });
+    } finally {
+      store.close();
+    }
 
     const queryResult = runCli([
       "runtime.audit",
@@ -3185,24 +3245,26 @@ process.stdin.on("data", (chunk) => {
           profile,
           platform: "xhs",
           issue_scope: "issue_209",
-          current_phase: "steady",
-          current_risk_state: "limited",
-          window_state: "stability",
-          latest_event_id: "rhythm_evt_run-rhythm-audit-probe-001",
-          latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
-          derived_at: expect.any(String),
+          current_phase: "cooldown",
+          current_risk_state: "blocked",
+          window_state: "cooldown",
+          latest_event_id: "rhythm_evt_persisted_block",
+          latest_reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+          derived_at: "2026-04-25T10:51:00.000Z",
           session_rhythm_window_state: expect.objectContaining({
             window_id: `rhythm_win_${profile}_issue_209`,
-            current_phase: "steady",
-            source_run_id: "run-rhythm-audit-probe-001"
+            current_phase: "cooldown",
+            source_run_id: "run-persisted-block"
           }),
           session_rhythm_event: expect.objectContaining({
-            event_id: "rhythm_evt_run-rhythm-audit-probe-001",
-            event_type: "recovery_probe_passed"
+            event_id: "rhythm_evt_persisted_block",
+            event_type: "risk_signal_detected"
           }),
           session_rhythm_decision: expect.objectContaining({
-            decision_id: "rhythm_decision_run-rhythm-audit-probe-001",
-            decision: "deferred"
+            decision_id: "rhythm_decision_persisted_block",
+            current_phase: "cooldown",
+            session_id: "nm-session-persisted-rhythm",
+            decision: "blocked"
           })
         }
       }

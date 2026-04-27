@@ -14,6 +14,27 @@ import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } fr
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const buildPersistedSessionRhythmStatusView = (persisted) => {
+    const windowState = persisted.window_state;
+    const event = persisted.event;
+    const currentPhase = asString(windowState.current_phase) ?? "unknown";
+    return {
+        profile: windowState.profile,
+        platform: windowState.platform,
+        issue_scope: windowState.issue_scope,
+        current_phase: currentPhase,
+        current_risk_state: windowState.risk_state,
+        window_state: currentPhase === "steady" ? "stability" : currentPhase,
+        cooldown_until: windowState.cooldown_until ?? null,
+        stability_window_until: windowState.stability_window_until ?? null,
+        latest_event_id: event.event_id ?? null,
+        latest_reason: event.reason ?? null,
+        derived_at: windowState.updated_at ?? null,
+        session_rhythm_window_state: windowState,
+        session_rhythm_event: event,
+        session_rhythm_decision: persisted.decision
+    };
+};
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -84,14 +105,7 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile, input) => {
             platform: "xhs",
             issueScope: "issue_209"
         });
-        return persisted
-            ? {
-                ...fallbackView,
-                session_rhythm_window_state: persisted.window_state,
-                session_rhythm_event: persisted.event,
-                session_rhythm_decision: persisted.decision
-            }
-            : fallbackView;
+        return persisted ? buildPersistedSessionRhythmStatusView(persisted) : fallbackView;
     }
     catch {
         return null;
