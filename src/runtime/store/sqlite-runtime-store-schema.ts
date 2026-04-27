@@ -510,7 +510,7 @@ export const initializeRuntimeStoreSchema = ({
       stability_window_until TEXT,
       risk_signal_count INTEGER NOT NULL DEFAULT 0,
       last_event_id TEXT,
-      source_run_id TEXT,
+      source_run_id TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(profile, platform, issue_scope)
     );
@@ -519,7 +519,7 @@ export const initializeRuntimeStoreSchema = ({
       profile TEXT NOT NULL,
       platform TEXT NOT NULL,
       issue_scope TEXT NOT NULL,
-      session_id TEXT,
+      session_id TEXT NOT NULL,
       window_id TEXT NOT NULL,
       event_type TEXT NOT NULL,
       phase_before TEXT NOT NULL,
@@ -534,8 +534,8 @@ export const initializeRuntimeStoreSchema = ({
     CREATE TABLE IF NOT EXISTS session_rhythm_decision (
       decision_id TEXT PRIMARY KEY,
       window_id TEXT NOT NULL,
-      run_id TEXT,
-      session_id TEXT,
+      run_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
       profile TEXT NOT NULL,
       current_phase TEXT NOT NULL,
       current_risk_state TEXT NOT NULL,

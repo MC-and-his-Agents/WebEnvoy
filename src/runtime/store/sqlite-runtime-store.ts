@@ -1051,7 +1051,7 @@ export class SQLiteRuntimeStore {
           input.profile,
           input.platform,
           input.issueScope,
-          asNullableRuntimeStoreString(windowState.session_id),
+          asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"),
           asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"),
           asNonEmptyRuntimeStoreString(windowState.risk_state, "risk_state"),
           asNullableRuntimeStoreString(windowState.window_started_at),
@@ -1063,7 +1063,7 @@ export class SQLiteRuntimeStore {
             ? (windowState.risk_signal_count as number)
             : 0,
           asNullableRuntimeStoreString(windowState.last_event_id),
-          asNullableRuntimeStoreString(windowState.source_run_id),
+          asNonEmptyRuntimeStoreString(windowState.source_run_id, "window_state.source_run_id"),
           updatedAt
         );
       this.#db
@@ -1082,7 +1082,7 @@ export class SQLiteRuntimeStore {
           input.profile,
           input.platform,
           input.issueScope,
-          asNullableRuntimeStoreString(event.session_id),
+          asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"),
           windowId,
           asNonEmptyRuntimeStoreString(event.event_type, "event_type"),
           asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"),
@@ -1107,8 +1107,8 @@ export class SQLiteRuntimeStore {
         .run(
           decisionId,
           windowId,
-          asNullableRuntimeStoreString(decision.run_id),
-          asNullableRuntimeStoreString(decision.session_id),
+          asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"),
+          asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"),
           input.profile,
           asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"),
           asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"),

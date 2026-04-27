@@ -424,6 +424,9 @@ export class RuntimeStoreRecorder {
     if (!profile) {
       return;
     }
+    if (!input.runId || !input.sessionId) {
+      return;
+    }
 
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(this.#cwd));
     const meta = await profileStore.readMeta(profile, { mode: "readonly" });

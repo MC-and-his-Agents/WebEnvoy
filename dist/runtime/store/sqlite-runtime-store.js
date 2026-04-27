@@ -480,9 +480,9 @@ export class SQLiteRuntimeStore {
             source_run_id = excluded.source_run_id,
             updated_at = excluded.updated_at
         `)
-                .run(windowId, input.profile, input.platform, input.issueScope, asNullableRuntimeStoreString(windowState.session_id), asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"), asNonEmptyRuntimeStoreString(windowState.risk_state, "risk_state"), asNullableRuntimeStoreString(windowState.window_started_at), asNullableRuntimeStoreString(windowState.window_deadline_at), asNullableRuntimeStoreString(windowState.cooldown_until), asNullableRuntimeStoreString(windowState.recovery_probe_due_at), asNullableRuntimeStoreString(windowState.stability_window_until), Number.isInteger(windowState.risk_signal_count)
+                .run(windowId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"), asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"), asNonEmptyRuntimeStoreString(windowState.risk_state, "risk_state"), asNullableRuntimeStoreString(windowState.window_started_at), asNullableRuntimeStoreString(windowState.window_deadline_at), asNullableRuntimeStoreString(windowState.cooldown_until), asNullableRuntimeStoreString(windowState.recovery_probe_due_at), asNullableRuntimeStoreString(windowState.stability_window_until), Number.isInteger(windowState.risk_signal_count)
                 ? windowState.risk_signal_count
-                : 0, asNullableRuntimeStoreString(windowState.last_event_id), asNullableRuntimeStoreString(windowState.source_run_id), updatedAt);
+                : 0, asNullableRuntimeStoreString(windowState.last_event_id), asNonEmptyRuntimeStoreString(windowState.source_run_id, "window_state.source_run_id"), updatedAt);
             this.#db
                 .prepare(`
           INSERT INTO session_rhythm_event(
@@ -492,7 +492,7 @@ export class SQLiteRuntimeStore {
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO NOTHING
         `)
-                .run(eventId, input.profile, input.platform, input.issueScope, asNullableRuntimeStoreString(event.session_id), windowId, asNonEmptyRuntimeStoreString(event.event_type, "event_type"), asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"), asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"), asNonEmptyRuntimeStoreString(event.risk_state_before, "risk_state_before"), asNonEmptyRuntimeStoreString(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
+                .run(eventId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"), windowId, asNonEmptyRuntimeStoreString(event.event_type, "event_type"), asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"), asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"), asNonEmptyRuntimeStoreString(event.risk_state_before, "risk_state_before"), asNonEmptyRuntimeStoreString(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
             this.#db
                 .prepare(`
           INSERT INTO session_rhythm_decision(
@@ -502,7 +502,7 @@ export class SQLiteRuntimeStore {
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(decision_id) DO NOTHING
         `)
-                .run(decisionId, windowId, asNullableRuntimeStoreString(decision.run_id), asNullableRuntimeStoreString(decision.session_id), input.profile, asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"), asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"), asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"), asNonEmptyRuntimeStoreString(decision.next_risk_state, "next_risk_state"), asNullableRuntimeStoreString(decision.effective_execution_mode), asNonEmptyRuntimeStoreString(decision.decision, "decision"), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
+                .run(decisionId, windowId, asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"), asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"), input.profile, asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"), asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"), asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"), asNonEmptyRuntimeStoreString(decision.next_risk_state, "next_risk_state"), asNullableRuntimeStoreString(decision.effective_execution_mode), asNonEmptyRuntimeStoreString(decision.decision, "decision"), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
             return this.getSessionRhythmStatusView({
                 profile: input.profile,
                 platform: input.platform,
