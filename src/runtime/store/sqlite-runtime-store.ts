@@ -385,9 +385,13 @@ const SESSION_RHYTHM_PHASES = new Set([
 const SESSION_RHYTHM_EVENT_TYPES = new Set([
   "risk_signal",
   "cooldown_started",
+  "cooldown_extended",
   "recovery_probe_started",
   "recovery_probe_passed",
-  "stability_window_passed"
+  "recovery_probe_failed",
+  "stability_window_passed",
+  "manual_approval_recorded",
+  "window_closed"
 ]);
 
 const SESSION_RHYTHM_DECISIONS = new Set(["allowed", "blocked", "deferred"]);
