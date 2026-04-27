@@ -167,7 +167,7 @@ export const buildLayer2InteractionEvidence = (input) => {
     };
 };
 export const buildXhsSearchLayer2InteractionEvidence = (input) => {
-    if (!input.recoveryProbe && input.requestedExecutionMode !== "recon") {
+    if (!input.recoveryProbe) {
         return null;
     }
     return buildLayer2InteractionEvidence({

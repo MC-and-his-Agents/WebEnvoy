@@ -262,7 +262,7 @@ export const buildXhsSearchLayer2InteractionEvidence = (input: {
   requestedExecutionMode?: string | null;
   recoveryProbe?: boolean;
 }): Layer2InteractionEvidence | null => {
-  if (!input.recoveryProbe && input.requestedExecutionMode !== "recon") {
+  if (!input.recoveryProbe) {
     return null;
   }
   return buildLayer2InteractionEvidence({

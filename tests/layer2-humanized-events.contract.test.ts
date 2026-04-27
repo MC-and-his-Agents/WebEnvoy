@@ -89,6 +89,15 @@ describe("FR-0013 layer2 humanized events", () => {
     });
   });
 
+  it("does not emit layer2 evidence for generic xhs recon without recovery probe marker", () => {
+    const evidence = buildXhsSearchLayer2InteractionEvidence({
+      requestedExecutionMode: "recon",
+      recoveryProbe: false
+    });
+
+    expect(evidence).toBeNull();
+  });
+
   it("does not emit layer2 evidence for xhs live API replay", () => {
     const evidence = buildXhsSearchLayer2InteractionEvidence({
       requestedExecutionMode: "live_read_high_risk",
