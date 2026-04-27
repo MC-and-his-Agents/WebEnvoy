@@ -3318,10 +3318,26 @@ describe("normalizeGateOptionsForContract", () => {
             approval_admission_ref: approvalAdmissionRef,
             audit_admission_ref: auditAdmissionRef,
             session_rhythm_window_id: "rhythm_win_persisted_issue_209",
-            session_rhythm_decision_id: null
+            session_rhythm_decision_id: `rhythm_decision_${runId}`
           }
         }
       });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        const persistedRhythm = await verificationStore.getSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209"
+        });
+        expect(persistedRhythm?.decision).toMatchObject({
+          decision_id: `rhythm_decision_${runId}`,
+          run_id: runId,
+          session_id: expect.any(String),
+          effective_execution_mode: "live_read_high_risk"
+        });
+      } finally {
+        verificationStore.close();
+      }
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
       if (previousBrowserPath === undefined) {

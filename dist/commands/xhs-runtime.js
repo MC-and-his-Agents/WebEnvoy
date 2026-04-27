@@ -19,6 +19,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
     if (!input.profile) {
         return null;
@@ -26,19 +27,81 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
     let store = null;
     try {
         store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+        const issueScope = asString(input.gate.options.issue_scope) ?? "issue_209";
         const persisted = await store.getSessionRhythmStatusView({
             profile: input.profile,
             platform: "xhs",
-            issueScope: asString(input.gate.options.issue_scope) ?? "issue_209"
+            issueScope
         });
-        const windowId = asString(persisted?.window_state.window_id);
-        const persistedDecisionRunId = asString(persisted?.decision.run_id);
-        const persistedDecisionId = asString(persisted?.decision.decision_id);
-        const decisionId = persistedDecisionRunId === input.runId ? persistedDecisionId : null;
-        if (windowId || decisionId) {
+        const fallbackView = !persisted &&
+            (input.profileMeta?.xhsCloseoutRhythm ||
+                input.profileMeta?.accountSafety?.state === "account_risk_blocked")
+            ? toSessionRhythmStatusView({
+                profile: input.profile,
+                rhythm: input.profileMeta?.xhsCloseoutRhythm,
+                accountSafety: input.profileMeta?.accountSafety,
+                issueScope,
+                sessionId: input.sessionId,
+                sourceRunId: input.runId,
+                effectiveExecutionMode: input.gate.requestedExecutionMode
+            })
+            : null;
+        const sourceWindowState = persisted?.window_state ?? asObject(fallbackView?.session_rhythm_window_state);
+        const sourceEvent = persisted?.event ?? asObject(fallbackView?.session_rhythm_event);
+        const sourceDecision = persisted?.decision ?? asObject(fallbackView?.session_rhythm_decision);
+        const windowId = asString(sourceWindowState?.window_id);
+        if (!windowId || !sourceEvent || !sourceDecision) {
+            return null;
+        }
+        const now = new Date().toISOString();
+        const currentSourceKey = toSessionRhythmIdPart(input.runId);
+        const currentEventId = `rhythm_evt_${currentSourceKey}`;
+        const currentDecisionId = `rhythm_decision_${currentSourceKey}`;
+        await store.recordSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope,
+            windowState: {
+                ...sourceWindowState,
+                session_id: input.sessionId,
+                last_event_id: currentEventId,
+                source_run_id: input.runId,
+                updated_at: now
+            },
+            event: {
+                ...sourceEvent,
+                event_id: currentEventId,
+                session_id: input.sessionId,
+                window_id: windowId,
+                source_audit_event_id: null,
+                recorded_at: now
+            },
+            decision: {
+                ...sourceDecision,
+                decision_id: currentDecisionId,
+                window_id: windowId,
+                run_id: input.runId,
+                session_id: input.sessionId,
+                profile: input.profile,
+                effective_execution_mode: input.gate.requestedExecutionMode,
+                decided_at: now
+            }
+        });
+        const current = await store.getSessionRhythmStatusView({
+            profile: input.profile,
+            platform: "xhs",
+            issueScope
+        });
+        const currentWindowId = asString(current?.window_state.window_id);
+        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId
+            ? asString(current?.decision.decision_id)
+            : null;
+        if (currentWindowId || currentDecisionIdFromStore) {
             return {
-                ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
-                ...(decisionId ? { __session_rhythm_decision_id: decisionId } : {})
+                ...(currentWindowId ? { __session_rhythm_window_id: currentWindowId } : {}),
+                ...(currentDecisionIdFromStore
+                    ? { __session_rhythm_decision_id: currentDecisionIdFromStore }
+                    : {})
             };
         }
     }
@@ -59,26 +122,7 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             // Compatibility refs are best-effort read-only after the query finishes.
         }
     }
-    if (!input.profileMeta?.xhsCloseoutRhythm &&
-        input.profileMeta?.accountSafety?.state !== "account_risk_blocked") {
-        return null;
-    }
-    const view = toSessionRhythmStatusView({
-        profile: input.profile,
-        rhythm: input.profileMeta?.xhsCloseoutRhythm,
-        accountSafety: input.profileMeta?.accountSafety,
-        issueScope: asString(input.gate.options.issue_scope) ?? "issue_209",
-        sourceRunId: input.runId,
-        effectiveExecutionMode: input.gate.requestedExecutionMode
-    });
-    const windowState = asObject(view.session_rhythm_window_state);
-    const windowId = asString(windowState?.window_id);
-    if (!windowId) {
-        return null;
-    }
-    return {
-        __session_rhythm_window_id: windowId
-    };
+    return null;
 };
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -589,6 +633,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             cwd: context.cwd,
             profile: context.profile,
             runId: context.run_id,
+            sessionId: bridgeSessionId,
             profileMeta,
             gate
         });
