@@ -364,6 +364,88 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(sqliteHeader.slice(0, 16)).toBe("SQLite format 3\u0000");
   });
 
+  it("rejects non-contract FR-0014 risk states and missing decision effective mode", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const baseInput = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        current_phase: "cooldown",
+        risk_state: "paused",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T10:55:00.000Z",
+        cooldown_until: "2026-04-25T10:55:00.000Z",
+        recovery_probe_due_at: "2026-04-25T10:55:00.000Z",
+        stability_window_until: null,
+        risk_signal_count: 1,
+        last_event_id: "rhythm_evt_risk-001",
+        source_run_id: "run-risk-001",
+        updated_at: "2026-04-25T10:40:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_risk-001",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "risk_signal_detected",
+        phase_before: "steady",
+        phase_after: "cooldown",
+        risk_state_before: "limited",
+        risk_state_after: "paused",
+        source_audit_event_id: "gate_evt_risk",
+        reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+        recorded_at: "2026-04-25T10:40:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_risk-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-risk-001",
+        session_id: "nm-session-001",
+        profile: "xhs_001",
+        current_phase: "cooldown",
+        current_risk_state: "paused",
+        next_phase: "cooldown",
+        next_risk_state: "paused",
+        effective_execution_mode: "live_read_high_risk",
+        decision: "blocked",
+        reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+        requires: ["cooldown_until_elapsed"],
+        decided_at: "2026-04-25T10:40:00.000Z"
+      }
+    };
+    try {
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          windowState: {
+            ...baseInput.windowState,
+            risk_state: "blocked"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+      await expect(
+        store.recordSessionRhythmStatusView({
+          ...baseInput,
+          decision: {
+            ...baseInput.decision,
+            effective_execution_mode: null
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+    } finally {
+      store.close();
+    }
+  });
+
   it("projects FR-0020 anti-detection validation views from exact scoped records", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));

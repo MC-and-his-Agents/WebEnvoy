@@ -364,6 +364,8 @@ const LIVE_APPROVAL_EXECUTION_MODES = new Set([
   "live_write"
 ]);
 
+const SESSION_RHYTHM_RISK_STATES = new Set(["paused", "limited", "allowed"]);
+
 const isAllowedLiveAuditRecord = (record: GateAuditRecord): boolean =>
   record.gate_decision === "allowed" &&
   LIVE_APPROVAL_EXECUTION_MODES.has(record.effective_execution_mode);
@@ -503,6 +505,16 @@ const asNonEmptyRuntimeStoreString = (value: unknown, fieldName: string): string
 
 const asNullableRuntimeStoreString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const asSessionRhythmRiskState = (value: unknown, fieldName: string): string => {
+  const riskState = asNonEmptyRuntimeStoreString(value, fieldName);
+  if (!SESSION_RHYTHM_RISK_STATES.has(riskState)) {
+    invalidRuntimeStoreInput(
+      `${fieldName} must be one of ${[...SESSION_RHYTHM_RISK_STATES].join(", ")}`
+    );
+  }
+  return riskState;
+};
 
 const parseJsonArray = (value: unknown): unknown[] => {
   if (typeof value !== "string") {
@@ -1053,7 +1065,7 @@ export class SQLiteRuntimeStore {
           input.issueScope,
           asNonEmptyRuntimeStoreString(windowState.session_id, "window_state.session_id"),
           asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"),
-          asNonEmptyRuntimeStoreString(windowState.risk_state, "risk_state"),
+          asSessionRhythmRiskState(windowState.risk_state, "risk_state"),
           asNullableRuntimeStoreString(windowState.window_started_at),
           asNullableRuntimeStoreString(windowState.window_deadline_at),
           asNullableRuntimeStoreString(windowState.cooldown_until),
@@ -1087,8 +1099,8 @@ export class SQLiteRuntimeStore {
           asNonEmptyRuntimeStoreString(event.event_type, "event_type"),
           asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"),
           asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"),
-          asNonEmptyRuntimeStoreString(event.risk_state_before, "risk_state_before"),
-          asNonEmptyRuntimeStoreString(event.risk_state_after, "risk_state_after"),
+          asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"),
+          asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"),
           asNullableRuntimeStoreString(event.source_audit_event_id),
           asNullableRuntimeStoreString(event.reason),
           recordedAt
@@ -1111,10 +1123,10 @@ export class SQLiteRuntimeStore {
           asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"),
           input.profile,
           asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"),
-          asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"),
+          asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"),
           asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"),
-          asNonEmptyRuntimeStoreString(decision.next_risk_state, "next_risk_state"),
-          asNullableRuntimeStoreString(decision.effective_execution_mode),
+          asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"),
+          asNonEmptyRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode"),
           asNonEmptyRuntimeStoreString(decision.decision, "decision"),
           JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []),
           JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []),

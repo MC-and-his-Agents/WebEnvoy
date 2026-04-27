@@ -461,7 +461,7 @@ export const buildSessionRhythmFormalView = (input: {
       current_risk_state: riskState,
       next_phase: phase,
       next_risk_state: riskState,
-      effective_execution_mode: input.effectiveExecutionMode ?? null,
+      effective_execution_mode: input.effectiveExecutionMode ?? "recon",
       decision,
       reason_codes: reasonCodes,
       requires: decision === "allowed" ? [] : ["session_rhythm_window_not_ready"],
