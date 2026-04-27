@@ -46,7 +46,7 @@ const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     };
 };
 const withLayer2InteractionInSuccessPayload = (result, layer2Interaction) => {
-    if (!result.ok) {
+    if (!result.ok || !layer2Interaction) {
         return result;
     }
     const summary = asRecord(result.payload.summary);
@@ -79,6 +79,7 @@ const serializeCanonicalShape = (value) => {
     });
     return shape ? serializeSearchRequestShape(shape) : null;
 };
+const layer2InteractionSummary = (layer2Interaction) => layer2Interaction ? { layer2_interaction: layer2Interaction } : {};
 const XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST = new Set([
     "https://www.xiaohongshu.com",
     "https://edith.xiaohongshu.com"
@@ -596,7 +597,7 @@ export const executeXhsSearch = async (input, env) => {
                     approval_record: gate.approval_record,
                     risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                     audit_record: auditRecord,
-                    layer2_interaction: layer2Interaction,
+                    ...layer2InteractionSummary(layer2Interaction),
                     interaction_result: buildEditorInputEvidence(validationResult)
                 },
                 observability: createObservability({
@@ -639,7 +640,7 @@ export const executeXhsSearch = async (input, env) => {
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord,
-                        layer2_interaction: layer2Interaction
+                        ...layer2InteractionSummary(layer2Interaction)
                     }
                 }
             };
@@ -978,7 +979,7 @@ export const executeXhsSearch = async (input, env) => {
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord,
-                layer2_interaction: layer2Interaction,
+                ...layer2InteractionSummary(layer2Interaction),
                 request_context: {
                     status: "exact_hit",
                     page_context_namespace: requestContextState.pageContextNamespace,

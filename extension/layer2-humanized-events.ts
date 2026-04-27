@@ -1,5 +1,4 @@
 export type Layer2ActionKind =
-  | "api_read"
   | "click"
   | "focus"
   | "keyboard_input"
@@ -7,12 +6,7 @@ export type Layer2ActionKind =
   | "hover"
   | "scroll";
 
-export type Layer2SelectedPath =
-  | "real_input"
-  | "mixed_input"
-  | "synthetic_chain"
-  | "not_executed"
-  | "blocked";
+export type Layer2SelectedPath = "real_input" | "mixed_input" | "synthetic_chain" | "blocked";
 export type Layer2RhythmProfileSource = "default" | "platform_override";
 export type Layer2FailureCategory =
   | "focus_not_acquired"
@@ -98,15 +92,6 @@ const DEFAULT_RHYTHM_PROFILE: RhythmProfile = {
 };
 
 const STRATEGY_PROFILES: Record<Layer2ActionKind, EventStrategyProfile> = {
-  api_read: {
-    action_kind: "api_read",
-    preferred_path: "real_input",
-    fallback_path: null,
-    requires_focus: false,
-    requires_hover_confirm: false,
-    requires_settled_wait: false,
-    blocked_when_tier: []
-  },
   click: {
     action_kind: "click",
     preferred_path: "real_input",
@@ -164,14 +149,6 @@ const STRATEGY_PROFILES: Record<Layer2ActionKind, EventStrategyProfile> = {
 };
 
 const EVENT_CHAINS: Record<Layer2ActionKind, EventChainPolicy> = {
-  api_read: {
-    chain_name: "api_replay_no_ui_event_chain",
-    action_kind: "api_read",
-    required_events: [],
-    optional_events: [],
-    completion_signal: ["api_replay_requested"],
-    requires_settled_wait: false
-  },
   click: {
     chain_name: "hover_click",
     action_kind: "click",
@@ -246,8 +223,7 @@ export const buildLayer2InteractionEvidence = (input: {
     strategy.blocked_when_tier.includes(input.writeInteractionTierName)
       ? "FR-0011.write_interaction_tier"
       : null;
-  const selectedPath: Layer2SelectedPath =
-    blockedBy ? "blocked" : input.actionKind === "api_read" ? "not_executed" : strategy.preferred_path;
+  const selectedPath: Layer2SelectedPath = blockedBy ? "blocked" : strategy.preferred_path;
   const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
   const settledWaitResult =
     selectedPath === "blocked"
@@ -285,11 +261,12 @@ export const buildXhsSearchLayer2InteractionEvidence = (input: {
   writeInteractionTierName?: string | null;
   requestedExecutionMode?: string | null;
   recoveryProbe?: boolean;
-}): Layer2InteractionEvidence =>
-  buildLayer2InteractionEvidence({
-    actionKind:
-      input.recoveryProbe || input.requestedExecutionMode === "recon"
-        ? "scroll"
-        : "api_read",
+}): Layer2InteractionEvidence | null => {
+  if (!input.recoveryProbe && input.requestedExecutionMode !== "recon") {
+    return null;
+  }
+  return buildLayer2InteractionEvidence({
+    actionKind: "scroll",
     writeInteractionTierName: input.writeInteractionTierName ?? null
   });
+};

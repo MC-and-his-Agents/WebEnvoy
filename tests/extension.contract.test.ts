@@ -943,7 +943,8 @@ describe("extension build contract", () => {
       })
     ).toBe(true);
 
-    await expect(resultPromise).resolves.toMatchObject({
+    const searchResult = await resultPromise;
+    expect(searchResult).toMatchObject({
       kind: "result",
       ok: true,
       payload: {
@@ -959,25 +960,13 @@ describe("extension build contract", () => {
           request_context: {
             status: "exact_hit"
           },
-          layer2_interaction: {
-            event_strategy_profile: {
-              action_kind: "api_read"
-            },
-            strategy_selection: {
-              selected_path: "not_executed",
-              event_chain: "api_replay_no_ui_event_chain"
-            },
-            execution_trace: {
-              settled_wait_applied: false,
-              settled_wait_result: "not_required"
-            }
-          },
           execution_audit: {
             request_admission_decision: "allowed"
           }
         }
       }
     });
+    expect(searchResult.payload.summary).not.toHaveProperty("layer2_interaction");
     expect(bridgeRequests).toHaveLength(1);
     expect(bridgeRequests[0]).toMatchObject({
       type: "captured-request-context-read",

@@ -88,27 +88,12 @@ describe("FR-0013 layer2 humanized events", () => {
     });
   });
 
-  it("does not label xhs live API replay as keyboard input", () => {
+  it("does not emit layer2 evidence for xhs live API replay", () => {
     const evidence = buildXhsSearchLayer2InteractionEvidence({
       requestedExecutionMode: "live_read_high_risk",
       recoveryProbe: false
     });
 
-    expect(evidence.event_strategy_profile).toMatchObject({
-      action_kind: "api_read",
-      requires_focus: false,
-      requires_settled_wait: false
-    });
-    expect(evidence.strategy_selection).toMatchObject({
-      action_kind: "api_read",
-      selected_path: "not_executed",
-      event_chain: "api_replay_no_ui_event_chain"
-    });
-    expect(evidence.execution_trace).toMatchObject({
-      action_kind: "api_read",
-      selected_path: "not_executed",
-      settled_wait_applied: false,
-      settled_wait_result: "not_required"
-    });
+    expect(evidence).toBeNull();
   });
 });
