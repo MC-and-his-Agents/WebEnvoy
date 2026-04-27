@@ -752,6 +752,8 @@ describe("xhs-search gate helpers", () => {
       abilityAction: "read",
       requestedExecutionMode: "live_read_high_risk",
       runtimeProfileRef: "profile-session-001",
+      sessionRhythmWindowId: "rhythm_win_profile-session-001_issue_209",
+      sessionRhythmDecisionId: `rhythm_decision_${runId}`,
       admissionContext: createAdmissionContext({
         run_id: runId,
         request_id: requestId,

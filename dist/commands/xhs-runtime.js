@@ -23,6 +23,10 @@ const buildSessionRhythmCompatibilityRefsForRuntime = (input) => {
     if (!input.profile) {
         return null;
     }
+    if (!input.profileMeta?.xhsCloseoutRhythm &&
+        input.profileMeta?.accountSafety?.state !== "account_risk_blocked") {
+        return null;
+    }
     const view = toSessionRhythmStatusView({
         profile: input.profile,
         rhythm: input.profileMeta?.xhsCloseoutRhythm,

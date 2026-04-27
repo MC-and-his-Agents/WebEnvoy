@@ -2167,11 +2167,6 @@ const normalizeChecks = (value) => {
 const ISSUE209_LIVE_READ_MODES = new Set(["live_read_limited", "live_read_high_risk"]);
 const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
 
-const sanitizeIdPart = (value) =>
-  typeof value === "string" && value.length > 0
-    ? value.replace(/[^A-Za-z0-9._-]+/gu, "_")
-    : null;
-
 const hasExecutionAuditInputs = (requestAdmissionResult) => {
   const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
   return (
@@ -2246,15 +2241,9 @@ const buildIssue209ExecutionAudit = (input) => {
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),
       audit_record_ref: asString(input.auditRecord?.event_id),
-      session_rhythm_window_id:
-        asString(input.gate?.gate_input?.session_rhythm_window_id) ??
-        (sanitizeIdPart(input.auditRecord?.profile) && asString(input.auditRecord?.issue_scope)
-          ? `rhythm_win_${sanitizeIdPart(input.auditRecord.profile)}_${sanitizeIdPart(input.auditRecord.issue_scope)}`
-          : null),
+      session_rhythm_window_id: asString(input.gate?.gate_input?.session_rhythm_window_id),
       session_rhythm_decision_id: asString(input.gate?.gate_input?.session_rhythm_decision_id) ??
-        (sanitizeIdPart(input.runId)
-        ? `rhythm_decision_${sanitizeIdPart(input.runId)}`
-        : null)
+        null
     },
     request_admission_decision: requestAdmissionResult.admission_decision,
     risk_signals: riskSignals,
