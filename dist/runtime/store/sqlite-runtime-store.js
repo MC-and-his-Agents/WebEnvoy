@@ -447,7 +447,7 @@ export class SQLiteRuntimeStore {
             limit: input.limit
         });
     }
-    async upsertSessionRhythmStatusView(input) {
+    async recordSessionRhythmStatusView(input) {
         const windowState = input.windowState;
         const event = input.event;
         const decision = input.decision;
@@ -490,10 +490,7 @@ export class SQLiteRuntimeStore {
             phase_before, phase_after, risk_state_before, risk_state_after,
             source_audit_event_id, reason, recorded_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO UPDATE SET
-            source_audit_event_id = excluded.source_audit_event_id,
-            reason = excluded.reason,
-            recorded_at = excluded.recorded_at
+          ON CONFLICT(event_id) DO NOTHING
         `)
                 .run(eventId, input.profile, input.platform, input.issueScope, asNullableRuntimeStoreString(event.session_id), windowId, asNonEmptyRuntimeStoreString(event.event_type, "event_type"), asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"), asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"), asNonEmptyRuntimeStoreString(event.risk_state_before, "risk_state_before"), asNonEmptyRuntimeStoreString(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
             this.#db
@@ -503,12 +500,7 @@ export class SQLiteRuntimeStore {
             current_risk_state, next_phase, next_risk_state, effective_execution_mode,
             decision, reason_codes_json, requires_json, decided_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(decision_id) DO UPDATE SET
-            effective_execution_mode = excluded.effective_execution_mode,
-            decision = excluded.decision,
-            reason_codes_json = excluded.reason_codes_json,
-            requires_json = excluded.requires_json,
-            decided_at = excluded.decided_at
+          ON CONFLICT(decision_id) DO NOTHING
         `)
                 .run(decisionId, windowId, asNullableRuntimeStoreString(decision.run_id), asNullableRuntimeStoreString(decision.session_id), input.profile, asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"), asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"), asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"), asNonEmptyRuntimeStoreString(decision.next_risk_state, "next_risk_state"), asNullableRuntimeStoreString(decision.effective_execution_mode), asNonEmptyRuntimeStoreString(decision.decision, "decision"), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
             return this.getSessionRhythmStatusView({
@@ -520,6 +512,9 @@ export class SQLiteRuntimeStore {
         catch (error) {
             throw this.#toStoreDbError(error);
         }
+    }
+    async upsertSessionRhythmStatusView(input) {
+        return this.recordSessionRhythmStatusView(input);
     }
     async getSessionRhythmStatusView(input) {
         const platform = input.platform ?? "xhs";

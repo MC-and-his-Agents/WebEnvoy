@@ -210,7 +210,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
     try {
-      const view = await store.upsertSessionRhythmStatusView({
+      const view = await store.recordSessionRhythmStatusView({
         profile: "xhs_001",
         platform: "xhs",
         issueScope: "issue_209",
@@ -288,6 +288,47 @@ describeWithSqlite("sqlite-runtime-store", () => {
           issueScope: "issue_209"
         })
       ).resolves.toMatchObject(view);
+
+      await store.recordSessionRhythmStatusView({
+        profile: "xhs_001",
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          ...view.window_state,
+          updated_at: "2026-04-25T10:45:00.000Z"
+        },
+        event: {
+          ...view.event,
+          source_audit_event_id: "gate_evt_probe_overwrite_attempt",
+          reason: "OVERWRITE_ATTEMPT",
+          recorded_at: "2026-04-25T10:45:00.000Z"
+        },
+        decision: {
+          ...view.decision,
+          decision: "blocked",
+          reason_codes: ["OVERWRITE_ATTEMPT"],
+          requires: ["should_not_replace_existing_decision"],
+          decided_at: "2026-04-25T10:45:00.000Z"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          source_audit_event_id: "gate_evt_probe",
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+        }
+      });
     } finally {
       store.close();
     }

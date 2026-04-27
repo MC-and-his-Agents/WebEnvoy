@@ -79,25 +79,6 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile, input) => {
         if (!store) {
             return fallbackView;
         }
-        const windowState = asObject(fallbackView.session_rhythm_window_state);
-        const event = asObject(fallbackView.session_rhythm_event);
-        const decision = asObject(fallbackView.session_rhythm_decision);
-        if (windowState && event && decision) {
-            const persisted = await store.upsertSessionRhythmStatusView({
-                profile,
-                platform: "xhs",
-                issueScope: "issue_209",
-                windowState,
-                event,
-                decision
-            });
-            return {
-                ...fallbackView,
-                session_rhythm_window_state: persisted.window_state,
-                session_rhythm_event: persisted.event,
-                session_rhythm_decision: persisted.decision
-            };
-        }
         const persisted = await store.getSessionRhythmStatusView({
             profile,
             platform: "xhs",

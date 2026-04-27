@@ -2,6 +2,9 @@ import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
 import { diagnosisFromCliError } from "../cli-diagnosis.js";
 import { buildDiagnosis } from "../diagnostics.js";
+import { ProfileStore } from "../profile-store.js";
+import { toSessionRhythmStatusView } from "../xhs-closeout-rhythm.js";
+import { resolveRuntimeProfileRoot } from "../worktree-root.js";
 import {
   APPROVAL_CHECK_KEYS,
   getWriteActionMatrixDecisions
@@ -11,6 +14,7 @@ import {
   SQLiteRuntimeStore,
   type AppendRunEventInput,
   type AppendGateAuditRecordInput,
+  type SessionRhythmStatusViewInput,
   type UpsertGateApprovalInput,
   type UpsertRunInput,
   resolveRuntimeStorePath,
@@ -132,6 +136,7 @@ interface RuntimeStoreWriter {
   appendRunEvent(input: AppendRunEventInput): Promise<unknown>;
   upsertGateApproval?(input: UpsertGateApprovalInput): Promise<unknown>;
   appendGateAuditRecord?(input: AppendGateAuditRecordInput): Promise<unknown>;
+  recordSessionRhythmStatusView?(input: SessionRhythmStatusViewInput): Promise<unknown>;
   close(): void;
 }
 
@@ -332,9 +337,11 @@ const extractGateAuditRecordInput = (
 
 export class RuntimeStoreRecorder {
   #store: RuntimeStoreWriter;
+  #cwd: string;
   #startedAtByRunId = new Map<string, string>();
 
   constructor(cwd: string, store?: RuntimeStoreWriter) {
+    this.#cwd = cwd;
     this.#store = store ?? new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
   }
 
@@ -383,8 +390,78 @@ export class RuntimeStoreRecorder {
           "persisted approval_id is required for allowed live audit records"
         );
       }
-      await this.#store.appendGateAuditRecord(auditInput);
+      const persistedAuditRecord = asObject(await this.#store.appendGateAuditRecord(auditInput));
+      await this.#recordSessionRhythmArtifacts(
+        {
+          profile: auditInput.profile,
+          issueScope: auditInput.issueScope,
+          sessionId: auditInput.sessionId,
+          runId: auditInput.runId,
+          sourceAuditEventId: auditInput.eventId,
+          effectiveExecutionMode: auditInput.effectiveExecutionMode
+        },
+        persistedAuditRecord
+      );
     }
+  }
+
+  async #recordSessionRhythmArtifacts(
+    input: {
+      profile: string | null;
+      issueScope?: string | null;
+      sessionId?: string | null;
+      runId: string;
+      sourceAuditEventId?: string | null;
+      effectiveExecutionMode?: string | null;
+      force?: boolean;
+    },
+    persistedAuditRecord: JsonObject | null
+  ): Promise<void> {
+    if (!this.#store.recordSessionRhythmStatusView) {
+      return;
+    }
+    const profile = input.profile;
+    if (!profile) {
+      return;
+    }
+
+    const profileStore = new ProfileStore(resolveRuntimeProfileRoot(this.#cwd));
+    const meta = await profileStore.readMeta(profile, { mode: "readonly" });
+    const rhythmReasonCodes = Array.isArray(meta?.xhsCloseoutRhythm?.reasonCodes)
+      ? meta.xhsCloseoutRhythm.reasonCodes
+      : [];
+    if (
+      input.force !== true &&
+      !meta?.xhsCloseoutRhythm &&
+      meta?.accountSafety?.state !== "account_risk_blocked" &&
+      rhythmReasonCodes.length === 0
+    ) {
+      return;
+    }
+    const view = toSessionRhythmStatusView({
+      profile,
+      rhythm: meta?.xhsCloseoutRhythm,
+      accountSafety: meta?.accountSafety,
+      issueScope: input.issueScope ?? "issue_209",
+      sessionId: input.sessionId ?? null,
+      sourceRunId: input.runId,
+      sourceAuditEventId: asString(persistedAuditRecord?.event_id) ?? input.sourceAuditEventId ?? null,
+      effectiveExecutionMode: input.effectiveExecutionMode ?? null
+    });
+    const windowState = asObject(view.session_rhythm_window_state);
+    const event = asObject(view.session_rhythm_event);
+    const decision = asObject(view.session_rhythm_decision);
+    if (!windowState || !event || !decision) {
+      return;
+    }
+    await this.#store.recordSessionRhythmStatusView({
+      profile,
+      platform: "xhs",
+      issueScope: input.issueScope ?? "issue_209",
+      windowState,
+      event,
+      decision
+    });
   }
 
   async recordStart(context: RuntimeContext): Promise<void> {
@@ -433,6 +510,20 @@ export class RuntimeStoreRecorder {
         })
       );
       await this.#recordGateArtifacts(summary);
+      if (context.profile && (summary.xhs_closeout_rhythm || summary.account_safety)) {
+        await this.#recordSessionRhythmArtifacts(
+          {
+            profile: context.profile,
+            issueScope: "issue_209",
+            sessionId: resolveSessionId(summary),
+            runId: context.run_id,
+            sourceAuditEventId: null,
+            effectiveExecutionMode: asString(summary.requested_execution_mode),
+            force: true
+          },
+          null
+        );
+      }
     } finally {
       this.#startedAtByRunId.delete(context.run_id);
     }

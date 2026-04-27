@@ -240,10 +240,10 @@ export const buildSessionRhythmFormalView = (input) => {
     const riskState = resolveSessionRhythmRiskState({ state, accountSafety: input.accountSafety });
     const profileKey = sanitizeIdPart(input.profile);
     const issueScope = input.issueScope ?? "issue_209";
-    const sourceRunId = input.sourceRunId ??
-        (typeof status.probe_run_id === "string" && status.probe_run_id.length > 0
-            ? status.probe_run_id
-            : null);
+    const statusProbeRunId = typeof status.probe_run_id === "string" && status.probe_run_id.length > 0
+        ? status.probe_run_id
+        : null;
+    const sourceRunId = statusProbeRunId ?? input.sourceRunId ?? null;
     const sourceKey = sanitizeIdPart(sourceRunId ?? `${profileKey}_${state}`);
     const windowId = `rhythm_win_${profileKey}_${sanitizeIdPart(issueScope)}`;
     const latestEventId = `rhythm_evt_${sourceKey}`;

@@ -1009,7 +1009,7 @@ export class SQLiteRuntimeStore {
     });
   }
 
-  async upsertSessionRhythmStatusView(
+  async recordSessionRhythmStatusView(
     input: SessionRhythmStatusViewInput
   ): Promise<SessionRhythmStatusViewRecord> {
     const windowState = input.windowState;
@@ -1074,10 +1074,7 @@ export class SQLiteRuntimeStore {
             phase_before, phase_after, risk_state_before, risk_state_after,
             source_audit_event_id, reason, recorded_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO UPDATE SET
-            source_audit_event_id = excluded.source_audit_event_id,
-            reason = excluded.reason,
-            recorded_at = excluded.recorded_at
+          ON CONFLICT(event_id) DO NOTHING
         `
         )
         .run(
@@ -1104,12 +1101,7 @@ export class SQLiteRuntimeStore {
             current_risk_state, next_phase, next_risk_state, effective_execution_mode,
             decision, reason_codes_json, requires_json, decided_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(decision_id) DO UPDATE SET
-            effective_execution_mode = excluded.effective_execution_mode,
-            decision = excluded.decision,
-            reason_codes_json = excluded.reason_codes_json,
-            requires_json = excluded.requires_json,
-            decided_at = excluded.decided_at
+          ON CONFLICT(decision_id) DO NOTHING
         `
         )
         .run(
@@ -1136,6 +1128,12 @@ export class SQLiteRuntimeStore {
     } catch (error) {
       throw this.#toStoreDbError(error);
     }
+  }
+
+  async upsertSessionRhythmStatusView(
+    input: SessionRhythmStatusViewInput
+  ): Promise<SessionRhythmStatusViewRecord> {
+    return this.recordSessionRhythmStatusView(input);
   }
 
   async getSessionRhythmStatusView(
