@@ -495,6 +495,63 @@ export const initializeRuntimeStoreSchema = ({
       ON runtime_gate_audit_records(session_id, recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
       ON runtime_gate_audit_records(profile, recorded_at DESC);
+    CREATE TABLE IF NOT EXISTS session_rhythm_window_state (
+      window_id TEXT PRIMARY KEY,
+      profile TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      issue_scope TEXT NOT NULL,
+      session_id TEXT,
+      current_phase TEXT NOT NULL,
+      risk_state TEXT NOT NULL,
+      window_started_at TEXT,
+      window_deadline_at TEXT,
+      cooldown_until TEXT,
+      recovery_probe_due_at TEXT,
+      stability_window_until TEXT,
+      risk_signal_count INTEGER NOT NULL DEFAULT 0,
+      last_event_id TEXT,
+      source_run_id TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE(profile, platform, issue_scope)
+    );
+    CREATE TABLE IF NOT EXISTS session_rhythm_event (
+      event_id TEXT PRIMARY KEY,
+      profile TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      issue_scope TEXT NOT NULL,
+      session_id TEXT,
+      window_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      phase_before TEXT NOT NULL,
+      phase_after TEXT NOT NULL,
+      risk_state_before TEXT NOT NULL,
+      risk_state_after TEXT NOT NULL,
+      source_audit_event_id TEXT,
+      reason TEXT,
+      recorded_at TEXT NOT NULL,
+      FOREIGN KEY(window_id) REFERENCES session_rhythm_window_state(window_id)
+    );
+    CREATE TABLE IF NOT EXISTS session_rhythm_decision (
+      decision_id TEXT PRIMARY KEY,
+      window_id TEXT NOT NULL,
+      run_id TEXT,
+      session_id TEXT,
+      profile TEXT NOT NULL,
+      current_phase TEXT NOT NULL,
+      current_risk_state TEXT NOT NULL,
+      next_phase TEXT NOT NULL,
+      next_risk_state TEXT NOT NULL,
+      effective_execution_mode TEXT,
+      decision TEXT NOT NULL,
+      reason_codes_json TEXT NOT NULL,
+      requires_json TEXT NOT NULL,
+      decided_at TEXT NOT NULL,
+      FOREIGN KEY(window_id) REFERENCES session_rhythm_window_state(window_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_rhythm_window_scope
+      ON session_rhythm_window_state(profile, platform, issue_scope);
+    CREATE INDEX IF NOT EXISTS idx_session_rhythm_event_window_recorded
+      ON session_rhythm_event(window_id, recorded_at DESC);
     CREATE TABLE IF NOT EXISTS anti_detection_validation_request (
       request_ref TEXT PRIMARY KEY,
       validation_scope TEXT NOT NULL,

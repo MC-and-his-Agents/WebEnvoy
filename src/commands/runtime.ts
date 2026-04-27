@@ -98,7 +98,14 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
 
 const buildSessionRhythmStatusViewForProfile = async (
   cwd: string,
-  profile: string | null
+  profile: string | null,
+  input?: {
+    store?: SQLiteRuntimeStore;
+    sessionId?: string | null;
+    sourceRunId?: string | null;
+    sourceAuditEventId?: string | null;
+    effectiveExecutionMode?: string | null;
+  }
 ): Promise<Record<string, unknown> | null> => {
   if (!profile) {
     return null;
@@ -106,11 +113,51 @@ const buildSessionRhythmStatusViewForProfile = async (
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
   try {
     const meta = await profileStore.readMeta(profile, { mode: "readonly" });
-    return toSessionRhythmStatusView({
+    const fallbackView = toSessionRhythmStatusView({
       profile,
       rhythm: meta?.xhsCloseoutRhythm,
-      accountSafety: meta?.accountSafety
+      accountSafety: meta?.accountSafety,
+      sessionId: input?.sessionId ?? null,
+      sourceRunId: input?.sourceRunId ?? null,
+      sourceAuditEventId: input?.sourceAuditEventId ?? null,
+      effectiveExecutionMode: input?.effectiveExecutionMode ?? null
     });
+    const store = input?.store;
+    if (!store) {
+      return fallbackView;
+    }
+    const windowState = asObject(fallbackView.session_rhythm_window_state);
+    const event = asObject(fallbackView.session_rhythm_event);
+    const decision = asObject(fallbackView.session_rhythm_decision);
+    if (windowState && event && decision) {
+      const persisted = await store.upsertSessionRhythmStatusView({
+        profile,
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState,
+        event,
+        decision
+      });
+      return {
+        ...fallbackView,
+        session_rhythm_window_state: persisted.window_state,
+        session_rhythm_event: persisted.event,
+        session_rhythm_decision: persisted.decision
+      };
+    }
+    const persisted = await store.getSessionRhythmStatusView({
+      profile,
+      platform: "xhs",
+      issueScope: "issue_209"
+    });
+    return persisted
+      ? {
+          ...fallbackView,
+          session_rhythm_window_state: persisted.window_state,
+          session_rhythm_event: persisted.event,
+          session_rhythm_decision: persisted.decision
+        }
+      : fallbackView;
   } catch {
     return null;
   }
@@ -320,9 +367,17 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         enrichedAuditRecords
       );
       const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
+      const latestAuditRecord = enrichedAuditRecords[0] as Record<string, unknown> | undefined;
       const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
         context.cwd,
-        auditProfile
+        auditProfile,
+        {
+          store,
+          sessionId: asString(latestAuditRecord?.session_id),
+          sourceRunId: runId,
+          sourceAuditEventId: asString(latestAuditRecord?.event_id),
+          effectiveExecutionMode: asString(latestAuditRecord?.effective_execution_mode)
+        }
       );
       const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
         store,
@@ -366,9 +421,17 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       enrichedAuditRecords
     );
     const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
+    const latestAuditRecord = enrichedAuditRecords[0] as Record<string, unknown> | undefined;
     const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
       context.cwd,
-      profile ?? auditProfile
+      profile ?? auditProfile,
+      {
+        store,
+        sessionId: sessionId ?? asString(latestAuditRecord?.session_id),
+        sourceRunId: asString(latestAuditRecord?.run_id),
+        sourceAuditEventId: asString(latestAuditRecord?.event_id),
+        effectiveExecutionMode: asString(latestAuditRecord?.effective_execution_mode)
+      }
     );
     const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
       store,

@@ -789,8 +789,8 @@ describe("xhs-search gate helpers", () => {
         audit_admission_ref: auditAdmissionRef,
         approval_record_ref: approvalId,
         audit_record_ref: `gate_evt_${decisionId}`,
-        session_rhythm_window_id: null,
-        session_rhythm_decision_id: null
+        session_rhythm_window_id: "rhythm_win_profile-session-001_issue_209",
+        session_rhythm_decision_id: `rhythm_decision_${runId}`
       },
       request_admission_decision: "allowed",
       risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]

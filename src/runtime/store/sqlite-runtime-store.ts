@@ -149,6 +149,27 @@ export interface ListAuditRecordsInput {
   limit?: number;
 }
 
+export interface SessionRhythmStatusViewInput {
+  profile: string;
+  platform: string;
+  issueScope: string;
+  windowState: Record<string, unknown>;
+  event: Record<string, unknown>;
+  decision: Record<string, unknown>;
+}
+
+export interface SessionRhythmStatusViewQuery {
+  profile: string;
+  platform?: string;
+  issueScope?: string;
+}
+
+export interface SessionRhythmStatusViewRecord {
+  window_state: Record<string, unknown>;
+  event: Record<string, unknown>;
+  decision: Record<string, unknown>;
+}
+
 export type AntiDetectionValidationScope =
   | "layer1_consistency"
   | "layer2_interaction"
@@ -472,6 +493,29 @@ const sleepSync = (ms: number): void => {
 const invalidRuntimeStoreInput = (message: string): never => {
   throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", message);
 };
+
+const asNonEmptyRuntimeStoreString = (value: unknown, fieldName: string): string => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    invalidRuntimeStoreInput(`${fieldName} is required`);
+  }
+  return (value as string).trim();
+};
+
+const asNullableRuntimeStoreString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const parseJsonArray = (value: unknown): unknown[] => {
+  if (typeof value !== "string") {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const REQUEST_STATE_TRANSITIONS: Record<
   AntiDetectionRequestState,
   readonly AntiDetectionRequestState[]
@@ -963,6 +1007,220 @@ export class SQLiteRuntimeStore {
       profile: input.profile,
       limit: input.limit
     });
+  }
+
+  async upsertSessionRhythmStatusView(
+    input: SessionRhythmStatusViewInput
+  ): Promise<SessionRhythmStatusViewRecord> {
+    const windowState = input.windowState;
+    const event = input.event;
+    const decision = input.decision;
+    const windowId = asNonEmptyRuntimeStoreString(windowState.window_id, "window_id");
+    const eventId = asNonEmptyRuntimeStoreString(event.event_id, "event_id");
+    const decisionId = asNonEmptyRuntimeStoreString(decision.decision_id, "decision_id");
+    const updatedAt = asNonEmptyRuntimeStoreString(windowState.updated_at, "updated_at");
+    const recordedAt = asNonEmptyRuntimeStoreString(event.recorded_at, "recorded_at");
+    const decidedAt = asNonEmptyRuntimeStoreString(decision.decided_at, "decided_at");
+    try {
+      this.#db
+        .prepare(
+          `
+          INSERT INTO session_rhythm_window_state(
+            window_id, profile, platform, issue_scope, session_id, current_phase, risk_state,
+            window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
+            stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(profile, platform, issue_scope) DO UPDATE SET
+            window_id = excluded.window_id,
+            session_id = excluded.session_id,
+            current_phase = excluded.current_phase,
+            risk_state = excluded.risk_state,
+            window_started_at = excluded.window_started_at,
+            window_deadline_at = excluded.window_deadline_at,
+            cooldown_until = excluded.cooldown_until,
+            recovery_probe_due_at = excluded.recovery_probe_due_at,
+            stability_window_until = excluded.stability_window_until,
+            risk_signal_count = excluded.risk_signal_count,
+            last_event_id = excluded.last_event_id,
+            source_run_id = excluded.source_run_id,
+            updated_at = excluded.updated_at
+        `
+        )
+        .run(
+          windowId,
+          input.profile,
+          input.platform,
+          input.issueScope,
+          asNullableRuntimeStoreString(windowState.session_id),
+          asNonEmptyRuntimeStoreString(windowState.current_phase, "current_phase"),
+          asNonEmptyRuntimeStoreString(windowState.risk_state, "risk_state"),
+          asNullableRuntimeStoreString(windowState.window_started_at),
+          asNullableRuntimeStoreString(windowState.window_deadline_at),
+          asNullableRuntimeStoreString(windowState.cooldown_until),
+          asNullableRuntimeStoreString(windowState.recovery_probe_due_at),
+          asNullableRuntimeStoreString(windowState.stability_window_until),
+          Number.isInteger(windowState.risk_signal_count)
+            ? (windowState.risk_signal_count as number)
+            : 0,
+          asNullableRuntimeStoreString(windowState.last_event_id),
+          asNullableRuntimeStoreString(windowState.source_run_id),
+          updatedAt
+        );
+      this.#db
+        .prepare(
+          `
+          INSERT INTO session_rhythm_event(
+            event_id, profile, platform, issue_scope, session_id, window_id, event_type,
+            phase_before, phase_after, risk_state_before, risk_state_after,
+            source_audit_event_id, reason, recorded_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(event_id) DO UPDATE SET
+            source_audit_event_id = excluded.source_audit_event_id,
+            reason = excluded.reason,
+            recorded_at = excluded.recorded_at
+        `
+        )
+        .run(
+          eventId,
+          input.profile,
+          input.platform,
+          input.issueScope,
+          asNullableRuntimeStoreString(event.session_id),
+          windowId,
+          asNonEmptyRuntimeStoreString(event.event_type, "event_type"),
+          asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"),
+          asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"),
+          asNonEmptyRuntimeStoreString(event.risk_state_before, "risk_state_before"),
+          asNonEmptyRuntimeStoreString(event.risk_state_after, "risk_state_after"),
+          asNullableRuntimeStoreString(event.source_audit_event_id),
+          asNullableRuntimeStoreString(event.reason),
+          recordedAt
+        );
+      this.#db
+        .prepare(
+          `
+          INSERT INTO session_rhythm_decision(
+            decision_id, window_id, run_id, session_id, profile, current_phase,
+            current_risk_state, next_phase, next_risk_state, effective_execution_mode,
+            decision, reason_codes_json, requires_json, decided_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(decision_id) DO UPDATE SET
+            effective_execution_mode = excluded.effective_execution_mode,
+            decision = excluded.decision,
+            reason_codes_json = excluded.reason_codes_json,
+            requires_json = excluded.requires_json,
+            decided_at = excluded.decided_at
+        `
+        )
+        .run(
+          decisionId,
+          windowId,
+          asNullableRuntimeStoreString(decision.run_id),
+          asNullableRuntimeStoreString(decision.session_id),
+          input.profile,
+          asNonEmptyRuntimeStoreString(decision.current_phase, "current_phase"),
+          asNonEmptyRuntimeStoreString(decision.current_risk_state, "current_risk_state"),
+          asNonEmptyRuntimeStoreString(decision.next_phase, "next_phase"),
+          asNonEmptyRuntimeStoreString(decision.next_risk_state, "next_risk_state"),
+          asNullableRuntimeStoreString(decision.effective_execution_mode),
+          asNonEmptyRuntimeStoreString(decision.decision, "decision"),
+          JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []),
+          JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []),
+          decidedAt
+        );
+      return this.getSessionRhythmStatusView({
+        profile: input.profile,
+        platform: input.platform,
+        issueScope: input.issueScope
+      }) as Promise<SessionRhythmStatusViewRecord>;
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async getSessionRhythmStatusView(
+    input: SessionRhythmStatusViewQuery
+  ): Promise<SessionRhythmStatusViewRecord | null> {
+    const platform = input.platform ?? "xhs";
+    const issueScope = input.issueScope ?? "issue_209";
+    const row = this.#db
+      .prepare(
+        `
+        SELECT
+          w.window_id, w.profile, w.platform, w.issue_scope, w.session_id,
+          w.current_phase, w.risk_state, w.window_started_at, w.window_deadline_at,
+          w.cooldown_until, w.recovery_probe_due_at, w.stability_window_until,
+          w.risk_signal_count, w.last_event_id, w.source_run_id, w.updated_at,
+          e.event_id, e.event_type, e.phase_before, e.phase_after,
+          e.risk_state_before, e.risk_state_after, e.source_audit_event_id,
+          e.reason, e.recorded_at,
+          d.decision_id, d.run_id, d.current_risk_state, d.next_phase,
+          d.next_risk_state, d.effective_execution_mode, d.decision,
+          d.reason_codes_json, d.requires_json, d.decided_at
+        FROM session_rhythm_window_state w
+        LEFT JOIN session_rhythm_event e ON e.event_id = w.last_event_id
+        LEFT JOIN session_rhythm_decision d ON d.window_id = w.window_id
+        WHERE w.profile = ? AND w.platform = ? AND w.issue_scope = ?
+        ORDER BY d.decided_at DESC
+        LIMIT 1
+      `
+      )
+      .get(input.profile, platform, issueScope) as Record<string, unknown> | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      window_state: {
+        window_id: row.window_id,
+        profile: row.profile,
+        platform: row.platform,
+        issue_scope: row.issue_scope,
+        session_id: row.session_id,
+        current_phase: row.current_phase,
+        risk_state: row.risk_state,
+        window_started_at: row.window_started_at,
+        window_deadline_at: row.window_deadline_at,
+        cooldown_until: row.cooldown_until,
+        recovery_probe_due_at: row.recovery_probe_due_at,
+        stability_window_until: row.stability_window_until,
+        risk_signal_count: row.risk_signal_count,
+        last_event_id: row.last_event_id,
+        source_run_id: row.source_run_id,
+        updated_at: row.updated_at
+      },
+      event: {
+        event_id: row.event_id,
+        profile: row.profile,
+        platform: row.platform,
+        issue_scope: row.issue_scope,
+        session_id: row.session_id,
+        window_id: row.window_id,
+        event_type: row.event_type,
+        phase_before: row.phase_before,
+        phase_after: row.phase_after,
+        risk_state_before: row.risk_state_before,
+        risk_state_after: row.risk_state_after,
+        source_audit_event_id: row.source_audit_event_id,
+        reason: row.reason,
+        recorded_at: row.recorded_at
+      },
+      decision: {
+        decision_id: row.decision_id,
+        window_id: row.window_id,
+        run_id: row.run_id,
+        session_id: row.session_id,
+        profile: row.profile,
+        current_phase: row.current_phase,
+        current_risk_state: row.current_risk_state,
+        next_phase: row.next_phase,
+        next_risk_state: row.next_risk_state,
+        effective_execution_mode: row.effective_execution_mode,
+        decision: row.decision,
+        reason_codes: parseJsonArray(row.reason_codes_json),
+        requires: parseJsonArray(row.requires_json),
+        decided_at: row.decided_at
+      }
+    };
   }
 
   async upsertAntiDetectionValidationRequest(

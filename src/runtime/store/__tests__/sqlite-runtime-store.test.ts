@@ -206,6 +206,93 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
+  it("persists FR-0014 session rhythm window event and decision view", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      const view = await store.upsertSessionRhythmStatusView({
+        profile: "xhs_001",
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          window_id: "rhythm_win_xhs_001_issue_209",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-001",
+          current_phase: "recovery_probe",
+          risk_state: "limited",
+          window_started_at: null,
+          window_deadline_at: null,
+          cooldown_until: null,
+          recovery_probe_due_at: "2026-04-25T10:35:00.000Z",
+          stability_window_until: null,
+          risk_signal_count: 0,
+          last_event_id: "rhythm_evt_run-probe-001",
+          source_run_id: "run-probe-001",
+          updated_at: "2026-04-25T10:40:00.000Z"
+        },
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          profile: "xhs_001",
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: "nm-session-001",
+          window_id: "rhythm_win_xhs_001_issue_209",
+          event_type: "recovery_probe_passed",
+          phase_before: "recovery_probe",
+          phase_after: "steady",
+          risk_state_before: "limited",
+          risk_state_after: "limited",
+          source_audit_event_id: "gate_evt_probe",
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+          recorded_at: "2026-04-25T10:40:00.000Z"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          window_id: "rhythm_win_xhs_001_issue_209",
+          run_id: "run-probe-001",
+          session_id: "nm-session-001",
+          profile: "xhs_001",
+          current_phase: "recovery_probe",
+          current_risk_state: "limited",
+          next_phase: "steady",
+          next_risk_state: "limited",
+          effective_execution_mode: "recon",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+          requires: ["audit_record_present"],
+          decided_at: "2026-04-25T10:40:00.000Z"
+        }
+      });
+
+      expect(view).toMatchObject({
+        window_state: {
+          window_id: "rhythm_win_xhs_001_issue_209",
+          source_run_id: "run-probe-001"
+        },
+        event: {
+          event_id: "rhythm_evt_run-probe-001",
+          source_audit_event_id: "gate_evt_probe"
+        },
+        decision: {
+          decision_id: "rhythm_decision_run-probe-001",
+          decision: "allowed",
+          reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject(view);
+    } finally {
+      store.close();
+    }
+  });
+
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);

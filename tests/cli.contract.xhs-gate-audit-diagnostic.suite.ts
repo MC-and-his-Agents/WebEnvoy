@@ -3077,12 +3077,25 @@ process.stdin.on("data", (chunk) => {
           profile: auditProfile,
           platform: "xhs",
           issue_scope: "issue_209",
-          current_phase: "stability",
+          current_phase: "steady",
           current_risk_state: "limited",
           window_state: "stability",
-          latest_event_id: "run-session-audit-probe-001",
+          latest_event_id: "rhythm_evt_run-session-audit-probe-001",
           latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
-          derived_at: expect.any(String)
+          derived_at: expect.any(String),
+          session_rhythm_window_state: expect.objectContaining({
+            window_id: `rhythm_win_${auditProfile}_issue_209`,
+            current_phase: "steady",
+            source_run_id: "run-session-audit-probe-001"
+          }),
+          session_rhythm_event: expect.objectContaining({
+            event_id: "rhythm_evt_run-session-audit-probe-001",
+            event_type: "recovery_probe_passed"
+          }),
+          session_rhythm_decision: expect.objectContaining({
+            decision_id: "rhythm_decision_run-session-audit-probe-001",
+            decision: "deferred"
+          })
         }
       }
     });
@@ -3172,12 +3185,25 @@ process.stdin.on("data", (chunk) => {
           profile,
           platform: "xhs",
           issue_scope: "issue_209",
-          current_phase: "stability",
+          current_phase: "steady",
           current_risk_state: "limited",
           window_state: "stability",
-          latest_event_id: "run-rhythm-audit-probe-001",
+          latest_event_id: "rhythm_evt_run-rhythm-audit-probe-001",
           latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
-          derived_at: expect.any(String)
+          derived_at: expect.any(String),
+          session_rhythm_window_state: expect.objectContaining({
+            window_id: `rhythm_win_${profile}_issue_209`,
+            current_phase: "steady",
+            source_run_id: "run-rhythm-audit-probe-001"
+          }),
+          session_rhythm_event: expect.objectContaining({
+            event_id: "rhythm_evt_run-rhythm-audit-probe-001",
+            event_type: "recovery_probe_passed"
+          }),
+          session_rhythm_decision: expect.objectContaining({
+            decision_id: "rhythm_decision_run-rhythm-audit-probe-001",
+            decision: "deferred"
+          })
         }
       }
     });

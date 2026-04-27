@@ -59,18 +59,58 @@ const enrichAuditRecordWithWriteTier = (auditRecord) => {
         write_action_matrix_decisions: writeActionMatrixDecisions
     };
 };
-const buildSessionRhythmStatusViewForProfile = async (cwd, profile) => {
+const buildSessionRhythmStatusViewForProfile = async (cwd, profile, input) => {
     if (!profile) {
         return null;
     }
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
     try {
         const meta = await profileStore.readMeta(profile, { mode: "readonly" });
-        return toSessionRhythmStatusView({
+        const fallbackView = toSessionRhythmStatusView({
             profile,
             rhythm: meta?.xhsCloseoutRhythm,
-            accountSafety: meta?.accountSafety
+            accountSafety: meta?.accountSafety,
+            sessionId: input?.sessionId ?? null,
+            sourceRunId: input?.sourceRunId ?? null,
+            sourceAuditEventId: input?.sourceAuditEventId ?? null,
+            effectiveExecutionMode: input?.effectiveExecutionMode ?? null
         });
+        const store = input?.store;
+        if (!store) {
+            return fallbackView;
+        }
+        const windowState = asObject(fallbackView.session_rhythm_window_state);
+        const event = asObject(fallbackView.session_rhythm_event);
+        const decision = asObject(fallbackView.session_rhythm_decision);
+        if (windowState && event && decision) {
+            const persisted = await store.upsertSessionRhythmStatusView({
+                profile,
+                platform: "xhs",
+                issueScope: "issue_209",
+                windowState,
+                event,
+                decision
+            });
+            return {
+                ...fallbackView,
+                session_rhythm_window_state: persisted.window_state,
+                session_rhythm_event: persisted.event,
+                session_rhythm_decision: persisted.decision
+            };
+        }
+        const persisted = await store.getSessionRhythmStatusView({
+            profile,
+            platform: "xhs",
+            issueScope: "issue_209"
+        });
+        return persisted
+            ? {
+                ...fallbackView,
+                session_rhythm_window_state: persisted.window_state,
+                session_rhythm_event: persisted.event,
+                session_rhythm_decision: persisted.decision
+            }
+            : fallbackView;
     }
     catch {
         return null;
@@ -238,7 +278,14 @@ const runtimeAuditQuery = async (context) => {
             const enrichedAuditRecords = trail.auditRecords.map((record) => enrichAuditRecordWithWriteTier(record));
             const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), enrichedAuditRecords);
             const auditProfile = asString(enrichedAuditRecords[0]?.profile);
-            const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, auditProfile);
+            const latestAuditRecord = enrichedAuditRecords[0];
+            const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, auditProfile, {
+                store,
+                sessionId: asString(latestAuditRecord?.session_id),
+                sourceRunId: runId,
+                sourceAuditEventId: asString(latestAuditRecord?.event_id),
+                effectiveExecutionMode: asString(latestAuditRecord?.effective_execution_mode)
+            });
             const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
                 store,
                 profile: auditProfile,
@@ -273,7 +320,14 @@ const runtimeAuditQuery = async (context) => {
         const enrichedAuditRecords = records.map((record) => enrichAuditRecordWithWriteTier(record));
         const currentRiskState = resolveCurrentRiskState(null, enrichedAuditRecords);
         const auditProfile = asString(enrichedAuditRecords[0]?.profile);
-        const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile);
+        const latestAuditRecord = enrichedAuditRecords[0];
+        const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile, {
+            store,
+            sessionId: sessionId ?? asString(latestAuditRecord?.session_id),
+            sourceRunId: asString(latestAuditRecord?.run_id),
+            sourceAuditEventId: asString(latestAuditRecord?.event_id),
+            effectiveExecutionMode: asString(latestAuditRecord?.effective_execution_mode)
+        });
         const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
             store,
             profile: profile ?? auditProfile,
