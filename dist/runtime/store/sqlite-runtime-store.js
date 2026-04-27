@@ -498,7 +498,10 @@ export class SQLiteRuntimeStore {
         const updatedAt = asNonEmptyRuntimeStoreString(windowState.updated_at, "updated_at");
         const recordedAt = asNonEmptyRuntimeStoreString(event.recorded_at, "recorded_at");
         const decidedAt = asNonEmptyRuntimeStoreString(decision.decided_at, "decided_at");
+        let transactionStarted = false;
         try {
+            this.#db.exec("BEGIN IMMEDIATE");
+            transactionStarted = true;
             this.#db
                 .prepare(`
           INSERT INTO session_rhythm_window_state(
@@ -549,6 +552,8 @@ export class SQLiteRuntimeStore {
           ON CONFLICT(decision_id) DO NOTHING
         `)
                 .run(decisionId, windowId, asNonEmptyRuntimeStoreString(decision.run_id, "decision.run_id"), asNonEmptyRuntimeStoreString(decision.session_id, "decision.session_id"), input.profile, asEnumRuntimeStoreString(decision.current_phase, "current_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.current_risk_state, "current_risk_state"), asEnumRuntimeStoreString(decision.next_phase, "next_phase", SESSION_RHYTHM_PHASES), asSessionRhythmRiskState(decision.next_risk_state, "next_risk_state"), asEnumRuntimeStoreString(decision.effective_execution_mode, "effective_execution_mode", EXECUTION_MODES), asEnumRuntimeStoreString(decision.decision, "decision", SESSION_RHYTHM_DECISIONS), JSON.stringify(Array.isArray(decision.reason_codes) ? decision.reason_codes : []), JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []), decidedAt);
+            this.#db.exec("COMMIT");
+            transactionStarted = false;
             return this.getSessionRhythmStatusView({
                 profile: input.profile,
                 platform: input.platform,
@@ -556,6 +561,14 @@ export class SQLiteRuntimeStore {
             });
         }
         catch (error) {
+            if (transactionStarted) {
+                try {
+                    this.#db.exec("ROLLBACK");
+                }
+                catch {
+                    // Preserve the original write failure; SQLite may already have closed the transaction.
+                }
+            }
             throw this.#toStoreDbError(error);
         }
     }

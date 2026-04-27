@@ -1077,7 +1077,10 @@ export class SQLiteRuntimeStore {
     const updatedAt = asNonEmptyRuntimeStoreString(windowState.updated_at, "updated_at");
     const recordedAt = asNonEmptyRuntimeStoreString(event.recorded_at, "recorded_at");
     const decidedAt = asNonEmptyRuntimeStoreString(decision.decided_at, "decided_at");
+    let transactionStarted = false;
     try {
+      this.#db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
       this.#db
         .prepare(
           `
@@ -1181,12 +1184,21 @@ export class SQLiteRuntimeStore {
           JSON.stringify(Array.isArray(decision.requires) ? decision.requires : []),
           decidedAt
         );
+      this.#db.exec("COMMIT");
+      transactionStarted = false;
       return this.getSessionRhythmStatusView({
         profile: input.profile,
         platform: input.platform,
         issueScope: input.issueScope
       }) as Promise<SessionRhythmStatusViewRecord>;
     } catch (error) {
+      if (transactionStarted) {
+        try {
+          this.#db.exec("ROLLBACK");
+        } catch {
+          // Preserve the original write failure; SQLite may already have closed the transaction.
+        }
+      }
       throw this.#toStoreDbError(error);
     }
   }

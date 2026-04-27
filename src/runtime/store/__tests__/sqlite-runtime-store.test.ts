@@ -677,6 +677,80 @@ describeWithSqlite("sqlite-runtime-store", () => {
     }
   });
 
+  it("rolls back FR-0014 rhythm writes when the decision row is invalid", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await expect(
+        store.recordSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_atomic_issue_209",
+            profile: "xhs_001",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-atomic",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T10:55:00.000Z",
+            cooldown_until: "2026-04-25T10:55:00.000Z",
+            recovery_probe_due_at: "2026-04-25T10:55:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_atomic",
+            source_run_id: "run-atomic",
+            updated_at: "2026-04-25T10:40:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_atomic",
+            profile: "xhs_001",
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-atomic",
+            window_id: "rhythm_win_atomic_issue_209",
+            event_type: "risk_signal",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: "gate_evt_atomic",
+            reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+            recorded_at: "2026-04-25T10:40:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_atomic",
+            window_id: "rhythm_win_atomic_issue_209",
+            run_id: "run-atomic",
+            session_id: "nm-session-atomic",
+            profile: "xhs_001",
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "invalid_mode",
+            decision: "blocked",
+            reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+            requires: ["cooldown_until_elapsed"],
+            decided_at: "2026-04-25T10:40:00.000Z"
+          }
+        })
+      ).rejects.toMatchObject({ code: "ERR_RUNTIME_STORE_INVALID_INPUT" });
+
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
   it("preserves newer conservative FR-0014 rhythm windows from stale overwrites", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
