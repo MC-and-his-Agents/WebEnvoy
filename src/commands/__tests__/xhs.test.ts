@@ -3138,6 +3138,206 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("reads session rhythm compatibility refs from the persisted rhythm store before profile meta fallback", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-rhythm-"));
+    const profile = "profile-persisted-rhythm-refs-001";
+    const runId = "run-persisted-rhythm-refs-001";
+    const requestId = "req-persisted-rhythm-refs-001";
+    const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
+    const auditAdmissionRef = `audit_admission_${runId}_${requestId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: undefined
+      });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: "rhythm_win_persisted_issue_209",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-refs",
+            current_phase: "steady",
+            risk_state: "limited",
+            window_started_at: "2026-04-25T10:40:00.000Z",
+            window_deadline_at: "2026-04-25T11:00:00.000Z",
+            cooldown_until: null,
+            recovery_probe_due_at: null,
+            stability_window_until: "2026-04-25T11:00:00.000Z",
+            risk_signal_count: 0,
+            last_event_id: "rhythm_evt_persisted_refs",
+            source_run_id: "run-recovery-probe-persisted",
+            updated_at: "2026-04-25T10:41:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_refs",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-persisted-refs",
+            window_id: "rhythm_win_persisted_issue_209",
+            event_type: "recovery_probe_passed",
+            phase_before: "recovery_probe",
+            phase_after: "steady",
+            risk_state_before: "limited",
+            risk_state_after: "limited",
+            source_audit_event_id: "gate_evt_persisted_refs",
+            reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+            recorded_at: "2026-04-25T10:41:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_refs",
+            window_id: "rhythm_win_persisted_issue_209",
+            run_id: "run-recovery-probe-persisted",
+            session_id: "nm-session-persisted-refs",
+            profile,
+            current_phase: "steady",
+            current_risk_state: "limited",
+            next_phase: "steady",
+            next_risk_state: "limited",
+            effective_execution_mode: "live_read_high_risk",
+            decision: "allowed",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+            requires: [],
+            decided_at: "2026-04-25T10:41:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      const execution = await executeCommand(
+        {
+          cwd,
+          command: "xhs.detail",
+          profile,
+          run_id: runId,
+          params: {
+            request_id: requestId,
+            ability: {
+              id: "xhs.note.detail.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              note_id: "abc123"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "explore_detail_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed",
+              upstream_authorization_request: {
+                action_request: {
+                  request_ref: "upstream_req_persisted_refs_001",
+                  action_name: "xhs.read_note_detail",
+                  action_category: "read"
+                },
+                resource_binding: {
+                  binding_ref: "binding_persisted_refs_001",
+                  resource_kind: "anonymous_context",
+                  profile_ref: null,
+                  binding_constraints: {
+                    anonymous_required: true,
+                    reuse_logged_in_context_forbidden: true
+                  }
+                },
+                authorization_grant: {
+                  grant_ref: "grant_persisted_refs_001",
+                  allowed_actions: ["xhs.read_note_detail"],
+                  binding_scope: {
+                    allowed_resource_kinds: ["anonymous_context"],
+                    allowed_profile_refs: []
+                  },
+                  target_scope: {
+                    allowed_domains: ["www.xiaohongshu.com"],
+                    allowed_pages: ["explore_detail_tab"]
+                  },
+                  resource_state_snapshot: "active",
+                  approval_refs: [approvalAdmissionRef],
+                  audit_refs: [auditAdmissionRef]
+                },
+                runtime_target: {
+                  target_ref: "target_persisted_refs_001",
+                  domain: "www.xiaohongshu.com",
+                  page: "explore_detail_tab",
+                  tab_id: 32
+                }
+              },
+              approval_record: {
+                approved: true,
+                approver: "qa-reviewer",
+                approved_at: "2026-03-23T10:00:00Z",
+                checks: ISSUE209_APPROVAL_CHECKS
+              },
+              admission_context: createApprovedAnonymousReadAdmissionContext(runId, requestId),
+              __anonymous_isolation_verified: true,
+              target_site_logged_in: false
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        execution_audit: {
+          compatibility_refs: {
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef,
+            session_rhythm_window_id: "rhythm_win_persisted_issue_209",
+            session_rhythm_decision_id: "rhythm_decision_persisted_refs"
+          }
+        }
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("preserves explicit top-level gate_invocation_id through formal-source live reads", async () => {
     const runId = "run-formal-source-loopback-001";
     const requestId = "issue209-live-formal-source-loopback-001";

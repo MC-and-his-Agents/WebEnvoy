@@ -61,14 +61,46 @@ const asObject = (value: unknown): JsonObject | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const buildSessionRhythmCompatibilityRefsForRuntime = (input: {
+const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
+  cwd: string;
   profile: string | null;
   runId: string;
   profileMeta: Awaited<ReturnType<ProfileStore["readMeta"]>> | null;
   gate: ReturnType<typeof normalizeGateOptionsForContract>;
-}): JsonObject | null => {
+}): Promise<JsonObject | null> => {
   if (!input.profile) {
     return null;
+  }
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const persisted = await store.getSessionRhythmStatusView({
+      profile: input.profile,
+      platform: "xhs",
+      issueScope: asString(input.gate.options.issue_scope) ?? "issue_209"
+    });
+    const windowId = asString(persisted?.window_state.window_id);
+    const decisionId = asString(persisted?.decision.decision_id);
+    if (windowId || decisionId) {
+      return {
+        ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
+        ...(decisionId ? { __session_rhythm_decision_id: decisionId } : {})
+      };
+    }
+  } catch (error) {
+    if (error instanceof RuntimeStoreError) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+        retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+        cause: error
+      });
+    }
+    throw error;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      // Compatibility refs are best-effort read-only after the query finishes.
+    }
   }
   if (
     !input.profileMeta?.xhsCloseoutRhythm &&
@@ -764,7 +796,8 @@ const xhsReadCommand = async (
       target_site_logged_in: targetSiteLoggedIn,
       ...preparedGateOptions
     } = preparedIssue209LiveRead.options;
-    const sessionRhythmCompatibilityRefs = buildSessionRhythmCompatibilityRefsForRuntime({
+    const sessionRhythmCompatibilityRefs = await buildSessionRhythmCompatibilityRefsForRuntime({
+      cwd: context.cwd,
       profile: context.profile,
       runId: context.run_id,
       profileMeta,
