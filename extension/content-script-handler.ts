@@ -404,6 +404,12 @@ const performXhsSearchPassiveAction = async (input: {
     'input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]'
   ) as HTMLInputElement | null;
   if (!queryMatched && searchInput) {
+    const searchForm = searchInput.closest("form") as HTMLFormElement | null;
+    const searchButton = (searchForm?.querySelector(
+      'button[type="submit"], button[class*="search"], [role="button"][class*="search"]'
+    ) ?? document.querySelector(
+      'button[type="submit"], button[class*="search"], [role="button"][class*="search"]'
+    )) as HTMLElement | null;
     const valueSetter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value"
@@ -418,6 +424,13 @@ const performXhsSearchPassiveAction = async (input: {
     searchInput.dispatchEvent(
       new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" })
     );
+    if (searchForm && typeof searchForm.requestSubmit === "function") {
+      searchForm.requestSubmit();
+    } else if (searchButton && typeof searchButton.click === "function") {
+      searchButton.click();
+    } else if (searchForm) {
+      searchForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
     return {
       evidence_class: "humanized_action",
       action_kind: "keyboard_input",
@@ -427,6 +440,16 @@ const performXhsSearchPassiveAction = async (input: {
       query: input.query,
       query_matched: false,
       search_input_found: true,
+      search_form_found: Boolean(searchForm),
+      search_button_found: Boolean(searchButton),
+      submit_triggered:
+        searchForm && typeof searchForm.requestSubmit === "function"
+          ? "form_request_submit"
+          : searchButton
+            ? "button_click"
+            : searchForm
+              ? "submit_event"
+              : "enter_key",
       trigger_surface: "xhs.search_result"
     };
   }
