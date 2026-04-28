@@ -393,7 +393,10 @@ export const readCapturedRequestContextViaMainWorld = async (
       method: input.method,
       path: input.path,
       ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
-      shape_key: input.shape_key
+      shape_key: input.shape_key,
+      ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
+        ? { min_observed_at: input.min_observed_at }
+        : {})
     }
   });
   const normalized = asCapturedRequestContextLookupResult(result);
