@@ -5279,6 +5279,29 @@ const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const toIsoString = (value) => new Date(value).toISOString();
+const normalizeSearchQueryText = (value) => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.normalize("NFKC").trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+};
+const isCurrentSearchPageForQuery = (href, query) => {
+    const expectedQuery = normalizeSearchQueryText(query);
+    if (!expectedQuery) {
+        return false;
+    }
+    try {
+        const url = new URL(href);
+        if (url.hostname !== "www.xiaohongshu.com" || !url.pathname.includes("/search_result")) {
+            return false;
+        }
+        return normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery;
+    }
+    catch {
+        return false;
+    }
+};
 const pickFirstString = (record, keys) => {
     for (const key of keys) {
         const value = asString(record[key]);
@@ -6135,7 +6158,9 @@ const executeXhsSearch = async (input, env) => {
                 category: isBackendRejectedSource ? "request_failed" : "page_changed"
             }), gate, auditRecord), gate.execution_audit);
         }
-        const domExtraction = await resolveSearchDomExtraction(env);
+        const domExtraction = isCurrentSearchPageForQuery(env.getLocationHref(), input.params.query)
+            ? await resolveSearchDomExtraction(env)
+            : null;
         if (domExtraction) {
             const count = domExtraction.cards.length;
             return {

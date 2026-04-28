@@ -2364,6 +2364,17 @@ describe("extension build contract", () => {
           getCookie: () => "a1=session-cookie",
           sleep,
           readCapturedRequestContext: async () => null,
+          readPageStateRoot: async () => ({
+            feed: {
+              items: [
+                {
+                  title: "旧搜索词页面卡片",
+                  detail_url:
+                    "https://www.xiaohongshu.com/explore/stale-query-001?xsec_token=token-stale-001&xsec_source=pc_search"
+                }
+              ]
+            }
+          }),
           callSignature,
           fetchJson
         }
@@ -2446,7 +2457,8 @@ describe("extension build contract", () => {
         {
           now: () => 1_710_000_000_000,
           randomId: () => "source-req-dom-state-001",
-          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getLocationHref: () =>
+            "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",

@@ -104,6 +104,30 @@ const asString = (value: unknown): string | null =>
 
 const toIsoString = (value: number): string => new Date(value).toISOString();
 
+const normalizeSearchQueryText = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.normalize("NFKC").trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const isCurrentSearchPageForQuery = (href: string, query: string): boolean => {
+  const expectedQuery = normalizeSearchQueryText(query);
+  if (!expectedQuery) {
+    return false;
+  }
+  try {
+    const url = new URL(href);
+    if (url.hostname !== "www.xiaohongshu.com" || !url.pathname.includes("/search_result")) {
+      return false;
+    }
+    return normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery;
+  } catch {
+    return false;
+  }
+};
+
 type SearchDomCard = {
   title: string | null;
   detail_url: string | null;
@@ -1186,7 +1210,9 @@ export const executeXhsSearch = async (
         gate.execution_audit as JsonRecord | null
       );
     }
-    const domExtraction = await resolveSearchDomExtraction(env);
+    const domExtraction = isCurrentSearchPageForQuery(env.getLocationHref(), input.params.query)
+      ? await resolveSearchDomExtraction(env)
+      : null;
     if (domExtraction) {
       const count = domExtraction.cards.length;
       return {
