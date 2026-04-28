@@ -52,6 +52,8 @@
 
 `observed_at` 取自当前 captured request-context artifact 的 `observed_at ?? captured_at`，只用于 5 分钟 freshness window 判定，不作为长期持久化时间戳。
 
+#583 当前 compatibility matrix 只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity。其他已知 `xsec_source` 值可以被记录为 provenance，但不得在 #583 中放行 detail/user_home 后续读取。
+
 ## 不持久化的内容
 
 - 不持久化 raw page HTML。

@@ -21,6 +21,13 @@
 - 产出：`TODO.md`、`risks.md`
 - 重点：明确 #580 先实现 search passive route，#583 冻结 signed continuity，#582 最后 gate active fallback，#579 merged-main verify 后 #563 才恢复 passive probe。
 
+### 阶段 4：#583 signed continuity gate
+
+- 产出：`contracts/xhs-closeout-route-evidence.md`、`spec.md`、`data-model.md`、实现 PR。
+- 重点：冻结 detail/user_home signed-continuity gate 输入与 fail-closed 分类。
+- 当前 compatibility：只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity 驱动 detail/user_home 后续读取。
+- 不在 #583 中扩展 `pc_feed`、`pc_note`、`pc_profile`、`pc_user` 放行；如发现真实 profile/feed/note context 需求，开派生 issue。
+
 ## 实现约束
 
 - 不修改 `FR-0005` 文档。
@@ -53,11 +60,19 @@
   - active fallback gate 未显式放行时阻断
   - stale/cross-tab/cross-profile/synthetic-only template 阻断
   - fresh current-page template 放行后 evidence class 为 `active_api_fetch_fallback`
+- #583 实现必须补：
+  - 缺 signed URL / 缺 token -> `XSEC_TOKEN_MISSING`
+  - 空 token -> `XSEC_TOKEN_EMPTY`
+  - `observed_at ?? captured_at` 超过 5 分钟或缺失 -> `XSEC_TOKEN_STALE`
+  - `xsec_source` 缺失、集合外或不满足 `source_route=xhs.search && xsec_source=pc_search` -> `XSEC_SOURCE_MISMATCH`
+  - security redirect -> `SECURITY_REDIRECT`
+  - 上述失败都必须发生在签名入口与 API fetch 前
 
 ## 并行 / 串行关系
 
 - 串行：
   - #581 必须先于 #580 合入，避免实现输出 shape 漂移。
+  - #583 contract PR 必须先于 #583 implementation PR 合入，避免实现 gate 输入未冻结。
   - #582 必须晚于 #580/#583，避免 active fallback 在默认 route 未冻结前提前放行。
 - 可并行：
   - #583 的 signed continuity 规约可在 #580 实现后立即推进，不依赖 #582。
@@ -67,3 +82,4 @@
 - #581 spec review 通过并合入 main。
 - reviewer 确认本 FR 未修改 FR-0005，未改变 #445 close condition。
 - reviewer 确认 `active_api_fetch_fallback` 被明确标记为最后 fallback，且未在 #581 中放行。
+- #583 implementation PR 进入前，reviewer 已确认 signed-continuity gate 的 timestamp、freshness window、source compatibility matrix 与 failure reason 已冻结。

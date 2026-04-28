@@ -166,6 +166,8 @@ Canonical Issue: #581
 - stale 判定必须使用当前 captured request-context artifact 的 `observed_at`；若缺失则使用 `captured_at`。两者都缺失时视为 `XSEC_TOKEN_STALE`。
 - freshness window 固定复用 request-context freshness window：5 分钟。`now - (observed_at ?? captured_at) > 5 * 60_000` 时必须 fail closed 为 `XSEC_TOKEN_STALE`，不得复用历史 token。
 - `xsec_source` 允许集合固定为 `pc_search | pc_feed | pc_note | pc_profile | pc_user`；缺失、空值或集合外取值必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
+- #583 当前 route/context compatibility 只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity 驱动 `xhs.detail` / `xhs.user_home` 后续读取。
+- `pc_feed`、`pc_note`、`pc_profile`、`pc_user` 只是已知来源值，不是 #583 放行矩阵；未来支持这些 context 必须开派生 issue 扩展 compatibility matrix。
 - security redirect 必须优先 fail closed 为 `SECURITY_REDIRECT`。
 - 成功路径必须在 summary/evidence 中保留 signed continuity，但不得把 token 写入 canonical data_ref。
 
@@ -302,7 +304,7 @@ And 不得把裸 `note_id` / `user_id` 静默升级为 live fetch
 ### 场景 8：xsec_source 不匹配
 
 Given captured request-context 的 signed URL 包含非空 `xsec_token`
-But `xsec_source` 缺失或不属于当前允许来源集合
+But `xsec_source` 缺失、集合外，或不满足 #583 的 `source_route=xhs.search && xsec_source=pc_search` compatibility
 When 系统准备执行 detail/user_home route
 Then 必须返回 `XSEC_SOURCE_MISMATCH`
 And 不得调用签名入口或 API fetch
