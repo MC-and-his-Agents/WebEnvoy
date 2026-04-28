@@ -1264,8 +1264,8 @@ export class ProfileRuntimeService {
         ? lock.controllerPid
         : lock.ownerPid;
 
-    const identityPreflight = await this.#runIdentityPreflight({
-      input,
+    const identityPreflight = await runIdentityPreflight({
+      params: input.params,
       meta,
       profileDir
     });
@@ -1355,6 +1355,10 @@ export class ProfileRuntimeService {
         nowIso
       });
     }
+    await this.#ensureProfileScopedNativeHostManifest({
+      preflight: identityPreflight,
+      profileDir
+    });
 
     let attachedProfileState: ProfileState = accessState.profileState;
     let nextMeta = meta;

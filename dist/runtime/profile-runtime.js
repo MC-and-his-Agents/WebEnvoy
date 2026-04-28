@@ -896,8 +896,8 @@ export class ProfileRuntimeService {
         const pinnedControllerPid = typeof lock.controllerPid === "number"
             ? lock.controllerPid
             : lock.ownerPid;
-        const identityPreflight = await this.#runIdentityPreflight({
-            input,
+        const identityPreflight = await runIdentityPreflight({
+            params: input.params,
             meta,
             profileDir
         });
@@ -977,6 +977,10 @@ export class ProfileRuntimeService {
                 nowIso
             });
         }
+        await this.#ensureProfileScopedNativeHostManifest({
+            preflight: identityPreflight,
+            profileDir
+        });
         let attachedProfileState = accessState.profileState;
         let nextMeta = meta;
         if (attachableRecoverableRuntime && meta && meta.profileState !== attachedProfileState) {
