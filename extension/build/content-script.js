@@ -5626,6 +5626,10 @@ const isTrustedCapturedTemplate = (template, expected) => {
     if (!request || !asRecord(request.headers)) {
         return false;
     }
+    const response = asRecord(templateRecord.response);
+    if (!response || !("body" in response)) {
+        return false;
+    }
     return serializeCanonicalShape(request.body) === expected.shapeKey;
 };
 const isTrustedRejectedObservation = (observation, expected) => {
