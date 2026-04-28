@@ -254,6 +254,28 @@ const writeManagedInstallMetadata = async (input: {
   );
 };
 
+const readManagedInstallMetadata = async (
+  channelRoot: string
+): Promise<ManagedInstallMetadataRecord | null> => {
+  try {
+    const raw = await readFile(join(channelRoot, MANAGED_INSTALL_METADATA_FILENAME), "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const profileRoot =
+      typeof parsed.profile_root === "string" && parsed.profile_root.trim().length > 0
+        ? parsed.profile_root.trim()
+        : null;
+    if (!profileRoot) {
+      return null;
+    }
+    return {
+      profile_root: profileRoot,
+      bundle_runtime_expected: parsed.bundle_runtime_expected === true
+    };
+  } catch {
+    return null;
+  }
+};
+
 export interface InstallNativeHostInput {
   cwd: string;
   extensionId: string;
@@ -536,6 +558,13 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
   const launcherPath =
     shouldDeleteExplicitLauncher || !registeredLauncherPath ? resolvedPaths.launcherPath : registeredLauncherPath;
   const managedInstall = shouldDeleteRegisteredManagedLauncher ? registeredManagedInstall : null;
+  const managedInstallMetadata = managedInstall
+    ? await readManagedInstallMetadata(managedInstall.channelRoot)
+    : null;
+  const profileRootForCleanup =
+    !profileDir && managedInstallMetadata?.profile_root
+      ? managedInstallMetadata.profile_root
+      : profileRoot;
   const launcherPathSource = resolvedPaths.hasCustomLauncherPath
     ? ("custom" as InstallPathSource)
     : managedInstall
@@ -555,7 +584,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
   }
   const manifestExisted = await pathExists(resolvedPaths.manifestPath);
   const profileScopedManifestPaths = await listProfileScopedNativeHostManifestPaths({
-    profileRoot,
+    profileRoot: profileRootForCleanup,
     profileDir,
     nativeHostName: input.nativeHostName
   });
@@ -564,7 +593,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     await assertNoSymlinkAncestorBetween({
       command: "runtime.uninstall",
       field: "profile_dir",
-      fromDir: profileRoot,
+      fromDir: profileRootForCleanup,
       targetDir: scopedProfileDir
     });
     await assertNoSymlinkAncestorBetween({

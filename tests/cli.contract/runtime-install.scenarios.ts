@@ -2383,6 +2383,29 @@ describe("webenvoy cli contract / runtime install and identity", () => {
     const linkedLauncherPath = String(installSummary.launcher_path);
     const linkedInstallRoot = String(installSummary.install_root);
     const linkedInstallKey = String(installSummary.install_key);
+    const linkedProfileManifestPath = path.join(
+      linkedWorktreeCwd,
+      ".webenvoy",
+      "profiles",
+      "cross-cwd-profile",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    await mkdir(path.dirname(linkedProfileManifestPath), { recursive: true });
+    await writeFile(
+      linkedProfileManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: linkedLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
 
     const uninstall = runCli(
       [
@@ -2413,11 +2436,14 @@ describe("webenvoy cli contract / runtime install and identity", () => {
         launcher_path_source: "repo_owned_default",
         removed: {
           manifest: true,
+          profile_scoped_manifest: true,
+          profile_scoped_manifest_count: 1,
           launcher: true,
           bundle_runtime: true
         },
         remove_result: {
           manifest: "removed",
+          profile_scoped_manifest: "removed",
           launcher: "removed",
           bundle_runtime: "removed"
         }
@@ -2427,6 +2453,9 @@ describe("webenvoy cli contract / runtime install and identity", () => {
       code: "ENOENT"
     });
     await expect(readFile(linkedLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(linkedProfileManifestPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
     await expect(
