@@ -345,6 +345,31 @@ const listProfileScopedNativeHostManifestPaths = async (input: {
     );
 };
 
+const resolveProfileScopedNativeHostManifestCleanupPaths = async (input: {
+  candidates: string[];
+  launcherPath: string;
+}): Promise<string[]> => {
+  const removable: string[] = [];
+  const expectedLauncherPath = normalizePathForBoundaryCheck(input.launcherPath);
+
+  for (const candidate of input.candidates) {
+    if (!(await pathExists(candidate))) {
+      removable.push(candidate);
+      continue;
+    }
+
+    const registration = await readNativeHostRegistrationManifest(candidate);
+    if (
+      registration?.launcherPath &&
+      normalizePathForBoundaryCheck(registration.launcherPath) === expectedLauncherPath
+    ) {
+      removable.push(candidate);
+    }
+  }
+
+  return removable;
+};
+
 export const installNativeHost = async (input: InstallNativeHostInput) => {
   const resolvedPaths = resolveInstallPaths({
     command: "runtime.install",
@@ -357,6 +382,7 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
   const allowedOrigin = `chrome-extension://${input.extensionId}/`;
   const profileDir = resolveProfileDirForLauncher({
+    command: "runtime.install",
     cwd: resolvedPaths.worktreePath,
     profileRoot,
     profileDir: input.profileDir
@@ -528,6 +554,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
   });
   const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
   const profileDir = resolveProfileDirForLauncher({
+    command: "runtime.uninstall",
     cwd: resolvedPaths.worktreePath,
     profileRoot,
     profileDir: input.profileDir
@@ -588,7 +615,11 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     profileDir,
     nativeHostName: input.nativeHostName
   });
-  for (const profileScopedManifestPath of profileScopedManifestPaths) {
+  const removableProfileScopedManifestPaths = await resolveProfileScopedNativeHostManifestCleanupPaths({
+    candidates: profileScopedManifestPaths,
+    launcherPath
+  });
+  for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
     const scopedProfileDir = dirname(dirname(profileScopedManifestPath));
     await assertNoSymlinkAncestorBetween({
       command: "runtime.uninstall",
@@ -605,7 +636,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
   }
   const profileScopedManifestExistingPaths: string[] = [];
-  for (const profileScopedManifestPath of profileScopedManifestPaths) {
+  for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
     if (await pathExists(profileScopedManifestPath)) {
       profileScopedManifestExistingPaths.push(profileScopedManifestPath);
     }
@@ -620,7 +651,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
       ? await pathExists(legacyLauncherPath)
       : false;
   await rm(resolvedPaths.manifestPath, { force: true });
-  for (const profileScopedManifestPath of profileScopedManifestPaths) {
+  for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
     await rm(profileScopedManifestPath, { force: true });
   }
   if (managedInstall) {
@@ -644,10 +675,10 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     manifest_path_source: resolvedPaths.manifestPathSource,
     profile_dir: normalizePathForOutput(profileDir),
     profile_scoped_manifest_path:
-      profileDir && profileScopedManifestPaths.length > 0
-        ? normalizePathForOutput(profileScopedManifestPaths[0])
+      profileDir && removableProfileScopedManifestPaths.length > 0
+        ? normalizePathForOutput(removableProfileScopedManifestPaths[0])
         : null,
-    profile_scoped_manifest_paths: profileScopedManifestPaths.map((entry) =>
+    profile_scoped_manifest_paths: removableProfileScopedManifestPaths.map((entry) =>
       normalizePathForOutput(entry)
     ),
     launcher_dir: normalizePathForOutput(dirname(launcherPath)),
@@ -666,7 +697,7 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     },
     remove_result: {
       manifest: manifestExisted ? "removed" : "already_absent",
-      profile_scoped_manifest: profileScopedManifestPaths.length > 0
+      profile_scoped_manifest: removableProfileScopedManifestPaths.length > 0
         ? profileScopedManifestExistingPaths.length > 0
           ? "removed"
           : "already_absent"

@@ -1438,6 +1438,39 @@ describe("webenvoy cli contract / runtime install and identity", () => {
     });
   });
 
+  it("rejects runtime.uninstall when profile_dir escapes controlled profile root with uninstall ability context", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-profile-dir-boundary-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          profile_dir: "/tmp/webenvoy-profile-outside"
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(uninstall.status).toBe(2);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          ability_id: "runtime.uninstall",
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "profile_dir"
+        }
+      }
+    });
+  });
+
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -1784,6 +1817,24 @@ describe("webenvoy cli contract / runtime install and identity", () => {
 
   it("removes auto-provisioned profile-scoped manifests when runtime.uninstall omits profile_dir", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-all-profile-scoped-manifests-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+    const launcherPath = String(
+      (parseSingleJsonLine(install.stdout).summary as Record<string, unknown>).launcher_path
+    );
     const profileRoot = path.join(runtimeCwd, ".webenvoy", "profiles");
     const profileOneManifest = path.join(
       profileRoot,
@@ -1804,7 +1855,7 @@ describe("webenvoy cli contract / runtime install and identity", () => {
         `${JSON.stringify(
           {
             name: "com.webenvoy.host",
-            path: "/bin/echo",
+            path: launcherPath,
             type: "stdio",
             allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
           },
