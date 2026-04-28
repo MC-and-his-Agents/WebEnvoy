@@ -33,9 +33,34 @@ require_cmd() {
 }
 
 check_gh_auth() {
-  if ! gh auth status >/dev/null 2>&1; then
+  if ! gh api user --jq '.login' >/dev/null 2>&1; then
     die "GitHub CLI 未登录或凭证失效，请先执行: gh auth login"
   fi
+}
+
+repository_slug() {
+  local origin_url=""
+
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    printf '%s\n' "${GITHUB_REPOSITORY}"
+    return 0
+  fi
+
+  origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+  if [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+  if [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+
+  die "无法从 origin remote 推导 GitHub repo slug，请设置 GITHUB_REPOSITORY=owner/repo 后重试。"
 }
 
 ensure_state_file() {
@@ -51,7 +76,22 @@ ensure_state_file() {
 }
 
 load_open_prs() {
-  gh pr list --state open --json number,title,headRefOid,headRefName,author,isDraft,url,baseRefName,milestone
+  gh api --paginate --slurp \
+    -H "Accept: application/vnd.github+json" \
+    "repos/$(repository_slug)/pulls?state=open&per_page=100" \
+    | jq '
+      [ .[][] | {
+          number,
+          title: (.title // ""),
+          headRefOid: (.head.sha // ""),
+          headRefName: (.head.ref // ""),
+          author: { login: (.user.login // "") },
+          isDraft: (.draft // false),
+          url: (.html_url // ""),
+          baseRefName: (.base.ref // ""),
+          milestone
+        } ]
+    '
 }
 
 branch_exists() {
@@ -175,7 +215,7 @@ main() {
   check_gh_auth
   ensure_state_file "${state_file}"
 
-  repo_slug="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+  repo_slug="$(repository_slug)"
 
   if ! branch_exists "${base_branch}"; then
     echo "目标分支 ${base_branch} 尚不存在，跳过本次自动 review。"

@@ -721,7 +721,9 @@ test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
   REUSED_REVIEWER_LOGIN="poller[bot]"
   export REUSED_REVIEWER_LOGIN
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" '"merge_method": "squash"'
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" '"sha": "head-sha-123"'
 }
 
 test_merge_if_safe_without_post_review_respects_comment_contract() {
@@ -734,7 +736,7 @@ test_merge_if_safe_without_post_review_respects_comment_contract() {
     "0"
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
 }
 
 test_merge_if_safe_finds_head_review_across_paginated_reviews() {
@@ -747,7 +749,7 @@ test_merge_if_safe_finds_head_review_across_paginated_reviews() {
     "1"
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/pulls/274/reviews"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/pulls/274/reviews"
   assert_file_contains "${MOCK_GH_CALLS_LOG}" "--paginate"
 }
 
@@ -781,8 +783,8 @@ test_merge_if_safe_blocks_when_required_checks_fail() {
 
   local err_file="${TMP_DIR}/merge.err"
   assert_fail merge_if_safe 274 0 2>"${err_file}"
-  assert_file_contains "${err_file}" "GitHub required checks 未全部通过，拒绝合并。"
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "pr checks 274 --required --json name,bucket,state,link"
+  assert_file_contains "${err_file}" "GitHub checks 未全部通过，拒绝合并。"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "commits/head-sha-123/check-runs"
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
@@ -801,8 +803,8 @@ test_merge_if_safe_blocks_when_review_completed_check_fails() {
 
   local err_file="${TMP_DIR}/merge.err"
   assert_fail merge_if_safe 274 0 2>"${err_file}"
-  assert_file_contains "${err_file}" "GitHub required checks 未全部通过，拒绝合并。"
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "pr checks 274 --required --json name,bucket,state,link"
+  assert_file_contains "${err_file}" "GitHub checks 未全部通过，拒绝合并。"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "commits/head-sha-123/check-runs"
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
@@ -818,7 +820,7 @@ test_merge_if_safe_uses_latest_review_state_on_same_head() {
   printf '%s\n' '[[{"id":22,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-03-26T10:00:00Z"},{"id":11,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"CHANGES_REQUESTED","submitted_at":"2026-03-26T09:00:00Z"}]]' > "${MOCK_GH_REVIEWS_JSON}"
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
 }
 
 test_post_review_fails_when_head_changes_after_review_snapshot() {
@@ -877,7 +879,7 @@ test_merge_if_safe_retries_until_merge_state_behind_recovers() {
   export PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
 }
 
 test_merge_if_safe_fails_when_merge_state_unknown_never_recovers() {
@@ -930,10 +932,10 @@ test_merge_if_safe_retries_until_review_state_is_visible() {
   export PR_GUARDIAN_REVIEW_STATE_RETRY_DELAY_SECONDS
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
 
   local review_calls
-  review_calls="$(grep -c "repos/:owner/:repo/pulls/274/reviews" "${MOCK_GH_CALLS_LOG}")"
+  review_calls="$(grep -c "repos/mcontheway/WebEnvoy/pulls/274/reviews" "${MOCK_GH_CALLS_LOG}")"
   if [[ "${review_calls}" -lt 2 ]]; then
     echo "expected merge_if_safe to retry review-state check at least once" >&2
     exit 1
@@ -975,13 +977,63 @@ test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api()
   export RESULT_FILE
 
   assert_pass post_review 274
-  assert_file_contains "${MOCK_GH_REVIEW_LOG}" "pr review 274 --comment --body-file"
+  assert_file_contains "${MOCK_GH_REVIEW_LOG}" "pulls/274/reviews"
+  assert_file_contains "${MOCK_GH_REVIEW_LOG}" '"event": "COMMENT"'
+  assert_file_contains "${MOCK_GH_REVIEW_LOG}" '"commit_id": "head-sha-123"'
   assert_file_not_contains "${MOCK_GH_REVIEW_LOG}" "pr comment 274"
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/pulls/274/reviews"
-  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/issues/274/comments"
-  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/pulls/274/reviews"
+  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/issues/274/comments"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "head-sha-123"
+}
+
+test_merge_if_safe_delete_branch_deletes_same_repo_non_main_head_ref() {
+  setup_merge_if_safe_fixture \
+    "merge-delete-same-repo-branch" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","headRefName":"fix/delete-me","headRepoFullName":"mcontheway/WebEnvoy","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+
+  assert_pass merge_if_safe 274 1
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "pulls/274/merge"
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "git/refs/heads/fix/delete-me"
+}
+
+test_merge_if_safe_delete_branch_skips_main_head_ref() {
+  setup_merge_if_safe_fixture \
+    "merge-delete-skips-main-head" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","headRefName":"main","headRepoFullName":"mcontheway/WebEnvoy","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+
+  assert_pass merge_if_safe 274 1
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "pulls/274/merge"
+  assert_file_not_contains "${MOCK_GH_MERGE_LOG}" "git/refs/heads/main"
+}
+
+test_merge_if_safe_delete_branch_skips_fork_head_ref() {
+  setup_merge_if_safe_fixture \
+    "merge-delete-skips-fork-head" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","headRefName":"fix/fork-branch","headRepoFullName":"external/WebEnvoy","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+
+  assert_pass merge_if_safe 274 1
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "pulls/274/merge"
+  assert_file_not_contains "${MOCK_GH_MERGE_LOG}" "git/refs/heads/fix/fork-branch"
 }
 
 test_post_review_records_local_guardian_proof_for_human_reviewer() {
@@ -1036,7 +1088,7 @@ test_post_review_retries_until_human_proof_review_is_visible() {
 
   assert_pass post_review 274
   assert_file_contains "$(guardian_proof_store_file)" '"1000"'
-  assert_equal "$(grep -c 'repos/:owner/:repo/pulls/274/reviews' "${MOCK_GH_CALLS_LOG}")" "2"
+  assert_equal "$(grep -c 'repos/mcontheway/WebEnvoy/pulls/274/reviews' "${MOCK_GH_CALLS_LOG}")" "3"
 }
 
 test_merge_if_safe_rejects_comment_marker_without_formal_review() {

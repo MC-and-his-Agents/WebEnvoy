@@ -13,7 +13,7 @@ usage() {
   scripts/open-pr.sh [--issue <number>] [--title <title>] [--base <branch>] [--draft] [--closing <fixes|refs|none>]
 
 说明:
-  基于当前分支自动生成 PR 标题和描述，并调用 gh pr create。
+  基于当前分支自动生成 PR 标题和描述，并通过 GitHub REST 创建 PR。
   默认 base 分支为 main，默认标题取最近一次提交信息。
   默认关闭语义为 `fixes`；如当前 PR 不应关闭 issue，请显式传 `--closing refs` 或 `--closing none`。
   创建 PR 前会执行分支纯度门禁（分支前缀与变更文件类别一致性）。
@@ -36,6 +36,51 @@ current_branch() {
 ensure_not_main_branch() {
   local branch="$1"
   [[ "${branch}" != "main" ]] || die "当前分支是 main，请切到独立分支后再创建 PR。"
+}
+
+check_gh_auth() {
+  if ! gh api user --jq '.login' >/dev/null 2>&1; then
+    die "GitHub CLI 未登录或凭证失效，请先执行 gh auth login"
+  fi
+}
+
+repository_slug() {
+  local origin_url=""
+
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    printf '%s\n' "${GITHUB_REPOSITORY}"
+    return 0
+  fi
+
+  origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+  if [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+  if [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
+    return 0
+  fi
+
+  die "无法从 origin remote 推导 GitHub repo slug，请设置 GITHUB_REPOSITORY=owner/repo 后重试。"
+}
+
+ensure_remote_branch_exists() {
+  local branch="$1"
+  local local_head
+  local remote_head
+
+  remote_head="$(git -C "${REPO_ROOT}" ls-remote --exit-code origin "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 { print $1 }')" \
+    || die "origin/${branch} 不存在；请先 push 当前分支后再创建 PR。"
+  [[ -n "${remote_head}" ]] || die "origin/${branch} 不存在；请先 push 当前分支后再创建 PR。"
+
+  local_head="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+  [[ "${remote_head}" == "${local_head}" ]] \
+    || die "origin/${branch} 尚未更新到当前 HEAD；请先 push 当前分支后再创建 PR。"
 }
 
 latest_commit_subject() {
@@ -165,10 +210,12 @@ main() {
   local risk_level
   local risk_reason
   local tmp_body
-  local create_args=()
+  local payload_file
+  local pr_response_file
 
   require_cmd git
   require_cmd gh
+  require_cmd jq
   require_cmd perl
 
   while [[ $# -gt 0 ]]; do
@@ -216,10 +263,11 @@ main() {
 
   [[ -f "${DEFAULT_TEMPLATE}" ]] || die "缺少 PR 模板: ${DEFAULT_TEMPLATE}"
   [[ -x "${PURITY_GUARD}" ]] || die "缺少可执行门禁脚本: ${PURITY_GUARD}"
-  gh auth status >/dev/null 2>&1 || die "GitHub CLI 未登录或凭证失效，请先执行 gh auth login"
+  check_gh_auth
 
   branch="$(current_branch)"
   ensure_not_main_branch "${branch}"
+  ensure_remote_branch_exists "${branch}"
   "${PURITY_GUARD}" "${branch}" "${base_branch}"
 
   if [[ -z "${title}" ]]; then
@@ -236,12 +284,25 @@ main() {
 
   build_body "${DEFAULT_TEMPLATE}" "${issue_number}" "${base_branch}" "${risk_level}" "${risk_reason}" "${closing_mode}" "${tmp_body}"
 
-  create_args+=(--base "${base_branch}" --title "${title}" --body-file "${tmp_body}")
-  if [[ "${draft}" == "1" ]]; then
-    create_args+=(--draft)
-  fi
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-create-payload.XXXXXX")"
+  pr_response_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-create-response.XXXXXX")"
+  trap "rm -f '${tmp_body}' '${payload_file}' '${pr_response_file}'" EXIT
 
-  gh pr create "${create_args[@]}"
+  jq -n \
+    --arg title "${title}" \
+    --arg head "${branch}" \
+    --arg base "${base_branch}" \
+    --arg body "$(cat "${tmp_body}")" \
+    --argjson draft "${draft}" \
+    '{title: $title, head: $head, base: $base, body: $body, draft: ($draft == 1)}' > "${payload_file}"
+
+  gh api \
+    --method POST \
+    -H "Accept: application/vnd.github+json" \
+    "repos/$(repository_slug)/pulls" \
+    --input "${payload_file}" > "${pr_response_file}"
+
+  jq -r '.html_url // .url' "${pr_response_file}"
 }
 
 main "$@"
