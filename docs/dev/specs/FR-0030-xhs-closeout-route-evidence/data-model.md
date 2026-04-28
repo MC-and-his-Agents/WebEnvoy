@@ -35,6 +35,25 @@
 
 上述 payload 都必须共享同一组 provenance 字段；缺少 route-specific target id、visibility signal 或至少一条 target continuity record 时不得申报成功。
 
+## Signed continuity payload
+
+`xhs.detail` / `xhs.user_home` 的页面内主动 fetch 前必须携带非持久化 signed continuity：
+
+- `source_url`
+- `target_url`
+- `detail_url` 或 `user_home_url`
+- `xsec_token`
+- `xsec_source`
+- `token_presence`
+- `observed_at`
+- `source_route`
+
+该 payload 只能出现在当前 run 的 summary/evidence 中，用于证明 signed URL 与 token continuity；不得写入 canonical identity、profile meta、SQLite 表或长期账号状态。
+
+`observed_at` 取自当前 captured request-context artifact 的 `observed_at ?? captured_at`，只用于 5 分钟 freshness window 判定，不作为长期持久化时间戳。
+
+#583 当前 compatibility matrix 只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity。其他已知 `xsec_source` 值可以被记录为 provenance，但不得在 #583 中放行 detail/user_home 后续读取。
+
 ## 不持久化的内容
 
 - 不持久化 raw page HTML。

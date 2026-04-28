@@ -147,6 +147,10 @@ type XhsRouteEvidenceFailureReasonV1 =
   | "ROUTE_EVIDENCE_MISSING"
   | "DOM_EXTRACTION_MISSING"
   | "PASSIVE_CAPTURE_MISSING"
+  | "XSEC_TOKEN_MISSING"
+  | "XSEC_TOKEN_EMPTY"
+  | "XSEC_TOKEN_STALE"
+  | "XSEC_SOURCE_MISMATCH"
   | "XHS_LOGIN_REQUIRED"
   | "CAPTCHA_REQUIRED"
   | "XHS_ACCOUNT_RISK_PAGE"
@@ -159,3 +163,57 @@ type XhsRouteEvidenceFailureReasonV1 =
 
 - risk/safety reasons 不得降级为 missing evidence。
 - `XHS_LOGIN_REQUIRED`、`SECURITY_REDIRECT`、`ACCOUNT_ABNORMAL`、`XHS_ACCOUNT_RISK_PAGE`、`CAPTCHA_REQUIRED`、`BROWSER_ENV_ABNORMAL` 必须阻断后续 live probe。
+
+## Signed continuity for detail/user_home
+
+```ts
+type XhsSignedContinuityFailureReasonV1 =
+  | "XSEC_TOKEN_MISSING"
+  | "XSEC_TOKEN_EMPTY"
+  | "XSEC_TOKEN_STALE"
+  | "XSEC_SOURCE_MISMATCH"
+  | "SECURITY_REDIRECT";
+
+type XhsSignedContinuityV1 = {
+  source_url: string | null;
+  target_url: string | null;
+  detail_url?: string | null;
+  user_home_url?: string | null;
+  xsec_token: string | null;
+  xsec_source: string | null;
+  token_presence: "present" | "missing" | "empty";
+  observed_at: number | null;
+  source_route:
+    | "xhs.search"
+    | "xhs.detail"
+    | "xhs.user_home"
+    | "unknown";
+};
+
+type XhsAllowedXsecSourceV1 =
+  | "pc_search"
+  | "pc_feed"
+  | "pc_note"
+  | "pc_profile"
+  | "pc_user";
+
+type XhsSignedContinuityCompatibilityV1 = {
+  command: "xhs.detail" | "xhs.user_home";
+  admitted_source_route: "xhs.search";
+  admitted_xsec_source: "pc_search";
+};
+```
+
+约束：
+
+- `xhs.detail` 与 `xhs.user_home` 的主动页面内 fetch 前，必须先从当前 captured request-context 的 signed detail/profile URL 中解析 `xsec_token` 与 `xsec_source`。
+- stale 判定必须使用当前 captured request-context artifact 的 `observed_at`；若缺失则使用 `captured_at`。两者都缺失时视为 `XSEC_TOKEN_STALE`。
+- freshness window 固定复用 request-context freshness window：5 分钟。`now - (observed_at ?? captured_at) > 5 * 60_000` 时必须 fail closed 为 `XSEC_TOKEN_STALE`。
+- `xsec_source` 允许集合固定为 `pc_search | pc_feed | pc_note | pc_profile | pc_user`；缺失、空值或集合外取值必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
+- #583 当前实现准入只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity 驱动 `xhs.detail` / `xhs.user_home` 后续读取；`pc_feed`、`pc_note`、`pc_profile`、`pc_user` 虽是已知来源值，但在 #583 中不得自动放行。
+- 若未来要支持 profile/feed/note context，应开派生 issue 扩展 compatibility matrix，不得在 #583 中把全局 allow-list 当成放行规则。
+- `xsec_token` / `xsec_source` 只属于 route continuity / provenance，不得写入 FR-0026 canonical identity。
+- 裸 `note_id` / `user_id`、裸 `/explore/<id>` URL 或裸 `/user/profile/<id>` URL 不得静默升级为 live fetch。
+- 缺 signed URL、缺 token、空 token、token 已过期、`xsec_source` 缺失或不在允许来源集合时必须 fail closed。
+- security redirect 必须优先分类为 `SECURITY_REDIRECT`，不得降级为 `REQUEST_CONTEXT_MISSING`、`DOM_EXTRACTION_MISSING` 或裸 fetch 重试。
+- 成功路径必须在 summary/evidence 中保留 signed continuity；但该 continuity 仍不得单独满足 #445 full closeout。

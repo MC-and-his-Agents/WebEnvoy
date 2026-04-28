@@ -23,3 +23,9 @@
 - 触发条件：把 `xsec_token` 写入 FR-0026 canonical note identity。
 - 缓解：本 FR 明确 token 属于 route continuity / provenance。
 - 回滚：拆出 identity 变更，转入 #583 continuity 口径。
+
+## 风险 5：裸 ID 被静默升级为 live fetch
+
+- 触发条件：detail/user_home 只拿到裸 `note_id` / `user_id` 或裸目标 URL，仍继续调用签名入口或 API fetch。
+- 缓解：#583 要求 signed URL、`xsec_token` 与 `xsec_source` 在当前 captured request-context 中同时满足；缺失、空值、过期、来源不匹配或 security redirect 必须 fail closed。
+- 回滚：撤回裸 fetch 放行逻辑，恢复 signed continuity fail-closed。

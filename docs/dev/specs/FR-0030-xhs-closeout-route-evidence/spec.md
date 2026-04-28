@@ -142,6 +142,35 @@ Canonical Issue: #581
 - 裸 `user_id` 只能作为页面状态中的目标标识，不得作为缺 token live fetch 的自动升级依据。
 - 若 user_home 页面出现 security redirect、登录墙、验证码、账号异常或浏览器环境异常，必须返回对应风险分类，而不是 `DOM_EXTRACTION_MISSING`。
 
+### 6A. detail/user_home signed continuity
+
+`xhs.detail` 与 `xhs.user_home` 在进入任何页面内主动 API fetch 前，必须先证明当前 captured request-context 绑定了 signed continuity。
+
+最小 signed continuity 字段：
+
+- `source_url`
+- `target_url`
+- `detail_url` 或 `user_home_url`
+- `xsec_token`
+- `xsec_source`
+- `token_presence`
+- `observed_at`
+- `source_route`
+
+约束：
+
+- `xsec_token` / `xsec_source` 是 route continuity / provenance，不是 FR-0026 canonical identity。
+- 裸 `note_id` / `user_id` 只允许作为 identity shape，用于匹配当前目标；不得作为缺 token live fetch 的放行依据。
+- 裸 detail/profile URL 不得静默升级为 live fetch；必须 fail closed 为 `XSEC_TOKEN_MISSING`。
+- `xsec_token=""` 必须 fail closed 为 `XSEC_TOKEN_EMPTY`。
+- stale 判定必须使用当前 captured request-context artifact 的 `observed_at`；若缺失则使用 `captured_at`。两者都缺失时视为 `XSEC_TOKEN_STALE`。
+- freshness window 固定复用 request-context freshness window：5 分钟。`now - (observed_at ?? captured_at) > 5 * 60_000` 时必须 fail closed 为 `XSEC_TOKEN_STALE`，不得复用历史 token。
+- `xsec_source` 允许集合固定为 `pc_search | pc_feed | pc_note | pc_profile | pc_user`；缺失、空值或集合外取值必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
+- #583 当前 route/context compatibility 只允许 `source_route=xhs.search` 且 `xsec_source=pc_search` 的 search-card continuity 驱动 `xhs.detail` / `xhs.user_home` 后续读取。
+- `pc_feed`、`pc_note`、`pc_profile`、`pc_user` 只是已知来源值，不是 #583 放行矩阵；未来支持这些 context 必须开派生 issue 扩展 compatibility matrix。
+- security redirect 必须优先 fail closed 为 `SECURITY_REDIRECT`。
+- 成功路径必须在 summary/evidence 中保留 signed continuity，但不得把 token 写入 canonical data_ref。
+
 ### 7. route-specific sufficiency
 
 系统必须冻结：
@@ -167,11 +196,16 @@ Canonical Issue: #581
 - `ACCOUNT_ABNORMAL`
 - `BROWSER_ENV_ABNORMAL`
 - `SECURITY_REDIRECT`
+- `XSEC_TOKEN_MISSING`
+- `XSEC_TOKEN_EMPTY`
+- `XSEC_TOKEN_STALE`
+- `XSEC_SOURCE_MISMATCH`
 
 约束：
 
 - 这些风险面不得被归类为 `REQUEST_CONTEXT_MISSING`、`DOM_EXTRACTION_MISSING` 或通用 page changed。
 - 任一登录、安全重定向、验证码、账号异常、账号风险页或浏览器环境异常信号出现时，后续 closeout route 必须 hard stop，并由 `#563` 或对应 issue 记录 truth。
+- signed continuity 失败不得回退为裸 ID active fetch；必须在签名与 fetch 前 fail closed。
 
 ## 异常与边界场景
 
@@ -258,4 +292,20 @@ But 缺少 signed URL、`xsec_token` 或 `xsec_source`
 When 系统评估后续 detail/user_home route
 Then 可以记录 `dom_state_extraction` provenance
 And 必须把 continuity 标记为缺失
+And 不得执行页面内主动 API fetch
+
+### 场景 7：detail/user_home signed continuity fail closed
+
+Given `xhs.detail` 或 `xhs.user_home` 只拿到裸目标 ID 或裸目标 URL
+When 系统准备执行页面内主动 API fetch
+Then 必须在签名前返回 `XSEC_TOKEN_MISSING`
+And 不得把裸 `note_id` / `user_id` 静默升级为 live fetch
+
+### 场景 8：xsec_source 不匹配
+
+Given captured request-context 的 signed URL 包含非空 `xsec_token`
+But `xsec_source` 缺失、集合外，或不满足 #583 的 `source_route=xhs.search && xsec_source=pc_search` compatibility
+When 系统准备执行 detail/user_home route
+Then 必须返回 `XSEC_SOURCE_MISMATCH`
+And 不得调用签名入口或 API fetch
 And 不得静默进入 active fetch fallback
