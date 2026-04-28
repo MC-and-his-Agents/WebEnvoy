@@ -295,6 +295,46 @@ const toAbsoluteXhsHref = (href: string | null): string | null => {
   }
 };
 
+const hasSearchCardLikeJson = (value: unknown, seen = new Set<object>()): boolean => {
+  const record = asRecord(value);
+  if (record) {
+    if (seen.has(record)) {
+      return false;
+    }
+    seen.add(record);
+    const href =
+      asString(record.detail_url) ??
+      asString(record.detailUrl) ??
+      asString(record.note_url) ??
+      asString(record.noteUrl) ??
+      asString(record.href) ??
+      asString(record.url) ??
+      asString(record.link);
+    if (href) {
+      const absoluteHref = toAbsoluteXhsHref(href);
+      try {
+        const url = absoluteHref ? new URL(absoluteHref) : null;
+        if (
+          url?.hostname === XHS_READ_DOMAIN &&
+          (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/"))
+        ) {
+          return true;
+        }
+      } catch {
+        // continue recursive scan
+      }
+    }
+    if (
+      asRecord(record.note_card) &&
+      (asString(record.xsec_token) || asString(asRecord(record.note_card)?.xsec_token))
+    ) {
+      return true;
+    }
+    return Object.values(record).some((entry) => hasSearchCardLikeJson(entry, seen));
+  }
+  return Array.isArray(value) ? value.some((entry) => hasSearchCardLikeJson(entry, seen)) : false;
+};
+
 const readJsonScriptSearchState = (): Record<string, unknown> | null => {
   if (typeof document.querySelectorAll !== "function") {
     return null;
@@ -308,6 +348,9 @@ const readJsonScriptSearchState = (): Record<string, unknown> | null => {
       }
       try {
         const parsed = JSON.parse(text) as unknown;
+        if (!hasSearchCardLikeJson(parsed)) {
+          continue;
+        }
         return {
           extraction_layer: "script_json",
           extraction_locator: selector,
