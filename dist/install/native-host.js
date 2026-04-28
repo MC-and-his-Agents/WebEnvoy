@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectManagedNativeHostInstall } from "./native-host-install-root.js";
@@ -176,6 +176,25 @@ const resolveNativeHostRuntimeBundlePlan = async (input) => {
         hostCommand: `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath)}`,
         bundleRuntimeWritten: true
     };
+};
+const listProfileScopedNativeHostManifestPaths = async (input) => {
+    if (input.profileDir) {
+        return [join(input.profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)];
+    }
+    let entries;
+    try {
+        entries = await readdir(input.profileRoot, { withFileTypes: true });
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return [];
+        }
+        throw error;
+    }
+    return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(input.profileRoot, entry.name, "NativeMessagingHosts", `${input.nativeHostName}.json`));
 };
 export const installNativeHost = async (input) => {
     const resolvedPaths = resolveInstallPaths({
@@ -388,27 +407,33 @@ export const uninstallNativeHost = async (input) => {
         await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
     }
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
-    const profileScopedManifestPath = profileDir
-        ? join(profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)
-        : null;
-    if (profileScopedManifestPath && profileDir) {
+    const profileScopedManifestPaths = await listProfileScopedNativeHostManifestPaths({
+        profileRoot,
+        profileDir,
+        nativeHostName: input.nativeHostName
+    });
+    for (const profileScopedManifestPath of profileScopedManifestPaths) {
+        const scopedProfileDir = dirname(dirname(profileScopedManifestPath));
         await assertNoSymlinkAncestorBetween({
             command: "runtime.uninstall",
             field: "profile_dir",
             fromDir: profileRoot,
-            targetDir: profileDir
+            targetDir: scopedProfileDir
         });
         await assertNoSymlinkAncestorBetween({
             command: "runtime.uninstall",
             field: "profile_dir",
-            fromDir: profileDir,
+            fromDir: scopedProfileDir,
             targetDir: dirname(profileScopedManifestPath)
         });
         await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
     }
-    const profileScopedManifestExisted = profileScopedManifestPath
-        ? await pathExists(profileScopedManifestPath)
-        : false;
+    const profileScopedManifestExistingPaths = [];
+    for (const profileScopedManifestPath of profileScopedManifestPaths) {
+        if (await pathExists(profileScopedManifestPath)) {
+            profileScopedManifestExistingPaths.push(profileScopedManifestPath);
+        }
+    }
     const launcherExisted = shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
         ? await pathExists(launcherPath)
         : false;
@@ -417,7 +442,7 @@ export const uninstallNativeHost = async (input) => {
         ? await pathExists(legacyLauncherPath)
         : false;
     await rm(resolvedPaths.manifestPath, { force: true });
-    if (profileScopedManifestPath) {
+    for (const profileScopedManifestPath of profileScopedManifestPaths) {
         await rm(profileScopedManifestPath, { force: true });
     }
     if (managedInstall) {
@@ -440,22 +465,26 @@ export const uninstallNativeHost = async (input) => {
         manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
         manifest_path_source: resolvedPaths.manifestPathSource,
         profile_dir: normalizePathForOutput(profileDir),
-        profile_scoped_manifest_path: normalizePathForOutput(profileScopedManifestPath),
+        profile_scoped_manifest_path: profileDir && profileScopedManifestPaths.length > 0
+            ? normalizePathForOutput(profileScopedManifestPaths[0])
+            : null,
+        profile_scoped_manifest_paths: profileScopedManifestPaths.map((entry) => normalizePathForOutput(entry)),
         launcher_dir: normalizePathForOutput(dirname(launcherPath)),
         launcher_path: normalizePathForOutput(launcherPath),
         launcher_path_source: launcherPathSource,
         legacy_launcher_path: normalizePathForOutput(legacyLauncherPath && legacyLauncherPath !== launcherPath ? legacyLauncherPath : null),
         removed: {
             manifest: manifestExisted,
-            profile_scoped_manifest: profileScopedManifestExisted,
+            profile_scoped_manifest: profileScopedManifestExistingPaths.length > 0,
+            profile_scoped_manifest_count: profileScopedManifestExistingPaths.length,
             launcher: launcherExisted,
             bundle_runtime: bundleRuntimeExisted,
             legacy_launcher: legacyLauncherExisted
         },
         remove_result: {
             manifest: manifestExisted ? "removed" : "already_absent",
-            profile_scoped_manifest: profileScopedManifestPath
-                ? profileScopedManifestExisted
+            profile_scoped_manifest: profileScopedManifestPaths.length > 0
+                ? profileScopedManifestExistingPaths.length > 0
                     ? "removed"
                     : "already_absent"
                 : "not_applicable",
@@ -468,7 +497,7 @@ export const uninstallNativeHost = async (input) => {
             legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
         },
         idempotent: !manifestExisted &&
-            !profileScopedManifestExisted &&
+            profileScopedManifestExistingPaths.length === 0 &&
             !launcherExisted &&
             !bundleRuntimeExisted &&
             !legacyLauncherExisted

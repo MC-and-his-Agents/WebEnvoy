@@ -1782,6 +1782,72 @@ describe("webenvoy cli contract / runtime install and identity", () => {
     });
   });
 
+  it("removes auto-provisioned profile-scoped manifests when runtime.uninstall omits profile_dir", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profileRoot = path.join(runtimeCwd, ".webenvoy", "profiles");
+    const profileOneManifest = path.join(
+      profileRoot,
+      "profile-one",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    const profileTwoManifest = path.join(
+      profileRoot,
+      "profile-two",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    for (const manifestPath of [profileOneManifest, profileTwoManifest]) {
+      await mkdir(path.dirname(manifestPath), { recursive: true });
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            name: "com.webenvoy.host",
+            path: "/bin/echo",
+            type: "stdio",
+            allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+    }
+
+    const result = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-all-profile-scoped-manifests-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(result.status).toBe(0);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        removed: {
+          profile_scoped_manifest: true,
+          profile_scoped_manifest_count: 2
+        },
+        remove_result: {
+          profile_scoped_manifest: "removed"
+        },
+        idempotent: false
+      }
+    });
+    await expect(readFile(profileOneManifest, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(profileTwoManifest, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("removes legacy browser-adjacent launcher when runtime.uninstall uses default install paths", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
