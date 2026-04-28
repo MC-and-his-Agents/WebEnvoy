@@ -1315,6 +1315,17 @@ const handleCapturedRequestContextReadRequest = async (request) => {
         }
         return (artifact.observed_at ?? artifact.captured_at) >= minObservedAt;
     };
+    const resolveAvailableShapeKeys = (routeBucket) => {
+        if (!routeBucket) {
+            return [];
+        }
+        if (minObservedAt === null) {
+            return [...routeBucket.keys()];
+        }
+        return [...routeBucket.entries()]
+            .filter(([, bucket]) => isFreshForLookup(bucket.admittedTemplate) || isFreshForLookup(bucket.rejectedObservation))
+            .map(([shapeKey]) => shapeKey);
+    };
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
     const result = method && path && namespace && shapeKey && routeScopeKey
         ? (() => {
@@ -1341,7 +1352,7 @@ const handleCapturedRequestContextReadRequest = async (request) => {
                         (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
                     return isFreshForLookup(incompatible) ? incompatible : null;
                 })(),
-                available_shape_keys: routeBucket ? [...routeBucket.keys()] : []
+                available_shape_keys: resolveAvailableShapeKeys(routeBucket)
             };
         })()
         : null;
