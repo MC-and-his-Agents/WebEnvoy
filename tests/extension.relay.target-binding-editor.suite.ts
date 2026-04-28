@@ -1166,9 +1166,7 @@ describe("extension background relay contract / target binding and editor input"
     ).toEqual(expect.arrayContaining(["TARGET_PAGE_CONTEXT_UNRESOLVED"]));
   });
 
-  it("returns structured payload when xhs.search request times out", async () => {
-    const timeoutError = new Error("request timeout");
-    timeoutError.name = "AbortError";
+  it("returns structured payload when xhs.search passive request observation fails", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -1177,13 +1175,16 @@ describe("extension background relay contract / target binding and editor input"
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
-        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
+        readCapturedRequestContext: createCapturedSearchRequestContextReader({
+          rejectedStatus: 0,
+          rejectedBody: {}
+        }),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
         }),
         fetchJson: async () => {
-          throw timeoutError;
+          throw new Error("xhs.search passive route should not fall back to active fetch");
         }
       }
     });
@@ -1242,7 +1243,7 @@ describe("extension background relay contract / target binding and editor input"
     expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
     expect(response.payload).toMatchObject({
       details: {
-        reason: "REQUEST_TIMEOUT"
+        reason: "TARGET_API_RESPONSE_INVALID"
       },
       diagnosis: {
         category: "request_failed"

@@ -188,6 +188,9 @@ export const createCapturedSearchRequestContextReader = (input?: {
   observedAt?: number;
   searchId?: string;
   referrer?: string;
+  responseBody?: Record<string, unknown>;
+  rejectedStatus?: number;
+  rejectedBody?: Record<string, unknown>;
 }) => {
   return async (lookup: {
     page_context_namespace: string;
@@ -206,56 +209,91 @@ export const createCapturedSearchRequestContextReader = (input?: {
     const noteType = typeof shape?.note_type === "number" ? shape.note_type : 0;
     const pageContextNamespace =
       lookup.page_context_namespace || "https://www.xiaohongshu.com/search_result";
-    return {
+    const commonArtifact = {
+      source_kind: "page_request" as const,
+      route_evidence_class: "passive_api_capture" as const,
+      transport: "fetch" as const,
+      method: "POST" as const,
+      path: "/api/sns/web/v1/search/notes" as const,
+      url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+      status: input?.rejectedStatus ?? 200,
+      captured_at: input?.capturedAt ?? 900,
+      observed_at: input?.observedAt ?? 900,
       page_context_namespace: pageContextNamespace,
       shape_key: lookup.shape_key,
-      admitted_template: {
-        source_kind: "page_request",
-        transport: "fetch",
-        method: "POST",
-        path: "/api/sns/web/v1/search/notes",
-        url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
-        status: 200,
-        captured_at: input?.capturedAt ?? 900,
-        observed_at: input?.observedAt ?? 900,
-        page_context_namespace: pageContextNamespace,
-        shape_key: lookup.shape_key,
-        shape: {
-          command: "xhs.search",
-          method: "POST",
-          pathname: "/api/sns/web/v1/search/notes",
+      shape: {
+        command: "xhs.search" as const,
+        method: "POST" as const,
+        pathname: "/api/sns/web/v1/search/notes" as const,
+        keyword,
+        page,
+        page_size: pageSize,
+        sort,
+        note_type: noteType
+      },
+      referrer:
+        input?.referrer ?? "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
+      request: {
+        headers: {
+          accept: "application/json, text/plain, */*",
+          "content-type": "application/json;charset=utf-8",
+          "X-S-Common": "{}",
+          "x-s": "signed-template",
+          "x-t": "1700000000"
+        },
+        body: {
           keyword,
           page,
           page_size: pageSize,
+          search_id: input?.searchId ?? "captured-search-id",
           sort,
           note_type: noteType
-        },
-        referrer:
-          input?.referrer ?? "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
-        template_ready: true,
-        request_status: {
-          completion: "completed",
-          http_status: 200
-        },
-        request: {
-          headers: {
-            accept: "application/json, text/plain, */*",
-            "content-type": "application/json;charset=utf-8",
-            "X-S-Common": "{}",
-            "x-s": "signed-template",
-            "x-t": "1700000000"
-          },
-          body: {
-            keyword,
-            page,
-            page_size: pageSize,
-            search_id: input?.searchId ?? "captured-search-id",
-            sort,
-            note_type: noteType
-          }
         }
       },
-      rejected_observation: null,
+      response: {
+        headers: {
+          "content-type": "application/json"
+        },
+        body: input?.responseBody ?? {
+          code: 0,
+          data: {
+            items: []
+          }
+        }
+      }
+    };
+    const rejectedObservation =
+      input?.rejectedStatus !== undefined || input?.rejectedBody !== undefined
+        ? {
+            ...commonArtifact,
+            status: input?.rejectedStatus ?? 0,
+            rejection_reason: "failed_request_rejected" as const,
+            request_status: {
+              completion: "failed" as const,
+              http_status: input?.rejectedStatus ?? null
+            },
+            response: {
+              headers: {
+                "content-type": "application/json"
+              },
+              body: input?.rejectedBody ?? {}
+            }
+          }
+        : null;
+    return {
+      page_context_namespace: pageContextNamespace,
+      shape_key: lookup.shape_key,
+      admitted_template: rejectedObservation
+        ? null
+        : {
+            ...commonArtifact,
+            template_ready: true,
+            request_status: {
+              completion: "completed" as const,
+              http_status: 200
+            }
+          },
+      rejected_observation: rejectedObservation,
       incompatible_observation: null,
       available_shape_keys: [lookup.shape_key]
     };

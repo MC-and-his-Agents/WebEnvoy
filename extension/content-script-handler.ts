@@ -284,6 +284,261 @@ const readAccountSafetyOverlay = (): XhsAccountSafetyOverlay | null => {
   return null;
 };
 
+const toAbsoluteXhsHref = (href: string | null): string | null => {
+  if (!href || href.trim().length === 0) {
+    return null;
+  }
+  try {
+    return new URL(href, window.location.origin).toString();
+  } catch {
+    return href;
+  }
+};
+
+const hasSearchCardLikeJson = (value: unknown, seen = new Set<object>()): boolean => {
+  const record = asRecord(value);
+  if (record) {
+    if (seen.has(record)) {
+      return false;
+    }
+    seen.add(record);
+    const href =
+      asString(record.detail_url) ??
+      asString(record.detailUrl) ??
+      asString(record.note_url) ??
+      asString(record.noteUrl) ??
+      asString(record.href) ??
+      asString(record.url) ??
+      asString(record.link);
+    if (href) {
+      const absoluteHref = toAbsoluteXhsHref(href);
+      try {
+        const url = absoluteHref ? new URL(absoluteHref) : null;
+        if (
+          url?.hostname === XHS_READ_DOMAIN &&
+          (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/"))
+        ) {
+          return true;
+        }
+      } catch {
+        // continue recursive scan
+      }
+    }
+    if (
+      asRecord(record.note_card) &&
+      (asString(record.xsec_token) || asString(asRecord(record.note_card)?.xsec_token))
+    ) {
+      return true;
+    }
+    return Object.values(record).some((entry) => hasSearchCardLikeJson(entry, seen));
+  }
+  return Array.isArray(value) ? value.some((entry) => hasSearchCardLikeJson(entry, seen)) : false;
+};
+
+const readJsonScriptSearchState = (): Record<string, unknown> | null => {
+  if (typeof document.querySelectorAll !== "function") {
+    return null;
+  }
+  const selectors = ['script[type="application/json"]', "script#__NEXT_DATA__", "script:not([src])"];
+  for (const selector of selectors) {
+    for (const element of Array.from(document.querySelectorAll(selector))) {
+      const text = (element.textContent ?? "").trim();
+      if (!text || (!text.includes("xsec") && !text.includes("/explore/"))) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(text) as unknown;
+        if (!hasSearchCardLikeJson(parsed)) {
+          continue;
+        }
+        return {
+          extraction_layer: "script_json",
+          extraction_locator: selector,
+          cards: parsed
+        };
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+};
+
+const readSearchDomCards = (): Record<string, unknown>[] => {
+  if (typeof document.querySelectorAll !== "function") {
+    return [];
+  }
+  const anchors = Array.from(
+    document.querySelectorAll('a[href*="/explore/"], a[href*="/discovery/item/"]')
+  );
+  return anchors
+    .map((anchor) => {
+      const root =
+        anchor.closest('[class*="note"], [class*="card"], article, section, li') ??
+        anchor.parentElement ??
+        anchor;
+      const userAnchor = root.querySelector('a[href*="/user/profile/"]');
+      const titleElement =
+        root.querySelector('[class*="title"], [class*="desc"]') ?? anchor.querySelector("[title]");
+      const title =
+        (titleElement as HTMLElement | null)?.innerText?.trim() ||
+        (titleElement?.textContent ?? "").trim() ||
+        (anchor.getAttribute("title") ?? "").trim() ||
+        (anchor.textContent ?? "").trim() ||
+        null;
+      return {
+        title,
+        detail_url: toAbsoluteXhsHref(anchor.getAttribute("href")),
+        user_home_url: toAbsoluteXhsHref(userAnchor?.getAttribute("href") ?? null)
+      };
+    })
+    .filter((card) => typeof card.detail_url === "string" && card.detail_url.length > 0)
+    .slice(0, 30);
+};
+
+const readXhsSearchDomState = (): Record<string, unknown> | null => {
+  const scriptState = readJsonScriptSearchState();
+  if (scriptState) {
+    return scriptState;
+  }
+  const cards = readSearchDomCards();
+  return cards.length > 0
+    ? {
+        extraction_layer: "dom_selector",
+        extraction_locator: 'a[href*="/explore/"], a[href*="/discovery/item/"]',
+        cards
+      }
+    : null;
+};
+
+const normalizeSearchQueryText = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.normalize("NFKC").trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const isCurrentSearchPageForQuery = (href: string, query: string): boolean => {
+  const expectedQuery = normalizeSearchQueryText(query);
+  if (!expectedQuery) {
+    return false;
+  }
+  try {
+    const url = new URL(href);
+    return (
+      url.hostname === XHS_READ_DOMAIN &&
+      url.pathname.includes("/search_result") &&
+      normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery
+    );
+  } catch {
+    return false;
+  }
+};
+
+const performXhsSearchPassiveAction = async (input: {
+  query: string;
+  pageUrl: string;
+  runId: string;
+  actionRef: string;
+}): Promise<Record<string, unknown>> => {
+  const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
+  const searchInput = document.querySelector(
+    'input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]'
+  ) as HTMLInputElement | null;
+  if (!queryMatched && searchInput) {
+    const searchForm = searchInput.closest("form") as HTMLFormElement | null;
+    const searchButton = (searchForm?.querySelector(
+      'button[type="submit"], button[class*="search"], [role="button"][class*="search"]'
+    ) ?? document.querySelector(
+      'button[type="submit"], button[class*="search"], [role="button"][class*="search"]'
+    )) as HTMLElement | null;
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set;
+    searchInput.focus();
+    valueSetter?.call(searchInput, input.query);
+    searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.query }));
+    searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    searchInput.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" })
+    );
+    searchInput.dispatchEvent(
+      new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" })
+    );
+    if (searchForm && typeof searchForm.requestSubmit === "function") {
+      searchForm.requestSubmit();
+    } else if (searchButton && typeof searchButton.click === "function") {
+      searchButton.click();
+    } else if (searchForm) {
+      searchForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+    return {
+      evidence_class: "humanized_action",
+      action_kind: "keyboard_input",
+      action_ref: input.actionRef,
+      run_id: input.runId,
+      page_url: input.pageUrl,
+      query: input.query,
+      query_matched: false,
+      search_input_found: true,
+      search_form_found: Boolean(searchForm),
+      search_button_found: Boolean(searchButton),
+      submit_triggered:
+        searchForm && typeof searchForm.requestSubmit === "function"
+          ? "form_request_submit"
+          : searchButton
+            ? "button_click"
+            : searchForm
+              ? "submit_event"
+              : "enter_key",
+      trigger_surface: "xhs.search_result"
+    };
+  }
+  if (queryMatched) {
+    const target = document.scrollingElement ?? document.documentElement;
+    const beforeScrollY = window.scrollY;
+    const deltaY = 240;
+    target.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY
+      })
+    );
+    window.scrollBy({
+      top: deltaY,
+      left: 0,
+      behavior: "auto"
+    });
+    target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return {
+      evidence_class: "humanized_action",
+      action_kind: "scroll",
+      action_ref: input.actionRef,
+      run_id: input.runId,
+      page_url: input.pageUrl,
+      query: input.query,
+      query_matched: true,
+      before_scroll_y: beforeScrollY,
+      after_scroll_y: window.scrollY,
+      trigger_surface: "xhs.search_result"
+    };
+  }
+  return {
+    evidence_class: "humanized_action",
+    action_kind: "keyboard_input",
+    action_ref: input.actionRef,
+    run_id: input.runId,
+    page_url: input.pageUrl,
+    query: input.query,
+    query_matched: false,
+    search_input_found: false,
+    skipped_reason: "search_input_missing"
+  };
+};
+
 const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   now: () => Date.now(),
   randomId: () =>
@@ -298,6 +553,8 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   readPageStateRoot: async () => await readPageStateViaMainWorld(),
+  readSearchDomState: async () => readXhsSearchDomState(),
+  performSearchPassiveAction: async (input) => await performXhsSearchPassiveAction(input),
   readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],

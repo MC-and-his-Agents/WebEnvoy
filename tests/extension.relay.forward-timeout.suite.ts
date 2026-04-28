@@ -153,7 +153,6 @@ describe("extension background relay contract / forward and timeout", () => {
   });
 
   it("passes xhs.search execution payload through relay on error", async () => {
-    let capturedHeaders: Record<string, string> | null = null;
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -162,20 +161,19 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
-        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
+        readCapturedRequestContext: createCapturedSearchRequestContextReader({
+          rejectedStatus: 461,
+          rejectedBody: {
+            code: 300011,
+            msg: "Account abnormal. Switch account and retry."
+          }
+        }),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
         }),
-        fetchJson: async (request) => {
-          capturedHeaders = request.headers;
-          return {
-            status: 200,
-            body: {
-              code: 300011,
-              msg: "Account abnormal. Switch account and retry."
-            }
-          };
+        fetchJson: async () => {
+          throw new Error("xhs.search passive route should not fall back to active fetch");
         }
       }
     });
@@ -249,7 +247,6 @@ describe("extension background relay contract / forward and timeout", () => {
         }
       }
     });
-    expect(capturedHeaders?.["X-S-Common"]).toBe("{}");
   });
 
   it.each([
@@ -2231,9 +2228,7 @@ describe("extension background relay contract / forward and timeout", () => {
     ).toEqual(expect.arrayContaining(["TARGET_PAGE_CONTEXT_UNRESOLVED"]));
   });
 
-  it("returns structured payload when xhs.search request times out", async () => {
-    const timeoutError = new Error("request timeout");
-    timeoutError.name = "AbortError";
+  it("returns structured payload when xhs.search passive request observation fails", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -2242,13 +2237,16 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
-        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
+        readCapturedRequestContext: createCapturedSearchRequestContextReader({
+          rejectedStatus: 0,
+          rejectedBody: {}
+        }),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
         }),
         fetchJson: async () => {
-          throw timeoutError;
+          throw new Error("xhs.search passive route should not fall back to active fetch");
         }
       }
     });
@@ -2288,7 +2286,7 @@ describe("extension background relay contract / forward and timeout", () => {
     expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
     expect(response.payload).toMatchObject({
       details: {
-        reason: "REQUEST_TIMEOUT"
+        reason: "TARGET_API_RESPONSE_INVALID"
       },
       diagnosis: {
         category: "request_failed"

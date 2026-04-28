@@ -1051,6 +1051,7 @@ const storeCapturedRequestContext = (
       ));
 
   const artifact: CapturedRequestContextArtifact = {
+    ...(candidate.synthetic ? {} : { route_evidence_class: "passive_api_capture" as const }),
     source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
     transport: candidate.transport,
     method: candidate.method,
@@ -1581,6 +1582,32 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
     currentPageCaptureContext.pageContextNamespace
   );
   const shapeKey = asString(request.payload.shape_key);
+  const minObservedAt =
+    typeof request.payload.min_observed_at === "number" && Number.isFinite(request.payload.min_observed_at)
+      ? request.payload.min_observed_at
+      : null;
+  const isFreshForLookup = (artifact: CapturedRequestContextArtifact | null | undefined): boolean => {
+    if (!artifact) {
+      return false;
+    }
+    if (minObservedAt === null) {
+      return true;
+    }
+    return (artifact.observed_at ?? artifact.captured_at) >= minObservedAt;
+  };
+  const resolveAvailableShapeKeys = (
+    routeBucket: Map<string, CapturedContextBucket> | null | undefined
+  ): string[] => {
+    if (!routeBucket) {
+      return [];
+    }
+    if (minObservedAt === null) {
+      return [...routeBucket.keys()];
+    }
+    return [...routeBucket.entries()]
+      .filter(([, bucket]) => isFreshForLookup(bucket.admittedTemplate) || isFreshForLookup(bucket.rejectedObservation))
+      .map(([shapeKey]) => shapeKey);
+  };
   const routeScopeKey =
     method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
   const result: CapturedRequestContextLookupResult | null =
@@ -1596,19 +1623,25 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
             admitted_template:
               exactBucket?.admittedTemplate &&
               exactBucket.admittedTemplate.method === method &&
-              exactBucket.admittedTemplate.path === path
+              exactBucket.admittedTemplate.path === path &&
+              isFreshForLookup(exactBucket.admittedTemplate)
                 ? exactBucket.admittedTemplate
                 : null,
             rejected_observation:
               exactBucket?.rejectedObservation &&
               exactBucket.rejectedObservation.method === method &&
-              exactBucket.rejectedObservation.path === path
+              exactBucket.rejectedObservation.path === path &&
+              isFreshForLookup(exactBucket.rejectedObservation)
                 ? exactBucket.rejectedObservation
                 : null,
             incompatible_observation:
-              getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
-              (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null),
-            available_shape_keys: routeBucket ? [...routeBucket.keys()] : []
+              (() => {
+                const incompatible =
+                  getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
+                  (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
+                return isFreshForLookup(incompatible) ? incompatible : null;
+              })(),
+            available_shape_keys: resolveAvailableShapeKeys(routeBucket)
           };
         })()
       : null;

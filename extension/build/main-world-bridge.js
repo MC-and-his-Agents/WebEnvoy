@@ -880,6 +880,7 @@ const storeCapturedRequestContext = (candidate, input) => {
         (contextShape.routeScope.command !== "xhs.detail" ||
             detailResponseContainsCanonicalNoteId(input.responseBody, contextShape.shape.note_id ?? ""));
     const artifact = {
+        ...(candidate.synthetic ? {} : { route_evidence_class: "passive_api_capture" }),
         source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
         transport: candidate.transport,
         method: candidate.method,
@@ -1302,6 +1303,29 @@ const handleCapturedRequestContextReadRequest = async (request) => {
     const currentPageCaptureContext = resolveCurrentPageCaptureContext();
     const namespace = resolveActiveVisitedPageContextNamespace(asString(request.payload.page_context_namespace), currentPageCaptureContext.pageContextNamespace);
     const shapeKey = asString(request.payload.shape_key);
+    const minObservedAt = typeof request.payload.min_observed_at === "number" && Number.isFinite(request.payload.min_observed_at)
+        ? request.payload.min_observed_at
+        : null;
+    const isFreshForLookup = (artifact) => {
+        if (!artifact) {
+            return false;
+        }
+        if (minObservedAt === null) {
+            return true;
+        }
+        return (artifact.observed_at ?? artifact.captured_at) >= minObservedAt;
+    };
+    const resolveAvailableShapeKeys = (routeBucket) => {
+        if (!routeBucket) {
+            return [];
+        }
+        if (minObservedAt === null) {
+            return [...routeBucket.keys()];
+        }
+        return [...routeBucket.entries()]
+            .filter(([, bucket]) => isFreshForLookup(bucket.admittedTemplate) || isFreshForLookup(bucket.rejectedObservation))
+            .map(([shapeKey]) => shapeKey);
+    };
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
     const result = method && path && namespace && shapeKey && routeScopeKey
         ? (() => {
@@ -1313,17 +1337,22 @@ const handleCapturedRequestContextReadRequest = async (request) => {
                 shape_key: shapeKey,
                 admitted_template: exactBucket?.admittedTemplate &&
                     exactBucket.admittedTemplate.method === method &&
-                    exactBucket.admittedTemplate.path === path
+                    exactBucket.admittedTemplate.path === path &&
+                    isFreshForLookup(exactBucket.admittedTemplate)
                     ? exactBucket.admittedTemplate
                     : null,
                 rejected_observation: exactBucket?.rejectedObservation &&
                     exactBucket.rejectedObservation.method === method &&
-                    exactBucket.rejectedObservation.path === path
+                    exactBucket.rejectedObservation.path === path &&
+                    isFreshForLookup(exactBucket.rejectedObservation)
                     ? exactBucket.rejectedObservation
                     : null,
-                incompatible_observation: getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
-                    (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null),
-                available_shape_keys: routeBucket ? [...routeBucket.keys()] : []
+                incompatible_observation: (() => {
+                    const incompatible = getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
+                        (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
+                    return isFreshForLookup(incompatible) ? incompatible : null;
+                })(),
+                available_shape_keys: resolveAvailableShapeKeys(routeBucket)
             };
         })()
         : null;

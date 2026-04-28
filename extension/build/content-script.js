@@ -5277,21 +5277,250 @@ const asInteger = (value) => {
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
-const serializeRequestBody = (value) => {
-    if (value === undefined || value === null) {
-        return undefined;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toIsoString = (value) => new Date(value).toISOString();
+const normalizeSearchQueryText = (value) => {
+    if (typeof value !== "string") {
+        return null;
     }
-    if (typeof value === "string") {
+    const normalized = value.normalize("NFKC").trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+};
+const isCurrentSearchPageForQuery = (href, query) => {
+    const expectedQuery = normalizeSearchQueryText(query);
+    if (!expectedQuery) {
+        return false;
+    }
+    try {
+        const url = new URL(href);
+        if (url.hostname !== "www.xiaohongshu.com" || !url.pathname.includes("/search_result")) {
+            return false;
+        }
+        return normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery;
+    }
+    catch {
+        return false;
+    }
+};
+const pickFirstString = (record, keys) => {
+    for (const key of keys) {
+        const value = asString(record[key]);
+        if (value) {
+            return value;
+        }
+    }
+    return null;
+};
+const normalizeXhsUrl = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        return new URL(value, "https://www.xiaohongshu.com").toString();
+    }
+    catch {
         return value;
     }
-    return JSON.stringify(value);
 };
-const buildReplayRequestPayload = (capturedBody, freshPayload) => ({
-    ...capturedBody,
-    search_id: typeof freshPayload.search_id === "string" && freshPayload.search_id.length > 0
-        ? freshPayload.search_id
-        : capturedBody.search_id
-});
+const isXhsNoteCardUrl = (value) => {
+    if (!value) {
+        return false;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return (url.hostname === "www.xiaohongshu.com" &&
+            (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/")));
+    }
+    catch {
+        return false;
+    }
+};
+const isXhsUserProfileUrl = (value) => {
+    if (!value) {
+        return false;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/user/profile/");
+    }
+    catch {
+        return false;
+    }
+};
+const parseXsecFromUrl = (value) => {
+    if (!value) {
+        return {
+            xsec_token: null,
+            xsec_source: null
+        };
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return {
+            xsec_token: asString(url.searchParams.get("xsec_token")),
+            xsec_source: asString(url.searchParams.get("xsec_source"))
+        };
+    }
+    catch {
+        return {
+            xsec_token: null,
+            xsec_source: null
+        };
+    }
+};
+const buildXhsContinuityUrl = (input) => {
+    if (!input.id || !input.xsecToken) {
+        return null;
+    }
+    const path = input.kind === "note"
+        ? `/explore/${encodeURIComponent(input.id)}`
+        : `/user/profile/${encodeURIComponent(input.id)}`;
+    const url = new URL(path, "https://www.xiaohongshu.com");
+    url.searchParams.set("xsec_token", input.xsecToken);
+    if (input.xsecSource) {
+        url.searchParams.set("xsec_source", input.xsecSource);
+    }
+    return url.toString();
+};
+const collectSearchDomCards = (value, seen = new Set()) => {
+    const record = asRecord(value);
+    if (record) {
+        if (seen.has(record)) {
+            return [];
+        }
+        seen.add(record);
+        const userRecord = asRecord(record.user) ?? asRecord(record.author);
+        const noteCardRecord = asRecord(record.note_card) ?? asRecord(record.noteCard);
+        const hasKnownSearchCardShape = noteCardRecord !== null ||
+            "display_title" in record ||
+            "displayTitle" in record ||
+            "interact_info" in record ||
+            "cover" in record ||
+            "image_list" in record ||
+            "video_info" in record;
+        const noteCardUserRecord = asRecord(noteCardRecord?.user) ?? asRecord(noteCardRecord?.author) ?? null;
+        const noteId = pickFirstString(record, ["note_id", "noteId", "id"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["note_id", "noteId", "id"]) : null);
+        const userId = pickFirstString(record, ["user_id", "userId"]) ??
+            (userRecord ? pickFirstString(userRecord, ["user_id", "userId", "id"]) : null) ??
+            (noteCardUserRecord ? pickFirstString(noteCardUserRecord, ["user_id", "userId", "id"]) : null);
+        const rawDetailUrl = normalizeXhsUrl(pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"]) ??
+            (noteCardRecord
+                ? pickFirstString(noteCardRecord, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"])
+                : null));
+        const rawUserHomeUrl = normalizeXhsUrl(pickFirstString(record, ["user_home_url", "userHomeUrl", "author_url", "authorUrl", "user_url", "userUrl"]) ??
+            (userRecord ? pickFirstString(userRecord, ["user_home_url", "userHomeUrl", "url", "link"]) : null) ??
+            (noteCardUserRecord
+                ? pickFirstString(noteCardUserRecord, ["user_home_url", "userHomeUrl", "url", "link"])
+                : null));
+        const parsedDetail = parseXsecFromUrl(rawDetailUrl);
+        const parsedUser = parseXsecFromUrl(rawUserHomeUrl);
+        const xsecToken = pickFirstString(record, ["xsec_token", "xsecToken"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["xsec_token", "xsecToken"]) : null) ??
+            parsedDetail.xsec_token ??
+            parsedUser.xsec_token;
+        const xsecSource = pickFirstString(record, ["xsec_source", "xsecSource"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["xsec_source", "xsecSource"]) : null) ??
+            parsedDetail.xsec_source ??
+            parsedUser.xsec_source;
+        const detailUrl = isXhsNoteCardUrl(rawDetailUrl)
+            ? rawDetailUrl
+            : hasKnownSearchCardShape
+                ? buildXhsContinuityUrl({
+                    kind: "note",
+                    id: noteId,
+                    xsecToken,
+                    xsecSource
+                })
+                : null;
+        const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl)
+            ? rawUserHomeUrl
+            : hasKnownSearchCardShape
+                ? buildXhsContinuityUrl({
+                    kind: "user",
+                    id: userId,
+                    xsecToken,
+                    xsecSource
+                })
+                : null;
+        const card = {
+            title: pickFirstString(record, ["title", "display_title", "displayTitle", "desc"]) ??
+                (noteCardRecord ? pickFirstString(noteCardRecord, ["title", "display_title", "displayTitle"]) : null),
+            note_id: noteId,
+            user_id: userId,
+            detail_url: detailUrl,
+            user_home_url: userHomeUrl,
+            xsec_token: xsecToken,
+            xsec_source: xsecSource
+        };
+        const hasCardSignal = card.detail_url !== null || card.user_home_url !== null;
+        return [
+            ...(hasCardSignal ? [card] : []),
+            ...Object.values(record).flatMap((entry) => collectSearchDomCards(entry, seen))
+        ];
+    }
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => collectSearchDomCards(entry, seen));
+    }
+    return [];
+};
+const resolveSearchDomExtraction = async (env) => {
+    const state = (typeof env.readPageStateRoot === "function" ? await env.readPageStateRoot().catch(() => null) : null) ??
+        (typeof env.getPageStateRoot === "function" ? env.getPageStateRoot() : null);
+    const stateCards = collectSearchDomCards(state);
+    if (stateCards.length > 0) {
+        return {
+            extraction_layer: "hydration_state",
+            extraction_locator: "window.__INITIAL_STATE__",
+            cards: stateCards
+        };
+    }
+    const domState = typeof env.readSearchDomState === "function" ? await env.readSearchDomState().catch(() => null) : null;
+    const domStateRecord = asRecord(domState);
+    const domCards = collectSearchDomCards(domStateRecord?.cards ?? domState);
+    if (domCards.length > 0) {
+        return {
+            extraction_layer: domStateRecord?.extraction_layer === "script_json" ? "script_json" : "dom_selector",
+            extraction_locator: asString(domStateRecord?.extraction_locator) ??
+                (domStateRecord?.extraction_layer === "script_json"
+                    ? "script[type='application/json']"
+                    : ".search-result-container"),
+            cards: domCards
+        };
+    }
+    return null;
+};
+const buildSearchTargetContinuity = (cards) => cards.map((card) => ({
+    target_url: card.detail_url ?? card.user_home_url,
+    note_id: card.note_id,
+    user_id: card.user_id,
+    detail_url: card.detail_url,
+    user_home_url: card.user_home_url,
+    xsec_token: card.xsec_token,
+    xsec_source: card.xsec_source,
+    token_presence: card.xsec_token && card.xsec_token.trim().length > 0
+        ? "present"
+        : card.xsec_token === ""
+            ? "empty"
+            : "missing",
+    source_route: "xhs.search"
+}));
+const performSearchPassiveAction = async (input, env) => {
+    if (typeof env.performSearchPassiveAction !== "function") {
+        return null;
+    }
+    try {
+        return asRecord(await env.performSearchPassiveAction({
+            query: input.params.query,
+            pageUrl: env.getLocationHref(),
+            runId: input.executionContext.runId,
+            actionRef: input.executionContext.gateInvocationId ?? input.executionContext.runId
+        }));
+    }
+    catch {
+        return null;
+    }
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5355,7 +5584,7 @@ const XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST = new Set([
     "https://www.xiaohongshu.com",
     "https://edith.xiaohongshu.com"
 ]);
-const resolveTrustedSearchReplayUrl = (value) => {
+const resolveTrustedSearchTemplateUrl = (value) => {
     if (typeof value !== "string" || value.trim().length === 0) {
         return null;
     }
@@ -5390,68 +5619,19 @@ const isTrustedCapturedTemplate = (template, expected) => {
         serializeCanonicalShape(templateShape) !== expected.shapeKey) {
         return false;
     }
-    if (resolveTrustedSearchReplayUrl(templateRecord.url) === null) {
+    if (resolveTrustedSearchTemplateUrl(templateRecord.url) === null) {
         return false;
     }
     const request = asRecord(templateRecord.request);
     if (!request || !asRecord(request.headers)) {
         return false;
     }
+    const response = asRecord(templateRecord.response);
+    if (!response || !("body" in response)) {
+        return false;
+    }
     return serializeCanonicalShape(request.body) === expected.shapeKey;
 };
-const getCapturedHeader = (headers, key) => {
-    const matchedEntry = Object.entries(headers).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase());
-    return matchedEntry && matchedEntry[1].trim().length > 0 ? matchedEntry[1].trim() : null;
-};
-const resolveCapturedSignature = (headers) => {
-    const xSignature = getCapturedHeader(headers, "X-s");
-    const xTimestamp = getCapturedHeader(headers, "X-t");
-    return xSignature && xTimestamp ? { "X-s": xSignature, "X-t": xTimestamp } : null;
-};
-const SEARCH_REPLAY_HEADER_DENYLIST = new Set([
-    "accept",
-    "accept-encoding",
-    "connection",
-    "content-length",
-    "content-type",
-    "cookie",
-    "host",
-    "origin",
-    "referer",
-    "sec-ch-ua",
-    "sec-ch-ua-mobile",
-    "sec-ch-ua-platform",
-    "sec-fetch-dest",
-    "sec-fetch-mode",
-    "sec-fetch-site",
-    "sec-fetch-user",
-    "user-agent",
-    "x-b3-traceid",
-    "x-s",
-    "x-s-common",
-    "x-t",
-    "x-webenvoy-synthetic-request",
-    "x-xray-traceid"
-]);
-const buildCapturedReplayHeaders = (headers) => Object.fromEntries(Object.entries(headers).filter(([name, value]) => {
-    const normalizedName = name.trim().toLowerCase();
-    return (normalizedName.length > 0 &&
-        typeof value === "string" &&
-        value.trim().length > 0 &&
-        !SEARCH_REPLAY_HEADER_DENYLIST.has(normalizedName));
-}));
-const buildHeaders = (env, options, signature, capturedHeaders) => ({
-    ...buildCapturedReplayHeaders(capturedHeaders),
-    Accept: getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
-    "X-s": String(signature["X-s"]),
-    "X-t": String(signature["X-t"]),
-    "X-S-Common": getCapturedHeader(capturedHeaders, "X-S-Common") ??
-        options.x_s_common ??
-        resolveXsCommon(undefined),
-    "x-b3-traceid": env.randomId().replace(/-/g, ""),
-    "x-xray-traceid": env.randomId().replace(/-/g, ""),
-    "Content-Type": getCapturedHeader(capturedHeaders, "Content-Type") ?? "application/json;charset=utf-8"
-});
 const isTrustedRejectedObservation = (observation, expected) => {
     const observationRecord = asRecord(observation);
     if (!observationRecord) {
@@ -5540,13 +5720,13 @@ const waitForRequestContextRetry = async (env, ms) => {
         setTimeout(resolve, ms);
     });
 };
-const resolveRequestContextState = async (input, env) => {
+const resolveRequestContextState = async (requestInput, env) => {
     const shape = createSearchRequestShape({
-        keyword: input.params.query,
-        page: input.params.page ?? 1,
-        page_size: input.params.limit ?? 20,
-        sort: input.params.sort ?? "general",
-        note_type: input.params.note_type ?? 0
+        keyword: requestInput.params.query,
+        page: requestInput.params.page ?? 1,
+        page_size: requestInput.params.limit ?? 20,
+        sort: requestInput.params.sort ?? "general",
+        note_type: requestInput.params.note_type ?? 0
     });
     const fallbackNamespace = createPageContextNamespace(env.getLocationHref());
     const readCapturedRequestContext = env.readCapturedRequestContext;
@@ -5564,11 +5744,15 @@ const resolveRequestContextState = async (input, env) => {
     const lookupOnce = async (input) => {
         let lookup = null;
         try {
+            pageContextNamespace = createPageContextNamespace(env.getLocationHref());
             lookup = await readCapturedRequestContext({
                 method: "POST",
                 path: SEARCH_ENDPOINT,
                 page_context_namespace: pageContextNamespace,
-                shape_key: shapeKey
+                shape_key: shapeKey,
+                ...(typeof requestInput.minObservedAt === "number"
+                    ? { min_observed_at: requestInput.minObservedAt }
+                    : {})
             });
         }
         catch {
@@ -5602,14 +5786,33 @@ const resolveRequestContextState = async (input, env) => {
             ? lookup?.incompatible_observation ?? null
             : null;
         if (admittedTemplate && admittedTemplate.template_ready !== false) {
-            const replayUrl = resolveTrustedSearchReplayUrl(admittedTemplate.url);
-            if (!replayUrl) {
+            const templateUrl = resolveTrustedSearchTemplateUrl(admittedTemplate.url);
+            if (!templateUrl) {
                 return {
                     status: "miss",
                     failureReason: "template_missing",
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys
+                };
+            }
+            const admittedResponseRecord = asRecord(admittedTemplate.response.body);
+            const admittedBusinessCode = asInteger(admittedResponseRecord?.code);
+            if (admittedTemplate.status >= 400 || admittedBusinessCode !== 0) {
+                const failure = inferFailure(admittedTemplate.status, admittedTemplate.response.body);
+                return {
+                    status: "miss",
+                    failureReason: "rejected_source",
+                    detailReason: BACKEND_REJECTED_SOURCE_REASONS.has(failure.reason)
+                        ? failure.reason
+                        : "TARGET_API_RESPONSE_INVALID",
+                    detailMessage: failure.message,
+                    statusCode: admittedTemplate.status,
+                    ...(admittedBusinessCode !== null ? { platformCode: admittedBusinessCode } : {}),
+                    pageContextNamespace,
+                    shapeKey,
+                    availableShapeKeys,
+                    observedAt: admittedTemplate.observed_at ?? admittedTemplate.captured_at
                 };
             }
             const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
@@ -5627,9 +5830,12 @@ const resolveRequestContextState = async (input, env) => {
                 status: "hit",
                 template: {
                     request: {
-                        url: replayUrl,
+                        url: templateUrl,
                         headers: admittedTemplate.request.headers,
                         body: admittedTemplate.request.body
+                    },
+                    response: {
+                        body: admittedTemplate.response.body
                     },
                     referrer: typeof admittedTemplate.referrer === "string" ? admittedTemplate.referrer : null,
                     capturedAt: admittedTemplate.captured_at,
@@ -5991,9 +6197,12 @@ const executeXhsSearch = async (input, env) => {
         sort: input.params.sort ?? "general",
         note_type: input.params.note_type ?? 0
     };
+    const passiveActionStartedAt = env.now();
+    const passiveActionEvidence = await performSearchPassiveAction(input, env);
     const requestContextState = await resolveRequestContextState({
         params: input.params,
-        options: input.options
+        options: input.options,
+        minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null
     }, env);
     if (requestContextState.status !== "hit") {
         const backendRejectedReason = requestContextState.detailReason &&
@@ -6013,6 +6222,119 @@ const executeXhsSearch = async (input, env) => {
         };
         const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
         const isBackendRejectedSource = backendRejectedReason !== null;
+        if (requestContextState.failureReason === "rejected_source") {
+            return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
+                ability_id: input.abilityId,
+                stage: "execution",
+                reason,
+                request_context_reason: requestContextState.failureReason,
+                page_context_namespace: requestContextState.pageContextNamespace,
+                shape_key: requestContextState.shapeKey,
+                available_shape_keys: requestContextState.availableShapeKeys,
+                ...(requestContextState.statusCode !== undefined
+                    ? { status_code: requestContextState.statusCode }
+                    : {}),
+                ...(requestContextState.platformCode !== undefined
+                    ? { platform_code: requestContextState.platformCode }
+                    : {}),
+                ...(backendRejectedReason ? { rejected_source_reason: backendRejectedReason } : {}),
+                ...(requestContextState.observedAt !== undefined
+                    ? { observed_at: requestContextState.observedAt }
+                    : {})
+            }, createObservability({
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "failed",
+                ...(requestContextState.statusCode !== undefined
+                    ? { statusCode: requestContextState.statusCode }
+                    : {}),
+                failureReason: reason,
+                includeKeyRequest: false,
+                failureSite: {
+                    stage: "action",
+                    component: "page",
+                    target: isBackendRejectedSource ? SEARCH_ENDPOINT : "captured_request_context",
+                    summary
+                }
+            }), createDiagnosis({
+                reason,
+                summary,
+                category: isBackendRejectedSource ? "request_failed" : "page_changed"
+            }), gate, auditRecord), gate.execution_audit);
+        }
+        const domExtraction = isCurrentSearchPageForQuery(env.getLocationHref(), input.params.query)
+            ? await resolveSearchDomExtraction(env)
+            : null;
+        if (domExtraction) {
+            const count = domExtraction.cards.length;
+            return {
+                ok: true,
+                payload: {
+                    summary: {
+                        capability_result: {
+                            ability_id: input.abilityId,
+                            layer: input.abilityLayer,
+                            action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                            outcome: "success",
+                            data_ref: {
+                                query: input.params.query
+                            },
+                            metrics: {
+                                count,
+                                duration_ms: Math.max(0, env.now() - startedAt)
+                            }
+                        },
+                        scope_context: gate.scope_context,
+                        gate_input: {
+                            run_id: auditRecord.run_id,
+                            session_id: auditRecord.session_id,
+                            profile: auditRecord.profile,
+                            ...gate.gate_input
+                        },
+                        gate_outcome: gate.gate_outcome,
+                        read_execution_policy: gate.read_execution_policy,
+                        issue_action_matrix: gate.issue_action_matrix,
+                        consumer_gate_result: gate.consumer_gate_result,
+                        request_admission_result: gate.request_admission_result,
+                        execution_audit: gate.execution_audit,
+                        approval_record: gate.approval_record,
+                        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                        audit_record: auditRecord,
+                        ...layer2InteractionSummary(layer2Interaction),
+                        route_evidence: {
+                            evidence_class: "dom_state_extraction",
+                            profile_ref: input.executionContext.profile,
+                            target_tab_id: gate.consumer_gate_result.target_tab_id,
+                            page_url: env.getLocationHref(),
+                            run_id: input.executionContext.runId,
+                            action_ref: input.executionContext.gateInvocationId ?? input.executionContext.runId,
+                            extraction_layer: domExtraction.extraction_layer,
+                            extraction_locator: domExtraction.extraction_locator,
+                            extracted_at: toIsoString(env.now()),
+                            target_continuity: buildSearchTargetContinuity(domExtraction.cards),
+                            risk_surface_classification: "none",
+                            ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
+                            item_kind: "search_card",
+                            cards: domExtraction.cards
+                        },
+                        request_context: {
+                            status: "missing",
+                            page_context_namespace: requestContextState.pageContextNamespace,
+                            shape_key: requestContextState.shapeKey
+                        }
+                    },
+                    observability: createObservability({
+                        href: env.getLocationHref(),
+                        title: env.getDocumentTitle(),
+                        readyState: env.getReadyState(),
+                        requestId: `req-${env.randomId()}`,
+                        outcome: "completed"
+                    })
+                }
+            };
+        }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
             ability_id: input.abilityId,
             stage: "execution",
@@ -6086,134 +6408,19 @@ const executeXhsSearch = async (input, env) => {
             summary: "当前页面现场缺少可复用的搜索请求模板"
         }), gate, auditRecord), gate.execution_audit);
     }
-    const freshReplayPayload = buildReplayRequestPayload(capturedRequestBody, payload);
-    const freshRequestBody = serializeRequestBody(freshReplayPayload);
-    if (typeof freshRequestBody !== "string") {
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "当前页面现场缺少可复用的搜索请求模板", {
-            ability_id: input.abilityId,
-            stage: "execution",
-            reason: "REQUEST_CONTEXT_MISSING",
-            request_context_reason: "template_missing",
-            page_context_namespace: requestContextState.pageContextNamespace,
-            shape_key: requestContextState.shapeKey,
-            available_shape_keys: []
-        }, createObservability({
-            href: env.getLocationHref(),
-            title: env.getDocumentTitle(),
-            readyState: env.getReadyState(),
-            requestId: `req-${env.randomId()}`,
-            outcome: "failed",
-            failureReason: "REQUEST_CONTEXT_MISSING",
-            includeKeyRequest: false,
-            failureSite: {
-                stage: "action",
-                component: "page",
-                target: "captured_request_context",
-                summary: "当前页面现场缺少可复用的搜索请求模板"
+    const passiveCards = collectSearchDomCards(requestContextState.template.response.body);
+    const passiveTargetContinuity = passiveCards.length > 0
+        ? buildSearchTargetContinuity(passiveCards)
+        : [
+            {
+                target_url: env.getLocationHref(),
+                xsec_token: null,
+                xsec_source: null,
+                token_presence: "missing",
+                source_route: "xhs.search"
             }
-        }), createDiagnosis({
-            reason: "REQUEST_CONTEXT_MISSING",
-            summary: "当前页面现场缺少可复用的搜索请求模板"
-        }), gate, auditRecord), gate.execution_audit);
-    }
-    let replayPayload = freshReplayPayload;
-    let requestBody = freshRequestBody;
-    let signature;
-    try {
-        signature = await env.callSignature(SEARCH_ENDPOINT, freshReplayPayload);
-    }
-    catch (error) {
-        const capturedSignature = resolveCapturedSignature(headers);
-        const capturedRequestBodyText = serializeRequestBody(capturedRequestBody);
-        if (capturedSignature && typeof capturedRequestBodyText === "string") {
-            signature = capturedSignature;
-            replayPayload = capturedRequestBody;
-            requestBody = capturedRequestBodyText;
-        }
-        else {
-            return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
-                ability_id: input.abilityId,
-                stage: "execution",
-                reason: "SIGNATURE_ENTRY_MISSING"
-            }, createObservability({
-                href: env.getLocationHref(),
-                title: env.getDocumentTitle(),
-                readyState: env.getReadyState(),
-                requestId: `req-${env.randomId()}`,
-                outcome: "failed",
-                failureReason: error instanceof Error ? error.message : String(error),
-                includeKeyRequest: false,
-                failureSite: {
-                    stage: "action",
-                    component: "page",
-                    target: "window._webmsxyw",
-                    summary: "页面签名入口不可用"
-                }
-            }), createDiagnosis({
-                reason: "SIGNATURE_ENTRY_MISSING",
-                summary: "页面签名入口不可用",
-                category: "page_changed"
-            }), gate, auditRecord), gate.execution_audit);
-        }
-    }
-    let response;
-    const replayHeaders = buildHeaders(env, input.options, signature, headers);
-    try {
-        response = await env.fetchJson({
-            url: requestContextState.template.request.url,
-            method: "POST",
-            headers: replayHeaders,
-            body: requestBody,
-            pageContextRequest: true,
-            referrer: requestContextState.template.referrer ?? env.getLocationHref(),
-            referrerPolicy: "strict-origin-when-cross-origin",
-            timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
-                ? Math.max(1, Math.floor(input.options.timeout_ms))
-                : 30_000
-        });
-    }
-    catch (error) {
-        const failure = inferRequestException(error);
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
-            ability_id: input.abilityId,
-            stage: "execution",
-            reason: failure.reason
-        }, createObservability({
-            href: env.getLocationHref(),
-            title: env.getDocumentTitle(),
-            readyState: env.getReadyState(),
-            requestId: `req-${env.randomId()}`,
-            outcome: "failed",
-            failureReason: failure.detail
-        }), createDiagnosis({
-            reason: failure.reason,
-            summary: failure.message
-        }), gate, auditRecord), gate.execution_audit);
-    }
-    const responseRecord = asRecord(response.body);
-    const businessCode = asInteger(responseRecord?.code);
-    if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
-        const failure = inferFailure(response.status, response.body);
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
-            ability_id: input.abilityId,
-            stage: "execution",
-            reason: failure.reason,
-            status_code: response.status,
-            ...(businessCode !== null ? { platform_code: businessCode } : {})
-        }, createObservability({
-            href: env.getLocationHref(),
-            title: env.getDocumentTitle(),
-            readyState: env.getReadyState(),
-            requestId: `req-${env.randomId()}`,
-            outcome: "failed",
-            statusCode: response.status,
-            failureReason: failure.reason
-        }), createDiagnosis({
-            reason: failure.reason,
-            summary: failure.message
-        }), gate, auditRecord), gate.execution_audit);
-    }
-    const count = parseCount(response.body);
+        ];
+    const count = parseCount(requestContextState.template.response.body);
     return {
         ok: true,
         payload: {
@@ -6225,8 +6432,8 @@ const executeXhsSearch = async (input, env) => {
                     outcome: "success",
                     data_ref: {
                         query: input.params.query,
-                        search_id: typeof replayPayload.search_id === "string"
-                            ? replayPayload.search_id
+                        search_id: typeof capturedRequestBody.search_id === "string"
+                            ? capturedRequestBody.search_id
                             : payload.search_id
                     },
                     metrics: {
@@ -6251,6 +6458,25 @@ const executeXhsSearch = async (input, env) => {
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord,
                 ...layer2InteractionSummary(layer2Interaction),
+                route_evidence: {
+                    evidence_class: "passive_api_capture",
+                    profile_ref: input.executionContext.profile,
+                    target_tab_id: gate.consumer_gate_result.target_tab_id,
+                    page_url: env.getLocationHref(),
+                    run_id: input.executionContext.runId,
+                    action_ref: input.executionContext.gateInvocationId ?? input.executionContext.runId,
+                    captured_at: requestContextState.template.capturedAt,
+                    page_context_namespace: requestContextState.pageContextNamespace,
+                    shape_key: requestContextState.shapeKey,
+                    ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
+                    target_continuity: passiveTargetContinuity,
+                    ...(passiveCards.length > 0
+                        ? {
+                            item_kind: "search_card",
+                            cards: passiveCards
+                        }
+                        : {})
+                },
                 request_context: {
                     status: "exact_hit",
                     page_context_namespace: requestContextState.pageContextNamespace,
@@ -6264,7 +6490,7 @@ const executeXhsSearch = async (input, env) => {
                 readyState: env.getReadyState(),
                 requestId: `req-${env.randomId()}`,
                 outcome: "completed",
-                statusCode: response.status
+                statusCode: 200
             })
         }
     };
@@ -8739,7 +8965,10 @@ const readCapturedRequestContextViaMainWorld = async (input) => {
             method: input.method,
             path: input.path,
             ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
-            shape_key: input.shape_key
+            shape_key: input.shape_key,
+            ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
+                ? { min_observed_at: input.min_observed_at }
+                : {})
         }
     });
     const normalized = asCapturedRequestContextLookupResult(result);
@@ -9254,6 +9483,226 @@ const readAccountSafetyOverlay = () => {
     }
     return null;
 };
+const toAbsoluteXhsHref = (href) => {
+    if (!href || href.trim().length === 0) {
+        return null;
+    }
+    try {
+        return new URL(href, window.location.origin).toString();
+    }
+    catch {
+        return href;
+    }
+};
+const hasSearchCardLikeJson = (value, seen = new Set()) => {
+    const record = asRecord(value);
+    if (record) {
+        if (seen.has(record)) {
+            return false;
+        }
+        seen.add(record);
+        const href = asString(record.detail_url) ??
+            asString(record.detailUrl) ??
+            asString(record.note_url) ??
+            asString(record.noteUrl) ??
+            asString(record.href) ??
+            asString(record.url) ??
+            asString(record.link);
+        if (href) {
+            const absoluteHref = toAbsoluteXhsHref(href);
+            try {
+                const url = absoluteHref ? new URL(absoluteHref) : null;
+                if (url?.hostname === XHS_READ_DOMAIN &&
+                    (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/"))) {
+                    return true;
+                }
+            }
+            catch {
+                // continue recursive scan
+            }
+        }
+        if (asRecord(record.note_card) &&
+            (asString(record.xsec_token) || asString(asRecord(record.note_card)?.xsec_token))) {
+            return true;
+        }
+        return Object.values(record).some((entry) => hasSearchCardLikeJson(entry, seen));
+    }
+    return Array.isArray(value) ? value.some((entry) => hasSearchCardLikeJson(entry, seen)) : false;
+};
+const readJsonScriptSearchState = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    const selectors = ['script[type="application/json"]', "script#__NEXT_DATA__", "script:not([src])"];
+    for (const selector of selectors) {
+        for (const element of Array.from(document.querySelectorAll(selector))) {
+            const text = (element.textContent ?? "").trim();
+            if (!text || (!text.includes("xsec") && !text.includes("/explore/"))) {
+                continue;
+            }
+            try {
+                const parsed = JSON.parse(text);
+                if (!hasSearchCardLikeJson(parsed)) {
+                    continue;
+                }
+                return {
+                    extraction_layer: "script_json",
+                    extraction_locator: selector,
+                    cards: parsed
+                };
+            }
+            catch {
+                continue;
+            }
+        }
+    }
+    return null;
+};
+const readSearchDomCards = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return [];
+    }
+    const anchors = Array.from(document.querySelectorAll('a[href*="/explore/"], a[href*="/discovery/item/"]'));
+    return anchors
+        .map((anchor) => {
+        const root = anchor.closest('[class*="note"], [class*="card"], article, section, li') ??
+            anchor.parentElement ??
+            anchor;
+        const userAnchor = root.querySelector('a[href*="/user/profile/"]');
+        const titleElement = root.querySelector('[class*="title"], [class*="desc"]') ?? anchor.querySelector("[title]");
+        const title = titleElement?.innerText?.trim() ||
+            (titleElement?.textContent ?? "").trim() ||
+            (anchor.getAttribute("title") ?? "").trim() ||
+            (anchor.textContent ?? "").trim() ||
+            null;
+        return {
+            title,
+            detail_url: toAbsoluteXhsHref(anchor.getAttribute("href")),
+            user_home_url: toAbsoluteXhsHref(userAnchor?.getAttribute("href") ?? null)
+        };
+    })
+        .filter((card) => typeof card.detail_url === "string" && card.detail_url.length > 0)
+        .slice(0, 30);
+};
+const readXhsSearchDomState = () => {
+    const scriptState = readJsonScriptSearchState();
+    if (scriptState) {
+        return scriptState;
+    }
+    const cards = readSearchDomCards();
+    return cards.length > 0
+        ? {
+            extraction_layer: "dom_selector",
+            extraction_locator: 'a[href*="/explore/"], a[href*="/discovery/item/"]',
+            cards
+        }
+        : null;
+};
+const normalizeSearchQueryText = (value) => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.normalize("NFKC").trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+};
+const isCurrentSearchPageForQuery = (href, query) => {
+    const expectedQuery = normalizeSearchQueryText(query);
+    if (!expectedQuery) {
+        return false;
+    }
+    try {
+        const url = new URL(href);
+        return (url.hostname === XHS_READ_DOMAIN &&
+            url.pathname.includes("/search_result") &&
+            normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery);
+    }
+    catch {
+        return false;
+    }
+};
+const performXhsSearchPassiveAction = async (input) => {
+    const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
+    const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
+    if (!queryMatched && searchInput) {
+        const searchForm = searchInput.closest("form");
+        const searchButton = (searchForm?.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]') ?? document.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]'));
+        const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        searchInput.focus();
+        valueSetter?.call(searchInput, input.query);
+        searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.query }));
+        searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        searchInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+        searchInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+        if (searchForm && typeof searchForm.requestSubmit === "function") {
+            searchForm.requestSubmit();
+        }
+        else if (searchButton && typeof searchButton.click === "function") {
+            searchButton.click();
+        }
+        else if (searchForm) {
+            searchForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        }
+        return {
+            evidence_class: "humanized_action",
+            action_kind: "keyboard_input",
+            action_ref: input.actionRef,
+            run_id: input.runId,
+            page_url: input.pageUrl,
+            query: input.query,
+            query_matched: false,
+            search_input_found: true,
+            search_form_found: Boolean(searchForm),
+            search_button_found: Boolean(searchButton),
+            submit_triggered: searchForm && typeof searchForm.requestSubmit === "function"
+                ? "form_request_submit"
+                : searchButton
+                    ? "button_click"
+                    : searchForm
+                        ? "submit_event"
+                        : "enter_key",
+            trigger_surface: "xhs.search_result"
+        };
+    }
+    if (queryMatched) {
+        const target = document.scrollingElement ?? document.documentElement;
+        const beforeScrollY = window.scrollY;
+        const deltaY = 240;
+        target.dispatchEvent(new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaY
+        }));
+        window.scrollBy({
+            top: deltaY,
+            left: 0,
+            behavior: "auto"
+        });
+        target.dispatchEvent(new Event("scroll", { bubbles: true }));
+        return {
+            evidence_class: "humanized_action",
+            action_kind: "scroll",
+            action_ref: input.actionRef,
+            run_id: input.runId,
+            page_url: input.pageUrl,
+            query: input.query,
+            query_matched: true,
+            before_scroll_y: beforeScrollY,
+            after_scroll_y: window.scrollY,
+            trigger_surface: "xhs.search_result"
+        };
+    }
+    return {
+        evidence_class: "humanized_action",
+        action_kind: "keyboard_input",
+        action_ref: input.actionRef,
+        run_id: input.runId,
+        page_url: input.pageUrl,
+        query: input.query,
+        query_matched: false,
+        search_input_found: false,
+        skipped_reason: "search_input_missing"
+    };
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -9267,6 +9716,8 @@ const createBrowserEnvironment = () => ({
     getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readSearchDomState: async () => readXhsSearchDomState(),
+    performSearchPassiveAction: async (input) => await performXhsSearchPassiveAction(input),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
