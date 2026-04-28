@@ -271,6 +271,7 @@ export interface UninstallNativeHostInput {
   browserChannel: BrowserChannel;
   manifestDir?: string;
   launcherPath?: string;
+  profileDir?: string;
 }
 
 const resolveNativeHostRuntimeBundlePlan = async (input: {
@@ -467,6 +468,12 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     manifestDir: input.manifestDir,
     launcherPath: input.launcherPath
   });
+  const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
+  const profileDir = resolveProfileDirForLauncher({
+    cwd: resolvedPaths.worktreePath,
+    profileRoot,
+    profileDir: input.profileDir
+  });
   await assertNoSymlinkAncestorBetween({
     command: "runtime.uninstall",
     field: "manifest_dir",
@@ -511,6 +518,21 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
   }
   const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+  const profileScopedManifestPath = profileDir
+    ? join(profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)
+    : null;
+  if (profileScopedManifestPath && profileDir) {
+    await assertNoSymlinkAncestorBetween({
+      command: "runtime.uninstall",
+      field: "profile_dir",
+      fromDir: profileRoot,
+      targetDir: profileDir
+    });
+    await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
+  }
+  const profileScopedManifestExisted = profileScopedManifestPath
+    ? await pathExists(profileScopedManifestPath)
+    : false;
   const launcherExisted =
     shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
       ? await pathExists(launcherPath)
@@ -521,6 +543,9 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
       ? await pathExists(legacyLauncherPath)
       : false;
   await rm(resolvedPaths.manifestPath, { force: true });
+  if (profileScopedManifestPath) {
+    await rm(profileScopedManifestPath, { force: true });
+  }
   if (managedInstall) {
     await rm(managedInstall.channelRoot, { recursive: true, force: true });
   } else if (shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher) {
@@ -540,6 +565,8 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     manifest_dir: normalizePathForOutput(resolvedPaths.manifestDir),
     manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
     manifest_path_source: resolvedPaths.manifestPathSource,
+    profile_dir: normalizePathForOutput(profileDir),
+    profile_scoped_manifest_path: normalizePathForOutput(profileScopedManifestPath),
     launcher_dir: normalizePathForOutput(dirname(launcherPath)),
     launcher_path: normalizePathForOutput(launcherPath),
     launcher_path_source: launcherPathSource,
@@ -548,12 +575,18 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     ),
     removed: {
       manifest: manifestExisted,
+      profile_scoped_manifest: profileScopedManifestExisted,
       launcher: launcherExisted,
       bundle_runtime: bundleRuntimeExisted,
       legacy_launcher: legacyLauncherExisted
     },
     remove_result: {
       manifest: manifestExisted ? "removed" : "already_absent",
+      profile_scoped_manifest: profileScopedManifestPath
+        ? profileScopedManifestExisted
+          ? "removed"
+          : "already_absent"
+        : "not_applicable",
       launcher:
         shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
           ? launcherExisted
@@ -563,6 +596,11 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
       bundle_runtime: bundleRuntimeExisted ? "removed" : "already_absent",
       legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
     },
-    idempotent: !manifestExisted && !launcherExisted && !bundleRuntimeExisted && !legacyLauncherExisted
+    idempotent:
+      !manifestExisted &&
+      !profileScopedManifestExisted &&
+      !launcherExisted &&
+      !bundleRuntimeExisted &&
+      !legacyLauncherExisted
   };
 };

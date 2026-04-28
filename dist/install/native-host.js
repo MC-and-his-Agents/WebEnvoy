@@ -332,6 +332,12 @@ export const uninstallNativeHost = async (input) => {
         manifestDir: input.manifestDir,
         launcherPath: input.launcherPath
     });
+    const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
+    const profileDir = resolveProfileDirForLauncher({
+        cwd: resolvedPaths.worktreePath,
+        profileRoot,
+        profileDir: input.profileDir
+    });
     await assertNoSymlinkAncestorBetween({
         command: "runtime.uninstall",
         field: "manifest_dir",
@@ -373,6 +379,21 @@ export const uninstallNativeHost = async (input) => {
         await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
     }
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+    const profileScopedManifestPath = profileDir
+        ? join(profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)
+        : null;
+    if (profileScopedManifestPath && profileDir) {
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.uninstall",
+            field: "profile_dir",
+            fromDir: profileRoot,
+            targetDir: profileDir
+        });
+        await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
+    }
+    const profileScopedManifestExisted = profileScopedManifestPath
+        ? await pathExists(profileScopedManifestPath)
+        : false;
     const launcherExisted = shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
         ? await pathExists(launcherPath)
         : false;
@@ -381,6 +402,9 @@ export const uninstallNativeHost = async (input) => {
         ? await pathExists(legacyLauncherPath)
         : false;
     await rm(resolvedPaths.manifestPath, { force: true });
+    if (profileScopedManifestPath) {
+        await rm(profileScopedManifestPath, { force: true });
+    }
     if (managedInstall) {
         await rm(managedInstall.channelRoot, { recursive: true, force: true });
     }
@@ -400,18 +424,26 @@ export const uninstallNativeHost = async (input) => {
         manifest_dir: normalizePathForOutput(resolvedPaths.manifestDir),
         manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
         manifest_path_source: resolvedPaths.manifestPathSource,
+        profile_dir: normalizePathForOutput(profileDir),
+        profile_scoped_manifest_path: normalizePathForOutput(profileScopedManifestPath),
         launcher_dir: normalizePathForOutput(dirname(launcherPath)),
         launcher_path: normalizePathForOutput(launcherPath),
         launcher_path_source: launcherPathSource,
         legacy_launcher_path: normalizePathForOutput(legacyLauncherPath && legacyLauncherPath !== launcherPath ? legacyLauncherPath : null),
         removed: {
             manifest: manifestExisted,
+            profile_scoped_manifest: profileScopedManifestExisted,
             launcher: launcherExisted,
             bundle_runtime: bundleRuntimeExisted,
             legacy_launcher: legacyLauncherExisted
         },
         remove_result: {
             manifest: manifestExisted ? "removed" : "already_absent",
+            profile_scoped_manifest: profileScopedManifestPath
+                ? profileScopedManifestExisted
+                    ? "removed"
+                    : "already_absent"
+                : "not_applicable",
             launcher: shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
                 ? launcherExisted
                     ? "removed"
@@ -420,6 +452,10 @@ export const uninstallNativeHost = async (input) => {
             bundle_runtime: bundleRuntimeExisted ? "removed" : "already_absent",
             legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
         },
-        idempotent: !manifestExisted && !launcherExisted && !bundleRuntimeExisted && !legacyLauncherExisted
+        idempotent: !manifestExisted &&
+            !profileScopedManifestExisted &&
+            !launcherExisted &&
+            !bundleRuntimeExisted &&
+            !legacyLauncherExisted
     };
 };
