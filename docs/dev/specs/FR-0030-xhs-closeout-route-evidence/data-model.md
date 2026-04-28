@@ -35,6 +35,20 @@
 
 上述 payload 都必须共享同一组 provenance 字段；缺少 route-specific target id、visibility signal 或至少一条 target continuity record 时不得申报成功。
 
+## Signed continuity payload
+
+`xhs.detail` / `xhs.user_home` 的页面内主动 fetch 前必须携带非持久化 signed continuity：
+
+- `source_url`
+- `target_url`
+- `detail_url` 或 `user_home_url`
+- `xsec_token`
+- `xsec_source`
+- `token_presence`
+- `source_route`
+
+该 payload 只能出现在当前 run 的 summary/evidence 中，用于证明 signed URL 与 token continuity；不得写入 canonical identity、profile meta、SQLite 表或长期账号状态。
+
 ## 不持久化的内容
 
 - 不持久化 raw page HTML。

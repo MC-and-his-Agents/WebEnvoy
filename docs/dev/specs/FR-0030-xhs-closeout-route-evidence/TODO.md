@@ -5,6 +5,7 @@
 - [ ] reviewer 确认 `dom_state_extraction.extraction_layer` 只允许 `hydration_state | script_json | dom_selector`
 - [ ] reviewer 确认 DOM/state provenance 字段覆盖 profile、tab、page URL、run、action、locator、timestamp、continuity 与 risk classification
 - [ ] reviewer 确认 detail/user_home route-specific DOM/state evidence 覆盖 payload fields、sufficiency rules 与 failure boundaries
+- [ ] reviewer 确认 #583 signed continuity 已阻断裸 note_id/user_id、缺 token、空 token、token 过期、xsec_source mismatch 与 security redirect
 - [ ] reviewer 确认 DOM/state evidence 不替代 #445 full closeout success bar
 - [ ] reviewer 确认 active fetch fallback 已被明确留给 #582 单独 gate
 - [ ] reviewer 确认本 FR 未修改 FR-0005 docs
