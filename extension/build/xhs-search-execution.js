@@ -535,7 +535,7 @@ const resolveRequestContextState = async (requestInput, env) => {
             }
             const admittedResponseRecord = asRecord(admittedTemplate.response.body);
             const admittedBusinessCode = asInteger(admittedResponseRecord?.code);
-            if (admittedTemplate.status >= 400 || (admittedBusinessCode !== null && admittedBusinessCode !== 0)) {
+            if (admittedTemplate.status >= 400 || admittedBusinessCode !== 0) {
                 const failure = inferFailure(admittedTemplate.status, admittedTemplate.response.body);
                 return {
                     status: "miss",
