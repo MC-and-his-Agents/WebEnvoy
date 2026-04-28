@@ -75,7 +75,8 @@ setup_case_dir() {
   : > "${MOCK_GUARDIAN_LOG}"
   printf '{\n  "prs": {}\n}\n' > "${STATE_FILE}"
   unset MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR
-  export MOCK_GH_CALLS_LOG MOCK_GUARDIAN_LOG MOCK_GH_OPEN_PRS_JSON MOCK_GUARDIAN_STATUS_DIR STATE_FILE
+  GITHUB_REPOSITORY="${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
+  export MOCK_GH_CALLS_LOG MOCK_GUARDIAN_LOG MOCK_GH_OPEN_PRS_JSON MOCK_GUARDIAN_STATUS_DIR STATE_FILE GITHUB_REPOSITORY
 
   cat > "${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -83,18 +84,36 @@ set -euo pipefail
 
 echo "$*" >> "${MOCK_GH_CALLS_LOG:?missing MOCK_GH_CALLS_LOG}"
 
-if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
-  exit 0
-fi
+if [[ "${1:-}" == "api" ]]; then
+  endpoint=""
+  for arg in "$@"; do
+    if [[ "${arg}" == "user" || "${arg}" == repos/* ]]; then
+      endpoint="${arg}"
+    fi
+  done
 
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
-  printf '%s\n' "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
-  exit 0
-fi
+  if [[ "${endpoint}" == "user" ]]; then
+    if [[ " $* " == *" --jq "* ]]; then
+      printf '%s\n' "poller-user"
+    else
+      printf '%s\n' '{"login":"poller-user"}'
+    fi
+    exit 0
+  fi
 
-if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
-  cat "${MOCK_GH_OPEN_PRS_JSON:?missing MOCK_GH_OPEN_PRS_JSON}"
-  exit 0
+  if [[ "${endpoint}" == repos/*/pulls\?state=open* ]]; then
+    jq '[ [ .[] | if .headRefOid? then {
+      number,
+      title,
+      head: { sha: .headRefOid, ref: .headRefName },
+      user: .author,
+      draft: .isDraft,
+      html_url: .url,
+      base: { ref: .baseRefName },
+      milestone
+    } else . end ] ]' "${MOCK_GH_OPEN_PRS_JSON:?missing MOCK_GH_OPEN_PRS_JSON}"
+    exit 0
+  fi
 fi
 
 echo "unexpected gh call: $*" >&2

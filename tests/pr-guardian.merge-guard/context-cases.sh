@@ -19,26 +19,11 @@ run_all_checks_pass_without_required_checks_reported() {
   MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
   export MOCK_GH_CHECKS_JSON
   printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"},{"name":"Validate Docs And Scripts","bucket":"pass","state":"SUCCESS","link":"https://example.test/docs"}]' > "${MOCK_GH_CHECKS_JSON}"
-
-  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
-  export MOCK_GH_REQUIRED_CHECKS_JSON
-  printf '%s\n' '[]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
-
-  MOCK_GH_REQUIRED_CHECKS_EXIT_CODE=1
-  MOCK_GH_REQUIRED_CHECKS_STDERR="no required checks reported"
-  export MOCK_GH_REQUIRED_CHECKS_EXIT_CODE
-  export MOCK_GH_REQUIRED_CHECKS_STDERR
-
   all_required_checks_pass 123 >/dev/null 2>&1
 }
 
 run_all_checks_pass_when_required_checks_pass_but_all_checks_fail() {
   setup_case_dir "checks-required-pass-all-fail"
-
-  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
-  export MOCK_GH_REQUIRED_CHECKS_JSON
-  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
-
   MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
   export MOCK_GH_CHECKS_JSON
   printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"},{"name":"Validate Docs And Scripts","bucket":"fail","state":"FAILURE","link":"https://example.test/docs"}]' > "${MOCK_GH_CHECKS_JSON}"
@@ -52,11 +37,6 @@ run_all_checks_pass_when_required_checks_pass_but_all_checks_fail() {
 
 run_all_checks_pass_when_all_checks_list_is_empty() {
   setup_case_dir "checks-all-empty"
-
-  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
-  export MOCK_GH_REQUIRED_CHECKS_JSON
-  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
-
   MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
   export MOCK_GH_CHECKS_JSON
   printf '%s\n' '[]' > "${MOCK_GH_CHECKS_JSON}"
@@ -253,7 +233,7 @@ EOF
   assert_file_contains "${issue_file}" "- 收敛审查输入"
   assert_file_contains "${issue_file}" "## 关闭条件"
   assert_file_contains "${issue_file}" "- 所有阻断完成关闭"
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 123 --json number,title,body"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/issues/123"
 }
 
 test_fetch_issue_summary_strips_prompt_injection_content() {
@@ -306,8 +286,8 @@ EOF
   assert_file_contains "${issue_file}" "- 收敛审查输入"
   assert_file_contains "${issue_file}" "Issue #456: Follow-up issue"
   assert_file_contains "${issue_file}" "- 补齐 issue 上下文"
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 123 --json number,title,body"
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 456 --json number,title,body"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/issues/123"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/mcontheway/WebEnvoy/issues/456"
 }
 
 test_fetch_issue_summary_skips_when_issue_number_missing() {
@@ -322,7 +302,7 @@ test_fetch_issue_summary_skips_when_issue_number_missing() {
   if [[ -f "${issue_file}" ]]; then
     assert_file_empty "${issue_file}"
   fi
-  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "issue view"
+  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "issues/"
 }
 
 test_extract_issue_number_from_pr_body_supports_refs_only_linkage() {
@@ -408,14 +388,14 @@ test_resolve_linked_issue_numbers_merges_pr_and_metadata_links() {
   META_FILE="${TMP_DIR}/pr.json"
   export META_FILE
   cat > "${META_FILE}" <<'EOF'
-{"closingIssuesReferences":[{"number":456},{"number":999}]}
+{}
 EOF
 
   local resolved_file="${TMP_DIR}/issues.txt"
   resolve_linked_issue_numbers > "${resolved_file}"
 
-  if [[ "$(cat "${resolved_file}")" != $'123\n456\n789\n999' ]]; then
-    echo "expected merged issue list to preserve PR order and append metadata uniques, got: $(cat "${resolved_file}")" >&2
+  if [[ "$(cat "${resolved_file}")" != $'123\n456\n789' ]]; then
+    echo "expected issue list to come from explicit PR body links, got: $(cat "${resolved_file}")" >&2
     exit 1
   fi
 }

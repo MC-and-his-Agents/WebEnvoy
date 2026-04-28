@@ -55,6 +55,28 @@ fetch_issue_snapshot() {
   return 1
 }
 
+patch_issue() {
+  local repo="$1"
+  local issue_number="$2"
+  local title="$3"
+  local body_file="$4"
+  local payload_file
+
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-patch.XXXXXX")"
+  trap 'rm -f "${payload_file:-}"' RETURN
+
+  jq -n \
+    --arg title "${title}" \
+    --arg body "$(cat "${body_file}")" \
+    '{title: $title, body: $body}' > "${payload_file}"
+
+  gh api \
+    --method PATCH \
+    -H "Accept: application/vnd.github+json" \
+    "repos/${repo}/issues/${issue_number}" \
+    --input "${payload_file}" >/dev/null
+}
+
 extract_issue_snapshot_field() {
   local snapshot_file="$1"
   local field="$2"
@@ -428,10 +450,7 @@ sync_map_remap() {
       fi
     } > "${final_body}"
 
-    gh issue edit "${old_issue_number}" \
-      --repo "${repo}" \
-      --title "$(demoted_issue_title "${old_issue_title}")" \
-      --body-file "${final_body}"
+    patch_issue "${repo}" "${old_issue_number}" "$(demoted_issue_title "${old_issue_title}")" "${final_body}"
   else
     status=$?
     if [[ "${status}" -ne "${ANCHOR_MISSING_EXIT}" ]] && [[ "${status}" -ne "${ANCHOR_CONFLICT_EXIT}" ]]; then
@@ -478,10 +497,7 @@ sync_issue() {
     fi
   } > "${final_body}"
 
-  gh issue edit "${issue_number}" \
-    --repo "${repo}" \
-    --title "${issue_title}" \
-    --body-file "${final_body}"
+  patch_issue "${repo}" "${issue_number}" "${issue_title}" "${final_body}"
 }
 
 usage() {
@@ -499,6 +515,7 @@ EOF
 main() {
   require_cmd gh
   require_cmd grep
+  require_cmd jq
   require_cmd mktemp
   require_cmd perl
   require_cmd sed

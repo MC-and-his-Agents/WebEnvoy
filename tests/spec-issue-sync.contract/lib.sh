@@ -141,9 +141,47 @@ if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
 fi
 
 if [[ "${1:-}" == "api" ]]; then
-  endpoint="${2:-}"
-  if [[ "${endpoint}" =~ ^repos/.+/issues/([0-9]+)$ ]]; then
+  endpoint=""
+  method="GET"
+  input_file=""
+  next_is_method=0
+  next_is_input=0
+  for arg in "$@"; do
+    if [[ "${arg}" == "--method" ]]; then
+      next_is_method=1
+      continue
+    fi
+    if [[ "${next_is_method}" == "1" ]]; then
+      method="${arg}"
+      next_is_method=0
+      continue
+    fi
+    if [[ "${arg}" == "--input" ]]; then
+      next_is_input=1
+      continue
+    fi
+    if [[ "${next_is_input}" == "1" ]]; then
+      input_file="${arg}"
+      next_is_input=0
+      continue
+    fi
+    if [[ "${arg}" == repos/* ]]; then
+      endpoint="${arg}"
+    fi
+  done
+
+  if [[ "${endpoint}" =~ ^repos/.+/issues/([0-9]+)$ && "${method}" == "GET" ]]; then
     json_print_issue "${BASH_REMATCH[1]}"
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/issues/([0-9]+)$ && "${method}" == "PATCH" ]]; then
+    issue_number="${BASH_REMATCH[1]}"
+    echo "${issue_number}" >> "${MOCK_GH_EDIT_LOG:?missing MOCK_GH_EDIT_LOG}"
+    consume_issue_edit_failure "${issue_number}"
+    jq -r '.title' "${input_file}" > "${MOCK_GH_STATE_DIR}/issue-${issue_number}.title"
+    jq -r '.body' "${input_file}" > "${MOCK_GH_STATE_DIR}/issue-${issue_number}.body"
+    printf '%s\n' '{"ok":true}'
     exit 0
   fi
 

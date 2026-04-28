@@ -48,146 +48,36 @@ pop_sequence_response_line() {
   printf '%s\n' "${line}"
 }
 
-if [[ "${1:-}" == "pr" && "${2:-}" == "checks" ]]; then
-  checks_payload_file="${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}"
-  checks_exit_code="${MOCK_GH_CHECKS_EXIT_CODE:-0}"
-  checks_stderr="${MOCK_GH_CHECKS_STDERR:-}"
-
-  if [[ " $* " == *" --required "* ]]; then
-    checks_payload_file="${MOCK_GH_REQUIRED_CHECKS_JSON:-${checks_payload_file}}"
-    checks_exit_code="${MOCK_GH_REQUIRED_CHECKS_EXIT_CODE:-${checks_exit_code}}"
-    checks_stderr="${MOCK_GH_REQUIRED_CHECKS_STDERR:-${checks_stderr}}"
-  fi
-
-  if [[ "${checks_exit_code}" != "0" ]]; then
-    if [[ -n "${checks_stderr:-}" ]]; then
-      printf '%s\n' "${checks_stderr}" >&2
-    fi
-    exit "${checks_exit_code}"
-  fi
-
-  cat "${checks_payload_file}"
-  exit 0
-fi
-
-if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
-  if [[ -n "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" ]]; then
-    pop_sequence_response_line "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
-  else
-    cat "${MOCK_GH_PR_VIEW_JSON:?missing MOCK_GH_PR_VIEW_JSON}"
-  fi
-  exit 0
-fi
-
-if [[ "${1:-}" == "pr" && "${2:-}" == "review" ]]; then
-  echo "$*" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
-  review_state="COMMENTED"
-  body_file=""
-  body=""
-  pr_number="${3:-}"
-  shift 3
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --approve)
-        review_state="APPROVED"
-        ;;
-      --request-changes)
-        review_state="CHANGES_REQUESTED"
-        ;;
-      --comment)
-        review_state="COMMENTED"
-        ;;
-      --body-file)
-        shift
-        body_file="${1:-}"
-        ;;
-      --body)
-        shift
-        body="${1:-}"
-        ;;
-    esac
-    shift || true
-  done
-
-  if [[ -n "${body_file}" ]]; then
-    body="$(cat "${body_file}")"
-  fi
-
-  if [[ -n "${MOCK_GH_POSTED_REVIEWS_JSON:-}" ]]; then
-    next_review_id="$(cat "${MOCK_GH_NEXT_REVIEW_ID_FILE:?missing MOCK_GH_NEXT_REVIEW_ID_FILE}")"
-    printf '%s\n' "$((next_review_id + 1))" > "${MOCK_GH_NEXT_REVIEW_ID_FILE}"
-
-    tmp_reviews_file="${MOCK_GH_POSTED_REVIEWS_JSON}.tmp"
-    jq \
-      --argjson review_id "${next_review_id}" \
-      --arg reviewer "${MOCK_GH_USER_LOGIN:?missing MOCK_GH_USER_LOGIN}" \
-      --arg commit_id "${HEAD_SHA:-}" \
-      --arg review_state "${review_state}" \
-      --arg submitted_at "${MOCK_GH_REVIEW_SUBMITTED_AT:-2026-04-07T10:10:00Z}" \
-      --arg body "${body}" \
-      '
-        .[0] += [
-          {
-            id: $review_id,
-            user: { login: $reviewer },
-            commit_id: $commit_id,
-            state: $review_state,
-            submitted_at: $submitted_at,
-            body: $body
-          }
-        ]
-      ' "${MOCK_GH_POSTED_REVIEWS_JSON}" > "${tmp_reviews_file}"
-    mv "${tmp_reviews_file}" "${MOCK_GH_POSTED_REVIEWS_JSON}"
-  fi
-  exit 0
-fi
-
-if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
-  echo "$*" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
-  exit 0
-fi
-
-if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
-  issue_exit_code="${MOCK_GH_ISSUE_VIEW_EXIT_CODE:-0}"
-  issue_stderr="${MOCK_GH_ISSUE_VIEW_STDERR:-}"
-  if [[ "${issue_exit_code}" != "0" ]]; then
-    if [[ -n "${issue_stderr:-}" ]]; then
-      printf '%s\n' "${issue_stderr}" >&2
-    fi
-    exit "${issue_exit_code}"
-  fi
-  if [[ -n "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}" ]]; then
-    pop_sequence_response_line "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}"
-    exit 0
-  fi
-  cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
-  exit 0
-fi
-
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
-  if [[ " $* " == *" --json nameWithOwner "* ]]; then
-    if [[ " $* " == *" --jq "* ]]; then
-      printf '%s\n' "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
-    else
-      printf '{"nameWithOwner":"%s"}\n' "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
-    fi
-  elif [[ " $* " == *" --jq "* ]]; then
-    printf '%s\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
-  else
-    printf '{"owner":{"login":"%s"}}\n' "${MOCK_GH_REPO_OWNER_LOGIN:-mcontheway}"
-  fi
-  exit 0
-fi
-
 if [[ "${1:-}" == "api" ]]; then
   endpoint=""
   has_paginate=0
+  method="GET"
+  input_file=""
+  next_is_method=0
+  next_is_input=0
   for arg in "$@"; do
     if [[ "${arg}" == "--paginate" ]]; then
       has_paginate=1
     fi
-    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews ]]; then
+    if [[ "${arg}" == "--method" ]]; then
+      next_is_method=1
+      continue
+    fi
+    if [[ "${next_is_method}" == "1" ]]; then
+      method="${arg}"
+      next_is_method=0
+      continue
+    fi
+    if [[ "${arg}" == "--input" ]]; then
+      next_is_input=1
+      continue
+    fi
+    if [[ "${next_is_input}" == "1" ]]; then
+      input_file="${arg}"
+      next_is_input=0
+      continue
+    fi
+    if [[ "${arg}" == "user" || "${arg}" == repos/* ]]; then
       endpoint="${arg}"
     fi
   done
@@ -201,7 +91,119 @@ if [[ "${1:-}" == "api" ]]; then
     exit 0
   fi
 
-  if [[ "${endpoint}" == repos/:owner/:repo/pulls/*/reviews ]]; then
+  if [[ "${endpoint}" =~ ^repos/.+/pulls/([0-9]+)$ && "${method}" == "GET" ]]; then
+    if [[ -n "${MOCK_GH_PR_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}" ]]; then
+      raw_pr="$(pop_sequence_response_line "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}")"
+    else
+      raw_pr="$(cat "${MOCK_GH_PR_VIEW_JSON:?missing MOCK_GH_PR_VIEW_JSON}")"
+    fi
+    jq --arg repo "${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}" '
+      if .headRefOid? then
+        {
+          number: (.number // 274),
+          title: (.title // "Mock PR"),
+          body: (.body // ""),
+          html_url: (.url // "https://example.test/pr/274"),
+          draft: (.isDraft // false),
+          base: { ref: (.baseRefName // "main") },
+          head: {
+            ref: (.headRefName // "feat/mock"),
+            sha: (.headRefOid // ""),
+            repo: { full_name: (.headRepoFullName // $repo), owner: { login: (($repo | split("/"))[0]) } }
+          },
+          mergeable: ((.mergeable // "UNKNOWN") == "MERGEABLE"),
+          mergeable_state: ((.mergeStateStatus // "UNKNOWN") | ascii_downcase),
+          user: { login: (.author.login // "author") }
+        }
+      else
+        .
+      end
+    ' <<< "${raw_pr}"
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/issues/([0-9]+)$ && "${method}" == "GET" ]]; then
+    issue_exit_code="${MOCK_GH_ISSUE_VIEW_EXIT_CODE:-0}"
+    issue_stderr="${MOCK_GH_ISSUE_VIEW_STDERR:-}"
+    if [[ "${issue_exit_code}" != "0" ]]; then
+      if [[ -n "${issue_stderr:-}" ]]; then
+        printf '%s\n' "${issue_stderr}" >&2
+      fi
+      exit "${issue_exit_code}"
+    fi
+    if [[ -n "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}" ]]; then
+      pop_sequence_response_line "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}"
+      exit 0
+    fi
+    cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/commits/.+/check-runs && "${method}" == "GET" ]]; then
+    checks_payload_file="${MOCK_GH_REQUIRED_CHECKS_JSON:-${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}}"
+    checks_exit_code="${MOCK_GH_CHECKS_EXIT_CODE:-0}"
+    checks_stderr="${MOCK_GH_CHECKS_STDERR:-}"
+    if [[ "${checks_exit_code}" != "0" ]]; then
+      if [[ -n "${checks_stderr:-}" ]]; then
+        printf '%s\n' "${checks_stderr}" >&2
+      fi
+      exit "${checks_exit_code}"
+    fi
+    jq -nc --slurpfile checks "${checks_payload_file}" '
+      [
+        ($checks[0] // [])[]
+        | {
+            name: (.name // ""),
+            status: (if (.bucket // "") == "pass" then "completed" elif (.bucket // "") == "pending" then "queued" else "completed" end),
+            conclusion: (if (.bucket // "") == "pass" then "success" elif (.bucket // "") == "pending" then null else "failure" end),
+            html_url: (.link // "")
+          }
+      ] as $runs
+      | [ { total_count: ($runs | length), check_runs: $runs } ]
+    '
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/commits/.+/status$ && "${method}" == "GET" ]]; then
+    if [[ -n "${MOCK_GH_STATUSES_JSON:-}" ]]; then
+      jq -nc --slurpfile statuses "${MOCK_GH_STATUSES_JSON}" '{statuses: ($statuses[0] // [])}'
+    else
+      printf '%s\n' '{"statuses":[]}'
+    fi
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/pulls/([0-9]+)/reviews$ && "${method}" == "POST" ]]; then
+    echo "${endpoint}" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
+    cat "${input_file}" >> "${MOCK_GH_REVIEW_LOG}"
+    review_event="$(jq -r '.event // "COMMENT"' "${input_file}")"
+    review_state="COMMENTED"
+    case "${review_event}" in
+      APPROVE) review_state="APPROVED" ;;
+      REQUEST_CHANGES) review_state="CHANGES_REQUESTED" ;;
+    esac
+    body="$(jq -r '.body // ""' "${input_file}")"
+    commit_id="$(jq -r '.commit_id // ""' "${input_file}")"
+    if [[ -n "${MOCK_GH_POSTED_REVIEWS_JSON:-}" ]]; then
+      next_review_id="$(cat "${MOCK_GH_NEXT_REVIEW_ID_FILE:?missing MOCK_GH_NEXT_REVIEW_ID_FILE}")"
+      printf '%s\n' "$((next_review_id + 1))" > "${MOCK_GH_NEXT_REVIEW_ID_FILE}"
+      tmp_reviews_file="${MOCK_GH_POSTED_REVIEWS_JSON}.tmp"
+      jq \
+        --argjson review_id "${next_review_id}" \
+        --arg reviewer "${MOCK_GH_USER_LOGIN:?missing MOCK_GH_USER_LOGIN}" \
+        --arg commit_id "${commit_id}" \
+        --arg review_state "${review_state}" \
+        --arg submitted_at "${MOCK_GH_REVIEW_SUBMITTED_AT:-2026-04-07T10:10:00Z}" \
+        --arg body "${body}" \
+        '.[0] += [{id: $review_id, user: {login: $reviewer}, commit_id: $commit_id, state: $review_state, submitted_at: $submitted_at, body: $body}]' \
+        "${MOCK_GH_POSTED_REVIEWS_JSON}" > "${tmp_reviews_file}"
+      mv "${tmp_reviews_file}" "${MOCK_GH_POSTED_REVIEWS_JSON}"
+    fi
+    printf '%s\n' '{"id":1000}'
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/pulls/([0-9]+)/reviews$ ]]; then
     if [[ -n "${MOCK_GH_REVIEWS_SEQUENCE_FILE:-}" && -s "${MOCK_GH_REVIEWS_SEQUENCE_FILE}" ]]; then
       pop_sequence_response_line "${MOCK_GH_REVIEWS_SEQUENCE_FILE}"
       exit 0
@@ -225,6 +227,18 @@ if [[ "${1:-}" == "api" ]]; then
             end
         '
     fi
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/pulls/([0-9]+)/merge$ && "${method}" == "PUT" ]]; then
+    echo "${endpoint}" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
+    cat "${input_file}" >> "${MOCK_GH_MERGE_LOG}"
+    printf '%s\n' '{"merged":true}'
+    exit 0
+  fi
+
+  if [[ "${endpoint}" =~ ^repos/.+/git/refs/heads/.+ && "${method}" == "DELETE" ]]; then
+    echo "${endpoint}" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
     exit 0
   fi
 
@@ -304,16 +318,19 @@ setup_case_dir() {
   MOCK_GH_REVIEW_LOG="${case_dir}/gh.review.log"
   MOCK_GH_POSTED_REVIEWS_JSON="${case_dir}/mock/posted-reviews.json"
   MOCK_GH_NEXT_REVIEW_ID_FILE="${case_dir}/mock/next-review-id.txt"
+  MOCK_GH_PR_VIEW_JSON="${case_dir}/mock/pr-view.json"
   : > "${MOCK_GH_CALLS_LOG}"
   : > "${MOCK_GH_MERGE_LOG}"
   : > "${MOCK_GH_REVIEW_LOG}"
   printf '%s\n' '[[]]' > "${MOCK_GH_POSTED_REVIEWS_JSON}"
   printf '%s\n' '1000' > "${MOCK_GH_NEXT_REVIEW_ID_FILE}"
+  printf '%s\n' '{"baseRefName":"main","headRefName":"feat/mock","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
   export MOCK_GH_CALLS_LOG
   export MOCK_GH_MERGE_LOG
   export MOCK_GH_REVIEW_LOG
   export MOCK_GH_POSTED_REVIEWS_JSON
   export MOCK_GH_NEXT_REVIEW_ID_FILE
+  export MOCK_GH_PR_VIEW_JSON
 
   MOCK_CODEX_CALLS_LOG="${case_dir}/codex.calls.log"
   MOCK_CODEX_PROMPT_CAPTURE="${case_dir}/codex.prompt.log"
@@ -346,7 +363,9 @@ setup_case_dir() {
   unset MOCK_GH_REPO_OWNER_LOGIN || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
   CODEX_HOME="${case_dir}/codex-home"
+  REPO_SLUG="${MOCK_REPO_SLUG:-mcontheway/WebEnvoy}"
   export CODEX_HOME
+  export REPO_SLUG
   mkdir -p "${CODEX_HOME}/state"
 }
 

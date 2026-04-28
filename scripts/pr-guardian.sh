@@ -81,11 +81,83 @@ repository_slug() {
   elif [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
     REPO_SLUG="${BASH_REMATCH[1]}"
   else
-    REPO_SLUG="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+    die "无法从 origin remote 推导 GitHub repo slug，请设置 REPO_SLUG=owner/repo 后重试。"
   fi
 
   export REPO_SLUG
   printf '%s\n' "${REPO_SLUG}"
+}
+
+github_rest_get() {
+  local endpoint="$1"
+
+  gh api \
+    -H "Accept: application/vnd.github+json" \
+    "repos/$(repository_slug)/${endpoint}"
+}
+
+github_rest_paginated_slurp() {
+  local endpoint="$1"
+
+  gh api --paginate --slurp \
+    -H "Accept: application/vnd.github+json" \
+    "repos/$(repository_slug)/${endpoint}"
+}
+
+github_rest_method_with_input() {
+  local method="$1"
+  local endpoint="$2"
+  local input_file="$3"
+
+  gh api \
+    --method "${method}" \
+    -H "Accept: application/vnd.github+json" \
+    "repos/$(repository_slug)/${endpoint}" \
+    --input "${input_file}"
+}
+
+load_pr_meta_rest() {
+  local pr_number="$1"
+  local output_file="$2"
+
+  github_rest_get "pulls/${pr_number}" | jq '
+    def mergeable_value:
+      if .mergeable == true then "MERGEABLE"
+      elif .mergeable == false then "CONFLICTING"
+      else "UNKNOWN"
+      end;
+    def merge_state:
+      ((.mergeable_state // "unknown") | ascii_upcase);
+    {
+      number,
+      title: (.title // ""),
+      body: (.body // ""),
+      url: (.html_url // ""),
+      isDraft: (.draft // false),
+      baseRefName: (.base.ref // ""),
+      headRefName: (.head.ref // ""),
+      headRefOid: (.head.sha // ""),
+      headRepoFullName: (.head.repo.full_name // ""),
+      headRepoOwner: (.head.repo.owner.login // ""),
+      mergeable: mergeable_value,
+      mergeStateStatus: merge_state,
+      author: { login: (.user.login // "") }
+    }
+  ' > "${output_file}"
+}
+
+load_issue_rest() {
+  local issue_number="$1"
+  local output_file="$2"
+
+  github_rest_get "issues/${issue_number}" | jq '
+    {
+      number,
+      title: (.title // ""),
+      body: (.body // ""),
+      updatedAt: (.updated_at // "")
+    }
+  ' > "${output_file}"
 }
 
 origin_url_to_https() {
@@ -295,7 +367,7 @@ ensure_merge_base_available_for_refs() {
 }
 
 check_gh_auth() {
-  if ! gh auth status >/dev/null 2>&1; then
+  if ! gh api user --jq '.login' >/dev/null 2>&1; then
     die "GitHub CLI 未登录或凭证失效，请先执行: gh auth login"
   fi
 }
@@ -586,7 +658,7 @@ build_lightweight_issue_basis() {
     [[ -n "${issue_number}" ]] || continue
 
     issue_file="${TMP_DIR}/issue-${issue_number}-review-basis.json"
-    if ! gh issue view "${issue_number}" --json number,title,body,updatedAt > "${issue_file}" 2>/dev/null; then
+    if ! load_issue_rest "${issue_number}" "${issue_file}" 2>/dev/null; then
       printf 'issue=%s\tlookup=failed\n' "${issue_number}"
       continue
     fi
@@ -734,9 +806,7 @@ prepare_pr_workspace() {
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
   BASELINE_SNAPSHOT_ROOT="${TMP_DIR}/baseline-snapshot"
 
-  gh pr view "${pr_number}" --json \
-    number,title,body,url,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,author,closingIssuesReferences \
-    > "${META_FILE}"
+  load_pr_meta_rest "${pr_number}" "${META_FILE}"
 
   BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
   HEAD_SHA="$(jq -r '.headRefOid' "${META_FILE}")"
@@ -781,9 +851,7 @@ prepare_review_status_context() {
   SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
   LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
 
-  gh pr view "${pr_number}" --json \
-    title,body,baseRefName,headRefOid,author,closingIssuesReferences \
-    > "${META_FILE}"
+  load_pr_meta_rest "${pr_number}" "${META_FILE}"
 
   PR_TITLE="$(jq -r '.title // ""' "${META_FILE}")"
   PR_BODY="$(jq -r '.body // ""' "${META_FILE}")"
@@ -1249,10 +1317,7 @@ extract_issue_numbers_from_pr_body() {
 }
 
 resolve_linked_issue_numbers() {
-  {
-    extract_issue_numbers_from_pr_body
-    jq -r '.closingIssuesReferences[]?.number // empty' "${META_FILE}"
-  } | awk 'NF && !seen[$0]++ { print }'
+  extract_issue_numbers_from_pr_body | awk 'NF && !seen[$0]++ { print }'
 }
 
 list_linked_issue_numbers() {
@@ -1479,7 +1544,7 @@ fetch_issue_summary() {
     [[ -n "${issue_number}" ]] || continue
 
     issue_file="${TMP_DIR}/issue-${issue_number}.json"
-    if ! gh issue view "${issue_number}" --json number,title,body > "${issue_file}" 2>/dev/null; then
+    if ! load_issue_rest "${issue_number}" "${issue_file}" 2>/dev/null; then
       die "关联 Issue 拉取失败，无法按仓库要求补齐审查上下文: #${issue_number}"
     fi
 
@@ -2937,24 +3002,30 @@ submit_review_event() {
   local pr_number="$1"
   local verdict="$2"
   local reviewer="$3"
+  local event="COMMENT"
+  local payload_file="${TMP_DIR}/review-event.json"
 
   if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${reviewer}" ]]; then
-    gh pr review "${pr_number}" --comment --body-file "${REVIEW_MD_FILE}" >/dev/null
-    return
+    event="COMMENT"
+  elif [[ "${verdict}" == "APPROVE" ]]; then
+    event="APPROVE"
+  else
+    event="REQUEST_CHANGES"
   fi
 
-  if [[ "${verdict}" == "APPROVE" ]]; then
-    gh pr review "${pr_number}" --approve --body-file "${REVIEW_MD_FILE}" >/dev/null
-  else
-    gh pr review "${pr_number}" --request-changes --body-file "${REVIEW_MD_FILE}" >/dev/null
-  fi
+  jq -n \
+    --arg event "${event}" \
+    --arg body "$(cat "${REVIEW_MD_FILE}")" \
+    --arg commit_id "${HEAD_SHA:-}" \
+    '{event: $event, body: $body, commit_id: $commit_id}' > "${payload_file}"
+  github_rest_method_with_input POST "pulls/${pr_number}/reviews" "${payload_file}" >/dev/null
 }
 
 load_pull_reviews() {
   local pr_number="$1"
   local reviews_file="$2"
 
-  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+  github_rest_paginated_slurp "pulls/${pr_number}/reviews" > "${reviews_file}"
 }
 
 annotate_pull_reviews_for_reuse() {
@@ -3587,7 +3658,7 @@ assert_pr_head_matches_snapshot() {
   local current_head_sha
   local head_meta_file="${TMP_DIR}/head-check.json"
 
-  gh pr view "${pr_number}" --json headRefOid > "${head_meta_file}"
+  load_pr_meta_rest "${pr_number}" "${head_meta_file}"
   current_head_sha="$(jq -r '.headRefOid' "${head_meta_file}")"
 
   if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
@@ -3689,60 +3760,78 @@ print_summary() {
   echo
 }
 
+load_pr_checks_rest() {
+  local pr_number="$1"
+  local output_file="$2"
+  local head_meta_file="${TMP_DIR}/checks-pr-meta.json"
+  local check_runs_file="${TMP_DIR}/checks.runs.raw.json"
+  local statuses_file="${TMP_DIR}/checks.status.raw.json"
+  local head_sha
+
+  load_pr_meta_rest "${pr_number}" "${head_meta_file}"
+  head_sha="$(jq -r '.headRefOid' "${head_meta_file}")"
+  [[ -n "${head_sha}" && "${head_sha}" != "null" ]] || return 1
+
+  github_rest_paginated_slurp "commits/${head_sha}/check-runs?per_page=100" > "${check_runs_file}"
+  github_rest_get "commits/${head_sha}/status" > "${statuses_file}"
+
+  jq -n \
+    --slurpfile check_pages "${check_runs_file}" \
+    --slurpfile status_payload "${statuses_file}" \
+    '
+      def check_bucket:
+        if (.status // "") != "completed" then "pending"
+        elif ((.conclusion // "") | IN("success", "neutral", "skipped")) then "pass"
+        else "fail"
+        end;
+      def status_bucket:
+        if (.state // "") == "success" then "pass"
+        elif (.state // "") == "pending" then "pending"
+        else "fail"
+        end;
+      (
+        $check_pages[0]
+        | map(.check_runs[]? | {
+            name: (.name // ""),
+            bucket: check_bucket,
+            state: ((.conclusion // .status // "") | ascii_upcase),
+            link: (.html_url // "")
+          })
+      )
+      +
+      (
+        ($status_payload[0].statuses // [])
+        | map({
+            name: (.context // ""),
+            bucket: status_bucket,
+            state: ((.state // "") | ascii_upcase),
+            link: (.target_url // "")
+          })
+      )
+    ' > "${output_file}"
+}
+
 all_required_checks_pass() {
   local pr_number="$1"
-  local checks_file="${TMP_DIR}/checks.required.json"
-  local checks_error_file="${TMP_DIR}/checks.required.err"
-  local all_checks_file="${TMP_DIR}/checks.all.json"
-  local all_checks_error_file="${TMP_DIR}/checks.all.err"
-  local using_required_checks="1"
+  local checks_file="${TMP_DIR}/checks.all.json"
 
-  if ! gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
-    if grep -q "no required checks reported" "${checks_error_file}"; then
-      if ! gh pr checks "${pr_number}" --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
-        sed 's/^/  /' "${checks_error_file}" >&2 || true
-        return 1
-      fi
-      using_required_checks="0"
-    elif [[ -s "${checks_file}" ]] && jq empty "${checks_file}" >/dev/null 2>&1; then
-      :
-    else
-      sed 's/^/  /' "${checks_error_file}" >&2 || true
-      return 1
-    fi
+  if ! load_pr_checks_rest "${pr_number}" "${checks_file}"; then
+    return 1
   fi
 
   if [[ "$(jq 'length' "${checks_file}")" -eq 0 ]]; then
-    if [[ "${using_required_checks}" == "1" ]]; then
-      echo "GitHub required checks 列表为空，拒绝视为通过。" >&2
-    else
-      echo "GitHub 未配置 required checks，且当前 checks 列表为空，拒绝视为通过。" >&2
-    fi
-    return 1
-  fi
-
-  if ! jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1; then
-    return 1
-  fi
-
-  if ! gh pr checks "${pr_number}" --json name,bucket,state,link > "${all_checks_file}" 2>"${all_checks_error_file}"; then
-    sed 's/^/  /' "${all_checks_error_file}" >&2 || true
-    return 1
-  fi
-
-  if [[ "$(jq 'length' "${all_checks_file}")" -eq 0 ]]; then
     echo "GitHub checks 列表为空，拒绝视为通过。" >&2
     return 1
   fi
 
-  jq -e 'all(.[]; .bucket == "pass")' "${all_checks_file}" >/dev/null 2>&1
+  jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
 }
 
 load_merge_gate_meta() {
   local pr_number="$1"
   local meta_file="$2"
 
-  gh pr view "${pr_number}" --json baseRefName,headRefOid,mergeable,mergeStateStatus,isDraft > "${meta_file}"
+  load_pr_meta_rest "${pr_number}" "${meta_file}"
 }
 
 wait_for_merge_gate_ready() {
@@ -3775,6 +3864,44 @@ wait_for_merge_gate_ready() {
   done
 
   return 1
+}
+
+merge_pull_rest() {
+  local pr_number="$1"
+  local payload_file="${TMP_DIR}/merge-payload.json"
+
+  jq -n \
+    --arg merge_method "squash" \
+    --arg sha "${HEAD_SHA:-}" \
+    '{merge_method: $merge_method, sha: $sha}' > "${payload_file}"
+
+  github_rest_method_with_input PUT "pulls/${pr_number}/merge" "${payload_file}" >/dev/null
+}
+
+delete_same_repo_head_ref_rest() {
+  local current_meta_file="$1"
+  local head_repo_full_name
+  local head_ref_name
+  local repo_slug
+
+  repo_slug="$(repository_slug)"
+  head_repo_full_name="$(jq -r '.headRepoFullName // ""' "${current_meta_file}")"
+  head_ref_name="$(jq -r '.headRefName // ""' "${current_meta_file}")"
+
+  if [[ -z "${head_ref_name}" || "${head_ref_name}" == "main" || "${head_ref_name}" == "master" ]]; then
+    warn "跳过删除 PR head 分支：headRefName=${head_ref_name:-<empty>}。"
+    return 0
+  fi
+
+  if [[ "${head_repo_full_name}" != "${repo_slug}" ]]; then
+    warn "跳过删除 fork PR head 分支：headRepoFullName=${head_repo_full_name:-<empty>}。"
+    return 0
+  fi
+
+  gh api \
+    --method DELETE \
+    -H "Accept: application/vnd.github+json" \
+    "repos/${repo_slug}/git/refs/heads/${head_ref_name}" >/dev/null
 }
 
 merge_if_safe() {
@@ -3831,13 +3958,14 @@ merge_if_safe() {
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then
-    die "GitHub required checks 未全部通过，拒绝合并。"
+    die "GitHub checks 未全部通过，拒绝合并。"
   fi
 
   if [[ "${delete_branch}" == "1" ]]; then
-    gh pr merge "${pr_number}" --squash --delete-branch --match-head-commit "${HEAD_SHA}"
+    merge_pull_rest "${pr_number}"
+    delete_same_repo_head_ref_rest "${current_meta_file}"
   else
-    gh pr merge "${pr_number}" --squash --match-head-commit "${HEAD_SHA}"
+    merge_pull_rest "${pr_number}"
   fi
 }
 
