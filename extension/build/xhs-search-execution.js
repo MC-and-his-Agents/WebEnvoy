@@ -109,6 +109,20 @@ const parseXsecFromUrl = (value) => {
         };
     }
 };
+const buildXhsContinuityUrl = (input) => {
+    if (!input.id || !input.xsecToken) {
+        return null;
+    }
+    const path = input.kind === "note"
+        ? `/explore/${encodeURIComponent(input.id)}`
+        : `/user/profile/${encodeURIComponent(input.id)}`;
+    const url = new URL(path, "https://www.xiaohongshu.com");
+    url.searchParams.set("xsec_token", input.xsecToken);
+    if (input.xsecSource) {
+        url.searchParams.set("xsec_source", input.xsecSource);
+    }
+    return url.toString();
+};
 const collectSearchDomCards = (value, seen = new Set()) => {
     const record = asRecord(value);
     if (record) {
@@ -116,33 +130,58 @@ const collectSearchDomCards = (value, seen = new Set()) => {
             return [];
         }
         seen.add(record);
-        const rawDetailUrl = normalizeXhsUrl(pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"]));
-        const detailUrl = isXhsNoteCardUrl(rawDetailUrl) ? rawDetailUrl : null;
         const userRecord = asRecord(record.user) ?? asRecord(record.author);
+        const noteCardRecord = asRecord(record.note_card) ?? asRecord(record.noteCard);
+        const noteCardUserRecord = asRecord(noteCardRecord?.user) ?? asRecord(noteCardRecord?.author) ?? null;
+        const noteId = pickFirstString(record, ["note_id", "noteId", "id"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["note_id", "noteId", "id"]) : null);
+        const userId = pickFirstString(record, ["user_id", "userId"]) ??
+            (userRecord ? pickFirstString(userRecord, ["user_id", "userId", "id"]) : null) ??
+            (noteCardUserRecord ? pickFirstString(noteCardUserRecord, ["user_id", "userId", "id"]) : null);
+        const rawDetailUrl = normalizeXhsUrl(pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"]) ??
+            (noteCardRecord
+                ? pickFirstString(noteCardRecord, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"])
+                : null));
         const rawUserHomeUrl = normalizeXhsUrl(pickFirstString(record, ["user_home_url", "userHomeUrl", "author_url", "authorUrl", "user_url", "userUrl"]) ??
-            (userRecord ? pickFirstString(userRecord, ["user_home_url", "userHomeUrl", "url", "link"]) : null));
-        const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl) ? rawUserHomeUrl : null;
-        const parsedDetail = parseXsecFromUrl(detailUrl);
-        const parsedUser = parseXsecFromUrl(userHomeUrl);
+            (userRecord ? pickFirstString(userRecord, ["user_home_url", "userHomeUrl", "url", "link"]) : null) ??
+            (noteCardUserRecord
+                ? pickFirstString(noteCardUserRecord, ["user_home_url", "userHomeUrl", "url", "link"])
+                : null));
+        const parsedDetail = parseXsecFromUrl(rawDetailUrl);
+        const parsedUser = parseXsecFromUrl(rawUserHomeUrl);
+        const xsecToken = pickFirstString(record, ["xsec_token", "xsecToken"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["xsec_token", "xsecToken"]) : null) ??
+            parsedDetail.xsec_token ??
+            parsedUser.xsec_token;
+        const xsecSource = pickFirstString(record, ["xsec_source", "xsecSource"]) ??
+            (noteCardRecord ? pickFirstString(noteCardRecord, ["xsec_source", "xsecSource"]) : null) ??
+            parsedDetail.xsec_source ??
+            parsedUser.xsec_source;
+        const detailUrl = isXhsNoteCardUrl(rawDetailUrl)
+            ? rawDetailUrl
+            : buildXhsContinuityUrl({
+                kind: "note",
+                id: noteId,
+                xsecToken,
+                xsecSource
+            });
+        const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl)
+            ? rawUserHomeUrl
+            : buildXhsContinuityUrl({
+                kind: "user",
+                id: userId,
+                xsecToken,
+                xsecSource
+            });
         const card = {
             title: pickFirstString(record, ["title", "display_title", "displayTitle", "desc"]) ??
-                (asRecord(record.note_card)
-                    ? pickFirstString(asRecord(record.note_card), ["title", "display_title", "displayTitle"])
-                    : null),
+                (noteCardRecord ? pickFirstString(noteCardRecord, ["title", "display_title", "displayTitle"]) : null),
+            note_id: noteId,
+            user_id: userId,
             detail_url: detailUrl,
             user_home_url: userHomeUrl,
-            xsec_token: pickFirstString(record, ["xsec_token", "xsecToken"]) ??
-                (asRecord(record.note_card)
-                    ? pickFirstString(asRecord(record.note_card), ["xsec_token", "xsecToken"])
-                    : null) ??
-                parsedDetail.xsec_token ??
-                parsedUser.xsec_token,
-            xsec_source: pickFirstString(record, ["xsec_source", "xsecSource"]) ??
-                (asRecord(record.note_card)
-                    ? pickFirstString(asRecord(record.note_card), ["xsec_source", "xsecSource"])
-                    : null) ??
-                parsedDetail.xsec_source ??
-                parsedUser.xsec_source
+            xsec_token: xsecToken,
+            xsec_source: xsecSource
         };
         const hasCardSignal = card.detail_url !== null || card.user_home_url !== null;
         return [
@@ -183,6 +222,8 @@ const resolveSearchDomExtraction = async (env) => {
 };
 const buildSearchTargetContinuity = (cards) => cards.map((card) => ({
     target_url: card.detail_url ?? card.user_home_url,
+    note_id: card.note_id,
+    user_id: card.user_id,
     detail_url: card.detail_url,
     user_home_url: card.user_home_url,
     xsec_token: card.xsec_token,

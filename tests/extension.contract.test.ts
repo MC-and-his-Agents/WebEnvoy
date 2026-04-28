@@ -1636,11 +1636,15 @@ describe("extension build contract", () => {
                 data: {
                   items: [
                     {
+                      id: "note-passive-001",
                       title: "露营装备清单",
-                      detail_url:
-                        "https://www.xiaohongshu.com/explore/note-passive-001?xsec_token=token-passive-001&xsec_source=pc_search",
-                      user_home_url:
-                        "https://www.xiaohongshu.com/user/profile/user-passive-001?xsec_token=token-user-passive-001&xsec_source=pc_search"
+                      xsec_token: "token-passive-001",
+                      xsec_source: "pc_search",
+                      note_card: {
+                        user: {
+                          user_id: "user-passive-001"
+                        }
+                      }
                     }
                   ]
                 }
@@ -1670,13 +1674,17 @@ describe("extension build contract", () => {
                 detail_url:
                   "https://www.xiaohongshu.com/explore/note-passive-001?xsec_token=token-passive-001&xsec_source=pc_search",
                 user_home_url:
-                  "https://www.xiaohongshu.com/user/profile/user-passive-001?xsec_token=token-user-passive-001&xsec_source=pc_search",
+                  "https://www.xiaohongshu.com/user/profile/user-passive-001?xsec_token=token-passive-001&xsec_source=pc_search",
+                note_id: "note-passive-001",
+                user_id: "user-passive-001",
                 xsec_token: "token-passive-001",
                 xsec_source: "pc_search"
               }
             ],
             target_continuity: [
               {
+                note_id: "note-passive-001",
+                user_id: "user-passive-001",
                 token_presence: "present",
                 source_route: "xhs.search"
               }

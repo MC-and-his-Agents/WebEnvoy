@@ -265,6 +265,27 @@ const isCurrentSearchPageForQuery = (href, query) => {
 };
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
+    const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
+    if (!queryMatched && searchInput) {
+        const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        searchInput.focus();
+        valueSetter?.call(searchInput, input.query);
+        searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.query }));
+        searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        searchInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+        searchInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+        return {
+            evidence_class: "humanized_action",
+            action_kind: "keyboard_input",
+            action_ref: input.actionRef,
+            run_id: input.runId,
+            page_url: input.pageUrl,
+            query: input.query,
+            query_matched: false,
+            search_input_found: true,
+            trigger_surface: "xhs.search_result"
+        };
+    }
     if (queryMatched) {
         const target = document.scrollingElement ?? document.documentElement;
         const beforeScrollY = window.scrollY;
@@ -295,13 +316,14 @@ const performXhsSearchPassiveAction = async (input) => {
     }
     return {
         evidence_class: "humanized_action",
-        action_kind: "scroll",
+        action_kind: "keyboard_input",
         action_ref: input.actionRef,
         run_id: input.runId,
         page_url: input.pageUrl,
         query: input.query,
         query_matched: false,
-        skipped_reason: "query_mismatch"
+        search_input_found: false,
+        skipped_reason: "search_input_missing"
     };
 };
 const createBrowserEnvironment = () => ({
