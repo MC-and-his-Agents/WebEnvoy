@@ -182,17 +182,28 @@ type XhsSignedContinuityV1 = {
   xsec_token: string | null;
   xsec_source: string | null;
   token_presence: "present" | "missing" | "empty";
+  observed_at: number | null;
   source_route:
     | "xhs.search"
     | "xhs.detail"
     | "xhs.user_home"
     | "unknown";
 };
+
+type XhsAllowedXsecSourceV1 =
+  | "pc_search"
+  | "pc_feed"
+  | "pc_note"
+  | "pc_profile"
+  | "pc_user";
 ```
 
 约束：
 
 - `xhs.detail` 与 `xhs.user_home` 的主动页面内 fetch 前，必须先从当前 captured request-context 的 signed detail/profile URL 中解析 `xsec_token` 与 `xsec_source`。
+- stale 判定必须使用当前 captured request-context artifact 的 `observed_at`；若缺失则使用 `captured_at`。两者都缺失时视为 `XSEC_TOKEN_STALE`。
+- freshness window 固定复用 request-context freshness window：5 分钟。`now - (observed_at ?? captured_at) > 5 * 60_000` 时必须 fail closed 为 `XSEC_TOKEN_STALE`。
+- `xsec_source` 允许集合固定为 `pc_search | pc_feed | pc_note | pc_profile | pc_user`；缺失、空值或集合外取值必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
 - `xsec_token` / `xsec_source` 只属于 route continuity / provenance，不得写入 FR-0026 canonical identity。
 - 裸 `note_id` / `user_id`、裸 `/explore/<id>` URL 或裸 `/user/profile/<id>` URL 不得静默升级为 live fetch。
 - 缺 signed URL、缺 token、空 token、token 已过期、`xsec_source` 缺失或不在允许来源集合时必须 fail closed。

@@ -45,9 +45,12 @@
 - `xsec_token`
 - `xsec_source`
 - `token_presence`
+- `observed_at`
 - `source_route`
 
 该 payload 只能出现在当前 run 的 summary/evidence 中，用于证明 signed URL 与 token continuity；不得写入 canonical identity、profile meta、SQLite 表或长期账号状态。
+
+`observed_at` 取自当前 captured request-context artifact 的 `observed_at ?? captured_at`，只用于 5 分钟 freshness window 判定，不作为长期持久化时间戳。
 
 ## 不持久化的内容
 

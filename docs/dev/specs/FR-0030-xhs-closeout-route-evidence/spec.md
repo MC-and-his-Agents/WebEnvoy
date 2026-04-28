@@ -154,6 +154,7 @@ Canonical Issue: #581
 - `xsec_token`
 - `xsec_source`
 - `token_presence`
+- `observed_at`
 - `source_route`
 
 约束：
@@ -162,8 +163,9 @@ Canonical Issue: #581
 - 裸 `note_id` / `user_id` 只允许作为 identity shape，用于匹配当前目标；不得作为缺 token live fetch 的放行依据。
 - 裸 detail/profile URL 不得静默升级为 live fetch；必须 fail closed 为 `XSEC_TOKEN_MISSING`。
 - `xsec_token=""` 必须 fail closed 为 `XSEC_TOKEN_EMPTY`。
-- captured template 超出 freshness window 时，signed continuity 必须视为过期，不得复用历史 token。
-- `xsec_source` 缺失或不属于当前允许来源集合时，必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
+- stale 判定必须使用当前 captured request-context artifact 的 `observed_at`；若缺失则使用 `captured_at`。两者都缺失时视为 `XSEC_TOKEN_STALE`。
+- freshness window 固定复用 request-context freshness window：5 分钟。`now - (observed_at ?? captured_at) > 5 * 60_000` 时必须 fail closed 为 `XSEC_TOKEN_STALE`，不得复用历史 token。
+- `xsec_source` 允许集合固定为 `pc_search | pc_feed | pc_note | pc_profile | pc_user`；缺失、空值或集合外取值必须 fail closed 为 `XSEC_SOURCE_MISMATCH`。
 - security redirect 必须优先 fail closed 为 `SECURITY_REDIRECT`。
 - 成功路径必须在 summary/evidence 中保留 signed continuity，但不得把 token 写入 canonical data_ref。
 
