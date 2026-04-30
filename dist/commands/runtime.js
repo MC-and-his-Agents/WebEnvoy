@@ -761,11 +761,41 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (context) => {
         status.transportState === "ready" &&
         status.executionSurface === "real_browser" &&
         status.headless === false;
+    const runtimeTakeover = asObject(status.runtimeTakeoverEvidence);
+    const managedRuntimeTargetTabId = asInteger(runtimeTakeover?.managedTargetTabId ?? runtimeTakeover?.managed_target_tab_id);
+    const managedRuntimeTargetDomain = asString(runtimeTakeover?.managedTargetDomain ?? runtimeTakeover?.managed_target_domain);
+    const runtimeTargetTabContinuity = asString(runtimeTakeover?.targetTabContinuity ?? runtimeTakeover?.target_tab_continuity);
+    const currentRuntimeContinuity = runtimeTakeover?.observedRunId === context.run_id &&
+        runtimeTakeover.controllerBrowserContinuity === true &&
+        runtimeTakeover.ownerConflictFree === true &&
+        runtimeTakeover.identityBound === true &&
+        runtimeTakeover.runtimeContextId === runtimeContextId;
+    const staleBootstrapTargetContinuity = managedRuntimeTargetTabId === context.params.target_tab_id &&
+        managedRuntimeTargetDomain === context.params.target_domain &&
+        runtimeTargetTabContinuity === "runtime_trust_state";
+    const staleBootstrapSameRuntimeReady = status.lockHeld === true &&
+        currentRuntimeContinuity &&
+        staleBootstrapTargetContinuity &&
+        status.identityBindingState === "bound" &&
+        status.transportState === "ready" &&
+        status.bootstrapState === "stale" &&
+        (status.runtimeReadiness === "blocked" || status.runtimeReadiness === "recoverable") &&
+        status.executionSurface === "real_browser" &&
+        status.headless === false;
     const validationReady = antiDetectionValidationView?.all_required_ready === true;
+    const runtimeReadyForRestore = officialRuntimeReady || attachedRuntimeReady || staleBootstrapSameRuntimeReady;
+    const validationAllowsRestore = staleBootstrapSameRuntimeReady
+        ? validationReady
+        : recoveryProbeWindow || validationReady;
     if (accountSafetyClear &&
         rhythmAllowsRestore &&
-        (officialRuntimeReady || attachedRuntimeReady) &&
-        (recoveryProbeWindow || validationReady)) {
+        runtimeReadyForRestore &&
+        validationAllowsRestore) {
+        const restoreRuntimeAttachState = attachedRuntimeReady
+            ? "attached_existing_runtime"
+            : staleBootstrapSameRuntimeReady
+                ? "stale_bootstrap_same_runtime"
+                : "not_required";
         return {
             source: "cli_persisted_runtime_gate",
             profile_ref: context.profile,
@@ -775,13 +805,20 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (context) => {
             target_page: context.params.target_page,
             target_tab_id: context.params.target_tab_id,
             target_url: targetUrl,
+            managed_target_tab_id: restoreRuntimeAttachState === "stale_bootstrap_same_runtime"
+                ? managedRuntimeTargetTabId
+                : context.params.target_tab_id,
+            target_tab_continuity: restoreRuntimeAttachState === "stale_bootstrap_same_runtime"
+                ? "stale_bootstrap_current_managed_tab"
+                : "runtime_trust_state",
             runtime_context_id: runtimeContextId,
             action_ref: actionRef,
-            restore_runtime_attach_state: attachedRuntimeReady ? "attached_existing_runtime" : "not_required",
+            restore_runtime_attach_state: restoreRuntimeAttachState,
             account_safety_state: accountSafety?.state ?? null,
             xhs_closeout_rhythm_state: rhythmState,
             recovery_probe_window: recoveryProbeWindow,
-            official_runtime_ready: officialRuntimeReady || attachedRuntimeReady,
+            stale_bootstrap_recovery: restoreRuntimeAttachState === "stale_bootstrap_same_runtime",
+            official_runtime_ready: runtimeReadyForRestore,
             identity_binding_state: status.identityBindingState,
             transport_state: status.transportState,
             bootstrap_state: status.bootstrapState,
@@ -800,7 +837,7 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (context) => {
                 ? "ACCOUNT_RISK_BLOCKED"
                 : !rhythmAllowsRestore
                     ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
-                    : !(officialRuntimeReady || attachedRuntimeReady)
+                    : !runtimeReadyForRestore
                         ? "OFFICIAL_RUNTIME_NOT_READY"
                         : "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
             account_safety: accountSafety,

@@ -138,7 +138,15 @@ const onRequest = (request) => {
         },
         payload: {
           transport_state: "ready",
-          bootstrap_state: "ready"
+          bootstrap_state: "ready",
+          managed_target_tab_id: Number.isInteger(commandParams.target_tab_id)
+            ? commandParams.target_tab_id
+            : null,
+          managed_target_domain:
+            typeof commandParams.target_domain === "string" ? commandParams.target_domain : null,
+          target_tab_continuity: Number.isInteger(commandParams.target_tab_id)
+            ? "runtime_trust_state"
+            : null
         },
         error: null
       });
@@ -160,7 +168,15 @@ const onRequest = (request) => {
         },
         payload: {
           transport_state: "ready",
-          bootstrap_state: commandRunId === staleRunId ? "stale" : "ready"
+          bootstrap_state: commandRunId === staleRunId ? "stale" : "ready",
+          managed_target_tab_id: Number.isInteger(commandParams.target_tab_id)
+            ? commandParams.target_tab_id
+            : null,
+          managed_target_domain:
+            typeof commandParams.target_domain === "string" ? commandParams.target_domain : null,
+          target_tab_continuity: Number.isInteger(commandParams.target_tab_id)
+            ? "runtime_trust_state"
+            : null
         },
         error: null
       });

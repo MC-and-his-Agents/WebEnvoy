@@ -195,6 +195,9 @@ interface RuntimeTakeoverEvidenceRecord {
   transportBootstrapViable: boolean;
   observedRunId: string;
   runtimeContextId: string | null;
+  managedTargetTabId: number | null;
+  managedTargetDomain: string | null;
+  targetTabContinuity: string | null;
 }
 
 interface RuntimeActionInput {
@@ -315,6 +318,12 @@ const readFingerprintMetaMode = (params: JsonObject): ReadMetaMode | undefined =
 
 const asObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
+const asNonEmptyString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
 const parseLocalStorageSnapshot = (params: JsonObject): LocalStorageSnapshot | null => {
   const rawSnapshot = params.localStorageSnapshot;
@@ -2064,6 +2073,7 @@ export class ProfileRuntimeService {
     browserPid: number | null;
     stateRunId: string | null;
   }): RuntimeTakeoverEvidenceRecord {
+    const readinessDetails = input.readiness.details ?? {};
     const controllerBrowserContinuity =
       Number.isInteger(input.pinnedControllerPid) &&
       Number.isInteger(input.browserPid) &&
@@ -2093,7 +2103,10 @@ export class ProfileRuntimeService {
       runtimeContextId:
         input.observedRunId.length > 0
           ? buildRuntimeBootstrapContextId(input.profile, input.observedRunId)
-          : null
+          : null,
+      managedTargetTabId: asInteger(readinessDetails.managed_target_tab_id),
+      managedTargetDomain: asNonEmptyString(readinessDetails.managed_target_domain),
+      targetTabContinuity: asNonEmptyString(readinessDetails.target_tab_continuity)
     };
   }
 
