@@ -503,9 +503,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     profile: string;
     sessionId?: string;
     runId?: string;
-    decision?: "allowed" | "blocked";
+    decision?: "allowed" | "blocked" | "deferred";
     riskState?: "allowed" | "paused" | "limited";
     currentPhase?: "steady" | "cooldown" | "recovery_probe";
+    reasonCodes?: string[];
+    requires?: string[];
   }): Promise<void> => {
     const sessionId = input.sessionId ?? "nm-session-001";
     const runId = input.runId ?? `run-${input.profile}-validation-source-rhythm`;
@@ -568,10 +570,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           effective_execution_mode: "live_read_high_risk",
           decision,
           reason_codes:
-            decision === "allowed"
+            input.reasonCodes ??
+            (decision === "allowed"
               ? ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
-              : ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
-          requires: decision === "allowed" ? [] : ["cooldown_until_elapsed"],
+              : ["ACCOUNT_RISK_RECOVERY_REQUIRED"]),
+          requires: input.requires ?? (decision === "allowed" ? [] : ["cooldown_until_elapsed"]),
           decided_at: "2026-04-30T01:00:05.000Z"
         }
       });
@@ -689,9 +692,18 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     signals?: ReturnType<typeof createXhsCloseoutValidationSignals>;
     artifactRefs?: string[];
     approvalChecks?: Record<string, boolean>;
+    rhythmDecision?: "allowed" | "blocked" | "deferred";
+    rhythmRiskState?: "allowed" | "paused" | "limited";
+    rhythmCurrentPhase?: "steady" | "cooldown" | "recovery_probe";
+    rhythmReasonCodes?: string[];
+    rhythmRequires?: string[];
   }): Promise<string[]> => {
     const requestedExecutionMode = input.requestedExecutionMode ?? "live_read_high_risk";
     const effectiveExecutionMode = input.effectiveExecutionMode ?? requestedExecutionMode;
+    const sourceAuditRiskState =
+      requestedExecutionMode === "live_read_high_risk"
+        ? (input.rhythmRiskState ?? "allowed")
+        : "paused";
     const decisionId = `gate_decision_${input.runId}`;
     const approvalId = `gate_approval_${input.runId}`;
     const sessionId = `session-${input.runId}`;
@@ -699,7 +711,12 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       cwd: input.cwd,
       profile: input.profile,
       sessionId,
-      runId: input.runId
+      runId: input.runId,
+      decision: input.rhythmDecision,
+      riskState: input.rhythmRiskState,
+      currentPhase: input.rhythmCurrentPhase,
+      reasonCodes: input.rhythmReasonCodes,
+      requires: input.rhythmRequires
     });
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
     const signals = bindXhsCloseoutValidationSignalsToSource(
@@ -814,8 +831,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
         sessionId,
         profile: input.profile,
         issueScope: "issue_209",
-        riskState: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "paused",
-        nextState: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "paused",
+        riskState: sourceAuditRiskState,
+        nextState: sourceAuditRiskState,
         transitionTrigger: "gate_evaluation",
         targetDomain: "www.xiaohongshu.com",
         targetTabId: 32,
@@ -4239,6 +4256,85 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  itWithSqlite("generates XHS closeout validation baseline from baseline bootstrap rhythm source samples", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_baseline_bootstrap_profile";
+    const runId = "run-xhs-closeout-validation-baseline-bootstrap-001";
+    const sourceRunId = "run-xhs-closeout-validation-source-baseline-bootstrap-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      rhythmDecision: "deferred",
+      rhythmRiskState: "limited",
+      rhythmCurrentPhase: "recovery_probe",
+      rhythmReasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+      rhythmRequires: ["session_rhythm_window_not_ready"]
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+        observed_at: "2026-04-30T01:35:00.000Z"
+      })
+    ], cwd);
+
+    expect(result.status, result.stdout).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "success",
+      summary: {
+        validation_baseline_generation: {
+          source: "runtime.xhs_closeout_validation",
+          profile,
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          run_id: runId,
+          source_run_id: sourceRunId,
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        },
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          effective_execution_mode: "live_read_high_risk",
+          all_required_ready: true,
+          missing_target_fr_refs: [],
+          blocking_target_fr_refs: []
+        }
+      }
+    });
+
+    const BaselineDatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const baselineDb = new BaselineDatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => { get: (...args: unknown[]) => unknown };
+      close: () => void;
+    };
+    try {
+      const sourceAudit = baselineDb.prepare(
+        "SELECT risk_state, next_state, gate_reasons_json FROM runtime_gate_audit_records WHERE event_id = ?"
+      ).get(`gate_evt_${sourceRunId}`) as {
+        risk_state: string;
+        next_state: string;
+        gate_reasons_json: string;
+      };
+      expect(sourceAudit.risk_state).toBe("limited");
+      expect(sourceAudit.next_state).toBe("limited");
+      expect(JSON.parse(sourceAudit.gate_reasons_json)).toEqual(["LIVE_MODE_APPROVED"]);
+    } finally {
+      baselineDb.close();
+    }
+  });
+
   itWithSqlite("fails closed when XHS closeout validation source socket lacks browser attestation", async () => {
     const cwd = await createRuntimeCwd();
     const profile = "xhs_validation_source_cli_profile";
@@ -4278,6 +4374,57 @@ process.stdin.on("data", (chunk) => {
           reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING",
           bootstrap_attested: null,
           attestation_source: null
+        }
+      }
+    });
+  });
+
+  itWithSqlite("admits XHS closeout validation source baseline bootstrap rhythm before browser attestation", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_baseline_bootstrap_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-baseline-bootstrap-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "deferred",
+      riskState: "limited",
+      currentPhase: "recovery_probe",
+      reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+      requires: ["session_rhythm_window_not_ready"]
+    });
+
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
+    let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
+    try {
+      sourceResult = await runCliAsync([
+        "runtime.xhs_closeout_validation_source",
+        "--profile",
+        profile,
+        "--run-id",
+        sourceRunId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        })
+      ], cwd);
+    } finally {
+      await socketBridge.close();
+    }
+
+    expect(sourceResult.status, sourceResult.stdout).toBe(6);
+    const sourceBody = parseSingleJsonLine(sourceResult.stdout);
+    expect(sourceBody).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
         }
       }
     });
@@ -4441,6 +4588,178 @@ process.stdin.on("data", (chunk) => {
           rhythm_decision_run_id: sourceRunId,
           rhythm_decision: "blocked",
           rhythm_current_risk_state: "paused"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed before native bridge when XHS closeout validation source account safety is not clear", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_account_risk_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-account-risk-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "deferred",
+      riskState: "limited",
+      currentPhase: "recovery_probe",
+      reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+      requires: ["session_rhythm_window_not_ready"]
+    });
+    const metaPath = path.join(cwd, ".webenvoy", "profiles", profile, "__webenvoy_meta.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          accountSafety: {
+            ...(meta.accountSafety as Record<string, unknown>),
+            state: "account_risk_blocked",
+            reason: "ACCOUNT_ABNORMAL"
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_ACCOUNT_SAFETY_BLOCKED",
+          account_safety_state: "account_risk_blocked"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source deferred rhythm lacks baseline bootstrap reasons", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_deferred_rhythm_reason_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-deferred-rhythm-reason-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "deferred",
+      riskState: "limited",
+      currentPhase: "recovery_probe",
+      reasonCodes: ["ANTI_DETECTION_BASELINE_REQUIRED"],
+      requires: ["session_rhythm_window_not_ready"]
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_BLOCKED",
+          expected_run_id: sourceRunId,
+          rhythm_decision_run_id: sourceRunId,
+          rhythm_decision: "deferred",
+          rhythm_current_risk_state: "limited",
+          rhythm_reason_codes: ["ANTI_DETECTION_BASELINE_REQUIRED"],
+          rhythm_requires: ["session_rhythm_window_not_ready"]
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source deferred rhythm requires cooldown", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_deferred_rhythm_cooldown_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-deferred-rhythm-cooldown-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "deferred",
+      riskState: "limited",
+      currentPhase: "recovery_probe",
+      reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+      requires: ["cooldown_until_elapsed"]
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_BLOCKED",
+          rhythm_decision: "deferred",
+          rhythm_current_risk_state: "limited",
+          rhythm_requires: ["cooldown_until_elapsed"]
         }
       }
     });

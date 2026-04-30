@@ -343,9 +343,7 @@ const signalMatchesSourceBinding = (input: {
       asString(input.signal.session_rhythm_decision_id) === asString(rhythmView.decision.decision_id) &&
       asString(rhythmView.decision.run_id) === input.sourceRunId &&
       asString(rhythmView.decision.session_id) === input.sourceAudit.session_id &&
-      asString(rhythmView.decision.decision) === "allowed" &&
-      asString(rhythmView.decision.current_risk_state) === "allowed" &&
-      asString(rhythmView.decision.next_risk_state) === "allowed" &&
+      isEligibleXhsCloseoutValidationSourceRhythmDecision(rhythmView) &&
       input.signal.active_fetch_performed === false &&
       input.signal.closeout_bundle_entered === false
     );
@@ -866,12 +864,83 @@ const buildXhsCloseoutValidationSourceSignals = (input: {
   }
 });
 
-const assertAllowedXhsCloseoutValidationSourceRhythm = (input: {
+type XhsCloseoutValidationSourceRhythmAdmissionClass =
+  | "allowed"
+  | "baseline_required_recovery";
+
+const XHS_CLOSEOUT_VALIDATION_SOURCE_RECOVERY_REASONS = [
+  "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+  "ANTI_DETECTION_BASELINE_REQUIRED"
+] as const;
+
+const XHS_CLOSEOUT_VALIDATION_SOURCE_BASELINE_REQUIRES = new Set([
+  "session_rhythm_window_not_ready",
+  "anti_detection_baseline_required",
+  "anti_detection_validation_baseline_required",
+  "validation_baseline_required"
+]);
+
+const isXhsCloseoutValidationSourceRecoverableRiskState = (state: string | null): boolean =>
+  state === "limited" || state === "allowed";
+
+const isEligibleXhsCloseoutValidationSourceRhythmDecision = (
+  rhythmView: SessionRhythmStatusViewRecord
+): boolean => {
+  const decision = asString(rhythmView.decision.decision);
+  const currentRiskState = asString(rhythmView.decision.current_risk_state);
+  const nextRiskState = asString(rhythmView.decision.next_risk_state);
+  const windowRiskState = asString(rhythmView.window_state.risk_state);
+  if (
+    decision === "allowed" &&
+    currentRiskState === "allowed" &&
+    nextRiskState === "allowed" &&
+    windowRiskState === "allowed"
+  ) {
+    return true;
+  }
+  return isBaselineRequiredXhsCloseoutValidationSourceRhythm({
+    decision,
+    currentRiskState,
+    nextRiskState,
+    windowRiskState,
+    reasonCodes: asStringArray(rhythmView.decision.reason_codes),
+    requires: asStringArray(rhythmView.decision.requires)
+  });
+};
+
+const isBaselineRequiredXhsCloseoutValidationSourceRhythm = (input: {
+  decision: string | null;
+  currentRiskState: string | null;
+  nextRiskState: string | null;
+  windowRiskState: string | null;
+  reasonCodes: string[];
+  requires: string[];
+}): boolean =>
+  input.decision === "deferred" &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.currentRiskState) &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.nextRiskState) &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.windowRiskState) &&
+  XHS_CLOSEOUT_VALIDATION_SOURCE_RECOVERY_REASONS.every((reason) =>
+    input.reasonCodes.includes(reason)
+  ) &&
+  input.requires.length > 0 &&
+  input.requires.every((requirement) =>
+    XHS_CLOSEOUT_VALIDATION_SOURCE_BASELINE_REQUIRES.has(requirement)
+  );
+
+const assertEligibleXhsCloseoutValidationSourceRhythm = (input: {
   rhythmView: SessionRhythmStatusViewRecord;
   profile: string;
   sessionId?: string | null;
   runId: string;
-}): { sessionId: string; sessionRhythmWindowId: string; sessionRhythmDecisionId: string } => {
+}): {
+  sessionId: string;
+  sessionRhythmWindowId: string;
+  sessionRhythmDecisionId: string;
+  rhythmAdmissionClass: XhsCloseoutValidationSourceRhythmAdmissionClass;
+  rhythmAuditRiskState: string;
+  rhythmAuditNextState: string;
+} => {
   const sessionRhythmWindowId = asString(input.rhythmView.window_state.window_id);
   const sessionRhythmDecisionId = asString(input.rhythmView.decision.decision_id);
   const decisionRunId = asString(input.rhythmView.decision.run_id);
@@ -880,6 +949,8 @@ const assertAllowedXhsCloseoutValidationSourceRhythm = (input: {
   const currentRiskState = asString(input.rhythmView.decision.current_risk_state);
   const nextRiskState = asString(input.rhythmView.decision.next_risk_state);
   const windowRiskState = asString(input.rhythmView.window_state.risk_state);
+  const reasonCodes = asStringArray(input.rhythmView.decision.reason_codes);
+  const requires = asStringArray(input.rhythmView.decision.requires);
   if (!sessionRhythmWindowId || !sessionRhythmDecisionId || !decisionSessionId) {
     throw new CliError(
       "ERR_EXECUTION_FAILED",
@@ -894,13 +965,19 @@ const assertAllowedXhsCloseoutValidationSourceRhythm = (input: {
       }
     );
   }
+  const runAndSessionBound =
+    decisionRunId === input.runId &&
+    (input.sessionId === null ||
+      input.sessionId === undefined ||
+      decisionSessionId === input.sessionId);
+  const allowedRhythm =
+    decision === "allowed" &&
+    currentRiskState === "allowed" &&
+    nextRiskState === "allowed" &&
+    windowRiskState === "allowed";
   if (
-    decisionRunId !== input.runId ||
-    (input.sessionId !== null && input.sessionId !== undefined && decisionSessionId !== input.sessionId) ||
-    decision !== "allowed" ||
-    currentRiskState !== "allowed" ||
-    nextRiskState !== "allowed" ||
-    windowRiskState !== "allowed"
+    !runAndSessionBound ||
+    !isEligibleXhsCloseoutValidationSourceRhythmDecision(input.rhythmView)
   ) {
     throw new CliError(
       "ERR_EXECUTION_FAILED",
@@ -919,12 +996,21 @@ const assertAllowedXhsCloseoutValidationSourceRhythm = (input: {
           rhythm_decision: decision,
           rhythm_current_risk_state: currentRiskState,
           rhythm_next_risk_state: nextRiskState,
-          rhythm_window_risk_state: windowRiskState
+          rhythm_window_risk_state: windowRiskState,
+          rhythm_reason_codes: reasonCodes,
+          rhythm_requires: requires
         }
       }
     );
   }
-  return { sessionId: decisionSessionId, sessionRhythmWindowId, sessionRhythmDecisionId };
+  return {
+    sessionId: decisionSessionId,
+    sessionRhythmWindowId,
+    sessionRhythmDecisionId,
+    rhythmAdmissionClass: allowedRhythm ? "allowed" : "baseline_required_recovery",
+    rhythmAuditRiskState: currentRiskState ?? "limited",
+    rhythmAuditNextState: nextRiskState ?? currentRiskState ?? "limited"
+  };
 };
 
 const resolveXhsCloseoutValidationSourceRhythm = async (input: {
@@ -932,7 +1018,14 @@ const resolveXhsCloseoutValidationSourceRhythm = async (input: {
   profile: string;
   sessionId?: string | null;
   runId: string;
-}): Promise<{ sessionId: string; sessionRhythmWindowId: string; sessionRhythmDecisionId: string }> => {
+}): Promise<{
+  sessionId: string;
+  sessionRhythmWindowId: string;
+  sessionRhythmDecisionId: string;
+  rhythmAdmissionClass: XhsCloseoutValidationSourceRhythmAdmissionClass;
+  rhythmAuditRiskState: string;
+  rhythmAuditNextState: string;
+}> => {
   const persisted = await input.store.getSessionRhythmStatusView({
     profile: input.profile,
     platform: "xhs",
@@ -941,7 +1034,7 @@ const resolveXhsCloseoutValidationSourceRhythm = async (input: {
     runId: input.runId
   });
   if (persisted && asString(persisted.decision.run_id) === input.runId) {
-    return assertAllowedXhsCloseoutValidationSourceRhythm({
+    return assertEligibleXhsCloseoutValidationSourceRhythm({
       rhythmView: persisted,
       profile: input.profile,
       sessionId: input.sessionId,
@@ -1036,7 +1129,8 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
   const profileMeta = await profileStore.readMeta(profile, { mode: "readonly" });
   assertXhsCloseoutValidationSourceOfficialRuntime({ profile, profileMeta });
-  if (profileMeta?.accountSafety?.state === "account_risk_blocked") {
+  const accountSafetyState = asString(profileMeta?.accountSafety?.state);
+  if (accountSafetyState !== "clear") {
     throw new CliError(
       "ERR_EXECUTION_FAILED",
       "XHS closeout validation source blocked by account-safety state",
@@ -1046,7 +1140,7 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
           ability_id: "runtime.xhs_closeout_validation_source",
           stage: "execution",
           reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_ACCOUNT_SAFETY_BLOCKED",
-          account_safety_state: profileMeta.accountSafety.state
+          account_safety_state: accountSafetyState
         }
       }
     );
@@ -1080,7 +1174,10 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
     const {
       sessionId: rhythmSessionId,
       sessionRhythmWindowId,
-      sessionRhythmDecisionId
+      sessionRhythmDecisionId,
+      rhythmAdmissionClass,
+      rhythmAuditRiskState,
+      rhythmAuditNextState
     } = await resolveXhsCloseoutValidationSourceRhythm({
       store: runtimeStore,
       profile,
@@ -1198,7 +1295,8 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
           action_ref: actionRef,
           checked_at: observedAt,
           active_fetch_performed: false,
-          closeout_bundle_entered: false
+          closeout_bundle_entered: false,
+          rhythm_admission_class: rhythmAdmissionClass
         },
         main_world_secret: `xhs-closeout-validation-source-${randomUUID()}`,
         fingerprint_runtime: fingerprintContext as unknown as JsonObject
@@ -1337,8 +1435,8 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
         sessionId,
         profile,
         issueScope: "issue_209",
-        riskState: "allowed",
-        nextState: "allowed",
+        riskState: rhythmAuditRiskState,
+        nextState: rhythmAuditNextState,
         transitionTrigger: "gate_evaluation",
         targetDomain,
         targetTabId,
@@ -1348,7 +1446,13 @@ const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
         requestedExecutionMode,
         effectiveExecutionMode: requestedExecutionMode,
         gateDecision: "allowed",
-        gateReasons: [XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON],
+        gateReasons:
+          rhythmAdmissionClass === "baseline_required_recovery"
+            ? [
+                XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON,
+                "XHS_CLOSEOUT_VALIDATION_SOURCE_BASELINE_REQUIRED_RECOVERY"
+              ]
+            : [XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON],
         approver: "runtime.xhs_closeout_validation_source",
         approvedAt: observedAt,
         recordedAt: observedAt
