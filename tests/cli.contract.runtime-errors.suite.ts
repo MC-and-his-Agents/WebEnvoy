@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, type DatabaseSyncCtor } from "./cli.contract.shared.js";
+import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, resolveRuntimeStorePath, type DatabaseSyncCtor } from "./cli.contract.shared.js";
+import { SQLiteRuntimeStore } from "../src/runtime/store/sqlite-runtime-store.js";
 
 const startOfficialReadyRuntime = async (
   runtimeCwd: string,
@@ -53,6 +54,87 @@ const startOfficialReadyRuntime = async (
     profile
   });
   return persistentExtensionIdentity;
+};
+
+const seedReadyXhsCloseoutValidationViews = async (cwd: string, profile: string): Promise<void> => {
+  const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+  const observedAt = "2026-04-30T02:00:00.000Z";
+  const scopes = [
+    ["FR-0012", "layer1_consistency"],
+    ["FR-0013", "layer2_interaction"],
+    ["FR-0014", "layer3_session_rhythm"]
+  ] as const;
+  try {
+    for (const [targetFrRef, validationScope] of scopes) {
+      const requestRef = `validation-request/restore-stale/${profile}/${targetFrRef}`;
+      const sampleRef = `validation-sample/restore-stale/${profile}/${targetFrRef}`;
+      const baselineRef = `baseline/restore-stale/${profile}/${targetFrRef}`;
+      const recordRef = `validation-record/restore-stale/${profile}/${targetFrRef}`;
+      const scope = {
+        targetFrRef,
+        validationScope,
+        profileRef: `profile/${profile}`,
+        browserChannel: "Google Chrome stable" as const,
+        executionSurface: "real_browser" as const,
+        effectiveExecutionMode: "live_read_high_risk" as const,
+        probeBundleRef: "probe-bundle/xhs-closeout-min-v1"
+      };
+      await store.upsertAntiDetectionValidationRequest({
+        ...scope,
+        requestRef,
+        sampleGoal: `restore stale bootstrap ${targetFrRef}`,
+        requestedExecutionMode: "live_read_high_risk",
+        requestState: "accepted",
+        requestedAt: observedAt
+      });
+      await store.upsertAntiDetectionValidationRequest({
+        ...scope,
+        requestRef,
+        sampleGoal: `restore stale bootstrap ${targetFrRef}`,
+        requestedExecutionMode: "live_read_high_risk",
+        requestState: "completed",
+        requestedAt: observedAt
+      });
+      await store.insertAntiDetectionStructuredSample({
+        ...scope,
+        sampleRef,
+        requestRef,
+        runId: `run-restore-stale-validation-${targetFrRef}`,
+        capturedAt: observedAt,
+        structuredPayload: { target_fr_ref: targetFrRef, validation_scope: validationScope },
+        artifactRefs: []
+      });
+      await store.insertAntiDetectionBaselineSnapshot({
+        ...scope,
+        baselineRef,
+        signalVector: { stable: true },
+        capturedAt: observedAt,
+        sourceSampleRefs: [sampleRef],
+        sourceRunIds: [`run-restore-stale-validation-${targetFrRef}`]
+      });
+      await store.insertAntiDetectionValidationRecord({
+        ...scope,
+        recordRef,
+        requestRef,
+        sampleRef,
+        baselineRef,
+        resultState: "verified",
+        driftState: "no_drift",
+        failureClass: null,
+        runId: `run-restore-stale-validation-${targetFrRef}`,
+        validatedAt: observedAt
+      });
+      await store.upsertAntiDetectionBaselineRegistryEntry({
+        ...scope,
+        activeBaselineRef: baselineRef,
+        supersededBaselineRefs: [],
+        replacementReason: "initial_seed",
+        updatedAt: observedAt
+      });
+    }
+  } finally {
+    store.close();
+  }
 };
 
 describe("webenvoy cli contract / runtime errors and fallback", () => {
@@ -726,6 +808,124 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
     });
   });
 
+  it("blocks stale-bootstrap XHS target restoration during recovery probe when validation is missing", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_restore_stale_bootstrap_probe_blocked";
+    const runId = "run-contract-restore-stale-bootstrap-probe-blocked-001";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(runtimeCwd, profile, runId);
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", profile);
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const existingMeta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...existingMeta,
+          schemaVersion: 1,
+          profileName: profile,
+          profileDir,
+          xhsCloseoutRhythm: {
+            state: "single_probe_required",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: true,
+            singleProbePassedAt: null,
+            probeRunId: null,
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+          },
+          updatedAt: "2026-04-25T10:35:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        profile,
+        "--run-id",
+        runId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-stale-for-run",
+        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: runId
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: runId,
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+          anti_detection_validation_view: expect.objectContaining({
+            all_required_ready: false
+          })
+        }
+      }
+    });
+  }, 10_000);
+
+  it("allows same-runtime XHS target restoration after stale bootstrap when validation is ready", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_restore_stale_bootstrap_ready";
+    const runId = "run-contract-restore-stale-bootstrap-ready-001";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(runtimeCwd, profile, runId);
+    await seedReadyXhsCloseoutValidationViews(runtimeCwd, profile);
+
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        profile,
+        "--run-id",
+        runId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-stale-for-run",
+        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: runId
+      }
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: runId,
+      command: "runtime.restore_xhs_target",
+      status: "success"
+    });
+  }, 10_000);
+
   it("attaches a fresh CLI run before restoring an already-running XHS target", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const profile = "xhs_restore_attach_ready";
@@ -736,6 +936,7 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
       profile,
       ownerRunId
     );
+    await seedReadyXhsCloseoutValidationViews(runtimeCwd, profile);
     const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", profile);
     const metaPath = path.join(profileDir, "__webenvoy_meta.json");
     const existingMeta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;

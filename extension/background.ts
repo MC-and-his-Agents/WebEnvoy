@@ -91,6 +91,15 @@ interface TrustedFingerprintContextEntry {
   sourceDomain: string | null;
 }
 
+interface StaleRestoreBindingLease {
+  sessionId: string;
+  runId: string;
+  runtimeContextId: string;
+  targetTabId: number;
+  targetDomain: string;
+  issuedAtMs: number;
+}
+
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
@@ -106,6 +115,7 @@ const XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST = new Set([
 const editorInputDebuggerProbeWaitMs = 150;
 const xhsTargetRestoreNavigationTimeoutMs = 5_000;
 const xhsTargetRestoreNavigationPollMs = 100;
+const xhsStaleRestoreBindingLeaseMaxAgeMs = 120_000;
 const editorInputDebuggerEntryLabels = ["新的创作"] as const;
 const editorInputSelectors = [
   'div.tiptap.ProseMirror[contenteditable="true"]',
@@ -948,6 +958,18 @@ const isRestoreSafetyGateAllowed = (
     value?.restore_runtime_attach_state === "attached_existing_runtime" &&
     value.identity_binding_state === "bound" &&
     value.transport_state === "ready";
+  const staleBootstrapSameRuntimeReady =
+    value?.restore_runtime_attach_state === "stale_bootstrap_same_runtime" &&
+    value.stale_bootstrap_recovery === true &&
+    value.managed_target_tab_id === targetTabId &&
+    value.target_tab_continuity === "stale_bootstrap_current_managed_tab" &&
+    value.identity_binding_state === "bound" &&
+    value.transport_state === "ready" &&
+    value.bootstrap_state === "stale" &&
+    (value.runtime_readiness === "blocked" || value.runtime_readiness === "recoverable");
+  const validationAllowsRestore = staleBootstrapSameRuntimeReady
+    ? value?.anti_detection_validation_ready === true
+    : recoveryProbeWindow || value?.anti_detection_validation_ready === true;
   return (
     value?.source === "cli_persisted_runtime_gate" &&
     value.profile_ref === profile &&
@@ -961,13 +983,13 @@ const isRestoreSafetyGateAllowed = (
     value.action_ref === actionRef &&
     value.account_safety_state === "clear" &&
     value.official_runtime_ready === true &&
-    (directRuntimeReady || attachedRuntimeReady) &&
+    (directRuntimeReady || attachedRuntimeReady || staleBootstrapSameRuntimeReady) &&
     value.execution_surface === "real_browser" &&
     value.headless === false &&
     (rhythmState === "not_required" ||
       rhythmState === "single_probe_passed" ||
       rhythmState === "single_probe_required") &&
-    (recoveryProbeWindow || value.anti_detection_validation_ready === true)
+    validationAllowsRestore
   );
 };
 
@@ -2133,6 +2155,7 @@ class ChromeBackgroundBridge {
   #runtimeTrustState = new BackgroundRuntimeTrustState({
     serializeFingerprintRuntimeContext
   });
+  #staleRestoreBindingLeases = new Map<string, StaleRestoreBindingLease>();
   #pendingMainWorldBridgeEnsures = new Map<number, Promise<void>>();
   #recoveryState: NativeBridgeRecoveryState;
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -2472,22 +2495,65 @@ class ChromeBackgroundBridge {
 
   #clearTrustedFingerprintContexts(): void {
     this.#runtimeTrustState.clearTrustedContexts();
+    this.#staleRestoreBindingLeases.clear();
   }
 
   #clearRuntimeBootstrapStates(): void {
     this.#runtimeTrustState.clearRuntimeBootstrapStates();
+    this.#staleRestoreBindingLeases.clear();
   }
 
   #clearRuntimeBootstrapStateByProfile(profile: string): void {
     this.#runtimeTrustState.clearRuntimeBootstrapStateByProfile(profile);
+    this.#clearStaleRestoreBindingLeasesByProfile(profile);
   }
 
   #clearTrustedFingerprintContextBySession(profile: string, sessionId: string): void {
     this.#runtimeTrustState.clearTrustedContextBySession(profile, sessionId);
+    this.#staleRestoreBindingLeases.delete(
+      this.#buildStaleRestoreBindingLeaseKey(profile, sessionId)
+    );
   }
 
   #clearTrustedFingerprintContextsByProfile(profile: string): void {
     this.#runtimeTrustState.clearTrustedContextsByProfile(profile);
+    this.#clearStaleRestoreBindingLeasesByProfile(profile);
+  }
+
+  #buildStaleRestoreBindingLeaseKey(profile: string, sessionId: string): string {
+    return `${profile}::${sessionId}`;
+  }
+
+  #clearStaleRestoreBindingLeasesByProfile(profile: string): void {
+    const prefix = `${profile}::`;
+    for (const key of this.#staleRestoreBindingLeases.keys()) {
+      if (key.startsWith(prefix)) {
+        this.#staleRestoreBindingLeases.delete(key);
+      }
+    }
+  }
+
+  #upsertStaleRestoreBindingLease(profile: string, lease: StaleRestoreBindingLease): void {
+    this.#staleRestoreBindingLeases.set(
+      this.#buildStaleRestoreBindingLeaseKey(profile, lease.sessionId),
+      lease
+    );
+  }
+
+  #getStaleRestoreBindingLease(
+    profile: string,
+    sessionId: string
+  ): StaleRestoreBindingLease | null {
+    const key = this.#buildStaleRestoreBindingLeaseKey(profile, sessionId);
+    const lease = this.#staleRestoreBindingLeases.get(key) ?? null;
+    if (!lease) {
+      return null;
+    }
+    if (Date.now() - lease.issuedAtMs > xhsStaleRestoreBindingLeaseMaxAgeMs) {
+      this.#staleRestoreBindingLeases.delete(key);
+      return null;
+    }
+    return lease;
   }
 
   #invalidateTrustedFingerprintContextForCommand(request: BridgeRequest, command: string): void {
@@ -3402,6 +3468,17 @@ class ChromeBackgroundBridge {
     }
     const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
     const trusted = this.#runtimeTrustState.getTrusted(profile, sessionId);
+    const staleBootstrapRecovery =
+      restoreSafetyGate?.restore_runtime_attach_state === "stale_bootstrap_same_runtime" &&
+      restoreSafetyGate.stale_bootstrap_recovery === true &&
+      restoreSafetyGate.anti_detection_validation_ready === true &&
+      restoreSafetyGate.profile_ref === profile &&
+      restoreSafetyGate.session_id === sessionId &&
+      restoreSafetyGate.run_id === runId &&
+      restoreSafetyGate.target_tab_id === sourceTab.id &&
+      restoreSafetyGate.managed_target_tab_id === sourceTab.id &&
+      restoreSafetyGate.target_tab_continuity === "stale_bootstrap_current_managed_tab" &&
+      restoreSafetyGate.target_domain === targetDomain;
     const bootstrapBindsTarget =
       !!bootstrap &&
       (bootstrap.status === "pending" || bootstrap.status === "ready") &&
@@ -3413,7 +3490,18 @@ class ChromeBackgroundBridge {
       trusted.sessionId === sessionId &&
       trusted.sourceTabId === sourceTab.id &&
       trusted.sourceDomain === targetDomain;
-    if (!bootstrapBindsTarget && !trustedBindsTarget) {
+    const staleRestoreLease = this.#getStaleRestoreBindingLease(profile, sessionId);
+    const staleRestoreLeaseBindsTarget =
+      !!staleRestoreLease &&
+      staleRestoreLease.runId === runId &&
+      staleRestoreLease.runtimeContextId === restoreSafetyGate?.runtime_context_id &&
+      staleRestoreLease.targetTabId === sourceTab.id &&
+      staleRestoreLease.targetDomain === targetDomain;
+    const staleBootstrapRecoveryBindsTarget =
+      staleBootstrapRecovery &&
+      staleRestoreLeaseBindsTarget &&
+      restoreSafetyGate?.managed_target_tab_id === sourceTab.id;
+    if (!bootstrapBindsTarget && !trustedBindsTarget && !staleBootstrapRecoveryBindsTarget) {
       fail("TARGET_RESTORE_MANAGED_TAB_NOT_BOUND", "runtime.restore_xhs_target requires a current managed tab binding", {
         requested_target_tab_id: targetTabId,
         bootstrap_session_id: bootstrap?.sessionId ?? null,
@@ -3855,6 +3943,37 @@ class ChromeBackgroundBridge {
               ? "pending"
               : bootstrap.status
           : "stale";
+    const managedTargetTabId =
+      targetBindingRequested && targetBindingMatches && typeof bootstrap?.sourceTabId === "number"
+        ? bootstrap.sourceTabId
+        : null;
+    const managedTargetDomain =
+      targetBindingRequested && targetBindingMatches && typeof bootstrap?.sourceDomain === "string"
+        ? bootstrap.sourceDomain
+        : null;
+    const targetTabContinuity =
+      managedTargetTabId !== null && managedTargetDomain !== null ? "runtime_trust_state" : null;
+    if (
+      profile &&
+      requestRunId &&
+      requestRuntimeContextId &&
+      managedTargetTabId !== null &&
+      managedTargetDomain !== null &&
+      targetTabContinuity === "runtime_trust_state"
+    ) {
+      this.#upsertStaleRestoreBindingLease(profile, {
+        sessionId: this.#sessionId,
+        runId: requestRunId,
+        runtimeContextId: requestRuntimeContextId,
+        targetTabId: managedTargetTabId,
+        targetDomain: managedTargetDomain,
+        issuedAtMs: Date.now()
+      });
+    } else if (profile) {
+      this.#staleRestoreBindingLeases.delete(
+        this.#buildStaleRestoreBindingLeaseKey(profile, this.#sessionId)
+      );
+    }
 
     this.#emit({
       id: request.id,
@@ -3872,6 +3991,9 @@ class ChromeBackgroundBridge {
         run_id: bootstrap?.runId ?? null,
         runtime_context_id: bootstrap?.runtimeContextId ?? null,
         version: bootstrap?.version ?? null,
+        managed_target_tab_id: managedTargetTabId,
+        managed_target_domain: managedTargetDomain,
+        target_tab_continuity: targetTabContinuity,
         transport_state: "ready"
       },
       error: null

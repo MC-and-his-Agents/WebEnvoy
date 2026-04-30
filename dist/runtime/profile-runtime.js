@@ -125,6 +125,8 @@ const readSessionId = (params) => {
 };
 const readFingerprintMetaMode = (params) => params.migrate_fingerprint_profile_bundle === true ? "migrate" : undefined;
 const asObjectRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const parseLocalStorageSnapshot = (params) => {
     const rawSnapshot = params.localStorageSnapshot;
     if (rawSnapshot === undefined || rawSnapshot === null) {
@@ -1584,6 +1586,7 @@ export class ProfileRuntimeService {
         }
     }
     #buildRuntimeTakeoverEvidence(input) {
+        const readinessDetails = input.readiness.details ?? {};
         const controllerBrowserContinuity = Number.isInteger(input.pinnedControllerPid) &&
             Number.isInteger(input.browserPid) &&
             input.stateRunId === input.observedRunId;
@@ -1607,7 +1610,10 @@ export class ProfileRuntimeService {
             observedRunId: input.observedRunId,
             runtimeContextId: input.observedRunId.length > 0
                 ? buildRuntimeBootstrapContextId(input.profile, input.observedRunId)
-                : null
+                : null,
+            managedTargetTabId: asInteger(readinessDetails.managed_target_tab_id),
+            managedTargetDomain: asNonEmptyString(readinessDetails.managed_target_domain),
+            targetTabContinuity: asNonEmptyString(readinessDetails.target_tab_continuity)
         };
     }
     async #rebindActiveRuntimeOwnership(input) {

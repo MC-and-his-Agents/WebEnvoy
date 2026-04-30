@@ -14,6 +14,11 @@ const createRestoreSafetyGate = (
     restoreRuntimeAttachState?: string;
     bootstrapState?: string;
     runtimeReadiness?: string;
+    staleBootstrapRecovery?: boolean;
+    recoveryProbeWindow?: boolean;
+    antiDetectionValidationReady?: boolean;
+    managedTargetTabId?: number;
+    targetTabContinuity?: string;
   } = {}
 ) => ({
   source: "cli_persisted_runtime_gate",
@@ -24,22 +29,25 @@ const createRestoreSafetyGate = (
   target_domain: input.targetDomain ?? "www.xiaohongshu.com",
   target_page: input.targetPage ?? "search_result_tab",
   target_tab_id: input.targetTabId ?? 44,
+  managed_target_tab_id: input.managedTargetTabId ?? input.targetTabId ?? 44,
+  target_tab_continuity: input.targetTabContinuity ?? "runtime_trust_state",
   target_url:
     input.targetUrl ?? "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
   runtime_context_id: input.runtimeContextId ?? `${runId}-ctx`,
   action_ref: input.actionRef ?? runId,
   account_safety_state: "clear",
   xhs_closeout_rhythm_state: "single_probe_passed",
-  recovery_probe_window: false,
+  recovery_probe_window: input.recoveryProbeWindow ?? false,
   official_runtime_ready: true,
   identity_binding_state: "bound",
   transport_state: "ready",
   bootstrap_state: input.bootstrapState ?? "ready",
   runtime_readiness: input.runtimeReadiness ?? "ready",
   restore_runtime_attach_state: input.restoreRuntimeAttachState ?? "not_required",
+  stale_bootstrap_recovery: input.staleBootstrapRecovery ?? false,
   execution_surface: "real_browser",
   headless: false,
-  anti_detection_validation_ready: true
+  anti_detection_validation_ready: input.antiDetectionValidationReady ?? true
 });
 
 const primeManagedXhsBootstrap = async (
@@ -73,6 +81,43 @@ const primeManagedXhsBootstrap = async (
           manifest_version: "1"
         },
         main_world_secret: `${input.runId}-secret`
+      },
+      cwd: "/workspace/WebEnvoy"
+    },
+    timeout_ms: 100
+  });
+  await waitForBridgeTurn();
+  chromeApi.tabs.sendMessage.mockClear();
+  chromeApi.tabs.update.mockClear();
+  chromeApi.tabs.create.mockClear();
+  chromeApi.scripting.executeScript.mockClear();
+};
+
+const primeStaleRestoreBindingLease = async (
+  port: ReturnType<typeof createMockPort>,
+  chromeApi: ReturnType<typeof createChromeApi>["chromeApi"],
+  input: {
+    runId: string;
+    targetTabId: number;
+    targetDomain?: string;
+    sessionId?: string;
+  }
+) => {
+  await primeManagedXhsBootstrap(port, chromeApi, input);
+  port.onMessageListeners[0]?.({
+    id: `${input.runId}-readiness`,
+    method: "bridge.forward",
+    profile: "xhs_001",
+    params: {
+      session_id: input.sessionId ?? "nm-session-001",
+      run_id: input.runId,
+      command: "runtime.readiness",
+      command_params: {
+        run_id: input.runId,
+        runtime_context_id: `${input.runId}-ctx`,
+        target_domain: input.targetDomain ?? "www.xiaohongshu.com",
+        target_page: "search_result_tab",
+        target_tab_id: input.targetTabId
       },
       cwd: "/workspace/WebEnvoy"
     },
@@ -328,6 +373,284 @@ describe("extension service worker / gate and approval", () => {
       payload: {
         restore_evidence: {
           restore_action: "navigate_existing_tab",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      }
+    });
+  });
+
+  it("restores a managed XHS tab during same-runtime stale bootstrap recovery", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 44,
+        url: "https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend",
+        active: true
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeStaleRestoreBindingLease(firstPort, chromeApi, {
+      runId: "run-restore-xhs-search-tab-stale-bootstrap-001",
+      targetTabId: 44
+    });
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 44,
+        url: "https://example.com/off-domain-drift",
+        active: true
+      }
+    ]);
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-restore-xhs-search-tab-stale-bootstrap-001",
+        command: "runtime.restore_xhs_target",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          restore_safety_gate: createRestoreSafetyGate(
+            "run-restore-xhs-search-tab-stale-bootstrap-001",
+            {
+              restoreRuntimeAttachState: "stale_bootstrap_same_runtime",
+              bootstrapState: "stale",
+              runtimeReadiness: "blocked",
+              staleBootstrapRecovery: true,
+              targetTabContinuity: "stale_bootstrap_current_managed_tab"
+            }
+          )
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.get).toHaveBeenCalledWith(44);
+    expect(chromeApi.tabs.update).toHaveBeenCalledWith(44, {
+      url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
+      active: true
+    });
+    expect(chromeApi.tabs.create).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    const response = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-restore-xhs-search-tab-stale-bootstrap-001");
+    expect(response).toMatchObject({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-001",
+      status: "success",
+      payload: {
+        restore_evidence: {
+          restore_action: "navigate_existing_tab",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      }
+    });
+  });
+
+  it("fails closed when stale bootstrap recovery lacks validation readiness", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-validation-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-restore-xhs-search-tab-stale-bootstrap-validation-001",
+        command: "runtime.restore_xhs_target",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          restore_safety_gate: createRestoreSafetyGate(
+            "run-restore-xhs-search-tab-stale-bootstrap-validation-001",
+            {
+              restoreRuntimeAttachState: "stale_bootstrap_same_runtime",
+              bootstrapState: "stale",
+              runtimeReadiness: "blocked",
+              staleBootstrapRecovery: true,
+              recoveryProbeWindow: true,
+              antiDetectionValidationReady: false,
+              targetTabContinuity: "stale_bootstrap_current_managed_tab"
+            }
+          )
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.query).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.update).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.create).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    const response = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find(
+        (message) => message.id === "run-restore-xhs-search-tab-stale-bootstrap-validation-001"
+      );
+    expect(response).toMatchObject({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-validation-001",
+      status: "error",
+      payload: {
+        details: {
+          reason: "TARGET_RESTORE_SAFETY_GATE_BLOCKED",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      }
+    });
+  });
+
+  it("fails closed when stale bootstrap recovery lacks a current restore binding lease", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 44,
+        url: "https://example.com/off-domain-drift",
+        active: true
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-no-lease-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-restore-xhs-search-tab-stale-bootstrap-no-lease-001",
+        command: "runtime.restore_xhs_target",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          restore_safety_gate: createRestoreSafetyGate(
+            "run-restore-xhs-search-tab-stale-bootstrap-no-lease-001",
+            {
+              restoreRuntimeAttachState: "stale_bootstrap_same_runtime",
+              bootstrapState: "stale",
+              runtimeReadiness: "blocked",
+              staleBootstrapRecovery: true,
+              targetTabContinuity: "stale_bootstrap_current_managed_tab"
+            }
+          )
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.update).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.create).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    const response = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find(
+        (message) => message.id === "run-restore-xhs-search-tab-stale-bootstrap-no-lease-001"
+      );
+    expect(response).toMatchObject({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-no-lease-001",
+      status: "error",
+      payload: {
+        details: {
+          reason: "TARGET_RESTORE_MANAGED_TAB_NOT_BOUND",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      }
+    });
+  });
+
+  it("fails closed when stale bootstrap recovery points at another managed tab id", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 44,
+        url: "https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend",
+        active: true
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-mismatch-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-restore-xhs-search-tab-stale-bootstrap-mismatch-001",
+        command: "runtime.restore_xhs_target",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          restore_safety_gate: createRestoreSafetyGate(
+            "run-restore-xhs-search-tab-stale-bootstrap-mismatch-001",
+            {
+              restoreRuntimeAttachState: "stale_bootstrap_same_runtime",
+              bootstrapState: "stale",
+              runtimeReadiness: "blocked",
+              staleBootstrapRecovery: true,
+              managedTargetTabId: 55,
+              targetTabContinuity: "stale_bootstrap_current_managed_tab"
+            }
+          )
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.update).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.create).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    const response = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find(
+        (message) => message.id === "run-restore-xhs-search-tab-stale-bootstrap-mismatch-001"
+      );
+    expect(response).toMatchObject({
+      id: "run-restore-xhs-search-tab-stale-bootstrap-mismatch-001",
+      status: "error",
+      payload: {
+        details: {
+          reason: "TARGET_RESTORE_SAFETY_GATE_BLOCKED",
           active_fetch_performed: false,
           closeout_bundle_entered: false
         }
