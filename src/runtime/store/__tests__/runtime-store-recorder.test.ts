@@ -913,7 +913,7 @@ describe("runtime-store-recorder", () => {
     expect(appendGateAuditRecord).not.toHaveBeenCalled();
   });
 
-  it("records an allowed session rhythm decision for admitted live runs after a deferred probe", async () => {
+  it("records a live-admission session rhythm decision after a deferred probe", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-recorder-rhythm-"));
     const profile = "xhs_recorder_rhythm_profile";
     try {
@@ -1024,12 +1024,14 @@ describe("runtime-store-recorder", () => {
         expect.objectContaining({
           windowState: expect.objectContaining({
             session_id: "session-recorder-rhythm-live",
+            risk_state: "limited",
             last_event_id: "rhythm_evt_run-recorder-rhythm-live",
             source_run_id: "run-recorder-rhythm-live"
           }),
           event: expect.objectContaining({
             event_id: "rhythm_evt_run-recorder-rhythm-live",
             session_id: "session-recorder-rhythm-live",
+            risk_state_after: "limited",
             source_audit_event_id: "gate_evt_recorder_rhythm_live",
             reason: "XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"
           }),
@@ -1037,9 +1039,135 @@ describe("runtime-store-recorder", () => {
             decision_id: "rhythm_decision_run-recorder-rhythm-live",
             run_id: "run-recorder-rhythm-live",
             session_id: "session-recorder-rhythm-live",
+            current_risk_state: "limited",
+            next_risk_state: "limited",
             decision: "allowed",
             reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
             requires: []
+          })
+        })
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not promote session rhythm when the live gate is blocked", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-recorder-rhythm-limited-"));
+    const profile = "xhs_recorder_rhythm_limited_profile";
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(profile, "2026-04-25T10:00:00.000Z", {
+        allowUnsupportedExtensionBrowser: true
+      });
+      await profileStore.writeMeta(profile, {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_passed",
+          cooldownUntil: null,
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: false,
+          singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+          probeRunId: "run-recorder-rhythm-limited-probe",
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+        }
+      });
+      const recordSessionRhythmStatusView = vi.fn().mockResolvedValue(undefined);
+      const recorder = new RuntimeStoreRecorder(cwd, {
+        upsertRun: vi.fn().mockResolvedValue(undefined),
+        appendRunEvent: vi.fn().mockResolvedValue(undefined),
+        upsertGateApproval: vi.fn().mockResolvedValue({
+          approval_id: "gate_appr_recorder_rhythm_limited"
+        }),
+        appendGateAuditRecord: vi.fn().mockResolvedValue({
+          event_id: "gate_evt_recorder_rhythm_limited"
+        }),
+        recordSessionRhythmStatusView,
+        close: vi.fn()
+      });
+
+      await recorder.recordSuccess(
+        {
+          ...baseContext,
+          cwd,
+          profile,
+          command: "xhs.search",
+          run_id: "run-recorder-rhythm-limited"
+        },
+        {
+          run_id: "run-recorder-rhythm-limited",
+          gate_outcome: {
+            decision_id: "gate_decision_recorder_rhythm_limited"
+          },
+          approval_record: {
+            approval_id: "gate_appr_recorder_rhythm_limited",
+            decision_id: "gate_decision_recorder_rhythm_limited",
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:10.000Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_recorder_rhythm_limited",
+            decision_id: "gate_decision_recorder_rhythm_limited",
+            approval_id: "gate_appr_recorder_rhythm_limited",
+            run_id: "run-recorder-rhythm-limited",
+            session_id: "session-recorder-rhythm-limited",
+            profile,
+            issue_scope: "issue_209",
+            risk_state: "paused",
+            next_state: "paused",
+            transition_trigger: "manual_approval",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 9,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "blocked",
+            gate_reasons: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:10.000Z",
+            recorded_at: "2026-03-23T10:00:11.000Z"
+          }
+        }
+      );
+
+      expect(recordSessionRhythmStatusView).toHaveBeenCalledWith(
+        expect.objectContaining({
+          windowState: expect.objectContaining({
+            risk_state: "limited"
+          }),
+          event: expect.objectContaining({
+            risk_state_after: "limited"
+          }),
+          decision: expect.objectContaining({
+            current_risk_state: "limited",
+            next_risk_state: "limited",
+            decision: "deferred",
+            reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
+            requires: ["session_rhythm_window_not_ready"]
           })
         })
       );
