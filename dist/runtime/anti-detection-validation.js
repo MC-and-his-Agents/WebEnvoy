@@ -84,6 +84,40 @@ const stableJson = (value) => {
     }
     return JSON.stringify(value);
 };
+const cloneJsonObject = (value) => JSON.parse(JSON.stringify(value));
+const omitNestedKey = (value, path) => {
+    let cursor = value;
+    for (const key of path.slice(0, -1)) {
+        const next = cursor[key];
+        if (!isJsonObject(next)) {
+            return;
+        }
+        cursor = next;
+    }
+    delete cursor[path[path.length - 1] ?? ""];
+};
+const canonicalizeXhsCloseoutSignalVectorForComparison = (signalVector) => {
+    const canonical = cloneJsonObject(signalVector);
+    const validationScope = canonical.validation_scope;
+    omitNestedKey(canonical, ["signal", "browser_returned_evidence", "target_tab_id"]);
+    if (validationScope === "layer2_interaction") {
+        omitNestedKey(canonical, ["signal", "rhythm_profile", "source_run_id"]);
+        omitNestedKey(canonical, ["signal", "execution_trace", "action_ref"]);
+        omitNestedKey(canonical, ["signal", "execution_trace", "session_id"]);
+        omitNestedKey(canonical, ["signal", "execution_trace", "target_tab_id"]);
+    }
+    if (validationScope === "layer3_session_rhythm") {
+        omitNestedKey(canonical, ["signal", "session_rhythm_decision_id"]);
+    }
+    return canonical;
+};
+const xhsCloseoutSignalMatchesBaseline = (input) => {
+    if (!input.activeBaselineSignalVector) {
+        return true;
+    }
+    return (stableJson(canonicalizeXhsCloseoutSignalVectorForComparison(input.activeBaselineSignalVector)) ===
+        stableJson(canonicalizeXhsCloseoutSignalVectorForComparison(input.currentSignalVector)));
+};
 const validationScopeSignal = (signals, validationScope) => {
     if (validationScope === "layer1_consistency") {
         return signals.layer1_consistency;
@@ -220,9 +254,12 @@ export const persistXhsCloseoutValidationSignals = async (input) => {
             probe_bundle_ref: scope.probeBundleRef,
             signal
         };
-        const currentSignalJson = stableJson(signalVector);
-        const baselineSignalJson = activeBaseline ? stableJson(activeBaseline.signal_vector) : null;
-        const signalMatchesBaseline = !activeBaseline || baselineSignalJson === currentSignalJson;
+        const signalMatchesBaseline = xhsCloseoutSignalMatchesBaseline({
+            currentSignalVector: signalVector,
+            activeBaselineSignalVector: activeBaseline
+                ? activeBaseline.signal_vector
+                : null
+        });
         const resultState = signalMatchesBaseline ? "verified" : "broken";
         const driftState = signalMatchesBaseline ? "no_drift" : "drift_detected";
         await input.store.upsertAntiDetectionValidationRequest({
@@ -393,9 +430,12 @@ export const persistXhsCloseoutValidationSourceSamples = async (input) => {
                 probe_bundle_ref: scope.probeBundleRef,
                 signal
             };
-            const currentSignalJson = stableJson(signalVector);
-            const baselineSignalJson = activeBaseline ? stableJson(activeBaseline.signal_vector) : null;
-            const signalMatchesBaseline = !activeBaseline || baselineSignalJson === currentSignalJson;
+            const signalMatchesBaseline = xhsCloseoutSignalMatchesBaseline({
+                currentSignalVector: signalVector,
+                activeBaselineSignalVector: activeBaseline
+                    ? activeBaseline.signal_vector
+                    : null
+            });
             const resultState = signalMatchesBaseline ? "verified" : "broken";
             const driftState = signalMatchesBaseline ? "no_drift" : "drift_detected";
             const sampleGoal = `validate ${requiredScope.targetFrRef} XHS closeout baseline from approved source sample`;
