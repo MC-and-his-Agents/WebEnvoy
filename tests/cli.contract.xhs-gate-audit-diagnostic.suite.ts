@@ -144,6 +144,8 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
         const tabMismatchMode = mode === "xhs-closeout-validation-source-tab-mismatch";
         const sourceMismatchMode = mode === "xhs-closeout-validation-source-source-mismatch";
         const unboundTabMode = mode === "xhs-closeout-validation-source-unbound-tab";
+        const requireAllowedAdmissionMode =
+          mode === "xhs-closeout-validation-source-require-allowed-admission";
         const requestedTabId = Number.isInteger(commandParams.target_tab_id)
           ? (commandParams.target_tab_id as number)
           : null;
@@ -167,7 +169,11 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
           managedTabBindingGate.action_ref === actionRef &&
           managedTabBindingGate.active_fetch_performed === false &&
           managedTabBindingGate.closeout_bundle_entered === false;
-        if (unboundTabMode || !gateBindsTarget) {
+        if (
+          unboundTabMode ||
+          !gateBindsTarget ||
+          (requireAllowedAdmissionMode && managedTabBindingGate?.rhythm_admission_class !== "allowed")
+        ) {
           writeNativeBridgeSocketMessage(socket, {
             id: request.id,
             status: "error",
@@ -188,7 +194,8 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
                 target_tab_id: requestedTabId,
                 action_ref: actionRef,
                 active_fetch_performed: false,
-                closeout_bundle_entered: false
+                closeout_bundle_entered: false,
+                rhythm_admission_class: managedTabBindingGate?.rhythm_admission_class ?? null
               }
             },
             error: {
@@ -4342,7 +4349,11 @@ process.stdin.on("data", (chunk) => {
     await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
     await seedXhsCloseoutValidationSourceRhythmView({ cwd, profile, runId: sourceRunId });
 
-    const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({
+      cwd,
+      profile,
+      mode: "xhs-closeout-validation-source-require-allowed-admission"
+    });
     let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
     try {
       sourceResult = await runCliAsync([
@@ -4393,6 +4404,57 @@ process.stdin.on("data", (chunk) => {
       currentPhase: "recovery_probe",
       reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"],
       requires: ["session_rhythm_window_not_ready"]
+    });
+
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
+    let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
+    try {
+      sourceResult = await runCliAsync([
+        "runtime.xhs_closeout_validation_source",
+        "--profile",
+        profile,
+        "--run-id",
+        sourceRunId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        })
+      ], cwd);
+    } finally {
+      await socketBridge.close();
+    }
+
+    expect(sourceResult.status, sourceResult.stdout).toBe(6);
+    const sourceBody = parseSingleJsonLine(sourceResult.stdout);
+    expect(sourceBody).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("admits XHS closeout validation source live admission rhythm with limited risk before browser attestation", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_live_admission_limited_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-live-admission-limited-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "allowed",
+      riskState: "limited",
+      currentPhase: "steady",
+      reasonCodes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
+      requires: []
     });
 
     const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
@@ -4588,6 +4650,60 @@ process.stdin.on("data", (chunk) => {
           rhythm_decision_run_id: sourceRunId,
           rhythm_decision: "blocked",
           rhythm_current_risk_state: "paused"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source live admission rhythm lacks admission reason", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_live_admission_reason_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-live-admission-reason-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "allowed",
+      riskState: "limited",
+      currentPhase: "steady",
+      reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+      requires: []
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_BLOCKED",
+          expected_run_id: sourceRunId,
+          rhythm_decision_run_id: sourceRunId,
+          rhythm_decision: "allowed",
+          rhythm_current_risk_state: "limited",
+          rhythm_reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"],
+          rhythm_requires: []
         }
       }
     });

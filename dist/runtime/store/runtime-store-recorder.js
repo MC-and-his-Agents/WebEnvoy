@@ -291,7 +291,10 @@ export class RuntimeStoreRecorder {
                 sessionId: auditInput.sessionId,
                 runId: auditInput.runId,
                 sourceAuditEventId: auditInput.eventId,
-                effectiveExecutionMode: auditInput.effectiveExecutionMode
+                effectiveExecutionMode: auditInput.effectiveExecutionMode,
+                gateDecision: auditInput.gateDecision,
+                riskState: auditInput.riskState,
+                nextState: auditInput.nextState
             }, persistedAuditRecord);
         }
     }
@@ -336,6 +339,7 @@ export class RuntimeStoreRecorder {
         const liveRunAdmittedAfterDeferredProbe = (input.effectiveExecutionMode === "live_read_limited" ||
             input.effectiveExecutionMode === "live_read_high_risk" ||
             input.effectiveExecutionMode === "live_write") &&
+            input.gateDecision === "allowed" &&
             asString(decision.decision) === "deferred";
         const currentLiveRunKey = toSessionRhythmIdPart(input.runId);
         const currentLiveEventId = `rhythm_evt_${currentLiveRunKey}`;

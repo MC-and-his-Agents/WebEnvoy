@@ -883,6 +883,23 @@ const XHS_CLOSEOUT_VALIDATION_SOURCE_BASELINE_REQUIRES = new Set([
 const isXhsCloseoutValidationSourceRecoverableRiskState = (state: string | null): boolean =>
   state === "limited" || state === "allowed";
 
+const isLiveAdmissionAllowedXhsCloseoutValidationSourceRhythm = (input: {
+  decision: string | null;
+  currentRiskState: string | null;
+  nextRiskState: string | null;
+  windowRiskState: string | null;
+  effectiveExecutionMode: string | null;
+  reasonCodes: string[];
+  requires: string[];
+}): boolean =>
+  input.decision === "allowed" &&
+  input.effectiveExecutionMode === "live_read_high_risk" &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.currentRiskState) &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.nextRiskState) &&
+  isXhsCloseoutValidationSourceRecoverableRiskState(input.windowRiskState) &&
+  input.reasonCodes.includes("XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED") &&
+  input.requires.length === 0;
+
 const isEligibleXhsCloseoutValidationSourceRhythmDecision = (
   rhythmView: SessionRhythmStatusViewRecord
 ): boolean => {
@@ -890,6 +907,8 @@ const isEligibleXhsCloseoutValidationSourceRhythmDecision = (
   const currentRiskState = asString(rhythmView.decision.current_risk_state);
   const nextRiskState = asString(rhythmView.decision.next_risk_state);
   const windowRiskState = asString(rhythmView.window_state.risk_state);
+  const reasonCodes = asStringArray(rhythmView.decision.reason_codes);
+  const requires = asStringArray(rhythmView.decision.requires);
   if (
     decision === "allowed" &&
     currentRiskState === "allowed" &&
@@ -898,13 +917,26 @@ const isEligibleXhsCloseoutValidationSourceRhythmDecision = (
   ) {
     return true;
   }
+  if (
+    isLiveAdmissionAllowedXhsCloseoutValidationSourceRhythm({
+      decision,
+      currentRiskState,
+      nextRiskState,
+      windowRiskState,
+      effectiveExecutionMode: asString(rhythmView.decision.effective_execution_mode),
+      reasonCodes,
+      requires
+    })
+  ) {
+    return true;
+  }
   return isBaselineRequiredXhsCloseoutValidationSourceRhythm({
     decision,
     currentRiskState,
     nextRiskState,
     windowRiskState,
-    reasonCodes: asStringArray(rhythmView.decision.reason_codes),
-    requires: asStringArray(rhythmView.decision.requires)
+    reasonCodes,
+    requires
   });
 };
 
@@ -951,6 +983,15 @@ const assertEligibleXhsCloseoutValidationSourceRhythm = (input: {
   const windowRiskState = asString(input.rhythmView.window_state.risk_state);
   const reasonCodes = asStringArray(input.rhythmView.decision.reason_codes);
   const requires = asStringArray(input.rhythmView.decision.requires);
+  const liveAdmissionAllowedRhythm = isLiveAdmissionAllowedXhsCloseoutValidationSourceRhythm({
+    decision,
+    currentRiskState,
+    nextRiskState,
+    windowRiskState,
+    effectiveExecutionMode: asString(input.rhythmView.decision.effective_execution_mode),
+    reasonCodes,
+    requires
+  });
   if (!sessionRhythmWindowId || !sessionRhythmDecisionId || !decisionSessionId) {
     throw new CliError(
       "ERR_EXECUTION_FAILED",
@@ -1007,7 +1048,7 @@ const assertEligibleXhsCloseoutValidationSourceRhythm = (input: {
     sessionId: decisionSessionId,
     sessionRhythmWindowId,
     sessionRhythmDecisionId,
-    rhythmAdmissionClass: allowedRhythm ? "allowed" : "baseline_required_recovery",
+    rhythmAdmissionClass: allowedRhythm || liveAdmissionAllowedRhythm ? "allowed" : "baseline_required_recovery",
     rhythmAuditRiskState: currentRiskState ?? "limited",
     rhythmAuditNextState: nextRiskState ?? currentRiskState ?? "limited"
   };

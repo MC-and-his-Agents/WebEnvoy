@@ -408,7 +408,10 @@ export class RuntimeStoreRecorder {
           sessionId: auditInput.sessionId,
           runId: auditInput.runId,
           sourceAuditEventId: auditInput.eventId,
-          effectiveExecutionMode: auditInput.effectiveExecutionMode
+          effectiveExecutionMode: auditInput.effectiveExecutionMode,
+          gateDecision: auditInput.gateDecision,
+          riskState: auditInput.riskState,
+          nextState: auditInput.nextState
         },
         persistedAuditRecord
       );
@@ -423,6 +426,9 @@ export class RuntimeStoreRecorder {
       runId: string;
       sourceAuditEventId?: string | null;
       effectiveExecutionMode?: string | null;
+      gateDecision?: string | null;
+      riskState?: string | null;
+      nextState?: string | null;
       force?: boolean;
     },
     persistedAuditRecord: JsonObject | null
@@ -471,6 +477,7 @@ export class RuntimeStoreRecorder {
       (input.effectiveExecutionMode === "live_read_limited" ||
         input.effectiveExecutionMode === "live_read_high_risk" ||
         input.effectiveExecutionMode === "live_write") &&
+      input.gateDecision === "allowed" &&
       asString(decision.decision) === "deferred";
     const currentLiveRunKey = toSessionRhythmIdPart(input.runId);
     const currentLiveEventId = `rhythm_evt_${currentLiveRunKey}`;
