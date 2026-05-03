@@ -402,6 +402,24 @@ const withMockMainWorld = async (
         return;
       }
 
+      if (requestType === "captured-request-context-provenance-set") {
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: {
+            configured: true,
+            page_context_namespace: requestPayload?.page_context_namespace,
+            profile_ref: requestPayload?.profile_ref,
+            session_id: requestPayload?.session_id,
+            target_tab_id: requestPayload?.target_tab_id,
+            run_id: requestPayload?.run_id,
+            action_ref: requestPayload?.action_ref,
+            page_url: requestPayload?.page_url
+          }
+        });
+        return;
+      }
+
       if (requestType === "xhs-sign") {
         if ((mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ === true) {
           return;
@@ -1518,6 +1536,313 @@ describe("content-script handler contract", () => {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
       }
     });
+  });
+
+  it("configures xhs.search passive request-context provenance before the humanized action", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
+    const runId = "run-xhs-search-passive-provenance-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "search-passive-provenance");
+    const callOrder: string[] = [];
+    let configuredProvenance: Record<string, unknown> | null = null;
+    const requestBody = {
+      keyword: "露营",
+      page: 1,
+      page_size: 20,
+      sort: "general",
+      note_type: 0
+    };
+    const readCapturedRequestContext = vi.fn(async (lookup: {
+      page_context_namespace: string;
+      shape_key: string;
+      min_observed_at?: number;
+    }) => {
+      callOrder.push("read");
+      expect(configuredProvenance).toMatchObject({
+        profile_ref: "profile-a",
+        session_id: "nm-session-001",
+        target_tab_id: 1,
+        run_id: runId,
+        action_ref: "read",
+        page_url: href
+      });
+      expect(lookup.min_observed_at).toBe(1_710_000_000_000);
+      return {
+        page_context_namespace: lookup.page_context_namespace,
+        shape_key: lookup.shape_key,
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          transport: "fetch",
+          method: "POST",
+          path: "/api/sns/web/v1/search/notes",
+          url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          status: 200,
+          captured_at: 1_710_000_000_000,
+          observed_at: 1_710_000_000_000,
+          page_context_namespace: lookup.page_context_namespace,
+          shape_key: lookup.shape_key,
+          shape: JSON.parse(lookup.shape_key),
+          profile_ref: "profile-a",
+          session_id: "nm-session-001",
+          target_tab_id: 1,
+          run_id: runId,
+          action_ref: "read",
+          page_url: href,
+          request: {
+            headers: {
+              "content-type": "application/json"
+            },
+            body: requestBody
+          },
+          response: {
+            headers: {
+              "content-type": "application/json"
+            },
+            body: {
+              code: 0,
+              data: {
+                items: [{ id: "note-001" }]
+              }
+            }
+          }
+        },
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: [lookup.shape_key]
+      };
+    });
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_710_000_000_000,
+        randomId: () => "req-search-passive-provenance-001",
+        getLocationHref: () => href,
+        getDocumentTitle: () => "露营 - 小红书搜索",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=session-token",
+        configureCapturedRequestContextProvenance: async (input) => {
+          callOrder.push("configure");
+          configuredProvenance = input as unknown as Record<string, unknown>;
+          return {
+            configured: true,
+            ...(input as unknown as Record<string, unknown>)
+          };
+        },
+        performSearchPassiveAction: async () => {
+          callOrder.push("passive");
+          expect(configuredProvenance).not.toBeNull();
+          return {
+            evidence_class: "humanized_action",
+            action_kind: "keyboard_input"
+          };
+        },
+        readCapturedRequestContext,
+        callSignature: async () => ({
+          "X-s": "signature",
+          "X-t": "1700000000"
+        }),
+        fetchJson
+      }
+    });
+    const results: Array<Record<string, unknown>> = [];
+    handler.onResult((message) => {
+      results.push(message as unknown as Record<string, unknown>);
+    });
+
+    handler.onBackgroundMessage({
+      kind: "forward",
+      id: runId,
+      runId,
+      tabId: 1,
+      profile: "profile-a",
+      cwd: "/workspace/WebEnvoy",
+      timeoutMs: 1_000,
+      command: "xhs.search",
+      params: {
+        session_id: "nm-session-001"
+      },
+      commandParams: {
+        request_id: "issue613-search-passive-provenance-001",
+        gate_invocation_id: issue209Linkage.gateInvocationId,
+        requested_execution_mode: "live_read_limited",
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营"
+        },
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 1,
+          target_page: "search_result_tab",
+          action_type: "read",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecord({
+            runId,
+            requestId: runId,
+            commandRequestId: "issue613-search-passive-provenance-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          }),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId: runId,
+            commandRequestId: "issue613-search-passive-provenance-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          })
+        }
+      },
+      fingerprintContext: {
+        ...createFingerprintContext(),
+        injection: {
+          installed: true,
+          required_patches: [],
+          missing_required_patches: [],
+          source: "main_world"
+        }
+      }
+    });
+
+    await waitForResult(results);
+
+    expect(results[0]?.ok).toBe(true);
+    expect(callOrder).toEqual(["configure", "passive", "configure", "read"]);
+    const payload = results[0]?.payload as Record<string, unknown>;
+    const summary = payload?.summary as Record<string, unknown>;
+    expect(summary?.request_context).toMatchObject({ status: "exact_hit" });
+    expect(summary?.route_evidence).toMatchObject({
+      evidence_class: "passive_api_capture",
+      profile_ref: "profile-a",
+      target_tab_id: 1,
+      run_id: runId
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for xhs.search when passive request-context provenance is not confirmed", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
+    const runId = "run-xhs-search-passive-provenance-blocked-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "search-passive-provenance-blocked");
+    const performSearchPassiveAction = vi.fn(async () => ({
+      evidence_class: "humanized_action",
+      action_kind: "keyboard_input"
+    }));
+    const readCapturedRequestContext = vi.fn(async () => null);
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_710_000_000_000,
+        randomId: () => "req-search-passive-provenance-blocked-001",
+        getLocationHref: () => href,
+        getDocumentTitle: () => "露营 - 小红书搜索",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=session-token",
+        configureCapturedRequestContextProvenance: async () => ({
+          configured: false,
+          reason: "page_context_namespace_missing"
+        }),
+        performSearchPassiveAction,
+        readCapturedRequestContext,
+        callSignature: async () => ({
+          "X-s": "signature",
+          "X-t": "1700000000"
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        })
+      }
+    });
+    const results: Array<Record<string, unknown>> = [];
+    handler.onResult((message) => {
+      results.push(message as unknown as Record<string, unknown>);
+    });
+
+    handler.onBackgroundMessage({
+      kind: "forward",
+      id: runId,
+      runId,
+      tabId: 1,
+      profile: "profile-a",
+      cwd: "/workspace/WebEnvoy",
+      timeoutMs: 1_000,
+      command: "xhs.search",
+      params: {
+        session_id: "nm-session-001"
+      },
+      commandParams: {
+        request_id: "issue613-search-passive-provenance-blocked-001",
+        gate_invocation_id: issue209Linkage.gateInvocationId,
+        requested_execution_mode: "live_read_limited",
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营"
+        },
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 1,
+          target_page: "search_result_tab",
+          action_type: "read",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecord({
+            runId,
+            requestId: runId,
+            commandRequestId: "issue613-search-passive-provenance-blocked-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          }),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId: runId,
+            commandRequestId: "issue613-search-passive-provenance-blocked-001",
+            gateInvocationId: issue209Linkage.gateInvocationId
+          })
+        }
+      },
+      fingerprintContext: {
+        ...createFingerprintContext(),
+        injection: {
+          installed: true,
+          required_patches: [],
+          missing_required_patches: [],
+          source: "main_world"
+        }
+      }
+    });
+
+    await waitForResult(results);
+
+    expect(results[0]?.ok).toBe(false);
+    const payload = results[0]?.payload as Record<string, unknown>;
+    expect(payload?.details).toMatchObject({
+      reason: "REQUEST_CONTEXT_MISSING",
+      request_context_reason: "provenance_unconfirmed"
+    });
+    expect(payload).toHaveProperty("consumer_gate_result");
+    expect(performSearchPassiveAction).not.toHaveBeenCalled();
+    expect(readCapturedRequestContext).not.toHaveBeenCalled();
   });
 
   it("keeps xhs.search main-world requests alive past the default channel timeout when request timeout is longer", async () => {

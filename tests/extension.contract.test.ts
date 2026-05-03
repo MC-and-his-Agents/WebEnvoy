@@ -319,6 +319,21 @@ const createBundledMainWorldWindow = (input: {
             ? (detail.payload as Record<string, unknown>)
             : {};
         result = input.resolveLookup(payload, activeNamespace);
+      } else if (detail.type === "captured-request-context-provenance-set") {
+        const payload =
+          typeof detail.payload === "object" && detail.payload !== null
+            ? (detail.payload as Record<string, unknown>)
+            : {};
+        result = {
+          configured: true,
+          page_context_namespace: payload.page_context_namespace,
+          profile_ref: payload.profile_ref,
+          session_id: payload.session_id,
+          target_tab_id: payload.target_tab_id,
+          run_id: payload.run_id,
+          action_ref: payload.action_ref,
+          page_url: payload.page_url
+        };
       } else if (detail.type === "fingerprint-install") {
         result = {
           installed: true,
@@ -1057,8 +1072,30 @@ describe("extension build contract", () => {
       }
     });
     expect(searchResult.payload.summary).not.toHaveProperty("layer2_interaction");
-    expect(bridgeRequests).toHaveLength(1);
+    expect(bridgeRequests).toHaveLength(3);
     expect(bridgeRequests[0]).toMatchObject({
+      type: "captured-request-context-provenance-set",
+      payload: {
+        profile_ref: "profile-a",
+        session_id: "nm-session-bundled-handler-search-live-001",
+        target_tab_id: 21,
+        run_id: "run-bundled-handler-search-live-001",
+        action_ref: "read",
+        page_url: searchHref
+      }
+    });
+    expect(bridgeRequests[1]).toMatchObject({
+      type: "captured-request-context-provenance-set",
+      payload: {
+        profile_ref: "profile-a",
+        session_id: "nm-session-bundled-handler-search-live-001",
+        target_tab_id: 21,
+        run_id: "run-bundled-handler-search-live-001",
+        action_ref: "read",
+        page_url: searchHref
+      }
+    });
+    expect(bridgeRequests[2]).toMatchObject({
       type: "captured-request-context-read",
       payload: {
         shape_key: serializeSearchRequestShape(
@@ -1429,7 +1466,32 @@ describe("extension build contract", () => {
         }
       }
     });
-    expect(bridgeRequests).toHaveLength(1);
+    expect(bridgeRequests).toHaveLength(3);
+    expect(bridgeRequests[0]).toMatchObject({
+      type: "captured-request-context-provenance-set",
+      payload: {
+        profile_ref: "profile-a",
+        session_id: "nm-session-bundled-handler-search-live-002",
+        target_tab_id: 21,
+        run_id: "run-bundled-handler-search-live-002",
+        action_ref: "read",
+        page_url: searchHref
+      }
+    });
+    expect(bridgeRequests[1]).toMatchObject({
+      type: "captured-request-context-provenance-set",
+      payload: {
+        profile_ref: "profile-a",
+        session_id: "nm-session-bundled-handler-search-live-002",
+        target_tab_id: 21,
+        run_id: "run-bundled-handler-search-live-002",
+        action_ref: "read",
+        page_url: searchHref
+      }
+    });
+    expect(bridgeRequests[2]).toMatchObject({
+      type: "captured-request-context-read"
+    });
     expect(runtimeMessages).toEqual([]);
   });
 

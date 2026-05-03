@@ -45,6 +45,7 @@ export interface XhsSearchOptions {
   xhs_recovery_probe?: boolean;
   validation_action?: string;
   validation_text?: string;
+  __request_context_provenance_confirmed?: boolean;
   active_api_fetch_fallback?: ActiveApiFetchFallbackGateOptions;
   editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;
 }

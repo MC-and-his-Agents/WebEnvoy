@@ -6,7 +6,6 @@ import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.j
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
 import { encodeMainWorldPayload, configureCapturedRequestContextProvenanceViaMainWorld, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
-import { createPageContextNamespace } from "./xhs-search-types.js";
 import { containsCookie, hasXhsAccountSafetyOverlaySignal } from "./xhs-search-telemetry.js";
 export { encodeMainWorldPayload, configureCapturedRequestContextProvenanceViaMainWorld, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
@@ -16,6 +15,27 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const createCurrentPageContextNamespace = (href) => {
+    const normalized = href.trim();
+    if (normalized.length === 0) {
+        return "about:blank";
+    }
+    try {
+        const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
+        const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
+        const documentTimeOrigin = typeof globalThis.performance?.timeOrigin === "number" &&
+            Number.isFinite(globalThis.performance.timeOrigin)
+            ? Math.trunc(globalThis.performance.timeOrigin)
+            : null;
+        return documentTimeOrigin === null
+            ? `${parsed.origin}${queryIdentity}`
+            : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
+    }
+    catch {
+        return normalized;
+    }
+};
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const hasReadyFingerprintRuntime = (fingerprintRuntime) => {
@@ -25,6 +45,16 @@ const hasReadyFingerprintRuntime = (fingerprintRuntime) => {
         asStringArray(injection.missing_required_patches).length === 0 &&
         execution?.live_allowed === true &&
         execution.live_decision === "allowed");
+};
+const capturedRequestContextProvenanceConfirmed = (value, expected) => {
+    const record = asRecord(value);
+    return (record?.configured === true &&
+        record.profile_ref === expected.profile_ref &&
+        record.session_id === expected.session_id &&
+        (expected.target_tab_id === null || record.target_tab_id === expected.target_tab_id) &&
+        record.run_id === expected.run_id &&
+        record.action_ref === expected.action_ref &&
+        record.page_url === expected.page_url);
 };
 const resolveTrustedActiveFallbackRuntimeAttestation = (input) => {
     const attestation = asRecord(input.raw.runtime_attestation);
@@ -361,7 +391,7 @@ const isCurrentSearchPageForQuery = (href, query) => {
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
     const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
-    if (!queryMatched && searchInput) {
+    if (searchInput) {
         const searchForm = searchInput.closest("form");
         const searchButton = (searchForm?.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]') ?? document.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]'));
         const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -387,7 +417,7 @@ const performXhsSearchPassiveAction = async (input) => {
             run_id: input.runId,
             page_url: input.pageUrl,
             query: input.query,
-            query_matched: false,
+            query_matched: queryMatched,
             search_input_found: true,
             search_form_found: Boolean(searchForm),
             search_button_found: Boolean(searchButton),
@@ -920,7 +950,24 @@ export class ContentScriptHandler {
                 }
             };
             let result;
+            const configureReadRequestContextProvenance = async () => {
+                if (typeof this.#xhsEnv.configureCapturedRequestContextProvenance !== "function") {
+                    return true;
+                }
+                const expected = {
+                    page_context_namespace: createCurrentPageContextNamespace(locationHref),
+                    profile_ref: commonInput.executionContext.profile,
+                    session_id: commonInput.executionContext.sessionId,
+                    target_tab_id: typeof message.tabId === "number" ? message.tabId : null,
+                    run_id: commonInput.executionContext.runId,
+                    action_ref: commonInput.abilityAction,
+                    page_url: locationHref
+                };
+                const result = await this.#xhsEnv.configureCapturedRequestContextProvenance(expected).catch(() => null);
+                return capturedRequestContextProvenanceConfirmed(result, expected);
+            };
             if (message.command === "xhs.search") {
+                const requestContextProvenanceConfirmed = await configureReadRequestContextProvenance();
                 const searchInput = normalizedInput;
                 result = await executeXhsSearch({
                     ...commonInput,
@@ -936,21 +983,15 @@ export class ContentScriptHandler {
                             typeof searchInput.note_type === "number"
                             ? { note_type: searchInput.note_type }
                             : {})
+                    },
+                    options: {
+                        ...commonInput.options,
+                        __request_context_provenance_confirmed: requestContextProvenanceConfirmed
                     }
                 }, this.#xhsEnv);
             }
             else if (message.command === "xhs.detail") {
-                if (typeof this.#xhsEnv.configureCapturedRequestContextProvenance === "function") {
-                    await this.#xhsEnv.configureCapturedRequestContextProvenance({
-                        page_context_namespace: createPageContextNamespace(locationHref),
-                        profile_ref: commonInput.executionContext.profile,
-                        session_id: commonInput.executionContext.sessionId,
-                        target_tab_id: typeof message.tabId === "number" ? message.tabId : null,
-                        run_id: commonInput.executionContext.runId,
-                        action_ref: commonInput.abilityAction,
-                        page_url: locationHref
-                    }).catch(() => null);
-                }
+                void (await configureReadRequestContextProvenance());
                 result = await executeXhsDetail({
                     ...commonInput,
                     params: {
@@ -959,17 +1000,7 @@ export class ContentScriptHandler {
                 }, this.#xhsEnv);
             }
             else {
-                if (typeof this.#xhsEnv.configureCapturedRequestContextProvenance === "function") {
-                    await this.#xhsEnv.configureCapturedRequestContextProvenance({
-                        page_context_namespace: createPageContextNamespace(locationHref),
-                        profile_ref: commonInput.executionContext.profile,
-                        session_id: commonInput.executionContext.sessionId,
-                        target_tab_id: typeof message.tabId === "number" ? message.tabId : null,
-                        run_id: commonInput.executionContext.runId,
-                        action_ref: commonInput.abilityAction,
-                        page_url: locationHref
-                    }).catch(() => null);
-                }
+                void (await configureReadRequestContextProvenance());
                 result = await executeXhsUserHome({
                     ...commonInput,
                     params: {

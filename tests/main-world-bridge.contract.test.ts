@@ -258,6 +258,12 @@ const readCapturedContext = async (input: {
   shapeKey: string;
   method?: "POST" | "GET";
   path?: string;
+  profileRef?: string;
+  sessionId?: string;
+  targetTabId?: number;
+  runId?: string;
+  actionRef?: string;
+  pageUrl?: string;
 }) => {
   await flushMicrotasks();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -271,7 +277,13 @@ const readCapturedContext = async (input: {
         method: input.method ?? "POST",
         path: input.path ?? SEARCH_ENDPOINT,
         page_context_namespace: input.pageContextNamespace,
-        shape_key: input.shapeKey
+        shape_key: input.shapeKey,
+        ...(typeof input.profileRef === "string" ? { profile_ref: input.profileRef } : {}),
+        ...(typeof input.sessionId === "string" ? { session_id: input.sessionId } : {}),
+        ...(typeof input.targetTabId === "number" ? { target_tab_id: input.targetTabId } : {}),
+        ...(typeof input.runId === "string" ? { run_id: input.runId } : {}),
+        ...(typeof input.actionRef === "string" ? { action_ref: input.actionRef } : {}),
+        ...(typeof input.pageUrl === "string" ? { page_url: input.pageUrl } : {})
       }
     }
   } as unknown as Event);
@@ -559,6 +571,57 @@ describe("main-world bridge contract", () => {
           action_ref: "xhs.detail",
           page_url: SEARCH_PAGE_HREF
         }
+      }
+    });
+  });
+
+  it("does not return passive templates when requested provenance is absent or mismatched", async () => {
+    const env = createMockMainWorldEnvironment();
+    const pageContextNamespace = createPageContextNamespace(SEARCH_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+
+    const capturedWithoutProvenance = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-provenance-required-001",
+      actionRef: "read",
+      pageUrl: SEARCH_PAGE_HREF
+    });
+
+    expect(capturedWithoutProvenance).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null
       }
     });
   });

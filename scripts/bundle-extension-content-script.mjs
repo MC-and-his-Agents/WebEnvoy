@@ -407,6 +407,7 @@ const buildContentScriptBundle = async () => {
     sourceBody: contentScriptMainWorldSource,
     exports: [
       "encodeMainWorldPayload",
+      "configureCapturedRequestContextProvenanceViaMainWorld",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
       "MAIN_WORLD_EVENT_BOOTSTRAP",
@@ -464,6 +465,7 @@ const buildContentScriptBundle = async () => {
       "const { containsCookie, hasXhsAccountSafetyOverlaySignal } = __webenvoy_module_xhs_search_telemetry;",
       "const {",
       "  encodeMainWorldPayload,",
+      "  configureCapturedRequestContextProvenanceViaMainWorld,",
       "  installFingerprintRuntimeViaMainWorld,",
       "  installMainWorldEventChannelSecret,",
       "  MAIN_WORLD_EVENT_BOOTSTRAP,",
@@ -479,6 +481,7 @@ const buildContentScriptBundle = async () => {
       "ContentScriptHandler",
       "ExtensionContractError",
       "encodeMainWorldPayload",
+      "configureCapturedRequestContextProvenanceViaMainWorld",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
       "readCapturedRequestContextViaMainWorld",
