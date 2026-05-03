@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildXhsCloseoutValidationScope,
   persistXhsCloseoutValidationSourceEvidence,
+  persistXhsCloseoutValidationSourceSamples,
   persistXhsCloseoutValidationSignals,
   readXhsCloseoutValidationGateView,
   type XhsCloseoutValidationSignalMap
@@ -111,6 +112,60 @@ const sourceAudit: GateAuditRecord = {
   approved_at: "2026-04-30T01:00:00.000Z",
   recorded_at: "2026-04-30T01:00:01.000Z",
   created_at: "2026-04-30T01:00:01.000Z"
+};
+
+const sourceAuditForRun = (input: {
+  runId: string;
+  actionRef: string;
+  targetTabId: number;
+  sessionId: string;
+  observedAt: string;
+}): GateAuditRecord => ({
+  ...sourceAudit,
+  event_id: `gate_evt_${input.runId}_xhs_closeout_validation_source`,
+  decision_id: `gate_decision_${input.runId}_xhs_closeout_validation_source`,
+  approval_id: `gate_approval_${input.runId}_xhs_closeout_validation_source`,
+  run_id: input.runId,
+  session_id: input.sessionId,
+  target_tab_id: input.targetTabId,
+  action_ref: input.actionRef,
+  approved_at: input.observedAt,
+  recorded_at: input.observedAt,
+  created_at: input.observedAt
+});
+
+const signalsWithValidationSourceProvenance = (input: {
+  runId: string;
+  actionRef: string;
+  targetTabId: number;
+  sessionId: string;
+}): XhsCloseoutValidationSignalMap => {
+  const cloned = JSON.parse(JSON.stringify(signals)) as XhsCloseoutValidationSignalMap;
+  const pageUrl =
+    "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51";
+
+  for (const layer of [
+    cloned.layer1_consistency,
+    cloned.layer2_interaction,
+    cloned.layer3_session_rhythm
+  ]) {
+    const browserReturnedEvidence = layer.browser_returned_evidence as Record<string, unknown>;
+    browserReturnedEvidence.target_tab_id = input.targetTabId;
+    browserReturnedEvidence.page_url = pageUrl;
+  }
+
+  const rhythmProfile = cloned.layer2_interaction.rhythm_profile as Record<string, unknown>;
+  rhythmProfile.source_run_id = input.runId;
+
+  const executionTrace = cloned.layer2_interaction.execution_trace as Record<string, unknown>;
+  executionTrace.action_ref = input.actionRef;
+  executionTrace.session_id = input.sessionId;
+  executionTrace.target_tab_id = input.targetTabId;
+
+  cloned.layer3_session_rhythm.session_rhythm_decision_id =
+    `rhythm_decision_preflight_${input.runId}`;
+
+  return cloned;
 };
 
 const seedBrokenView = async (input: {
@@ -340,6 +395,112 @@ describe("FR-0020 XHS closeout validation baseline", () => {
             target_fr_ref: "FR-0014",
             validation_scope: "layer3_session_rhythm",
             baseline_status: "ready",
+            current_result_state: "verified",
+            current_drift_state: "no_drift"
+          })
+        ])
+      );
+    } finally {
+      store.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mark fresh validation-source runtime provenance as baseline drift", async () => {
+    const { cwd, store } = await createStore();
+    try {
+      const baselineSourceRunId = "run-validation-source-baseline";
+      const baselineSourceSamples = await persistXhsCloseoutValidationSourceEvidence({
+        store,
+        profile: "xhs_validation_profile",
+        effectiveExecutionMode: "live_read_high_risk",
+        targetDomain: "www.xiaohongshu.com",
+        sourceRunId: baselineSourceRunId,
+        observedAt: "2026-04-30T01:00:02.000Z",
+        sourceAudit: sourceAuditForRun({
+          runId: baselineSourceRunId,
+          actionRef: "action-validation-source-baseline",
+          targetTabId: 1230427335,
+          sessionId: "nm-session-001",
+          observedAt: "2026-04-30T01:00:02.000Z"
+        }),
+        actionRef: "action-validation-source-baseline",
+        signals: signalsWithValidationSourceProvenance({
+          runId: baselineSourceRunId,
+          actionRef: "action-validation-source-baseline",
+          targetTabId: 1230427335,
+          sessionId: "nm-session-001"
+        }),
+        artifactRefs: [`artifact/xhs-closeout-validation-source/${baselineSourceRunId}`]
+      });
+      await persistXhsCloseoutValidationSourceSamples({
+        store,
+        profile: "xhs_validation_profile",
+        effectiveExecutionMode: "live_read_high_risk",
+        targetDomain: "www.xiaohongshu.com",
+        validationRunId: "run-validation-baseline-seed",
+        observedAt: "2026-04-30T01:00:05.000Z",
+        sourceRunId: baselineSourceRunId,
+        sourceSamples: baselineSourceSamples
+      });
+
+      const freshSourceRunId = "run-validation-source-fresh";
+      const freshSourceSamples = await persistXhsCloseoutValidationSourceEvidence({
+        store,
+        profile: "xhs_validation_profile",
+        effectiveExecutionMode: "live_read_high_risk",
+        targetDomain: "www.xiaohongshu.com",
+        sourceRunId: freshSourceRunId,
+        observedAt: "2026-05-02T06:29:54.536Z",
+        sourceAudit: sourceAuditForRun({
+          runId: freshSourceRunId,
+          actionRef: "action-validation-source-fresh",
+          targetTabId: 1230427602,
+          sessionId: "nm-session-002",
+          observedAt: "2026-05-02T06:29:54.536Z"
+        }),
+        actionRef: "action-validation-source-fresh",
+        signals: signalsWithValidationSourceProvenance({
+          runId: freshSourceRunId,
+          actionRef: "action-validation-source-fresh",
+          targetTabId: 1230427602,
+          sessionId: "nm-session-002"
+        }),
+        artifactRefs: [`artifact/xhs-closeout-validation-source/${freshSourceRunId}`]
+      });
+
+      const gate = await persistXhsCloseoutValidationSourceSamples({
+        store,
+        profile: "xhs_validation_profile",
+        effectiveExecutionMode: "live_read_high_risk",
+        targetDomain: "www.xiaohongshu.com",
+        validationRunId: "run-validation-baseline-fresh",
+        observedAt: "2026-05-02T06:30:10.000Z",
+        sourceRunId: freshSourceRunId,
+        sourceSamples: freshSourceSamples
+      });
+
+      expect(gate).toMatchObject({
+        all_required_ready: true,
+        blocking_target_fr_refs: []
+      });
+      expect(gate.views).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            target_fr_ref: "FR-0012",
+            latest_record_ref: expect.stringContaining("run-validation-baseline-fresh"),
+            current_result_state: "verified",
+            current_drift_state: "no_drift"
+          }),
+          expect.objectContaining({
+            target_fr_ref: "FR-0013",
+            latest_record_ref: expect.stringContaining("run-validation-baseline-fresh"),
+            current_result_state: "verified",
+            current_drift_state: "no_drift"
+          }),
+          expect.objectContaining({
+            target_fr_ref: "FR-0014",
+            latest_record_ref: expect.stringContaining("run-validation-baseline-fresh"),
             current_result_state: "verified",
             current_drift_state: "no_drift"
           })
