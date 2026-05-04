@@ -56,6 +56,15 @@ type RequestContextFailureReason =
   | "shape_mismatch"
   | "rejected_source";
 
+type RequestContextExpectedProvenance = {
+  profile_ref: string;
+  session_id: string;
+  target_tab_id: number | null;
+  run_id: string;
+  action_ref: string;
+  page_url: string;
+};
+
 type RejectedSourceDetailReason =
   | "synthetic_request_rejected"
   | "failed_request_rejected"
@@ -676,6 +685,7 @@ const resolveRequestContextState = async (
     params: XhsSearchParams;
     options: XhsSearchOptions;
     minObservedAt?: number | null;
+    expectedProvenance?: RequestContextExpectedProvenance | null;
   },
   env: XhsSearchEnvironment
 ): Promise<RequestContextState> => {
@@ -712,6 +722,18 @@ const resolveRequestContextState = async (
         path: SEARCH_ENDPOINT,
         page_context_namespace: pageContextNamespace,
         shape_key: shapeKey,
+        ...(requestInput.expectedProvenance
+          ? {
+              profile_ref: requestInput.expectedProvenance.profile_ref,
+              session_id: requestInput.expectedProvenance.session_id,
+              ...(typeof requestInput.expectedProvenance.target_tab_id === "number"
+                ? { target_tab_id: requestInput.expectedProvenance.target_tab_id }
+                : {}),
+              run_id: requestInput.expectedProvenance.run_id,
+              action_ref: requestInput.expectedProvenance.action_ref,
+              page_url: requestInput.expectedProvenance.page_url
+            }
+          : {}),
         ...(typeof requestInput.minObservedAt === "number"
           ? { min_observed_at: requestInput.minObservedAt }
           : {})
@@ -1247,6 +1269,89 @@ export const executeXhsSearch = async (
     );
   }
 
+  const buildExpectedRequestContextProvenance = (): RequestContextExpectedProvenance => ({
+    profile_ref: input.executionContext.profile,
+    session_id: input.executionContext.sessionId,
+    target_tab_id:
+      typeof gate.consumer_gate_result.target_tab_id === "number"
+        ? gate.consumer_gate_result.target_tab_id
+        : null,
+    run_id: input.executionContext.runId,
+    action_ref: input.abilityAction,
+    page_url: env.getLocationHref()
+  });
+  const createProvenanceUnconfirmedFailure = (): SearchExecutionResult => {
+    const expectedProvenance = buildExpectedRequestContextProvenance();
+    const summary = "当前页面现场的搜索请求来源未完成 provenance 绑定";
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        summary,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "provenance_unconfirmed",
+          page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+          profile_ref: expectedProvenance.profile_ref,
+          session_id: expectedProvenance.session_id,
+          target_tab_id: expectedProvenance.target_tab_id,
+          run_id: expectedProvenance.run_id,
+          action_ref: expectedProvenance.action_ref,
+          page_url: expectedProvenance.page_url
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "REQUEST_CONTEXT_MISSING",
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "captured_request_context",
+            summary
+          }
+        }),
+        createDiagnosis({
+          reason: "REQUEST_CONTEXT_MISSING",
+          summary,
+          category: "page_changed"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
+    );
+  };
+  const confirmCurrentRequestContextProvenance = async (): Promise<boolean> => {
+    if (typeof env.configureCapturedRequestContextProvenance !== "function") {
+      return true;
+    }
+    const expectedProvenance = buildExpectedRequestContextProvenance();
+    const result = await env.configureCapturedRequestContextProvenance({
+      page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+      ...expectedProvenance
+    }).catch(() => null);
+    const record = asRecord(result);
+    return (
+      record?.configured === true &&
+      record.profile_ref === expectedProvenance.profile_ref &&
+      record.session_id === expectedProvenance.session_id &&
+      (expectedProvenance.target_tab_id === null ||
+        record.target_tab_id === expectedProvenance.target_tab_id) &&
+      record.run_id === expectedProvenance.run_id &&
+      record.action_ref === expectedProvenance.action_ref &&
+      record.page_url === expectedProvenance.page_url
+    );
+  };
+
+  if (input.options.__request_context_provenance_confirmed === false) {
+    return createProvenanceUnconfirmedFailure();
+  }
+
   const payload: JsonRecord = {
     keyword: input.params.query,
     page: input.params.page ?? 1,
@@ -1257,11 +1362,15 @@ export const executeXhsSearch = async (
   };
   const passiveActionStartedAt = env.now();
   const passiveActionEvidence = await performSearchPassiveAction(input, env);
+  if (!(await confirmCurrentRequestContextProvenance())) {
+    return createProvenanceUnconfirmedFailure();
+  }
   const requestContextState = await resolveRequestContextState(
     {
       params: input.params,
       options: input.options,
-      minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null
+      minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null,
+      expectedProvenance: buildExpectedRequestContextProvenance()
     },
     env
   );

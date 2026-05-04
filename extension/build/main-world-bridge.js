@@ -1403,6 +1403,37 @@ const handleCapturedRequestContextReadRequest = async (request) => {
     const minObservedAt = typeof request.payload.min_observed_at === "number" && Number.isFinite(request.payload.min_observed_at)
         ? request.payload.min_observed_at
         : null;
+    const requestedProvenance = {
+        profile_ref: asString(request.payload.profile_ref),
+        session_id: asString(request.payload.session_id),
+        target_tab_id: typeof request.payload.target_tab_id === "number" && Number.isInteger(request.payload.target_tab_id)
+            ? request.payload.target_tab_id
+            : null,
+        run_id: asString(request.payload.run_id),
+        action_ref: asString(request.payload.action_ref),
+        page_url: asString(request.payload.page_url)
+    };
+    const hasRequestedProvenance = requestedProvenance.profile_ref !== null ||
+        requestedProvenance.session_id !== null ||
+        requestedProvenance.target_tab_id !== null ||
+        requestedProvenance.run_id !== null ||
+        requestedProvenance.action_ref !== null ||
+        requestedProvenance.page_url !== null;
+    const matchesRequestedProvenance = (artifact) => {
+        if (!artifact || !hasRequestedProvenance) {
+            return Boolean(artifact);
+        }
+        return ((requestedProvenance.profile_ref === null ||
+            artifact.profile_ref === requestedProvenance.profile_ref) &&
+            (requestedProvenance.session_id === null ||
+                artifact.session_id === requestedProvenance.session_id) &&
+            (requestedProvenance.target_tab_id === null ||
+                artifact.target_tab_id === requestedProvenance.target_tab_id) &&
+            (requestedProvenance.run_id === null || artifact.run_id === requestedProvenance.run_id) &&
+            (requestedProvenance.action_ref === null ||
+                artifact.action_ref === requestedProvenance.action_ref) &&
+            (requestedProvenance.page_url === null || artifact.page_url === requestedProvenance.page_url));
+    };
     const isFreshForLookup = (artifact) => {
         if (!artifact) {
             return false;
@@ -1420,7 +1451,10 @@ const handleCapturedRequestContextReadRequest = async (request) => {
             return [...routeBucket.keys()];
         }
         return [...routeBucket.entries()]
-            .filter(([, bucket]) => isFreshForLookup(bucket.admittedTemplate) || isFreshForLookup(bucket.rejectedObservation))
+            .filter(([, bucket]) => (isFreshForLookup(bucket.admittedTemplate) &&
+            matchesRequestedProvenance(bucket.admittedTemplate)) ||
+            (isFreshForLookup(bucket.rejectedObservation) &&
+                matchesRequestedProvenance(bucket.rejectedObservation)))
             .map(([shapeKey]) => shapeKey);
     };
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
@@ -1435,19 +1469,23 @@ const handleCapturedRequestContextReadRequest = async (request) => {
                 admitted_template: exactBucket?.admittedTemplate &&
                     exactBucket.admittedTemplate.method === method &&
                     exactBucket.admittedTemplate.path === path &&
-                    isFreshForLookup(exactBucket.admittedTemplate)
+                    isFreshForLookup(exactBucket.admittedTemplate) &&
+                    matchesRequestedProvenance(exactBucket.admittedTemplate)
                     ? exactBucket.admittedTemplate
                     : null,
                 rejected_observation: exactBucket?.rejectedObservation &&
                     exactBucket.rejectedObservation.method === method &&
                     exactBucket.rejectedObservation.path === path &&
-                    isFreshForLookup(exactBucket.rejectedObservation)
+                    isFreshForLookup(exactBucket.rejectedObservation) &&
+                    matchesRequestedProvenance(exactBucket.rejectedObservation)
                     ? exactBucket.rejectedObservation
                     : null,
                 incompatible_observation: (() => {
                     const incompatible = getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
                         (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
-                    return isFreshForLookup(incompatible) ? incompatible : null;
+                    return isFreshForLookup(incompatible) && matchesRequestedProvenance(incompatible)
+                        ? incompatible
+                        : null;
                 })(),
                 available_shape_keys: resolveAvailableShapeKeys(routeBucket)
             };
