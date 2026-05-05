@@ -571,6 +571,12 @@ const createSameQuerySearchPerturbation = (query: string, currentValue: string):
   return candidates.find((candidate) => candidate !== currentValue && candidate !== query) ?? `${query}x`;
 };
 
+const waitForXhsSearchPassiveActionTurn = async (): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 180);
+  });
+};
+
 const performXhsSearchPassiveAction = async (input: {
   query: string;
   pageUrl: string;
@@ -609,6 +615,7 @@ const performXhsSearchPassiveAction = async (input: {
       normalizeSearchQueryText(currentInputValue) === normalizeSearchQueryText(input.query);
     let sameQueryPerturbed = false;
     let preSubmitValueChanged = false;
+    let inputSettleWaits = 0;
     searchInput.focus();
     if (sameQueryInputMatched) {
       const perturbedValue = createSameQuerySearchPerturbation(input.query, currentInputValue);
@@ -616,9 +623,15 @@ const performXhsSearchPassiveAction = async (input: {
       dispatchTextChange(perturbedValue);
       sameQueryPerturbed = true;
       preSubmitValueChanged = searchInput.value !== currentInputValue;
+      await waitForXhsSearchPassiveActionTurn();
+      inputSettleWaits += 1;
     }
     setSearchInputValue(input.query);
     dispatchTextChange(input.query);
+    if (sameQueryInputMatched) {
+      await waitForXhsSearchPassiveActionTurn();
+      inputSettleWaits += 1;
+    }
     searchInput.dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" })
     );
@@ -644,6 +657,7 @@ const performXhsSearchPassiveAction = async (input: {
       same_query_input_matched: sameQueryInputMatched,
       same_query_perturbed: sameQueryPerturbed,
       pre_submit_value_changed: preSubmitValueChanged,
+      input_settle_waits: inputSettleWaits,
       search_form_found: Boolean(searchForm),
       search_button_found: Boolean(searchButton),
       submit_triggered:

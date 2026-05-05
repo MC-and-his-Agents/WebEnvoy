@@ -1739,8 +1739,10 @@ describe("content-script handler contract", () => {
     const previousInputEvent = (globalThis as { InputEvent?: unknown }).InputEvent;
     const previousKeyboardEvent = (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
     const previousHTMLInputElement = (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+    const previousSetTimeout = globalThis.setTimeout;
     const valueSequence: string[] = [];
     const eventSequence: string[] = [];
+    const settleTimeouts: number[] = [];
 
     class MockEventImpl implements MockEvent {
       readonly type: string;
@@ -1817,6 +1819,15 @@ describe("content-script handler contract", () => {
     (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
     (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = MockKeyboardEventImpl;
     (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElementImpl;
+    globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      settleTimeouts.push(typeof timeout === "number" ? timeout : 0);
+      queueMicrotask(() => {
+        if (typeof handler === "function") {
+          handler(...args);
+        }
+      });
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
 
     try {
       await withMockMainWorld(async ({ mockWindow }) => {
@@ -1908,6 +1919,7 @@ describe("content-script handler contract", () => {
         const perturbValueIndex = eventSequence.indexOf(`value:${perturbValue}`);
         const restoredValueIndex = eventSequence.lastIndexOf("value:露营");
         const submitIndex = eventSequence.indexOf("requestSubmit");
+        expect(settleTimeouts.filter((timeout) => timeout === 180)).toHaveLength(2);
         expect(perturbValueIndex).toBeGreaterThan(-1);
         expect(restoredValueIndex).toBeGreaterThan(perturbValueIndex);
         expect(submitIndex).toBeGreaterThan(restoredValueIndex);
@@ -1918,7 +1930,8 @@ describe("content-script handler contract", () => {
           humanized_action: {
             same_query_input_matched: true,
             same_query_perturbed: true,
-            pre_submit_value_changed: true
+            pre_submit_value_changed: true,
+            input_settle_waits: 2
           }
         });
       });
@@ -1927,6 +1940,7 @@ describe("content-script handler contract", () => {
       (globalThis as { InputEvent?: unknown }).InputEvent = previousInputEvent;
       (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = previousKeyboardEvent;
       (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = previousHTMLInputElement;
+      globalThis.setTimeout = previousSetTimeout;
     }
   });
 

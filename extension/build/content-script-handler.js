@@ -392,6 +392,11 @@ const createSameQuerySearchPerturbation = (query, currentValue) => {
     const candidates = [`${query} `, query.slice(0, Math.max(0, query.length - 1)), `${query}x`];
     return candidates.find((candidate) => candidate !== currentValue && candidate !== query) ?? `${query}x`;
 };
+const waitForXhsSearchPassiveActionTurn = async () => {
+    await new Promise((resolve) => {
+        setTimeout(resolve, 180);
+    });
+};
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
     const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
@@ -416,6 +421,7 @@ const performXhsSearchPassiveAction = async (input) => {
             normalizeSearchQueryText(currentInputValue) === normalizeSearchQueryText(input.query);
         let sameQueryPerturbed = false;
         let preSubmitValueChanged = false;
+        let inputSettleWaits = 0;
         searchInput.focus();
         if (sameQueryInputMatched) {
             const perturbedValue = createSameQuerySearchPerturbation(input.query, currentInputValue);
@@ -423,9 +429,15 @@ const performXhsSearchPassiveAction = async (input) => {
             dispatchTextChange(perturbedValue);
             sameQueryPerturbed = true;
             preSubmitValueChanged = searchInput.value !== currentInputValue;
+            await waitForXhsSearchPassiveActionTurn();
+            inputSettleWaits += 1;
         }
         setSearchInputValue(input.query);
         dispatchTextChange(input.query);
+        if (sameQueryInputMatched) {
+            await waitForXhsSearchPassiveActionTurn();
+            inputSettleWaits += 1;
+        }
         searchInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
         searchInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
         if (searchForm && typeof searchForm.requestSubmit === "function") {
@@ -449,6 +461,7 @@ const performXhsSearchPassiveAction = async (input) => {
             same_query_input_matched: sameQueryInputMatched,
             same_query_perturbed: sameQueryPerturbed,
             pre_submit_value_changed: preSubmitValueChanged,
+            input_settle_waits: inputSettleWaits,
             search_form_found: Boolean(searchForm),
             search_button_found: Boolean(searchButton),
             submit_triggered: searchForm && typeof searchForm.requestSubmit === "function"

@@ -446,10 +446,12 @@ describe("main-world bridge contract", () => {
     });
   });
 
-  it("arms request-context capture before an SPA transition enters a search page", async () => {
+  it("resolves bare explore search capture after an SPA transition enters a search page", async () => {
     const env = createMockMainWorldEnvironment();
     const originalFetch = env.mockWindow.fetch;
-    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore";
+    const exploreHref = "https://www.xiaohongshu.com/explore";
+    const searchNamespace = createPageContextNamespace(SEARCH_PAGE_HREF);
+    env.mockWindow.location.href = exploreHref;
     env.setFetchHandler(async () => {
       return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
         status: 200,
@@ -465,14 +467,27 @@ describe("main-world bridge contract", () => {
     });
 
     const channel = await bootstrapMainWorldBridge(env.added);
-    expect(env.mockWindow.fetch).toBe(originalFetch);
-
-    env.mockWindow.history?.pushState({}, "", SEARCH_PAGE_HREF);
     expect(env.mockWindow.fetch).not.toBe(originalFetch);
-    const transitionedNamespace =
-      asRecord(
-        env.dispatched.filter((entry) => entry.type === channel.namespaceEvent).at(-1)?.detail
-      )?.page_context_namespace ?? createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1);
+    const configured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: searchNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-explore-pretransition-001",
+      actionRef: "xhs.search",
+      pageUrl: SEARCH_PAGE_HREF
+    });
+    expect(configured).toMatchObject({
+      ok: true,
+      result: {
+        configured: true,
+        page_context_namespace: searchNamespace
+      }
+    });
 
     await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
       method: "POST",
@@ -481,22 +496,37 @@ describe("main-world bridge contract", () => {
       },
       body: JSON.stringify({ keyword: "contract" })
     });
+    env.mockWindow.history?.pushState({}, "", SEARCH_PAGE_HREF);
+    expect(env.mockWindow.fetch).not.toBe(originalFetch);
 
     const captured = await readCapturedContext({
       dispatched: env.dispatched,
       requestEvent: channel.requestEvent,
       resultEvent: channel.resultEvent,
       requestListener: channel.requestListener,
-      pageContextNamespace: String(transitionedNamespace),
-      shapeKey: createShapeKey({ keyword: "contract" })
+      pageContextNamespace: searchNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-explore-pretransition-001",
+      actionRef: "xhs.search",
+      pageUrl: SEARCH_PAGE_HREF
     });
 
     expect(captured).toMatchObject({
       ok: true,
       result: {
+        page_context_namespace: createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1),
         admitted_template: {
           route_evidence_class: "passive_api_capture",
-          source_kind: "page_request"
+          source_kind: "page_request",
+          page_context_namespace: createVisitedPageContextNamespace(SEARCH_PAGE_HREF, 1),
+          captured_page_context_namespace: createVisitedPageContextNamespace(exploreHref, 0),
+          profile_ref: "xhs_001",
+          run_id: "run-search-explore-pretransition-001",
+          action_ref: "xhs.search",
+          page_url: SEARCH_PAGE_HREF
         }
       }
     });
