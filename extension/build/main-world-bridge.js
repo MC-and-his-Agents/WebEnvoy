@@ -252,6 +252,49 @@ const asInteger = (value) => {
     return null;
 };
 const toTrimmedString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const stripVisitedNamespaceSuffix = (namespace) => {
+    const visitIndex = namespace.indexOf("|visit=");
+    return visitIndex >= 0 ? namespace.slice(0, visitIndex) : namespace;
+};
+const parsePageContextNamespaceUrl = (namespace) => {
+    try {
+        return new URL(stripVisitedNamespaceSuffix(namespace));
+    }
+    catch {
+        return null;
+    }
+};
+const resolveNamespaceDocumentIdentity = (url) => url.hash.startsWith("#doc=") ? url.hash : null;
+const isBareExploreNamespaceUrl = (url) => url.origin === "https://www.xiaohongshu.com" && url.pathname === "/explore";
+const isSearchResultNamespaceUrl = (url) => url.origin === "https://www.xiaohongshu.com" && url.pathname.startsWith("/search_result");
+const areSameDocumentNamespaces = (left, right) => {
+    const leftDocument = resolveNamespaceDocumentIdentity(left);
+    const rightDocument = resolveNamespaceDocumentIdentity(right);
+    return left.origin === right.origin && leftDocument !== null && leftDocument === rightDocument;
+};
+const resolveSearchKeywordFromPayload = (payload) => toTrimmedString(asRecord(payload)?.keyword);
+const resolveSearchKeywordFromPageUrl = (pageUrl) => {
+    if (!pageUrl) {
+        return null;
+    }
+    try {
+        const parsed = new URL(pageUrl, "https://www.xiaohongshu.com/");
+        return toTrimmedString(parsed.searchParams.get("keyword"));
+    }
+    catch {
+        return null;
+    }
+};
+const isCompatibleExploreToSearchNamespace = (exploreNamespace, searchNamespace) => {
+    const exploreUrl = parsePageContextNamespaceUrl(exploreNamespace);
+    const searchUrl = parsePageContextNamespaceUrl(searchNamespace);
+    if (!exploreUrl || !searchUrl) {
+        return false;
+    }
+    return (isBareExploreNamespaceUrl(exploreUrl) &&
+        isSearchResultNamespaceUrl(searchUrl) &&
+        areSameDocumentNamespaces(exploreUrl, searchUrl));
+};
 const createCapturedContextRouteScope = (command, method, pathname) => ({
     command,
     method,
@@ -535,6 +578,7 @@ const isSupportedReadPage = (href) => {
             return false;
         }
         return (url.pathname.startsWith("/search_result") ||
+            url.pathname === "/explore" ||
             url.pathname.startsWith("/explore/") ||
             url.pathname.startsWith("/user/profile/"));
     }
@@ -843,6 +887,25 @@ const resolveLatestBucketArtifact = (bucket) => {
 const isSyntheticRejectedArtifact = (artifact) => artifact?.source_kind === "synthetic_request" ||
     artifact?.rejection_reason === "synthetic_request_rejected";
 const resolveCapturedRequestContextProvenance = (namespace) => mainWorldBridgeSharedState.capturedRequestContextProvenanceByNamespace.get(namespace) ?? null;
+const resolveCompatibleSearchResultProvenance = (namespace, body) => {
+    const requestKeyword = resolveSearchKeywordFromPayload(body);
+    if (!requestKeyword) {
+        return null;
+    }
+    for (const [candidateNamespace, provenance] of mainWorldBridgeSharedState
+        .capturedRequestContextProvenanceByNamespace) {
+        const pageKeyword = resolveSearchKeywordFromPageUrl(provenance.page_url);
+        if (pageKeyword === requestKeyword &&
+            isCompatibleExploreToSearchNamespace(namespace, candidateNamespace)) {
+            return provenance;
+        }
+    }
+    return null;
+};
+const resolveCapturedRequestContextProvenanceForCandidate = (input) => resolveCapturedRequestContextProvenance(input.namespace) ??
+    (input.path === SEARCH_ENDPOINT
+        ? resolveCompatibleSearchResultProvenance(input.namespace, input.body)
+        : null);
 const hasCapturedRequestContextProvenance = (artifact) => Object.prototype.hasOwnProperty.call(artifact, "profile_ref") ||
     Object.prototype.hasOwnProperty.call(artifact, "session_id") ||
     Object.prototype.hasOwnProperty.call(artifact, "target_tab_id") ||
@@ -1071,6 +1134,11 @@ const resolveFetchCandidate = async (input, init) => {
             : null;
     const body = await readArtifactPayload(bodySource);
     const pageCaptureContext = resolveCurrentPageCaptureContext();
+    const provenance = resolveCapturedRequestContextProvenanceForCandidate({
+        namespace: pageCaptureContext.pageContextNamespace,
+        path,
+        body
+    });
     return {
         transport: "fetch",
         method,
@@ -1080,7 +1148,7 @@ const resolveFetchCandidate = async (input, init) => {
         body,
         synthetic: isSyntheticRequest(headers) || isSyntheticRequestInput(input),
         pageContextNamespace: pageCaptureContext.pageContextNamespace,
-        provenance: resolveCapturedRequestContextProvenance(pageCaptureContext.pageContextNamespace),
+        provenance,
         referrer: pageCaptureContext.referrer
     };
 };
@@ -1120,6 +1188,11 @@ const resolveXhrCandidate = async (state, bodySource) => {
     }
     const body = await readArtifactPayload(bodySource);
     const pageCaptureContext = resolveCurrentPageCaptureContext();
+    const provenance = resolveCapturedRequestContextProvenanceForCandidate({
+        namespace: pageCaptureContext.pageContextNamespace,
+        path,
+        body
+    });
     return {
         transport: "xhr",
         method: state.method,
@@ -1129,7 +1202,7 @@ const resolveXhrCandidate = async (state, bodySource) => {
         body,
         synthetic: isSyntheticRequest(state.headers),
         pageContextNamespace: pageCaptureContext.pageContextNamespace,
-        provenance: resolveCapturedRequestContextProvenance(pageCaptureContext.pageContextNamespace),
+        provenance,
         referrer: pageCaptureContext.referrer
     };
 };
@@ -1458,37 +1531,74 @@ const handleCapturedRequestContextReadRequest = async (request) => {
             .map(([shapeKey]) => shapeKey);
     };
     const routeScopeKey = method && path && shapeKey ? resolveRouteScopeKeyFromLookup(method, path, shapeKey) : null;
+    const createLookupResultForNamespace = (lookupNamespace, resultNamespace = lookupNamespace) => {
+        const namespaceBuckets = mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(lookupNamespace);
+        const routeBucket = namespaceBuckets?.get(routeScopeKey ?? "") ?? null;
+        const exactBucket = routeBucket?.get(shapeKey ?? "") ?? null;
+        const normalizeArtifactNamespace = (artifact) => artifact && resultNamespace !== lookupNamespace
+            ? {
+                ...artifact,
+                captured_page_context_namespace: artifact.page_context_namespace,
+                page_context_namespace: resultNamespace
+            }
+            : artifact;
+        return {
+            page_context_namespace: resultNamespace,
+            shape_key: shapeKey ?? "",
+            admitted_template: exactBucket?.admittedTemplate &&
+                exactBucket.admittedTemplate.method === method &&
+                exactBucket.admittedTemplate.path === path &&
+                isFreshForLookup(exactBucket.admittedTemplate) &&
+                matchesRequestedProvenance(exactBucket.admittedTemplate)
+                ? normalizeArtifactNamespace(exactBucket.admittedTemplate)
+                : null,
+            rejected_observation: exactBucket?.rejectedObservation &&
+                exactBucket.rejectedObservation.method === method &&
+                exactBucket.rejectedObservation.path === path &&
+                isFreshForLookup(exactBucket.rejectedObservation) &&
+                matchesRequestedProvenance(exactBucket.rejectedObservation)
+                ? normalizeArtifactNamespace(exactBucket.rejectedObservation)
+                : null,
+            incompatible_observation: (() => {
+                const incompatible = getRouteBucketIncompatibleObservation(lookupNamespace, routeScopeKey ?? "") ??
+                    (routeBucket && shapeKey ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
+                return isFreshForLookup(incompatible) && matchesRequestedProvenance(incompatible)
+                    ? normalizeArtifactNamespace(incompatible)
+                    : null;
+            })(),
+            available_shape_keys: resolveAvailableShapeKeys(routeBucket)
+        };
+    };
+    const hasLookupEvidence = (lookup) => Boolean(lookup.admitted_template ||
+        lookup.rejected_observation ||
+        lookup.incompatible_observation ||
+        lookup.available_shape_keys.length > 0);
+    const resolveCompatibleLookupNamespaces = () => {
+        if (!namespace || routeScopeKey === null || path !== SEARCH_ENDPOINT) {
+            return [];
+        }
+        const requestedUrl = parsePageContextNamespaceUrl(namespace);
+        if (!requestedUrl || !isSearchResultNamespaceUrl(requestedUrl)) {
+            return [];
+        }
+        return [...mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.keys()]
+            .filter((candidateNamespace) => candidateNamespace !== namespace &&
+            isCompatibleExploreToSearchNamespace(candidateNamespace, namespace))
+            .sort((left, right) => right.localeCompare(left));
+    };
     const result = method && path && namespace && shapeKey && routeScopeKey
         ? (() => {
-            const namespaceBuckets = mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(namespace);
-            const routeBucket = namespaceBuckets?.get(routeScopeKey) ?? null;
-            const exactBucket = routeBucket?.get(shapeKey) ?? null;
-            return {
-                page_context_namespace: namespace,
-                shape_key: shapeKey,
-                admitted_template: exactBucket?.admittedTemplate &&
-                    exactBucket.admittedTemplate.method === method &&
-                    exactBucket.admittedTemplate.path === path &&
-                    isFreshForLookup(exactBucket.admittedTemplate) &&
-                    matchesRequestedProvenance(exactBucket.admittedTemplate)
-                    ? exactBucket.admittedTemplate
-                    : null,
-                rejected_observation: exactBucket?.rejectedObservation &&
-                    exactBucket.rejectedObservation.method === method &&
-                    exactBucket.rejectedObservation.path === path &&
-                    isFreshForLookup(exactBucket.rejectedObservation) &&
-                    matchesRequestedProvenance(exactBucket.rejectedObservation)
-                    ? exactBucket.rejectedObservation
-                    : null,
-                incompatible_observation: (() => {
-                    const incompatible = getRouteBucketIncompatibleObservation(namespace, routeScopeKey) ??
-                        (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
-                    return isFreshForLookup(incompatible) && matchesRequestedProvenance(incompatible)
-                        ? incompatible
-                        : null;
-                })(),
-                available_shape_keys: resolveAvailableShapeKeys(routeBucket)
-            };
+            const primary = createLookupResultForNamespace(namespace);
+            if (hasLookupEvidence(primary)) {
+                return primary;
+            }
+            for (const compatibleNamespace of resolveCompatibleLookupNamespaces()) {
+                const compatible = createLookupResultForNamespace(compatibleNamespace, namespace);
+                if (hasLookupEvidence(compatible)) {
+                    return compatible;
+                }
+            }
+            return primary;
         })()
         : null;
     await emitMainWorldResult({

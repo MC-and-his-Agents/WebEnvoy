@@ -163,6 +163,7 @@ export interface CapturedRequestContextArtifact {
   captured_at: number;
   observed_at?: number;
   page_context_namespace: PageContextNamespace;
+  captured_page_context_namespace?: PageContextNamespace;
   shape_key: string;
   shape: CapturedRequestContextShape;
   profile_ref?: string | null;
