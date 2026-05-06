@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { buildCloseoutRuntimeReadinessPreflight } from "../closeout-runtime-readiness.js";
+import { buildRuntimeBootstrapContextId } from "../runtime-bootstrap.js";
+
+const PROFILE = "xhs_closeout_preflight_profile";
+const REQUEST_RUN_ID = "run-request";
+const OBSERVED_RUN_ID = "run-owner";
+const OBSERVED_SESSION_ID = "nm-session-001";
+
+const observedContextId = () => buildRuntimeBootstrapContextId(PROFILE, OBSERVED_RUN_ID);
+const requestContextId = () => buildRuntimeBootstrapContextId(PROFILE, REQUEST_RUN_ID);
+const observedRuntimeInstanceId = () =>
+  `${OBSERVED_SESSION_ID}:${OBSERVED_RUN_ID}:${observedContextId()}`;
 
 const readyStatus = () => ({
+  profile: PROFILE,
+  runId: REQUEST_RUN_ID,
   profileState: "ready",
   lockHeld: true,
   identityBindingState: "bound",
@@ -86,15 +99,17 @@ describe("closeout runtime readiness preflight", () => {
             ownerConflictFree: true,
             controllerBrowserContinuity: true,
             transportBootstrapViable: true,
+            mode: "stale_bootstrap_rebind",
             attachableReadyRuntime: false,
             orphanRecoverable: false,
             staleBootstrapRecoverable: true,
             freshness: "fresh",
-            observedRunId: "run-owner",
-            observedRuntimeSessionId: "nm-session-001",
-            observedRuntimeInstanceId: "nm-session-001:run-owner:runtime-context-owner",
-            requestRunId: "run-request",
-            requestRuntimeContextId: "runtime-context-request",
+            observedRunId: OBSERVED_RUN_ID,
+            observedRuntimeSessionId: OBSERVED_SESSION_ID,
+            runtimeContextId: observedContextId(),
+            observedRuntimeInstanceId: observedRuntimeInstanceId(),
+            requestRunId: REQUEST_RUN_ID,
+            requestRuntimeContextId: requestContextId(),
             managedTargetTabId: 88,
             managedTargetDomain: "www.xiaohongshu.com",
             managedTargetPage: "search_result_tab",
@@ -134,13 +149,15 @@ describe("closeout runtime readiness preflight", () => {
             ownerConflictFree: true,
             controllerBrowserContinuity: true,
             transportBootstrapViable: true,
+            mode: "stale_bootstrap_rebind",
             staleBootstrapRecoverable: true,
             freshness: "fresh",
-            observedRunId: "run-owner",
-            observedRuntimeSessionId: "nm-session-001",
-            observedRuntimeInstanceId: "nm-session-001:run-owner:runtime-context-owner",
-            requestRunId: "run-request",
-            requestRuntimeContextId: "runtime-context-request",
+            observedRunId: OBSERVED_RUN_ID,
+            observedRuntimeSessionId: OBSERVED_SESSION_ID,
+            runtimeContextId: observedContextId(),
+            observedRuntimeInstanceId: observedRuntimeInstanceId(),
+            requestRunId: REQUEST_RUN_ID,
+            requestRuntimeContextId: requestContextId(),
             managedTargetTabId: 88,
             managedTargetDomain: "www.xiaohongshu.com",
             managedTargetPage: "search_result_tab",
@@ -180,11 +197,12 @@ describe("closeout runtime readiness preflight", () => {
             ownerConflictFree: true,
             controllerBrowserContinuity: true,
             transportBootstrapViable: true,
+            mode: "stale_bootstrap_rebind",
             staleBootstrapRecoverable: true,
             freshness: "fresh",
-            observedRunId: "run-owner",
-            requestRunId: "run-request",
-            requestRuntimeContextId: "runtime-context-request",
+            observedRunId: OBSERVED_RUN_ID,
+            requestRunId: REQUEST_RUN_ID,
+            requestRuntimeContextId: requestContextId(),
             managedTargetTabId: 88,
             managedTargetDomain: "www.xiaohongshu.com",
             managedTargetPage: "search_result_tab",
@@ -200,6 +218,97 @@ describe("closeout runtime readiness preflight", () => {
       },
       target_binding: {
         state: "verified"
+      }
+    });
+  });
+
+  it("blocks stale bootstrap rebind when takeover evidence is older than the request", () => {
+    expect(
+      buildCloseoutRuntimeReadinessPreflight({
+        params: {
+          requested_at: "2026-05-06T14:00:00.000Z",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 88,
+          target_page: "search_result_tab"
+        },
+        status: {
+          ...readyStatus(),
+          lockHeld: false,
+          bootstrapState: "stale",
+          runtimeReadiness: "blocked",
+          runtimeTakeoverEvidence: {
+            mode: "stale_bootstrap_rebind",
+            identityBound: true,
+            ownerConflictFree: true,
+            controllerBrowserContinuity: true,
+            transportBootstrapViable: true,
+            staleBootstrapRecoverable: true,
+            freshness: "fresh",
+            observedRunId: OBSERVED_RUN_ID,
+            observedRuntimeSessionId: OBSERVED_SESSION_ID,
+            runtimeContextId: observedContextId(),
+            observedRuntimeInstanceId: observedRuntimeInstanceId(),
+            requestRunId: REQUEST_RUN_ID,
+            requestRuntimeContextId: requestContextId(),
+            managedTargetTabId: 88,
+            managedTargetDomain: "www.xiaohongshu.com",
+            managedTargetPage: "search_result_tab",
+            targetTabContinuity: "runtime_trust_state",
+            takeoverEvidenceObservedAt: "2026-05-06T13:59:59.000Z"
+          }
+        }
+      })
+    ).toMatchObject({
+      decision: "NO_GO",
+      blocker: {
+        blocker_code: "bootstrap_stale_unrecoverable"
+      },
+      target_binding: {
+        state: "verified"
+      }
+    });
+  });
+
+  it("blocks stale bootstrap rebind when request run context does not match status", () => {
+    expect(
+      buildCloseoutRuntimeReadinessPreflight({
+        params: {
+          requested_at: "2026-05-06T14:00:00.000Z",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 88,
+          target_page: "search_result_tab"
+        },
+        status: {
+          ...readyStatus(),
+          lockHeld: false,
+          bootstrapState: "stale",
+          runtimeReadiness: "blocked",
+          runtimeTakeoverEvidence: {
+            mode: "stale_bootstrap_rebind",
+            identityBound: true,
+            ownerConflictFree: true,
+            controllerBrowserContinuity: true,
+            transportBootstrapViable: true,
+            staleBootstrapRecoverable: true,
+            freshness: "fresh",
+            observedRunId: OBSERVED_RUN_ID,
+            observedRuntimeSessionId: OBSERVED_SESSION_ID,
+            runtimeContextId: observedContextId(),
+            observedRuntimeInstanceId: observedRuntimeInstanceId(),
+            requestRunId: "run-other-request",
+            requestRuntimeContextId: requestContextId(),
+            managedTargetTabId: 88,
+            managedTargetDomain: "www.xiaohongshu.com",
+            managedTargetPage: "search_result_tab",
+            targetTabContinuity: "runtime_trust_state",
+            takeoverEvidenceObservedAt: "2026-05-06T14:00:01.000Z"
+          }
+        }
+      })
+    ).toMatchObject({
+      decision: "NO_GO",
+      blocker: {
+        blocker_code: "bootstrap_stale_unrecoverable"
       }
     });
   });

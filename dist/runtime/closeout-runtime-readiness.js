@@ -1,9 +1,42 @@
+import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBooleanOrNull = (value) => typeof value === "boolean" ? value : null;
+const isIsoTimestampAtOrAfter = (value, floor) => {
+    if (typeof value !== "string" || typeof floor !== "string") {
+        return false;
+    }
+    const valueMs = Date.parse(value);
+    const floorMs = Date.parse(floor);
+    return Number.isFinite(valueMs) && Number.isFinite(floorMs) && valueMs >= floorMs;
+};
+const buildObservedRuntimeInstanceId = (input) => `${input.sessionId}:${input.runId}:${input.runtimeContextId}`;
+const hasObservedRuntimeContinuity = (input) => {
+    const profile = asString(input.status.profile);
+    const observedRunId = asString(input.evidence.observedRunId);
+    const observedRuntimeSessionId = asString(input.evidence.observedRuntimeSessionId);
+    const observedRuntimeContextId = asString(input.evidence.runtimeContextId);
+    const observedRuntimeInstanceId = asString(input.evidence.observedRuntimeInstanceId);
+    if (profile === null ||
+        observedRunId === null ||
+        observedRuntimeSessionId === null ||
+        observedRuntimeContextId === null ||
+        observedRuntimeInstanceId === null) {
+        return false;
+    }
+    if (observedRuntimeContextId !== buildRuntimeBootstrapContextId(profile, observedRunId)) {
+        return false;
+    }
+    return (observedRuntimeInstanceId ===
+        buildObservedRuntimeInstanceId({
+            sessionId: observedRuntimeSessionId,
+            runId: observedRunId,
+            runtimeContextId: observedRuntimeContextId
+        }));
+};
 const blocker = (blockerCode, requiredRecoveryAction) => ({
     blocker_layer: "runtime_readiness",
     blocker_code: blockerCode,
@@ -47,6 +80,31 @@ const buildTargetBinding = (params, takeoverEvidence) => {
         target_tab_continuity: targetTabContinuity
     };
 };
+const hasStaleBootstrapRebindEvidence = (input) => {
+    const profile = asString(input.status.profile);
+    const runId = asString(input.status.runId);
+    if (!input.evidence || profile === null || runId === null) {
+        return false;
+    }
+    return (input.evidence.mode === "stale_bootstrap_rebind" &&
+        input.evidence.staleBootstrapRecoverable === true &&
+        input.evidence.freshness === "fresh" &&
+        input.evidence.identityBound === true &&
+        input.evidence.ownerConflictFree === true &&
+        input.evidence.controllerBrowserContinuity === true &&
+        input.evidence.transportBootstrapViable === true &&
+        asString(input.evidence.requestRunId) === runId &&
+        asString(input.evidence.requestRuntimeContextId) === buildRuntimeBootstrapContextId(profile, runId) &&
+        hasObservedRuntimeContinuity({
+            status: input.status,
+            evidence: input.evidence
+        }) &&
+        input.targetBinding.requested === true &&
+        input.targetBinding.state === "verified" &&
+        isIsoTimestampAtOrAfter(input.evidence.takeoverEvidenceObservedAt, input.requestedAt) &&
+        input.executionSurface === "real_browser" &&
+        input.headless === false);
+};
 export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     const params = input.params ?? {};
     const status = input.status;
@@ -59,17 +117,7 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     const lockHeld = status.lockHeld === true;
     const executionSurface = asString(status.executionSurface);
     const headless = asBooleanOrNull(status.headless);
-    const freshness = asString(takeoverEvidence?.freshness);
-    const staleBootstrapContinuityReady = takeoverEvidence?.identityBound === true &&
-        takeoverEvidence?.ownerConflictFree === true &&
-        takeoverEvidence?.controllerBrowserContinuity === true &&
-        takeoverEvidence?.transportBootstrapViable === true &&
-        asString(takeoverEvidence?.observedRunId) !== null &&
-        asString(takeoverEvidence?.observedRuntimeSessionId) !== null &&
-        asString(takeoverEvidence?.observedRuntimeInstanceId) !== null &&
-        asString(takeoverEvidence?.requestRunId) !== null &&
-        asString(takeoverEvidence?.requestRuntimeContextId) !== null &&
-        asString(takeoverEvidence?.takeoverEvidenceObservedAt) !== null;
+    const requestedAt = asString(params.requested_at);
     const base = {
         target_binding: targetBinding,
         runtime_status: {
@@ -155,13 +203,14 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     }
     if (bootstrapState === "stale") {
         if (!lockHeld &&
-            takeoverEvidence?.staleBootstrapRecoverable === true &&
-            freshness === "fresh" &&
-            staleBootstrapContinuityReady &&
-            executionSurface === "real_browser" &&
-            headless === false &&
-            targetBinding.requested &&
-            targetBinding.state === "verified") {
+            hasStaleBootstrapRebindEvidence({
+                status,
+                evidence: takeoverEvidence,
+                targetBinding,
+                requestedAt,
+                executionSurface,
+                headless
+            })) {
             return {
                 decision: "RECOVERABLE",
                 runtime_state: "recoverable",
