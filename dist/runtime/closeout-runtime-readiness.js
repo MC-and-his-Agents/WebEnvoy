@@ -80,7 +80,7 @@ const buildTargetBinding = (params, takeoverEvidence) => {
         target_tab_continuity: targetTabContinuity
     };
 };
-const hasStaleBootstrapRebindEvidence = (input) => {
+const hasStaleBootstrapRebindBaseEvidence = (input) => {
     const profile = asString(input.status.profile);
     const runId = asString(input.status.runId);
     if (!input.evidence || profile === null || runId === null) {
@@ -101,10 +101,11 @@ const hasStaleBootstrapRebindEvidence = (input) => {
         }) &&
         input.targetBinding.requested === true &&
         input.targetBinding.state === "verified" &&
-        isIsoTimestampAtOrAfter(input.evidence.takeoverEvidenceObservedAt, input.requestedAt) &&
         input.executionSurface === "real_browser" &&
         input.headless === false);
 };
+const hasStaleBootstrapRebindEvidence = (input) => hasStaleBootstrapRebindBaseEvidence(input) &&
+    isIsoTimestampAtOrAfter(input.evidence?.takeoverEvidenceObservedAt, input.requestedAt);
 export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     const params = input.params ?? {};
     const status = input.status;
@@ -151,12 +152,12 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
             ...base
         };
     }
-    if (targetBinding.requested && asString(params.requested_at) === null && bootstrapState === "stale") {
+    if (targetBinding.state === "missing") {
         return {
             decision: "NO_GO",
             runtime_state: "blocked",
             recovery_mode: "none",
-            blocker: blocker("request_identity_replay", "rerun_preflight_with_fresh_requested_at"),
+            blocker: blocker("target_mismatch", "restore_or_rebind_managed_target_tab"),
             ...base
         };
     }
@@ -202,6 +203,22 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
         };
     }
     if (bootstrapState === "stale") {
+        if (requestedAt === null &&
+            hasStaleBootstrapRebindBaseEvidence({
+                status,
+                evidence: takeoverEvidence,
+                targetBinding,
+                executionSurface,
+                headless
+            })) {
+            return {
+                decision: "NO_GO",
+                runtime_state: "blocked",
+                recovery_mode: "none",
+                blocker: blocker("request_identity_replay", "rerun_preflight_with_fresh_requested_at"),
+                ...base
+            };
+        }
         if (!lockHeld &&
             hasStaleBootstrapRebindEvidence({
                 status,
