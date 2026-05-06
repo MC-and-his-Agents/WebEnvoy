@@ -20,6 +20,7 @@ import { buildFingerprintContextForMeta, appendFingerprintContext } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
 import { buildCloseoutRuntimeReadinessPreflight } from "../runtime/closeout-runtime-readiness.js";
+import { buildCloseoutGateAggregator } from "../runtime/closeout-gate-aggregator.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   buildUnifiedRiskStateOutput,
@@ -2259,6 +2260,41 @@ const runtimeCloseoutPreflight = async (context: RuntimeContext) => {
   };
 };
 
+const runtimeCloseoutGate = async (context: RuntimeContext) => {
+  const status = await profileRuntime.status({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+  });
+  const closeoutRuntimeReadinessPreflight = buildCloseoutRuntimeReadinessPreflight({
+    status,
+    params: context.params
+  });
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+    const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+      store,
+      profile: context.profile,
+      effectiveExecutionMode: context.params.requested_execution_mode
+    });
+    return {
+      closeout_gate_aggregator: buildCloseoutGateAggregator({
+        status,
+        runtimePreflight: closeoutRuntimeReadinessPreflight,
+        antiDetectionValidationView,
+        params: context.params
+      }),
+      closeout_runtime_readiness_preflight: closeoutRuntimeReadinessPreflight,
+      anti_detection_validation_view: antiDetectionValidationView,
+      runtime_status: status
+    };
+  } finally {
+    store?.close();
+  }
+};
+
 const runtimeStop = async (context: RuntimeContext) =>
   profileRuntime.stop({
     cwd: context.cwd,
@@ -2440,6 +2476,7 @@ const runtimeHelp = async () => ({
     "runtime.login",
     "runtime.status",
     "runtime.closeout_preflight",
+    "runtime.closeout_gate",
     "runtime.tabs",
     "runtime.restore_xhs_target",
     "runtime.xhs_closeout_validation_source",
@@ -2487,6 +2524,12 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeCloseoutPreflight
+  },
+  {
+    name: "runtime.closeout_gate",
+    status: "implemented",
+    requiresProfile: true,
+    handler: runtimeCloseoutGate
   },
   {
     name: "runtime.tabs",
