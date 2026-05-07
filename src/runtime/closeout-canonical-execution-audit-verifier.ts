@@ -1,0 +1,406 @@
+import type { JsonObject } from "../core/types.js";
+
+export type CloseoutCanonicalExecutionAuditDecision = "PASS" | "FAIL";
+
+export type CloseoutCanonicalExecutionAuditBlockerLayer =
+  | "success_summary"
+  | "failure_details"
+  | "canonical_consistency"
+  | "observability_boundary";
+
+export type CloseoutCanonicalExecutionAuditBlockerCode =
+  | "missing_closeout_response"
+  | "missing_success_summary"
+  | "missing_success_request_admission_result"
+  | "invalid_success_request_admission_result"
+  | "missing_success_execution_audit"
+  | "invalid_success_execution_audit"
+  | "success_canonical_mismatch"
+  | "missing_failure_details"
+  | "missing_failure_execution_audit"
+  | "invalid_failure_execution_audit"
+  | "failure_execution_audit_mismatch"
+  | "execution_audit_in_observability";
+
+export interface CloseoutCanonicalExecutionAuditVerifierInput {
+  success?: {
+    summary?: unknown;
+    observability?: unknown;
+  } | null;
+  failure?: {
+    error?: {
+      details?: unknown;
+    } | null;
+    details?: unknown;
+    payload?: unknown;
+    observability?: unknown;
+  } | null;
+}
+
+export interface CloseoutCanonicalExecutionAuditVerifierResult {
+  decision: CloseoutCanonicalExecutionAuditDecision;
+  passed: boolean;
+  blockers: Array<{
+    blocker_code: CloseoutCanonicalExecutionAuditBlockerCode;
+    blocker_layer: CloseoutCanonicalExecutionAuditBlockerLayer;
+    message: string;
+    path: string;
+  }>;
+  success: {
+    checked: boolean;
+    has_summary: boolean;
+    has_request_admission_result: boolean;
+    has_execution_audit: boolean;
+    request_ref: string | null;
+    admission_decision: string | null;
+    audit_ref: string | null;
+  };
+  failure: {
+    checked: boolean;
+    details_path: "error.details" | "details" | "payload.details" | null;
+    has_details: boolean;
+    has_execution_audit: boolean;
+    audit_ref: string | null;
+    canonical_source_path: string | null;
+  };
+  observability: {
+    success_leak_paths: string[];
+    failure_leak_paths: string[];
+  };
+}
+
+const asObject = (value: unknown): JsonObject | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+
+const asNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const hasOwn = (value: JsonObject | null | undefined, key: string): boolean =>
+  !!value && Object.prototype.hasOwnProperty.call(value, key);
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+
+  const object = asObject(value);
+  if (object) {
+    return `{${Object.keys(object)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
+const sameJson = (left: unknown, right: unknown): boolean => stableJson(left) === stableJson(right);
+
+const blocker = (
+  blockerCode: CloseoutCanonicalExecutionAuditBlockerCode,
+  blockerLayer: CloseoutCanonicalExecutionAuditBlockerLayer,
+  path: string,
+  message: string
+): CloseoutCanonicalExecutionAuditVerifierResult["blockers"][number] => ({
+  blocker_code: blockerCode,
+  blocker_layer: blockerLayer,
+  path,
+  message
+});
+
+const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is JsonObject =>
+  value !== null &&
+  asNonEmptyString(value.request_ref) !== null &&
+  asNonEmptyString(value.admission_decision) !== null &&
+  asObject(value.derived_from) !== null;
+
+const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObject =>
+  value !== null &&
+  asNonEmptyString(value.audit_ref) !== null &&
+  asNonEmptyString(value.request_ref) !== null &&
+  asNonEmptyString(value.request_admission_decision) !== null &&
+  asObject(value.compatibility_refs) !== null &&
+  Array.isArray(value.risk_signals);
+
+const requestAdmissionMatchesExecutionAudit = (
+  requestAdmissionResult: JsonObject,
+  executionAudit: JsonObject
+): boolean =>
+  asNonEmptyString(requestAdmissionResult.request_ref) ===
+    asNonEmptyString(executionAudit.request_ref) &&
+  asNonEmptyString(requestAdmissionResult.admission_decision) ===
+    asNonEmptyString(executionAudit.request_admission_decision);
+
+const findExecutionAuditKeys = (value: unknown, path: string): string[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findExecutionAuditKeys(item, `${path}[${index}]`));
+  }
+
+  const object = asObject(value);
+  if (!object) {
+    return [];
+  }
+
+  return Object.keys(object).flatMap((key) => {
+    const nextPath = `${path}.${key}`;
+    const nested = findExecutionAuditKeys(object[key], nextPath);
+    return key === "execution_audit" ? [nextPath, ...nested] : nested;
+  });
+};
+
+const resolveFailureDetails = (
+  failure: NonNullable<CloseoutCanonicalExecutionAuditVerifierInput["failure"]>
+): {
+  path: CloseoutCanonicalExecutionAuditVerifierResult["failure"]["details_path"];
+  details: JsonObject | null;
+} => {
+  const errorDetails = asObject(failure.error?.details);
+  if (errorDetails) {
+    return { path: "error.details", details: errorDetails };
+  }
+
+  const directDetails = asObject(failure.details);
+  if (directDetails) {
+    return { path: "details", details: directDetails };
+  }
+
+  const payloadDetails = asObject(asObject(failure.payload)?.details);
+  if (payloadDetails) {
+    return { path: "payload.details", details: payloadDetails };
+  }
+
+  return { path: null, details: null };
+};
+
+const resolveFailureCanonicalAudit = (
+  failure: NonNullable<CloseoutCanonicalExecutionAuditVerifierInput["failure"]>
+): { path: string | null; executionAudit: JsonObject | null } => {
+  const payload = asObject(failure.payload);
+  const payloadAudit = asObject(payload?.execution_audit);
+  if (payloadAudit) {
+    return { path: "payload.execution_audit", executionAudit: payloadAudit };
+  }
+
+  const summaryAudit = asObject(asObject(payload?.summary)?.execution_audit);
+  if (summaryAudit) {
+    return { path: "payload.summary.execution_audit", executionAudit: summaryAudit };
+  }
+
+  const directAudit = asObject(failure.details);
+  const directExecutionAudit = asObject(directAudit?.execution_audit);
+  if (directExecutionAudit) {
+    return { path: "details.execution_audit", executionAudit: directExecutionAudit };
+  }
+
+  const errorExecutionAudit = asObject(asObject(failure.error?.details)?.execution_audit);
+  if (errorExecutionAudit) {
+    return { path: "error.details.execution_audit", executionAudit: errorExecutionAudit };
+  }
+
+  return { path: null, executionAudit: null };
+};
+
+export const verifyCloseoutCanonicalExecutionAudit = (
+  input: CloseoutCanonicalExecutionAuditVerifierInput
+): CloseoutCanonicalExecutionAuditVerifierResult => {
+  const blockers: CloseoutCanonicalExecutionAuditVerifierResult["blockers"] = [];
+  const successSummary = asObject(input.success?.summary);
+  const successRequestAdmissionResult = asObject(successSummary?.request_admission_result);
+  const successExecutionAudit = asObject(successSummary?.execution_audit);
+  const failureDetails = input.failure ? resolveFailureDetails(input.failure) : null;
+  const failureDetailsExecutionAudit = asObject(failureDetails?.details?.execution_audit);
+  const failureCanonicalAudit = input.failure ? resolveFailureCanonicalAudit(input.failure) : null;
+  const successLeakPaths = input.success
+    ? findExecutionAuditKeys(input.success.observability, "success.observability")
+    : [];
+  const failureObservability =
+    input.failure?.observability ?? asObject(input.failure?.payload)?.observability;
+  const failureLeakPaths = input.failure
+    ? findExecutionAuditKeys(failureObservability, "failure.observability")
+    : [];
+
+  if (!input.success && !input.failure) {
+    blockers.push(
+      blocker(
+        "missing_closeout_response",
+        "canonical_consistency",
+        "closeout",
+        "closeout canonical execution audit verifier requires a success or failure response"
+      )
+    );
+  }
+
+  if (input.success) {
+    if (!successSummary) {
+      blockers.push(
+        blocker(
+          "missing_success_summary",
+          "success_summary",
+          "success.summary",
+          "closeout success response must include a summary object"
+        )
+      );
+    }
+
+    if (!hasOwn(successSummary, "request_admission_result")) {
+      blockers.push(
+        blocker(
+          "missing_success_request_admission_result",
+          "success_summary",
+          "success.summary.request_admission_result",
+          "closeout success summary must include canonical request_admission_result"
+        )
+      );
+    } else if (!isCanonicalRequestAdmissionResult(successRequestAdmissionResult)) {
+      blockers.push(
+        blocker(
+          "invalid_success_request_admission_result",
+          "success_summary",
+          "success.summary.request_admission_result",
+          "closeout success request_admission_result must use the canonical shape"
+        )
+      );
+    }
+
+    if (!hasOwn(successSummary, "execution_audit")) {
+      blockers.push(
+        blocker(
+          "missing_success_execution_audit",
+          "success_summary",
+          "success.summary.execution_audit",
+          "closeout success summary must include canonical execution_audit"
+        )
+      );
+    } else if (!isCanonicalExecutionAudit(successExecutionAudit)) {
+      blockers.push(
+        blocker(
+          "invalid_success_execution_audit",
+          "success_summary",
+          "success.summary.execution_audit",
+          "closeout success execution_audit must use the canonical shape"
+        )
+      );
+    }
+
+    if (
+      isCanonicalRequestAdmissionResult(successRequestAdmissionResult) &&
+      isCanonicalExecutionAudit(successExecutionAudit) &&
+      !requestAdmissionMatchesExecutionAudit(successRequestAdmissionResult, successExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "success_canonical_mismatch",
+          "canonical_consistency",
+          "success.summary",
+          "success request_admission_result and execution_audit must describe the same admission decision"
+        )
+      );
+    }
+  }
+
+  if (input.failure) {
+    if (!failureDetails?.details) {
+      blockers.push(
+        blocker(
+          "missing_failure_details",
+          "failure_details",
+          "failure.error.details|failure.details|failure.payload.details",
+          "closeout failure response must include error.details or failure details"
+        )
+      );
+    }
+
+    if (!failureDetailsExecutionAudit) {
+      blockers.push(
+        blocker(
+          "missing_failure_execution_audit",
+          "failure_details",
+          failureDetails?.path
+            ? `failure.${failureDetails.path}.execution_audit`
+            : "failure.execution_audit",
+          "closeout failure details must include canonical execution_audit"
+        )
+      );
+    } else if (!isCanonicalExecutionAudit(failureDetailsExecutionAudit)) {
+      blockers.push(
+        blocker(
+          "invalid_failure_execution_audit",
+          "failure_details",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit`,
+          "closeout failure execution_audit must use the canonical shape"
+        )
+      );
+    }
+
+    if (
+      failureDetailsExecutionAudit &&
+      failureCanonicalAudit?.executionAudit &&
+      !sameJson(failureDetailsExecutionAudit, failureCanonicalAudit.executionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "failure_execution_audit_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit`,
+          "closeout failure details.execution_audit must match the canonical execution_audit"
+        )
+      );
+    }
+  }
+
+  for (const path of successLeakPaths) {
+    blockers.push(
+      blocker(
+        "execution_audit_in_observability",
+        "observability_boundary",
+        path,
+        "execution_audit must not be exposed through success observability"
+      )
+    );
+  }
+
+  for (const path of failureLeakPaths) {
+    blockers.push(
+      blocker(
+        "execution_audit_in_observability",
+        "observability_boundary",
+        path,
+        "execution_audit must not be exposed through failure observability"
+      )
+    );
+  }
+
+  return {
+    decision: blockers.length === 0 ? "PASS" : "FAIL",
+    passed: blockers.length === 0,
+    blockers,
+    success: {
+      checked: !!input.success,
+      has_summary: successSummary !== null,
+      has_request_admission_result: successRequestAdmissionResult !== null,
+      has_execution_audit: successExecutionAudit !== null,
+      request_ref: asNonEmptyString(successRequestAdmissionResult?.request_ref),
+      admission_decision: asNonEmptyString(successRequestAdmissionResult?.admission_decision),
+      audit_ref: asNonEmptyString(successExecutionAudit?.audit_ref)
+    },
+    failure: {
+      checked: !!input.failure,
+      details_path: failureDetails?.path ?? null,
+      has_details: failureDetails?.details !== null && failureDetails?.details !== undefined,
+      has_execution_audit: failureDetailsExecutionAudit !== null,
+      audit_ref: asNonEmptyString(failureDetailsExecutionAudit?.audit_ref),
+      canonical_source_path: failureCanonicalAudit?.path ?? null
+    },
+    observability: {
+      success_leak_paths: successLeakPaths,
+      failure_leak_paths: failureLeakPaths
+    }
+  };
+};
