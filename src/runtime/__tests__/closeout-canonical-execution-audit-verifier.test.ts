@@ -346,6 +346,28 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when present failure request_admission_result is malformed", () => {
+    const input = failureInput();
+    const payload = input.failure?.payload as Record<string, unknown>;
+    payload.request_admission_result = {
+      request_ref: "upstream_req_issue645_001",
+      admission_decision: "allowed",
+      derived_from: {}
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_request_admission_result",
+          blocker_layer: "failure_details",
+          path: "failure.payload.request_admission_result"
+        })
+      ])
+    });
+  });
+
   it("fails closed when failure execution audit admission decision differs from admission result", () => {
     const input = failureInput();
     const details = input.failure?.error?.details as Record<string, unknown>;
