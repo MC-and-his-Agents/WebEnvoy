@@ -158,7 +158,9 @@ const hasCanonicalCompatibilityRefs = (
   hasOptionalBlockedAdmissionRef(value.approval_admission_ref, decision) &&
   hasOptionalBlockedAdmissionRef(value.audit_admission_ref, decision) &&
   asNonEmptyString(value.approval_record_ref) !== null &&
-  asNonEmptyString(value.audit_record_ref) !== null;
+  asNonEmptyString(value.audit_record_ref) !== null &&
+  asNonEmptyString(value.session_rhythm_window_id) !== null &&
+  asNonEmptyString(value.session_rhythm_decision_id) !== null;
 
 const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObject => {
   const consumedInputs = asObject(value?.consumed_inputs);

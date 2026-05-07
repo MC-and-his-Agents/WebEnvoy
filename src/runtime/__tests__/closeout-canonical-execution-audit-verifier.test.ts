@@ -41,7 +41,9 @@ const executionAudit = () => ({
     approval_admission_ref: "approval_admission_issue645_001",
     audit_admission_ref: "audit_admission_issue645_001",
     approval_record_ref: "gate_appr_issue645_001",
-    audit_record_ref: "gate_evt_issue645_001"
+    audit_record_ref: "gate_evt_issue645_001",
+    session_rhythm_window_id: "rhythm_window_issue645_001",
+    session_rhythm_decision_id: "rhythm_decision_issue645_001"
   },
   risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"],
   recorded_at: "2026-04-14T10:00:11.000Z",
@@ -402,7 +404,9 @@ describe("closeout canonical execution audit verifier", () => {
         approval_admission_ref: "",
         audit_admission_ref: "audit_admission_issue645_001",
         approval_record_ref: "gate_appr_issue645_001",
-        audit_record_ref: "gate_evt_issue645_001"
+        audit_record_ref: "gate_evt_issue645_001",
+        session_rhythm_window_id: "",
+        session_rhythm_decision_id: "rhythm_decision_issue645_001"
       }
     };
 
@@ -432,7 +436,9 @@ describe("closeout canonical execution audit verifier", () => {
         approval_admission_ref: null,
         audit_admission_ref: null,
         approval_record_ref: "gate_appr_issue645_001",
-        audit_record_ref: "gate_evt_issue645_001"
+        audit_record_ref: "gate_evt_issue645_001",
+        session_rhythm_window_id: "rhythm_window_issue645_001",
+        session_rhythm_decision_id: "rhythm_decision_issue645_001"
       }
     };
     const details = input.failure?.error?.details as Record<string, unknown>;
