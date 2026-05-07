@@ -418,6 +418,36 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("accepts blocked execution_audit with null approval and audit admission compatibility refs", () => {
+    const input = failureInput();
+    const admissionResult = {
+      ...requestAdmissionResult(),
+      admission_decision: "blocked"
+    };
+    const blockedAudit = {
+      ...executionAudit(),
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        gate_run_id: "run_issue645_001",
+        approval_admission_ref: null,
+        audit_admission_ref: null,
+        approval_record_ref: "gate_appr_issue645_001",
+        audit_record_ref: "gate_evt_issue645_001"
+      }
+    };
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    details.execution_audit = blockedAudit;
+    payload.execution_audit = blockedAudit;
+    payload.request_admission_result = admissionResult;
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "PASS",
+      passed: true,
+      blockers: []
+    });
+  });
+
   it("fails closed when execution_audit risk signals are empty", () => {
     const input = failureInput();
     const details = input.failure?.error?.details as Record<string, unknown>;

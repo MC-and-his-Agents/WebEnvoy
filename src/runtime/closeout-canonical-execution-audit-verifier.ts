@@ -146,11 +146,17 @@ const hasCanonicalConsumedInputs = (value: JsonObject | null): boolean =>
   asNonEmptyString(value.authorization_grant_ref) !== null &&
   asNonEmptyString(value.runtime_target_ref) !== null;
 
-const hasCanonicalCompatibilityRefs = (value: JsonObject | null): boolean =>
+const hasOptionalBlockedAdmissionRef = (value: unknown, decision: unknown): boolean =>
+  decision === "blocked" ? value === null || asNonEmptyString(value) !== null : asNonEmptyString(value) !== null;
+
+const hasCanonicalCompatibilityRefs = (
+  value: JsonObject | null,
+  decision: unknown
+): boolean =>
   value !== null &&
   asNonEmptyString(value.gate_run_id) !== null &&
-  asNonEmptyString(value.approval_admission_ref) !== null &&
-  asNonEmptyString(value.audit_admission_ref) !== null &&
+  hasOptionalBlockedAdmissionRef(value.approval_admission_ref, decision) &&
+  hasOptionalBlockedAdmissionRef(value.audit_admission_ref, decision) &&
   asNonEmptyString(value.approval_record_ref) !== null &&
   asNonEmptyString(value.audit_record_ref) !== null;
 
@@ -163,7 +169,7 @@ const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObjec
     asNonEmptyString(value.audit_ref) !== null &&
     asNonEmptyString(value.request_ref) !== null &&
     hasCanonicalConsumedInputs(consumedInputs) &&
-    hasCanonicalCompatibilityRefs(compatibilityRefs) &&
+    hasCanonicalCompatibilityRefs(compatibilityRefs, value.request_admission_decision) &&
     (value.request_admission_decision === "allowed" ||
       value.request_admission_decision === "blocked" ||
       value.request_admission_decision === "deferred") &&
