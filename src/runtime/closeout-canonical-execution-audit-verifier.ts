@@ -21,6 +21,7 @@ export type CloseoutCanonicalExecutionAuditBlockerCode =
   | "missing_failure_execution_audit"
   | "invalid_failure_execution_audit"
   | "failure_execution_audit_mismatch"
+  | "failure_canonical_mismatch"
   | "failure_consumed_inputs_mismatch"
   | "execution_audit_in_observability";
 
@@ -470,6 +471,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
     }
 
     const failureRequestAdmission = failureRequestAdmissionResult?.requestAdmissionResult ?? null;
+    if (
+      isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
+      isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
+      !requestAdmissionMatchesExecutionAudit(failureRequestAdmission, failureDetailsExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "failure_canonical_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit`,
+          "failure request_admission_result and execution_audit must describe the same admission decision"
+        )
+      );
+    }
+
     if (
       isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
       isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&

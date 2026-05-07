@@ -321,6 +321,52 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when failure execution audit request ref differs from admission result", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    const mismatchedAudit = {
+      ...executionAudit(),
+      request_ref: "upstream_req_other"
+    };
+    details.execution_audit = mismatchedAudit;
+    payload.execution_audit = mismatchedAudit;
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_canonical_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when failure execution audit admission decision differs from admission result", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    const mismatchedAudit = {
+      ...executionAudit(),
+      request_admission_decision: "blocked"
+    };
+    details.execution_audit = mismatchedAudit;
+    payload.execution_audit = mismatchedAudit;
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_canonical_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
   it("fails closed when execution_audit omits consumed inputs", () => {
     const input = failureInput();
     const details = input.failure?.error?.details as Record<string, unknown>;
