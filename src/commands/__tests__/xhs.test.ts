@@ -8,6 +8,7 @@ import {
   buildOfficialChromeRuntimeStatusParams,
   ensureOfficialChromeRuntimeReady,
   normalizeGateOptionsForContract,
+  requiresCanonicalExecutionAuditForContract,
   resolveForwardTimeoutMsForContract
 } from "../xhs.js";
 import { executeCommand } from "../../core/router.js";
@@ -1072,6 +1073,45 @@ describe("ensureOfficialChromeRuntimeReady", () => {
 });
 
 describe("normalizeGateOptionsForContract", () => {
+  it("requires canonical execution audit only for explicit closeout production markers", () => {
+    expect(
+      requiresCanonicalExecutionAuditForContract({
+        payload: {
+          request_admission_result: {
+            request_ref: "upstream_req_legacy",
+            admission_decision: "blocked"
+          },
+          execution_audit: null
+        }
+      })
+    ).toBe(false);
+
+    expect(
+      requiresCanonicalExecutionAuditForContract({
+        summary: {
+          closeout_audit_required: true,
+          request_admission_result: {
+            request_ref: "upstream_req_closeout",
+            admission_decision: "allowed"
+          },
+          execution_audit: null
+        }
+      })
+    ).toBe(true);
+
+    expect(
+      requiresCanonicalExecutionAuditForContract({
+        summary: {
+          closeout_evidence_evaluation: {
+            route_role: "primary",
+            path_kind: "api",
+            evidence_status: "success"
+          }
+        }
+      })
+    ).toBe(true);
+  });
+
   describe("resolveForwardTimeoutMsForContract", () => {
     it("keeps a valid top-level timeout_ms for native bridge forwarding", () => {
       expect(resolveForwardTimeoutMsForContract({ timeout_ms: 120_000 })).toBe(120_000);

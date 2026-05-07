@@ -448,18 +448,33 @@ const pickCanonicalSummaryField = (
   return asObject(value) ?? undefined;
 };
 
-const hasNonNullOwn = (record: Record<string, unknown> | null | undefined, key: string): boolean =>
-  !!record && hasOwn(record, key) && record[key] !== null && record[key] !== undefined;
+const hasCloseoutProductionPathMarker = (record: JsonObject | null | undefined): boolean =>
+  record?.closeout_audit_required === true ||
+  hasOwn(record, "closeout_evidence_evaluation") ||
+  hasOwn(record, "closeout_readiness");
 
-const hasCloseoutCanonicalAuditCandidate = (
-  payload: Record<string, unknown>,
-  details?: JsonObject | null
-): boolean => {
-  const summary = asObject(payload.summary);
+const hasCloseoutRouteEvaluationMarker = (record: JsonObject | null | undefined): boolean => {
+  const routeRole = asString(record?.route_role);
+  const pathKind = asString(record?.path_kind);
+  const evidenceStatus = asString(record?.evidence_status);
   return (
-    hasNonNullOwn(payload, "execution_audit") ||
-    hasNonNullOwn(summary, "execution_audit") ||
-    hasNonNullOwn(details, "execution_audit")
+    routeRole === "primary" &&
+    pathKind === "api" &&
+    evidenceStatus === "success" &&
+    (hasOwn(record, "closeout_evidence") || hasOwn(record, "closeout_evidence_evaluation"))
+  );
+};
+
+export const requiresCanonicalExecutionAuditForContract = (input: {
+  payload?: Record<string, unknown> | null;
+  summary?: Record<string, unknown> | null;
+  details?: JsonObject | null;
+}): boolean => {
+  const payload = asObject(input.payload);
+  const summary = asObject(input.summary) ?? asObject(payload?.summary);
+  const details = asObject(input.details);
+  return [payload, summary, details].some(
+    (record) => hasCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record)
   );
 };
 
@@ -839,7 +854,7 @@ const toCliExecutionError = (
 ): CliError => {
   const details = asObject(payload.details);
   const pickedDetails = pickGateErrorDetails(payload, details);
-  if (hasCloseoutCanonicalAuditCandidate(payload, pickedDetails)) {
+  if (requiresCanonicalExecutionAuditForContract({ payload, details: pickedDetails })) {
     assertCloseoutCanonicalExecutionAuditForRuntime(ability, {
       failure: {
         payload,
@@ -1713,7 +1728,7 @@ const xhsReadCommand = async (
         : {}),
       ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
     });
-    if (hasCloseoutCanonicalAuditCandidate(summary)) {
+    if (requiresCanonicalExecutionAuditForContract({ payload: bridgeResult.payload, summary })) {
       assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, {
         success: {
           summary,

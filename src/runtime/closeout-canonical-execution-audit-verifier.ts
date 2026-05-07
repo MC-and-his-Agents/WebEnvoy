@@ -212,14 +212,15 @@ const consumedInputsMatchAdmissionRefs = (
 ): boolean => {
   const derivedFrom = asObject(requestAdmissionResult.derived_from);
   const consumedInputs = asObject(executionAudit.consumed_inputs);
+  const requestRef = asNonEmptyString(requestAdmissionResult.request_ref);
   const expectedActionRequestRef = asNonEmptyString(derivedFrom?.action_request_ref);
   const expectedResourceBindingRef = asNonEmptyString(derivedFrom?.resource_binding_ref);
   const expectedAuthorizationGrantRef = asNonEmptyString(derivedFrom?.authorization_grant_ref);
   const expectedRuntimeTargetRef = asNonEmptyString(derivedFrom?.runtime_target_ref);
 
   return (
-    (expectedActionRequestRef === null ||
-      expectedActionRequestRef === asNonEmptyString(consumedInputs?.action_request_ref)) &&
+    requestRef === asNonEmptyString(consumedInputs?.action_request_ref) &&
+    (expectedActionRequestRef === null || expectedActionRequestRef === requestRef) &&
     (expectedResourceBindingRef === null ||
       expectedResourceBindingRef === asNonEmptyString(consumedInputs?.resource_binding_ref)) &&
     (expectedAuthorizationGrantRef === null ||

@@ -348,12 +348,23 @@ const pickCanonicalSummaryField = (payload, key) => {
     }
     return asObject(value) ?? undefined;
 };
-const hasNonNullOwn = (record, key) => !!record && hasOwn(record, key) && record[key] !== null && record[key] !== undefined;
-const hasCloseoutCanonicalAuditCandidate = (payload, details) => {
-    const summary = asObject(payload.summary);
-    return (hasNonNullOwn(payload, "execution_audit") ||
-        hasNonNullOwn(summary, "execution_audit") ||
-        hasNonNullOwn(details, "execution_audit"));
+const hasCloseoutProductionPathMarker = (record) => record?.closeout_audit_required === true ||
+    hasOwn(record, "closeout_evidence_evaluation") ||
+    hasOwn(record, "closeout_readiness");
+const hasCloseoutRouteEvaluationMarker = (record) => {
+    const routeRole = asString(record?.route_role);
+    const pathKind = asString(record?.path_kind);
+    const evidenceStatus = asString(record?.evidence_status);
+    return (routeRole === "primary" &&
+        pathKind === "api" &&
+        evidenceStatus === "success" &&
+        (hasOwn(record, "closeout_evidence") || hasOwn(record, "closeout_evidence_evaluation")));
+};
+export const requiresCanonicalExecutionAuditForContract = (input) => {
+    const payload = asObject(input.payload);
+    const summary = asObject(input.summary) ?? asObject(payload?.summary);
+    const details = asObject(input.details);
+    return [payload, summary, details].some((record) => hasCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record));
 };
 const assertCloseoutCanonicalExecutionAuditForRuntime = (ability, input) => {
     const result = "success" in input
@@ -637,7 +648,7 @@ const augmentCloseoutHardStopDiagnosis = (value, closeoutHardStopRisk) => {
 const toCliExecutionError = (ability, payload, fallbackMessage) => {
     const details = asObject(payload.details);
     const pickedDetails = pickGateErrorDetails(payload, details);
-    if (hasCloseoutCanonicalAuditCandidate(payload, pickedDetails)) {
+    if (requiresCanonicalExecutionAuditForContract({ payload, details: pickedDetails })) {
         assertCloseoutCanonicalExecutionAuditForRuntime(ability, {
             failure: {
                 payload,
@@ -1280,7 +1291,7 @@ const xhsReadCommand = async (context, inputConfig) => {
                 : {}),
             ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
         });
-        if (hasCloseoutCanonicalAuditCandidate(summary)) {
+        if (requiresCanonicalExecutionAuditForContract({ payload: bridgeResult.payload, summary })) {
             assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, {
                 success: {
                     summary,

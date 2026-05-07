@@ -315,6 +315,37 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success execution audit consumed action ref differs from request ref", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      ...requestAdmissionResult(),
+      derived_from: {
+        gate_input_ref: "gate_input_issue645_001",
+        approval_admission_ref: "approval_admission_issue645_001",
+        audit_admission_ref: "audit_admission_issue645_001"
+      }
+    };
+    summary.execution_audit = {
+      ...executionAudit(),
+      consumed_inputs: {
+        ...executionAudit().consumed_inputs,
+        action_request_ref: "upstream_req_other"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "success_consumed_inputs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
   it("fails closed when success reason codes contain non-canonical entries", () => {
     const input = successInput();
     const summary = input.success?.summary as Record<string, unknown>;
