@@ -16,7 +16,7 @@ const requestAdmissionResult = () => ({
   effective_runtime_mode: "live_read_limited",
   reason_codes: ["LIVE_MODE_APPROVED"],
   derived_from: {
-    gate_input_ref: "gate_input_issue645_001",
+    gate_input_ref: "run_issue645_001",
     action_request_ref: "upstream_req_issue645_001",
     resource_binding_ref: "binding_issue645_001",
     authorization_grant_ref: "grant_issue645_001",
@@ -208,7 +208,7 @@ describe("closeout canonical execution audit verifier", () => {
     summary.request_admission_result = {
       ...requestAdmissionResult(),
       derived_from: {
-        gate_input_ref: "gate_input_issue645_001",
+        gate_input_ref: "run_issue645_001",
         approval_admission_ref: "approval_admission_issue645_001",
         audit_admission_ref: "audit_admission_issue645_001"
       }
@@ -321,7 +321,7 @@ describe("closeout canonical execution audit verifier", () => {
     summary.request_admission_result = {
       ...requestAdmissionResult(),
       derived_from: {
-        gate_input_ref: "gate_input_issue645_001",
+        gate_input_ref: "run_issue645_001",
         approval_admission_ref: "approval_admission_issue645_001",
         audit_admission_ref: "audit_admission_issue645_001"
       }
@@ -383,6 +383,29 @@ describe("closeout canonical execution audit verifier", () => {
       blockers: expect.arrayContaining([
         expect.objectContaining({
           blocker_code: "success_compatibility_refs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when success gate_run_id differs from admission gate_input_ref", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.execution_audit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        gate_run_id: "run_issue645_other"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "success_gate_run_mismatch",
           blocker_layer: "canonical_consistency"
         })
       ])
@@ -492,7 +515,7 @@ describe("closeout canonical execution audit verifier", () => {
     payload.request_admission_result = {
       ...requestAdmissionResult(),
       derived_from: {
-        gate_input_ref: "gate_input_issue645_001",
+        gate_input_ref: "run_issue645_001",
         action_request_ref: "upstream_req_issue645_001",
         resource_binding_ref: "binding_issue645_001",
         authorization_grant_ref: "grant_issue645_001",
@@ -713,6 +736,32 @@ describe("closeout canonical execution audit verifier", () => {
       blockers: expect.arrayContaining([
         expect.objectContaining({
           blocker_code: "failure_compatibility_refs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when failure gate_run_id differs from admission gate_input_ref", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    const mismatchedAudit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        gate_run_id: "run_issue645_other"
+      }
+    };
+    details.execution_audit = mismatchedAudit;
+    payload.execution_audit = mismatchedAudit;
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_gate_run_mismatch",
           blocker_layer: "canonical_consistency"
         })
       ])

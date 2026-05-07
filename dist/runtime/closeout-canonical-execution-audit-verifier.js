@@ -119,6 +119,12 @@ const compatibilityRefsMatchAdmissionRefs = (requestAdmissionResult, executionAu
     return (optionalAdmissionCompatibilityRefMatches(derivedFrom?.approval_admission_ref, compatibilityRefs?.approval_admission_ref, decision) &&
         optionalAdmissionCompatibilityRefMatches(derivedFrom?.audit_admission_ref, compatibilityRefs?.audit_admission_ref, decision));
 };
+const gateRunMatchesAdmissionGateInput = (requestAdmissionResult, executionAudit) => {
+    const derivedFrom = asObject(requestAdmissionResult.derived_from);
+    const compatibilityRefs = asObject(executionAudit.compatibility_refs);
+    return (asNonEmptyString(derivedFrom?.gate_input_ref) ===
+        asNonEmptyString(compatibilityRefs?.gate_run_id));
+};
 const findExecutionAuditKeys = (value, path) => {
     if (Array.isArray(value)) {
         return value.flatMap((item, index) => findExecutionAuditKeys(item, `${path}[${index}]`));
@@ -246,6 +252,11 @@ export const verifyCloseoutCanonicalExecutionAudit = (input) => {
             !compatibilityRefsMatchAdmissionRefs(successRequestAdmissionResult, successExecutionAudit)) {
             blockers.push(blocker("success_compatibility_refs_mismatch", "canonical_consistency", "success.summary.execution_audit.compatibility_refs", "success execution_audit compatibility_refs must match request_admission_result derived refs"));
         }
+        if (isCanonicalRequestAdmissionResult(successRequestAdmissionResult) &&
+            isCanonicalExecutionAudit(successExecutionAudit) &&
+            !gateRunMatchesAdmissionGateInput(successRequestAdmissionResult, successExecutionAudit)) {
+            blockers.push(blocker("success_gate_run_mismatch", "canonical_consistency", "success.summary.execution_audit.compatibility_refs.gate_run_id", "success execution_audit gate_run_id must match request_admission_result derived_from.gate_input_ref"));
+        }
     }
     if (input.failure) {
         if (!failureDetails?.details) {
@@ -287,6 +298,11 @@ export const verifyCloseoutCanonicalExecutionAudit = (input) => {
             isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
             !compatibilityRefsMatchAdmissionRefs(failureRequestAdmission, failureDetailsExecutionAudit)) {
             blockers.push(blocker("failure_compatibility_refs_mismatch", "canonical_consistency", `failure.${failureDetails?.path ?? "details"}.execution_audit.compatibility_refs`, "failure execution_audit compatibility_refs must match request_admission_result derived refs"));
+        }
+        if (isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
+            isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
+            !gateRunMatchesAdmissionGateInput(failureRequestAdmission, failureDetailsExecutionAudit)) {
+            blockers.push(blocker("failure_gate_run_mismatch", "canonical_consistency", `failure.${failureDetails?.path ?? "details"}.execution_audit.compatibility_refs.gate_run_id`, "failure execution_audit gate_run_id must match request_admission_result derived_from.gate_input_ref"));
         }
     }
     for (const path of successLeakPaths) {
