@@ -541,6 +541,7 @@ const markCloseoutAuditRequiredForXhsLiveRouteEvidence = (input: {
 
 const assertCloseoutCanonicalExecutionAuditForRuntime = (
   ability: AbilityRef,
+  expectedRunId: string,
   input:
     | {
         success: {
@@ -559,12 +560,14 @@ const assertCloseoutCanonicalExecutionAuditForRuntime = (
   const result =
     "success" in input
       ? verifyCloseoutCanonicalExecutionAudit({
+          expectedRunId,
           success: {
             summary: input.success.summary,
             observability: input.success.observability
           }
         })
       : verifyCloseoutCanonicalExecutionAudit({
+          expectedRunId,
           failure: {
             error: {
               details: input.failure.details ?? null
@@ -916,18 +919,23 @@ const augmentCloseoutHardStopDiagnosis = (
 const toCliExecutionError = (
   ability: AbilityRef,
   payload: Record<string, unknown>,
-  fallbackMessage: string
+  fallbackMessage: string,
+  expectedRunId: string
 ): CliError => {
   const details = asObject(payload.details);
   const pickedDetails = pickGateErrorDetails(payload, details);
   if (requiresCanonicalExecutionAuditForContract({ payload, details: pickedDetails })) {
-    assertCloseoutCanonicalExecutionAuditForRuntime(ability, {
-      failure: {
-        payload,
-        details: pickedDetails,
-        observability: payload.observability
+    assertCloseoutCanonicalExecutionAuditForRuntime(
+      ability,
+      expectedRunId,
+      {
+        failure: {
+          payload,
+          details: pickedDetails,
+          observability: payload.observability
+        }
       }
-    });
+    );
   }
   const closeoutHardStopRisk = classifyCloseoutHardStopRiskForPayload(payload);
   const reason =
@@ -1176,7 +1184,8 @@ const buildInProcessGateOnlyResult = (input: {
     throw toCliExecutionError(
       input.envelope.ability,
       payload,
-      `执行模式门禁阻断了当前 ${input.context.command} 请求`
+      `执行模式门禁阻断了当前 ${input.context.command} 请求`,
+      input.context.run_id
     );
   }
 
@@ -1741,7 +1750,8 @@ const xhsReadCommand = async (
       throw toCliExecutionError(
         envelope.ability,
         bridgeResult.payload,
-        bridgeResult.error.message
+        bridgeResult.error.message,
+        context.run_id
       );
     }
 
@@ -1776,7 +1786,8 @@ const xhsReadCommand = async (
       throw toCliExecutionError(
         envelope.ability,
         bridgeResult.payload,
-        "XHS recovery probe detected account-safety risk"
+        "XHS recovery probe detected account-safety risk",
+        context.run_id
       );
     }
 
@@ -1806,12 +1817,16 @@ const xhsReadCommand = async (
       ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
     });
     if (requiresCanonicalExecutionAuditForContract({ payload: bridgeResult.payload, summary })) {
-      assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, {
-        success: {
-          summary,
-          observability: bridgeResult.payload.observability
+      assertCloseoutCanonicalExecutionAuditForRuntime(
+        envelope.ability,
+        context.run_id,
+        {
+          success: {
+            summary,
+            observability: bridgeResult.payload.observability
+          }
         }
-      });
+      );
     }
 
     if (

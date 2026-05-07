@@ -31,6 +31,7 @@ export type CloseoutCanonicalExecutionAuditBlockerCode =
   | "execution_audit_in_observability";
 
 export interface CloseoutCanonicalExecutionAuditVerifierInput {
+  expectedRunId?: unknown;
   success?: {
     summary?: unknown;
     observability?: unknown;
@@ -282,6 +283,22 @@ const gateRunMatchesAdmissionGateInput = (
   );
 };
 
+const gateRefsMatchExpectedRunId = (
+  requestAdmissionResult: JsonObject,
+  executionAudit: JsonObject,
+  expectedRunId: string | null
+): boolean => {
+  if (expectedRunId === null) {
+    return true;
+  }
+  const derivedFrom = asObject(requestAdmissionResult.derived_from);
+  const compatibilityRefs = asObject(executionAudit.compatibility_refs);
+  return (
+    asNonEmptyString(derivedFrom?.gate_input_ref) === expectedRunId &&
+    asNonEmptyString(compatibilityRefs?.gate_run_id) === expectedRunId
+  );
+};
+
 const findExecutionAuditKeys = (value: unknown, path: string): string[] => {
   if (Array.isArray(value)) {
     return value.flatMap((item, index) => findExecutionAuditKeys(item, `${path}[${index}]`));
@@ -386,6 +403,7 @@ export const verifyCloseoutCanonicalExecutionAudit = (
 ): CloseoutCanonicalExecutionAuditVerifierResult => {
   const blockers: CloseoutCanonicalExecutionAuditVerifierResult["blockers"] = [];
   const successSummary = asObject(input.success?.summary);
+  const expectedRunId = asNonEmptyString(input.expectedRunId);
   const successRequestAdmissionResult = asObject(successSummary?.request_admission_result);
   const successExecutionAudit = asObject(successSummary?.execution_audit);
   const failureDetails = input.failure ? resolveFailureDetails(input.failure) : null;
@@ -529,6 +547,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
         )
       );
     }
+
+    if (
+      isCanonicalRequestAdmissionResult(successRequestAdmissionResult) &&
+      isCanonicalExecutionAudit(successExecutionAudit) &&
+      !gateRefsMatchExpectedRunId(successRequestAdmissionResult, successExecutionAudit, expectedRunId)
+    ) {
+      blockers.push(
+        blocker(
+          "success_gate_run_mismatch",
+          "canonical_consistency",
+          "success.summary.execution_audit.compatibility_refs.gate_run_id",
+          "success execution_audit gate refs must match the current run id"
+        )
+      );
+    }
   }
 
   if (input.failure) {
@@ -663,6 +696,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
           "canonical_consistency",
           `failure.${failureDetails?.path ?? "details"}.execution_audit.compatibility_refs.gate_run_id`,
           "failure execution_audit gate_run_id must match request_admission_result derived_from.gate_input_ref"
+        )
+      );
+    }
+
+    if (
+      isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
+      isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
+      !gateRefsMatchExpectedRunId(failureRequestAdmission, failureDetailsExecutionAudit, expectedRunId)
+    ) {
+      blockers.push(
+        blocker(
+          "failure_gate_run_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit.compatibility_refs.gate_run_id`,
+          "failure execution_audit gate refs must match the current run id"
         )
       );
     }

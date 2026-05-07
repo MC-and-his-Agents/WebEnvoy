@@ -408,15 +408,17 @@ const markCloseoutAuditRequiredForXhsLiveRouteEvidence = (input) => {
         closeout_audit_required: true
     };
 };
-const assertCloseoutCanonicalExecutionAuditForRuntime = (ability, input) => {
+const assertCloseoutCanonicalExecutionAuditForRuntime = (ability, expectedRunId, input) => {
     const result = "success" in input
         ? verifyCloseoutCanonicalExecutionAudit({
+            expectedRunId,
             success: {
                 summary: input.success.summary,
                 observability: input.success.observability
             }
         })
         : verifyCloseoutCanonicalExecutionAudit({
+            expectedRunId,
             failure: {
                 error: {
                     details: input.failure.details ?? null
@@ -692,11 +694,11 @@ const augmentCloseoutHardStopDiagnosis = (value, closeoutHardStopRisk) => {
         ].filter((item, index, list) => list.indexOf(item) === index)
     };
 };
-const toCliExecutionError = (ability, payload, fallbackMessage) => {
+const toCliExecutionError = (ability, payload, fallbackMessage, expectedRunId) => {
     const details = asObject(payload.details);
     const pickedDetails = pickGateErrorDetails(payload, details);
     if (requiresCanonicalExecutionAuditForContract({ payload, details: pickedDetails })) {
-        assertCloseoutCanonicalExecutionAuditForRuntime(ability, {
+        assertCloseoutCanonicalExecutionAuditForRuntime(ability, expectedRunId, {
             failure: {
                 payload,
                 details: pickedDetails,
@@ -881,7 +883,7 @@ const buildInProcessGateOnlyResult = (input) => {
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
         };
-        throw toCliExecutionError(input.envelope.ability, payload, `执行模式门禁阻断了当前 ${input.context.command} 请求`);
+        throw toCliExecutionError(input.envelope.ability, payload, `执行模式门禁阻断了当前 ${input.context.command} 请求`, input.context.run_id);
     }
     const dataRefValue = typeof input.parsedInput[input.dataRefKey] === "string"
         ? String(input.parsedInput[input.dataRefKey])
@@ -1304,7 +1306,7 @@ const xhsReadCommand = async (context, inputConfig) => {
                 requestedExecutionMode: gate.requestedExecutionMode,
                 payload: bridgeResult.payload
             });
-            throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
+            throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message, context.run_id);
         }
         const recoveryProbeRiskSignal = context.profile && recoveryProbeRequested
             ? resolveAccountSafetySignal(bridgeResult.payload, {
@@ -1328,7 +1330,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             if (accountSafety) {
                 mergeAccountSafetyIntoFailurePayload(bridgeResult.payload, accountSafety, xhsCloseoutRhythm, runtimeStop);
             }
-            throw toCliExecutionError(envelope.ability, bridgeResult.payload, "XHS recovery probe detected account-safety risk");
+            throw toCliExecutionError(envelope.ability, bridgeResult.payload, "XHS recovery probe detected account-safety risk", context.run_id);
         }
         const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
         const requestAdmissionResult = pickCanonicalSummaryField(bridgeResult.payload, "request_admission_result");
@@ -1350,7 +1352,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
         });
         if (requiresCanonicalExecutionAuditForContract({ payload: bridgeResult.payload, summary })) {
-            assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, {
+            assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, context.run_id, {
                 success: {
                     summary,
                     observability: bridgeResult.payload.observability

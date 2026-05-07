@@ -412,6 +412,41 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success gate refs point to an old run", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      ...requestAdmissionResult(),
+      derived_from: {
+        ...requestAdmissionResult().derived_from,
+        gate_input_ref: "run_issue645_old"
+      }
+    };
+    summary.execution_audit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        gate_run_id: "run_issue645_old"
+      }
+    };
+
+    expect(
+      verifyCloseoutCanonicalExecutionAudit({
+        expectedRunId: "run_issue645_001",
+        success: input.success
+      })
+    ).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "success_gate_run_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
   it("fails closed when failure details are missing execution_audit", () => {
     const input = failureInput();
     input.failure = {
@@ -757,6 +792,44 @@ describe("closeout canonical execution audit verifier", () => {
     payload.execution_audit = mismatchedAudit;
 
     expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_gate_run_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when failure gate refs point to an old run", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    payload.request_admission_result = {
+      ...requestAdmissionResult(),
+      derived_from: {
+        ...requestAdmissionResult().derived_from,
+        gate_input_ref: "run_issue645_old"
+      }
+    };
+    const oldRunAudit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        gate_run_id: "run_issue645_old"
+      }
+    };
+    details.execution_audit = oldRunAudit;
+    payload.execution_audit = oldRunAudit;
+
+    expect(
+      verifyCloseoutCanonicalExecutionAudit({
+        expectedRunId: "run_issue645_001",
+        failure: input.failure
+      })
+    ).toMatchObject({
       decision: "FAIL",
       passed: false,
       blockers: expect.arrayContaining([
