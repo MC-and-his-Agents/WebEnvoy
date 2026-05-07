@@ -411,6 +411,33 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when failure request_admission_result omits admission compatibility refs", () => {
+    const input = failureInput();
+    const payload = input.failure?.payload as Record<string, unknown>;
+    payload.request_admission_result = {
+      ...requestAdmissionResult(),
+      derived_from: {
+        gate_input_ref: "gate_input_issue645_001",
+        action_request_ref: "upstream_req_issue645_001",
+        resource_binding_ref: "binding_issue645_001",
+        authorization_grant_ref: "grant_issue645_001",
+        runtime_target_ref: "target_issue645_001"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_request_admission_result",
+          blocker_layer: "failure_details",
+          path: "failure.payload.request_admission_result"
+        })
+      ])
+    });
+  });
+
   it("fails closed when failure execution audit admission decision differs from admission result", () => {
     const input = failureInput();
     const details = input.failure?.error?.details as Record<string, unknown>;

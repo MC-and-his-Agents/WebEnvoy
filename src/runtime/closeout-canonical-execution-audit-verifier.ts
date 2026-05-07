@@ -128,6 +128,18 @@ const blocker = (
   message
 });
 
+const hasCanonicalConsumedInputs = (value: JsonObject | null): boolean =>
+  value !== null &&
+  asNonEmptyString(value.action_request_ref) !== null &&
+  asNonEmptyString(value.resource_binding_ref) !== null &&
+  asNonEmptyString(value.authorization_grant_ref) !== null &&
+  asNonEmptyString(value.runtime_target_ref) !== null;
+
+const hasCanonicalAdmissionDerivedRefs = (value: JsonObject | null): boolean =>
+  hasCanonicalConsumedInputs(value) &&
+  asNonEmptyString(value?.approval_admission_ref) !== null &&
+  asNonEmptyString(value?.audit_admission_ref) !== null;
+
 const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is JsonObject =>
   value !== null &&
   asNonEmptyString(value.request_ref) !== null &&
@@ -142,14 +154,7 @@ const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is J
   isBoolean(value.anonymous_isolation_ok) &&
   asNonEmptyString(value.effective_runtime_mode) !== null &&
   isNonEmptyStringArray(value.reason_codes) &&
-  asObject(value.derived_from) !== null;
-
-const hasCanonicalConsumedInputs = (value: JsonObject | null): boolean =>
-  value !== null &&
-  asNonEmptyString(value.action_request_ref) !== null &&
-  asNonEmptyString(value.resource_binding_ref) !== null &&
-  asNonEmptyString(value.authorization_grant_ref) !== null &&
-  asNonEmptyString(value.runtime_target_ref) !== null;
+  hasCanonicalAdmissionDerivedRefs(asObject(value.derived_from));
 
 const hasOptionalBlockedAdmissionRef = (value: unknown, decision: unknown): boolean =>
   decision === "blocked" ? value === null || asNonEmptyString(value) !== null : asNonEmptyString(value) !== null;
@@ -220,7 +225,7 @@ const optionalAdmissionCompatibilityRefMatches = (
 ): boolean => {
   const expectedRef = asNonEmptyString(expected);
   if (expectedRef === null) {
-    return true;
+    return false;
   }
   if (decision === "blocked" && observed === null) {
     return true;
