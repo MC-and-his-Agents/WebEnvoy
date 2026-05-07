@@ -120,10 +120,11 @@ const blocker = (
 });
 
 const isAdmittedEvidenceClass = (evidenceClass: string | null): boolean =>
-  evidenceClass === "passive_api_capture";
+  evidenceClass === "passive_api_capture" || evidenceClass === "humanized_action";
 
 const isRecognizedEvidenceClass = (evidenceClass: string | null): boolean =>
   evidenceClass === "passive_api_capture" ||
+  evidenceClass === "humanized_action" ||
   evidenceClass === "dom_state_extraction" ||
   evidenceClass === "active_api_fetch_fallback";
 
@@ -201,7 +202,7 @@ export const evaluateCloseoutEvidence = (
         "active API fetch fallback is not admitted as primary closeout evidence"
       )
     );
-  } else if (evidenceClass !== null && !isRecognizedEvidenceClass(evidenceClass)) {
+  } else if (evidenceClass === null || !isRecognizedEvidenceClass(evidenceClass)) {
     blockers.push(
       blocker(
         "unsupported_evidence_class",

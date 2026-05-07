@@ -57,6 +57,18 @@ describe("closeout evidence evaluator", () => {
     });
   });
 
+  it("accepts humanized_action when the rest of the closeout bar is satisfied", () => {
+    const input = baseInput();
+    input.evidence.evidence_class = "humanized_action";
+
+    expect(evaluateCloseoutEvidence(input)).toMatchObject({
+      decision: "PASS",
+      passed: true,
+      evidence_class: "humanized_action",
+      blockers: []
+    });
+  });
+
   it.each([
     {
       name: "non-primary route",
@@ -97,6 +109,13 @@ describe("closeout evidence evaluator", () => {
       name: "unsupported evidence class",
       mutate: (input: EvaluateCloseoutEvidenceInput) => {
         input.evidence.evidence_class = "unexpected_adapter_class";
+      },
+      blocker_code: "unsupported_evidence_class"
+    },
+    {
+      name: "missing evidence class",
+      mutate: (input: EvaluateCloseoutEvidenceInput) => {
+        input.evidence.evidence_class = null;
       },
       blocker_code: "unsupported_evidence_class"
     },
