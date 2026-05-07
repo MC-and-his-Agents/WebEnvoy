@@ -57,15 +57,15 @@ const isCanonicalRequestAdmissionResult = (value) => value !== null &&
     asNonEmptyString(value.effective_runtime_mode) !== null &&
     isNonEmptyStringArray(value.reason_codes) &&
     hasCanonicalAdmissionDerivedRefs(asObject(value.derived_from), value.admission_decision);
-const hasNullableCompatibilityRef = (value) => value === undefined || value === null || asNonEmptyString(value) !== null;
+const hasNullableCompatibilityRef = (value, key) => hasOwn(value, key) && (value[key] === null || asNonEmptyString(value[key]) !== null);
 const hasCanonicalCompatibilityRefs = (value, decision) => value !== null &&
     asNonEmptyString(value.gate_run_id) !== null &&
     hasOptionalBlockedAdmissionRef(value.approval_admission_ref, decision) &&
     hasOptionalBlockedAdmissionRef(value.audit_admission_ref, decision) &&
-    hasNullableCompatibilityRef(value.approval_record_ref) &&
-    hasNullableCompatibilityRef(value.audit_record_ref) &&
-    hasNullableCompatibilityRef(value.session_rhythm_window_id) &&
-    hasNullableCompatibilityRef(value.session_rhythm_decision_id);
+    hasNullableCompatibilityRef(value, "approval_record_ref") &&
+    hasNullableCompatibilityRef(value, "audit_record_ref") &&
+    hasNullableCompatibilityRef(value, "session_rhythm_window_id") &&
+    hasNullableCompatibilityRef(value, "session_rhythm_decision_id");
 const isCanonicalExecutionAudit = (value) => {
     const consumedInputs = asObject(value?.consumed_inputs);
     const compatibilityRefs = asObject(value?.compatibility_refs);

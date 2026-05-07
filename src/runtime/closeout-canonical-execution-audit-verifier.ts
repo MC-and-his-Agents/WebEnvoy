@@ -163,8 +163,8 @@ const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is J
   isNonEmptyStringArray(value.reason_codes) &&
   hasCanonicalAdmissionDerivedRefs(asObject(value.derived_from), value.admission_decision);
 
-const hasNullableCompatibilityRef = (value: unknown): boolean =>
-  value === undefined || value === null || asNonEmptyString(value) !== null;
+const hasNullableCompatibilityRef = (value: JsonObject, key: string): boolean =>
+  hasOwn(value, key) && (value[key] === null || asNonEmptyString(value[key]) !== null);
 
 const hasCanonicalCompatibilityRefs = (
   value: JsonObject | null,
@@ -174,10 +174,10 @@ const hasCanonicalCompatibilityRefs = (
   asNonEmptyString(value.gate_run_id) !== null &&
   hasOptionalBlockedAdmissionRef(value.approval_admission_ref, decision) &&
   hasOptionalBlockedAdmissionRef(value.audit_admission_ref, decision) &&
-  hasNullableCompatibilityRef(value.approval_record_ref) &&
-  hasNullableCompatibilityRef(value.audit_record_ref) &&
-  hasNullableCompatibilityRef(value.session_rhythm_window_id) &&
-  hasNullableCompatibilityRef(value.session_rhythm_decision_id);
+  hasNullableCompatibilityRef(value, "approval_record_ref") &&
+  hasNullableCompatibilityRef(value, "audit_record_ref") &&
+  hasNullableCompatibilityRef(value, "session_rhythm_window_id") &&
+  hasNullableCompatibilityRef(value, "session_rhythm_decision_id");
 
 const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObject => {
   const consumedInputs = asObject(value?.consumed_inputs);
