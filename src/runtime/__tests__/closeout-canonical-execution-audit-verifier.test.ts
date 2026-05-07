@@ -159,6 +159,9 @@ describe("closeout canonical execution audit verifier", () => {
           reason: "GATEWAY_INVOKER_FAILED",
           execution_audit: executionAudit()
         },
+        payload: {
+          execution_audit: executionAudit()
+        },
         observability: {
           failure_site: {
             summary: "gateway_invoker_failed"
@@ -172,8 +175,49 @@ describe("closeout canonical execution audit verifier", () => {
       passed: true,
       failure: {
         details_path: "details",
-        canonical_source_path: "details.execution_audit"
+        canonical_source_path: "payload.execution_audit"
       }
+    });
+  });
+
+  it("fails closed when failure details have no distinct canonical execution_audit source", () => {
+    const input: CloseoutCanonicalExecutionAuditVerifierInput = {
+      failure: {
+        details: {
+          reason: "GATEWAY_INVOKER_FAILED",
+          execution_audit: executionAudit()
+        }
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_execution_audit_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
+  it("accepts formal request_admission_result derived_from shape without duplicated consumed refs", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      ...requestAdmissionResult(),
+      derived_from: {
+        gate_input_ref: "gate_input_issue645_001",
+        approval_admission_ref: "approval_admission_issue645_001",
+        audit_admission_ref: "audit_admission_issue645_001"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "PASS",
+      passed: true,
+      blockers: []
     });
   });
 

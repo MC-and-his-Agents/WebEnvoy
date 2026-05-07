@@ -142,7 +142,8 @@ const hasCanonicalAdmissionDerivedRefs = (
   value: JsonObject | null,
   decision: unknown
 ): boolean =>
-  hasCanonicalConsumedInputs(value) &&
+  value !== null &&
+  asNonEmptyString(value.gate_input_ref) !== null &&
   hasOptionalBlockedAdmissionRef(value?.approval_admission_ref, decision) &&
   hasOptionalBlockedAdmissionRef(value?.audit_admission_ref, decision);
 
@@ -211,16 +212,21 @@ const consumedInputsMatchAdmissionRefs = (
 ): boolean => {
   const derivedFrom = asObject(requestAdmissionResult.derived_from);
   const consumedInputs = asObject(executionAudit.consumed_inputs);
+  const expectedActionRequestRef = asNonEmptyString(derivedFrom?.action_request_ref);
+  const expectedResourceBindingRef = asNonEmptyString(derivedFrom?.resource_binding_ref);
+  const expectedAuthorizationGrantRef = asNonEmptyString(derivedFrom?.authorization_grant_ref);
+  const expectedRuntimeTargetRef = asNonEmptyString(derivedFrom?.runtime_target_ref);
 
   return (
-    asNonEmptyString(derivedFrom?.action_request_ref) ===
-      asNonEmptyString(consumedInputs?.action_request_ref) &&
-    asNonEmptyString(derivedFrom?.resource_binding_ref) ===
-      asNonEmptyString(consumedInputs?.resource_binding_ref) &&
-    asNonEmptyString(derivedFrom?.authorization_grant_ref) ===
-      asNonEmptyString(consumedInputs?.authorization_grant_ref) &&
-    asNonEmptyString(derivedFrom?.runtime_target_ref) ===
-      asNonEmptyString(consumedInputs?.runtime_target_ref)
+    (expectedActionRequestRef === null ||
+      expectedActionRequestRef === asNonEmptyString(consumedInputs?.action_request_ref)) &&
+    (expectedResourceBindingRef === null ||
+      expectedResourceBindingRef === asNonEmptyString(consumedInputs?.resource_binding_ref)) &&
+    (expectedAuthorizationGrantRef === null ||
+      expectedAuthorizationGrantRef ===
+        asNonEmptyString(consumedInputs?.authorization_grant_ref)) &&
+    (expectedRuntimeTargetRef === null ||
+      expectedRuntimeTargetRef === asNonEmptyString(consumedInputs?.runtime_target_ref))
   );
 };
 
@@ -314,17 +320,6 @@ const resolveFailureCanonicalAudit = (
   const summaryAudit = asObject(asObject(payload?.summary)?.execution_audit);
   if (summaryAudit) {
     return { path: "payload.summary.execution_audit", executionAudit: summaryAudit };
-  }
-
-  const directAudit = asObject(failure.details);
-  const directExecutionAudit = asObject(directAudit?.execution_audit);
-  if (directExecutionAudit) {
-    return { path: "details.execution_audit", executionAudit: directExecutionAudit };
-  }
-
-  const errorExecutionAudit = asObject(asObject(failure.error?.details)?.execution_audit);
-  if (errorExecutionAudit) {
-    return { path: "error.details.execution_audit", executionAudit: errorExecutionAudit };
   }
 
   return { path: null, executionAudit: null };
@@ -541,6 +536,18 @@ export const verifyCloseoutCanonicalExecutionAudit = (
     }
 
     if (
+      failureDetailsExecutionAudit &&
+      !failureCanonicalAudit?.executionAudit
+    ) {
+      blockers.push(
+        blocker(
+          "failure_execution_audit_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit`,
+          "closeout failure details.execution_audit must match a distinct canonical execution_audit source"
+        )
+      );
+    } else if (
       failureDetailsExecutionAudit &&
       failureCanonicalAudit?.executionAudit &&
       !sameJson(failureDetailsExecutionAudit, failureCanonicalAudit.executionAudit)

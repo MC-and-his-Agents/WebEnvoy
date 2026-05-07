@@ -8,6 +8,7 @@ import { buildLoopbackGate } from "../runtime/native-messaging/loopback-gate.js"
 import { buildLoopbackGatePayload } from "../runtime/native-messaging/loopback-gate-payload.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { classifyCloseoutHardStopRisk } from "../runtime/closeout-hard-stop-risk.js";
+import { verifyCloseoutCanonicalExecutionAudit } from "../runtime/closeout-canonical-execution-audit-verifier.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account-safety.js";
 import { toSessionRhythmStatusView, toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
@@ -347,6 +348,43 @@ const pickCanonicalSummaryField = (payload, key) => {
     }
     return asObject(value) ?? undefined;
 };
+const hasNonNullOwn = (record, key) => !!record && hasOwn(record, key) && record[key] !== null && record[key] !== undefined;
+const hasCloseoutCanonicalAuditCandidate = (payload, details) => {
+    const summary = asObject(payload.summary);
+    return (hasNonNullOwn(payload, "execution_audit") ||
+        hasNonNullOwn(summary, "execution_audit") ||
+        hasNonNullOwn(details, "execution_audit"));
+};
+const assertCloseoutCanonicalExecutionAuditForRuntime = (ability, input) => {
+    const result = "success" in input
+        ? verifyCloseoutCanonicalExecutionAudit({
+            success: {
+                summary: input.success.summary,
+                observability: input.success.observability
+            }
+        })
+        : verifyCloseoutCanonicalExecutionAudit({
+            failure: {
+                error: {
+                    details: input.failure.details ?? null
+                },
+                payload: input.failure.payload,
+                observability: input.failure.observability
+            }
+        });
+    if (result.passed) {
+        return;
+    }
+    throw new CliError("ERR_EXECUTION_FAILED", "XHS closeout canonical execution audit invalid", {
+        retryable: false,
+        details: {
+            ability_id: ability.id,
+            stage: "execution",
+            reason: "CLOSEOUT_CANONICAL_EXECUTION_AUDIT_INVALID",
+            closeout_canonical_execution_audit: result
+        }
+    });
+};
 const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
     code === "ERR_TRANSPORT_TIMEOUT" ||
     code === "ERR_TRANSPORT_DISCONNECTED" ||
@@ -598,6 +636,16 @@ const augmentCloseoutHardStopDiagnosis = (value, closeoutHardStopRisk) => {
 };
 const toCliExecutionError = (ability, payload, fallbackMessage) => {
     const details = asObject(payload.details);
+    const pickedDetails = pickGateErrorDetails(payload, details);
+    if (hasCloseoutCanonicalAuditCandidate(payload, pickedDetails)) {
+        assertCloseoutCanonicalExecutionAuditForRuntime(ability, {
+            failure: {
+                payload,
+                details: pickedDetails,
+                observability: payload.observability
+            }
+        });
+    }
     const closeoutHardStopRisk = classifyCloseoutHardStopRiskForPayload(payload);
     const reason = typeof details?.reason === "string" && details.reason.trim().length > 0
         ? details.reason.trim()
@@ -617,7 +665,7 @@ const toCliExecutionError = (ability, payload, fallbackMessage) => {
                 ? { closeout_hard_stop_risk: closeoutHardStopRisk }
                 : {}),
             ...(consumerGateResult ?? {}),
-            ...pickGateErrorDetails(payload, details)
+            ...pickedDetails
         },
         observability: augmentCloseoutHardStopObservability(payload.observability, closeoutHardStopRisk),
         diagnosis: augmentCloseoutHardStopDiagnosis(payload.diagnosis, closeoutHardStopRisk)
@@ -1232,6 +1280,14 @@ const xhsReadCommand = async (context, inputConfig) => {
                 : {}),
             ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
         });
+        if (hasCloseoutCanonicalAuditCandidate(summary)) {
+            assertCloseoutCanonicalExecutionAuditForRuntime(envelope.ability, {
+                success: {
+                    summary,
+                    observability: bridgeResult.payload.observability
+                }
+            });
+        }
         if (context.profile &&
             recoveryProbeRequested) {
             const recoveryStatus = await profileRuntime.markXhsCloseoutSingleProbePassed({
