@@ -4,5 +4,6 @@ export {
   normalizeGateOptionsForContract,
   requiresCanonicalExecutionAuditForContract,
   resolveForwardTimeoutMsForContract,
+  shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract,
   xhsCommands
 } from "./xhs-runtime.js";

@@ -9,7 +9,8 @@ import {
   ensureOfficialChromeRuntimeReady,
   normalizeGateOptionsForContract,
   requiresCanonicalExecutionAuditForContract,
-  resolveForwardTimeoutMsForContract
+  resolveForwardTimeoutMsForContract,
+  shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract
 } from "../xhs.js";
 import { executeCommand } from "../../core/router.js";
 import { createCommandRegistry } from "../index.js";
@@ -1141,6 +1142,61 @@ describe("normalizeGateOptionsForContract", () => {
         }
       })
     ).toBe(true);
+  });
+
+  it("marks only live XHS closeout route evidence summaries as audit required", () => {
+    const routeEvidenceSummary = {
+      route_evidence: {
+        route: "xhs.search.api",
+        route_role: "primary",
+        path_kind: "api",
+        evidence_status: "success"
+      }
+    };
+
+    expect(
+      shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+        abilityId: "xhs.note.search.v1",
+        requestedExecutionMode: "live_read_high_risk",
+        summary: routeEvidenceSummary
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+        abilityId: "xhs.note.detail.v1",
+        requestedExecutionMode: "live_read_limited",
+        summary: routeEvidenceSummary
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+        abilityId: "xhs.note.search.v1",
+        requestedExecutionMode: "recon",
+        summary: routeEvidenceSummary
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+        abilityId: "xhs.note.search.v1",
+        requestedExecutionMode: "live_read_high_risk",
+        summary: {
+          metrics: {
+            count: 1
+          }
+        }
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+        abilityId: "xhs.note.unknown.v1",
+        requestedExecutionMode: "live_read_high_risk",
+        summary: routeEvidenceSummary
+      })
+    ).toBe(false);
   });
 
   describe("resolveForwardTimeoutMsForContract", () => {

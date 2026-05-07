@@ -398,6 +398,12 @@ const isLiveXhsExecutionMode = (mode: XhsExecutionMode): boolean =>
 const isLiveXhsReadExecutionMode = (mode: XhsExecutionMode): boolean =>
   mode === "live_read_limited" || mode === "live_read_high_risk";
 
+const XHS_CLOSEOUT_ROUTE_EVIDENCE_ABILITY_IDS = new Set<string>([
+  "xhs.note.search.v1",
+  "xhs.note.detail.v1",
+  "xhs.user.home.v1"
+]);
+
 const ACCOUNT_SAFETY_REASON_ALIASES: Record<string, AccountSafetyReason> = {
   SESSION_EXPIRED: "SESSION_EXPIRED",
   XHS_LOGIN_REQUIRED: "XHS_LOGIN_REQUIRED",
@@ -494,6 +500,43 @@ export const requiresCanonicalExecutionAuditForContract = (input: {
   return [payload, summary, details].some(
     (record) => hasExplicitCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record)
   );
+};
+
+export const shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract = (input: {
+  abilityId: string;
+  requestedExecutionMode: XhsExecutionMode;
+  summary?: Record<string, unknown> | null;
+}): boolean => {
+  const summary = asObject(input.summary);
+  return (
+    XHS_CLOSEOUT_ROUTE_EVIDENCE_ABILITY_IDS.has(input.abilityId) &&
+    isLiveXhsReadExecutionMode(input.requestedExecutionMode) &&
+    asObject(summary?.route_evidence) !== null
+  );
+};
+
+const markCloseoutAuditRequiredForXhsLiveRouteEvidence = (input: {
+  abilityId: string;
+  requestedExecutionMode: XhsExecutionMode;
+  payload: JsonObject;
+}): void => {
+  if (
+    !shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+      abilityId: input.abilityId,
+      requestedExecutionMode: input.requestedExecutionMode,
+      summary: asObject(input.payload.summary)
+    })
+  ) {
+    return;
+  }
+  const summary = asObject(input.payload.summary);
+  if (summary) {
+    summary.closeout_audit_required = true;
+    return;
+  }
+  input.payload.summary = {
+    closeout_audit_required: true
+  };
 };
 
 const assertCloseoutCanonicalExecutionAuditForRuntime = (
@@ -1685,6 +1728,11 @@ const xhsReadCommand = async (
           );
         }
       }
+      markCloseoutAuditRequiredForXhsLiveRouteEvidence({
+        abilityId: envelope.ability.id,
+        requestedExecutionMode: gate.requestedExecutionMode,
+        payload: bridgeResult.payload
+      });
       throw toCliExecutionError(
         envelope.ability,
         bridgeResult.payload,
@@ -1736,10 +1784,16 @@ const xhsReadCommand = async (
       bridgeResult.payload,
       "execution_audit"
     );
+    const closeoutAuditRequired = shouldRequireCloseoutAuditForXhsLiveRouteEvidenceForContract({
+      abilityId: envelope.ability.id,
+      requestedExecutionMode: gate.requestedExecutionMode,
+      summary: asObject(bridgeResult.payload.summary)
+    });
     const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
       ...(asObject(bridgeResult.payload.summary) ?? {}),
       session_id: bridgeSessionId,
       requested_execution_mode: gate.requestedExecutionMode,
+      ...(closeoutAuditRequired ? { closeout_audit_required: true } : {}),
       ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
       ...(requestAdmissionResult !== undefined
         ? { request_admission_result: requestAdmissionResult }
