@@ -392,6 +392,32 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when execution_audit omits canonical compatibility refs", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    details.execution_audit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        gate_run_id: "run_issue645_001",
+        approval_admission_ref: "",
+        audit_admission_ref: "audit_admission_issue645_001",
+        approval_record_ref: "gate_appr_issue645_001",
+        audit_record_ref: "gate_evt_issue645_001"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_execution_audit",
+          blocker_layer: "failure_details"
+        })
+      ])
+    });
+  });
+
   it("fails closed when execution_audit risk signals are empty", () => {
     const input = failureInput();
     const details = input.failure?.error?.details as Record<string, unknown>;
