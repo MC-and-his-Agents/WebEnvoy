@@ -8,8 +8,19 @@ import {
 const requestAdmissionResult = () => ({
   request_ref: "upstream_req_issue645_001",
   admission_decision: "allowed",
+  normalized_action_type: "read",
+  normalized_resource_kind: "profile_session",
+  runtime_target_match: true,
+  grant_match: true,
+  anonymous_isolation_ok: true,
   effective_runtime_mode: "live_read_limited",
+  reason_codes: ["LIVE_MODE_APPROVED"],
   derived_from: {
+    gate_input_ref: "gate_input_issue645_001",
+    action_request_ref: "upstream_req_issue645_001",
+    resource_binding_ref: "binding_issue645_001",
+    authorization_grant_ref: "grant_issue645_001",
+    runtime_target_ref: "target_issue645_001",
     approval_admission_ref: "approval_admission_issue645_001",
     audit_admission_ref: "audit_admission_issue645_001"
   }
@@ -18,14 +29,22 @@ const requestAdmissionResult = () => ({
 const executionAudit = () => ({
   audit_ref: "exec_audit_issue645_001",
   request_ref: "upstream_req_issue645_001",
+  consumed_inputs: {
+    action_request_ref: "upstream_req_issue645_001",
+    resource_binding_ref: "binding_issue645_001",
+    authorization_grant_ref: "grant_issue645_001",
+    runtime_target_ref: "target_issue645_001"
+  },
   request_admission_decision: "allowed",
   compatibility_refs: {
+    gate_run_id: "run_issue645_001",
     approval_admission_ref: "approval_admission_issue645_001",
     audit_admission_ref: "audit_admission_issue645_001",
     approval_record_ref: "gate_appr_issue645_001",
     audit_record_ref: "gate_evt_issue645_001"
   },
   risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"],
+  recorded_at: "2026-04-14T10:00:11.000Z",
   session_rhythm_window_id: "rhythm_window_issue645_001",
   session_rhythm_decision_id: "rhythm_decision_issue645_001"
 });
@@ -203,6 +222,27 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success request admission omits canonical admission fields", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      request_ref: "upstream_req_issue645_001",
+      admission_decision: "allowed",
+      derived_from: {}
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: [
+        expect.objectContaining({
+          blocker_code: "invalid_success_request_admission_result",
+          blocker_layer: "success_summary"
+        })
+      ]
+    });
+  });
+
   it("fails closed when failure details are missing execution_audit", () => {
     const input = failureInput();
     input.failure = {
@@ -227,6 +267,51 @@ describe("closeout canonical execution audit verifier", () => {
           blocker_layer: "failure_details"
         })
       ]
+    });
+  });
+
+  it("fails closed when execution_audit omits consumed inputs", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    details.execution_audit = {
+      ...executionAudit(),
+      consumed_inputs: {
+        action_request_ref: "upstream_req_issue645_001",
+        resource_binding_ref: "binding_issue645_001",
+        authorization_grant_ref: "grant_issue645_001",
+        runtime_target_ref: null
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_execution_audit",
+          blocker_layer: "failure_details"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when execution_audit risk signals are empty", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    details.execution_audit = {
+      ...executionAudit(),
+      risk_signals: []
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_execution_audit",
+          blocker_layer: "failure_details"
+        })
+      ])
     });
   });
 

@@ -82,6 +82,11 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const isNonEmptyStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.some((item) => asNonEmptyString(item) !== null);
+
+const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
+
 const hasOwn = (value: JsonObject | null | undefined, key: string): boolean =>
   !!value && Object.prototype.hasOwnProperty.call(value, key);
 
@@ -118,16 +123,42 @@ const blocker = (
 const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is JsonObject =>
   value !== null &&
   asNonEmptyString(value.request_ref) !== null &&
-  asNonEmptyString(value.admission_decision) !== null &&
+  (value.admission_decision === "allowed" ||
+    value.admission_decision === "blocked" ||
+    value.admission_decision === "deferred") &&
+  asNonEmptyString(value.normalized_action_type) !== null &&
+  (value.normalized_resource_kind === "anonymous_context" ||
+    value.normalized_resource_kind === "profile_session") &&
+  isBoolean(value.runtime_target_match) &&
+  isBoolean(value.grant_match) &&
+  isBoolean(value.anonymous_isolation_ok) &&
+  asNonEmptyString(value.effective_runtime_mode) !== null &&
+  isNonEmptyStringArray(value.reason_codes) &&
   asObject(value.derived_from) !== null;
 
-const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObject =>
+const hasCanonicalConsumedInputs = (value: JsonObject | null): boolean =>
   value !== null &&
-  asNonEmptyString(value.audit_ref) !== null &&
-  asNonEmptyString(value.request_ref) !== null &&
-  asNonEmptyString(value.request_admission_decision) !== null &&
-  asObject(value.compatibility_refs) !== null &&
-  Array.isArray(value.risk_signals);
+  asNonEmptyString(value.action_request_ref) !== null &&
+  asNonEmptyString(value.resource_binding_ref) !== null &&
+  asNonEmptyString(value.authorization_grant_ref) !== null &&
+  asNonEmptyString(value.runtime_target_ref) !== null;
+
+const isCanonicalExecutionAudit = (value: JsonObject | null): value is JsonObject => {
+  const consumedInputs = asObject(value?.consumed_inputs);
+
+  return (
+    value !== null &&
+    asNonEmptyString(value.audit_ref) !== null &&
+    asNonEmptyString(value.request_ref) !== null &&
+    hasCanonicalConsumedInputs(consumedInputs) &&
+    asObject(value.compatibility_refs) !== null &&
+    (value.request_admission_decision === "allowed" ||
+      value.request_admission_decision === "blocked" ||
+      value.request_admission_decision === "deferred") &&
+    isNonEmptyStringArray(value.risk_signals) &&
+    asNonEmptyString(value.recorded_at) !== null
+  );
+};
 
 const requestAdmissionMatchesExecutionAudit = (
   requestAdmissionResult: JsonObject,
