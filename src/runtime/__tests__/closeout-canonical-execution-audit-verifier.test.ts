@@ -271,6 +271,49 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success reason codes contain non-canonical entries", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      ...requestAdmissionResult(),
+      reason_codes: ["LIVE_MODE_APPROVED", ""]
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_success_request_admission_result",
+          blocker_layer: "success_summary"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when success compatibility refs differ from admission derived refs", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.execution_audit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        approval_admission_ref: "approval_admission_other"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "success_compatibility_refs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
   it("fails closed when failure details are missing execution_audit", () => {
     const input = failureInput();
     input.failure = {
@@ -491,6 +534,52 @@ describe("closeout canonical execution audit verifier", () => {
         expect.objectContaining({
           blocker_code: "invalid_failure_execution_audit",
           blocker_layer: "failure_details"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when execution_audit risk signals contain non-canonical entries", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    details.execution_audit = {
+      ...executionAudit(),
+      risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS", {}]
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_execution_audit",
+          blocker_layer: "failure_details"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when failure compatibility refs differ from admission derived refs", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    const payload = input.failure?.payload as Record<string, unknown>;
+    const mismatchedAudit = {
+      ...executionAudit(),
+      compatibility_refs: {
+        ...executionAudit().compatibility_refs,
+        audit_admission_ref: "audit_admission_other"
+      }
+    };
+    details.execution_audit = mismatchedAudit;
+    payload.execution_audit = mismatchedAudit;
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_compatibility_refs_mismatch",
+          blocker_layer: "canonical_consistency"
         })
       ])
     });

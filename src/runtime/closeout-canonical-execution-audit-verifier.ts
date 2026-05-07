@@ -17,6 +17,7 @@ export type CloseoutCanonicalExecutionAuditBlockerCode =
   | "invalid_success_execution_audit"
   | "success_canonical_mismatch"
   | "success_consumed_inputs_mismatch"
+  | "success_compatibility_refs_mismatch"
   | "missing_failure_details"
   | "invalid_failure_request_admission_result"
   | "missing_failure_execution_audit"
@@ -24,6 +25,7 @@ export type CloseoutCanonicalExecutionAuditBlockerCode =
   | "failure_execution_audit_mismatch"
   | "failure_canonical_mismatch"
   | "failure_consumed_inputs_mismatch"
+  | "failure_compatibility_refs_mismatch"
   | "execution_audit_in_observability";
 
 export interface CloseoutCanonicalExecutionAuditVerifierInput {
@@ -87,7 +89,9 @@ const asNonEmptyString = (value: unknown): string | null => {
 };
 
 const isNonEmptyStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.some((item) => asNonEmptyString(item) !== null);
+  Array.isArray(value) &&
+  value.length > 0 &&
+  value.every((item) => asNonEmptyString(item) !== null);
 
 const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
 
@@ -206,6 +210,43 @@ const consumedInputsMatchAdmissionRefs = (
       asNonEmptyString(consumedInputs?.authorization_grant_ref) &&
     asNonEmptyString(derivedFrom?.runtime_target_ref) ===
       asNonEmptyString(consumedInputs?.runtime_target_ref)
+  );
+};
+
+const optionalAdmissionCompatibilityRefMatches = (
+  expected: unknown,
+  observed: unknown,
+  decision: unknown
+): boolean => {
+  const expectedRef = asNonEmptyString(expected);
+  if (expectedRef === null) {
+    return true;
+  }
+  if (decision === "blocked" && observed === null) {
+    return true;
+  }
+  return expectedRef === asNonEmptyString(observed);
+};
+
+const compatibilityRefsMatchAdmissionRefs = (
+  requestAdmissionResult: JsonObject,
+  executionAudit: JsonObject
+): boolean => {
+  const derivedFrom = asObject(requestAdmissionResult.derived_from);
+  const compatibilityRefs = asObject(executionAudit.compatibility_refs);
+  const decision = executionAudit.request_admission_decision;
+
+  return (
+    optionalAdmissionCompatibilityRefMatches(
+      derivedFrom?.approval_admission_ref,
+      compatibilityRefs?.approval_admission_ref,
+      decision
+    ) &&
+    optionalAdmissionCompatibilityRefMatches(
+      derivedFrom?.audit_admission_ref,
+      compatibilityRefs?.audit_admission_ref,
+      decision
+    )
   );
 };
 
@@ -437,6 +478,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
         )
       );
     }
+
+    if (
+      isCanonicalRequestAdmissionResult(successRequestAdmissionResult) &&
+      isCanonicalExecutionAudit(successExecutionAudit) &&
+      !compatibilityRefsMatchAdmissionRefs(successRequestAdmissionResult, successExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "success_compatibility_refs_mismatch",
+          "canonical_consistency",
+          "success.summary.execution_audit.compatibility_refs",
+          "success execution_audit compatibility_refs must match request_admission_result derived refs"
+        )
+      );
+    }
   }
 
   if (input.failure) {
@@ -529,6 +585,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
           "canonical_consistency",
           `failure.${failureDetails?.path ?? "details"}.execution_audit.consumed_inputs`,
           "failure execution_audit consumed_inputs must match request_admission_result derived refs"
+        )
+      );
+    }
+
+    if (
+      isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
+      isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
+      !compatibilityRefsMatchAdmissionRefs(failureRequestAdmission, failureDetailsExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "failure_compatibility_refs_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit.compatibility_refs`,
+          "failure execution_audit compatibility_refs must match request_admission_result derived refs"
         )
       );
     }
