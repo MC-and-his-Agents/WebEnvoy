@@ -82,6 +82,7 @@ const failureInput = (): CloseoutCanonicalExecutionAuditVerifierInput => ({
       }
     },
     payload: {
+      request_admission_result: requestAdmissionResult(),
       execution_audit: executionAudit(),
       observability: {
         failure_site: {
@@ -243,6 +244,31 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success execution audit consumed inputs differ from admission refs", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.execution_audit = {
+      ...executionAudit(),
+      consumed_inputs: {
+        action_request_ref: "upstream_req_issue645_001",
+        resource_binding_ref: "binding_issue645_001",
+        authorization_grant_ref: "grant_issue645_001",
+        runtime_target_ref: "target_other"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "success_consumed_inputs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
+    });
+  });
+
   it("fails closed when failure details are missing execution_audit", () => {
     const input = failureInput();
     input.failure = {
@@ -267,6 +293,31 @@ describe("closeout canonical execution audit verifier", () => {
           blocker_layer: "failure_details"
         })
       ]
+    });
+  });
+
+  it("fails closed when failure execution audit consumed inputs differ from admission refs", () => {
+    const input = failureInput();
+    const details = input.failure?.error?.details as Record<string, unknown>;
+    details.execution_audit = {
+      ...executionAudit(),
+      consumed_inputs: {
+        action_request_ref: "upstream_req_issue645_001",
+        resource_binding_ref: "binding_other",
+        authorization_grant_ref: "grant_issue645_001",
+        runtime_target_ref: "target_issue645_001"
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "failure_consumed_inputs_mismatch",
+          blocker_layer: "canonical_consistency"
+        })
+      ])
     });
   });
 
@@ -375,13 +426,40 @@ describe("closeout canonical execution audit verifier", () => {
       decision: "FAIL",
       passed: false,
       observability: {
-        failure_leak_paths: ["failure.observability.failure_site.execution_audit"]
+        failure_leak_paths: ["failure.payload.observability.failure_site.execution_audit"]
       },
       blockers: [
         expect.objectContaining({
           blocker_code: "execution_audit_in_observability",
           blocker_layer: "observability_boundary",
-          path: "failure.observability.failure_site.execution_audit"
+          path: "failure.payload.observability.failure_site.execution_audit"
+        })
+      ]
+    });
+  });
+
+  it("fails closed when execution_audit leaks into direct failure observability", () => {
+    const input = failureInput();
+    input.failure = {
+      ...input.failure,
+      observability: {
+        diagnostics: {
+          execution_audit: executionAudit()
+        }
+      }
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      observability: {
+        failure_leak_paths: ["failure.observability.diagnostics.execution_audit"]
+      },
+      blockers: [
+        expect.objectContaining({
+          blocker_code: "execution_audit_in_observability",
+          blocker_layer: "observability_boundary",
+          path: "failure.observability.diagnostics.execution_audit"
         })
       ]
     });

@@ -16,10 +16,12 @@ export type CloseoutCanonicalExecutionAuditBlockerCode =
   | "missing_success_execution_audit"
   | "invalid_success_execution_audit"
   | "success_canonical_mismatch"
+  | "success_consumed_inputs_mismatch"
   | "missing_failure_details"
   | "missing_failure_execution_audit"
   | "invalid_failure_execution_audit"
   | "failure_execution_audit_mismatch"
+  | "failure_consumed_inputs_mismatch"
   | "execution_audit_in_observability";
 
 export interface CloseoutCanonicalExecutionAuditVerifierInput {
@@ -169,6 +171,25 @@ const requestAdmissionMatchesExecutionAudit = (
   asNonEmptyString(requestAdmissionResult.admission_decision) ===
     asNonEmptyString(executionAudit.request_admission_decision);
 
+const consumedInputsMatchAdmissionRefs = (
+  requestAdmissionResult: JsonObject,
+  executionAudit: JsonObject
+): boolean => {
+  const derivedFrom = asObject(requestAdmissionResult.derived_from);
+  const consumedInputs = asObject(executionAudit.consumed_inputs);
+
+  return (
+    asNonEmptyString(derivedFrom?.action_request_ref) ===
+      asNonEmptyString(consumedInputs?.action_request_ref) &&
+    asNonEmptyString(derivedFrom?.resource_binding_ref) ===
+      asNonEmptyString(consumedInputs?.resource_binding_ref) &&
+    asNonEmptyString(derivedFrom?.authorization_grant_ref) ===
+      asNonEmptyString(consumedInputs?.authorization_grant_ref) &&
+    asNonEmptyString(derivedFrom?.runtime_target_ref) ===
+      asNonEmptyString(consumedInputs?.runtime_target_ref)
+  );
+};
+
 const findExecutionAuditKeys = (value: unknown, path: string): string[] => {
   if (Array.isArray(value)) {
     return value.flatMap((item, index) => findExecutionAuditKeys(item, `${path}[${index}]`));
@@ -238,6 +259,47 @@ const resolveFailureCanonicalAudit = (
   return { path: null, executionAudit: null };
 };
 
+const resolveFailureRequestAdmissionResult = (
+  failure: NonNullable<CloseoutCanonicalExecutionAuditVerifierInput["failure"]>
+): { path: string | null; requestAdmissionResult: JsonObject | null } => {
+  const payload = asObject(failure.payload);
+  const payloadRequestAdmissionResult = asObject(payload?.request_admission_result);
+  if (payloadRequestAdmissionResult) {
+    return {
+      path: "payload.request_admission_result",
+      requestAdmissionResult: payloadRequestAdmissionResult
+    };
+  }
+
+  const summaryRequestAdmissionResult = asObject(asObject(payload?.summary)?.request_admission_result);
+  if (summaryRequestAdmissionResult) {
+    return {
+      path: "payload.summary.request_admission_result",
+      requestAdmissionResult: summaryRequestAdmissionResult
+    };
+  }
+
+  const detailsRequestAdmissionResult = asObject(asObject(failure.details)?.request_admission_result);
+  if (detailsRequestAdmissionResult) {
+    return {
+      path: "details.request_admission_result",
+      requestAdmissionResult: detailsRequestAdmissionResult
+    };
+  }
+
+  const errorRequestAdmissionResult = asObject(
+    asObject(failure.error?.details)?.request_admission_result
+  );
+  if (errorRequestAdmissionResult) {
+    return {
+      path: "error.details.request_admission_result",
+      requestAdmissionResult: errorRequestAdmissionResult
+    };
+  }
+
+  return { path: null, requestAdmissionResult: null };
+};
+
 export const verifyCloseoutCanonicalExecutionAudit = (
   input: CloseoutCanonicalExecutionAuditVerifierInput
 ): CloseoutCanonicalExecutionAuditVerifierResult => {
@@ -248,13 +310,20 @@ export const verifyCloseoutCanonicalExecutionAudit = (
   const failureDetails = input.failure ? resolveFailureDetails(input.failure) : null;
   const failureDetailsExecutionAudit = asObject(failureDetails?.details?.execution_audit);
   const failureCanonicalAudit = input.failure ? resolveFailureCanonicalAudit(input.failure) : null;
+  const failureRequestAdmissionResult = input.failure
+    ? resolveFailureRequestAdmissionResult(input.failure)
+    : null;
   const successLeakPaths = input.success
     ? findExecutionAuditKeys(input.success.observability, "success.observability")
     : [];
-  const failureObservability =
-    input.failure?.observability ?? asObject(input.failure?.payload)?.observability;
   const failureLeakPaths = input.failure
-    ? findExecutionAuditKeys(failureObservability, "failure.observability")
+    ? [
+        ...findExecutionAuditKeys(input.failure.observability, "failure.observability"),
+        ...findExecutionAuditKeys(
+          asObject(input.failure.payload)?.observability,
+          "failure.payload.observability"
+        )
+      ]
     : [];
 
   if (!input.success && !input.failure) {
@@ -334,6 +403,21 @@ export const verifyCloseoutCanonicalExecutionAudit = (
         )
       );
     }
+
+    if (
+      isCanonicalRequestAdmissionResult(successRequestAdmissionResult) &&
+      isCanonicalExecutionAudit(successExecutionAudit) &&
+      !consumedInputsMatchAdmissionRefs(successRequestAdmissionResult, successExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "success_consumed_inputs_mismatch",
+          "canonical_consistency",
+          "success.summary.execution_audit.consumed_inputs",
+          "success execution_audit consumed_inputs must match request_admission_result derived refs"
+        )
+      );
+    }
   }
 
   if (input.failure) {
@@ -381,6 +465,22 @@ export const verifyCloseoutCanonicalExecutionAudit = (
           "canonical_consistency",
           `failure.${failureDetails?.path ?? "details"}.execution_audit`,
           "closeout failure details.execution_audit must match the canonical execution_audit"
+        )
+      );
+    }
+
+    const failureRequestAdmission = failureRequestAdmissionResult?.requestAdmissionResult ?? null;
+    if (
+      isCanonicalRequestAdmissionResult(failureRequestAdmission) &&
+      isCanonicalExecutionAudit(failureDetailsExecutionAudit) &&
+      !consumedInputsMatchAdmissionRefs(failureRequestAdmission, failureDetailsExecutionAudit)
+    ) {
+      blockers.push(
+        blocker(
+          "failure_consumed_inputs_mismatch",
+          "canonical_consistency",
+          `failure.${failureDetails?.path ?? "details"}.execution_audit.consumed_inputs`,
+          "failure execution_audit consumed_inputs must match request_admission_result derived refs"
         )
       );
     }
