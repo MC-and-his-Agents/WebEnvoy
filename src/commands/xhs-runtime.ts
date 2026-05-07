@@ -448,24 +448,39 @@ const pickCanonicalSummaryField = (
   return asObject(value) ?? undefined;
 };
 
-const hasCloseoutProductionPathMarker = (record: JsonObject | null | undefined): boolean =>
+const hasExplicitCloseoutProductionPathMarker = (record: JsonObject | null | undefined): boolean =>
   record?.closeout_audit_required === true ||
   hasOwn(record, "closeout_evidence_evaluation") ||
   hasOwn(record, "closeout_readiness") ||
-  hasOwn(record, "route_evidence") ||
-  hasOwn(record, "closeout_route_evidence") ||
-  hasOwn(record, "route_evidence_evaluation");
+  hasOwn(record, "closeout_route_evidence");
 
-const hasCloseoutRouteEvaluationMarker = (record: JsonObject | null | undefined): boolean => {
+const isCloseoutPrimaryApiSuccessRoute = (record: JsonObject | null | undefined): boolean => {
   const routeRole = asString(record?.route_role);
   const pathKind = asString(record?.path_kind);
   const evidenceStatus = asString(record?.evidence_status);
-  return (
-    routeRole === "primary" &&
-    pathKind === "api" &&
-    evidenceStatus === "success" &&
+  return routeRole === "primary" && pathKind === "api" && evidenceStatus === "success";
+};
+
+const hasCloseoutRouteEvaluationMarker = (record: JsonObject | null | undefined): boolean => {
+  if (
+    isCloseoutPrimaryApiSuccessRoute(record) &&
     (hasOwn(record, "closeout_evidence") || hasOwn(record, "closeout_evidence_evaluation"))
-  );
+  ) {
+    return true;
+  }
+
+  const routeEvidenceEvaluation = asObject(record?.route_evidence_evaluation);
+  if (isCloseoutPrimaryApiSuccessRoute(routeEvidenceEvaluation)) {
+    return true;
+  }
+
+  const closeoutRouteEvidence = asObject(record?.closeout_route_evidence);
+  if (isCloseoutPrimaryApiSuccessRoute(closeoutRouteEvidence)) {
+    return true;
+  }
+
+  const routeEvidence = asObject(record?.route_evidence);
+  return hasExplicitCloseoutProductionPathMarker(record) && isCloseoutPrimaryApiSuccessRoute(routeEvidence);
 };
 
 export const requiresCanonicalExecutionAuditForContract = (input: {
@@ -477,7 +492,7 @@ export const requiresCanonicalExecutionAuditForContract = (input: {
   const summary = asObject(input.summary) ?? asObject(payload?.summary);
   const details = asObject(input.details);
   return [payload, summary, details].some(
-    (record) => hasCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record)
+    (record) => hasExplicitCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record)
   );
 };
 

@@ -348,26 +348,37 @@ const pickCanonicalSummaryField = (payload, key) => {
     }
     return asObject(value) ?? undefined;
 };
-const hasCloseoutProductionPathMarker = (record) => record?.closeout_audit_required === true ||
+const hasExplicitCloseoutProductionPathMarker = (record) => record?.closeout_audit_required === true ||
     hasOwn(record, "closeout_evidence_evaluation") ||
     hasOwn(record, "closeout_readiness") ||
-    hasOwn(record, "route_evidence") ||
-    hasOwn(record, "closeout_route_evidence") ||
-    hasOwn(record, "route_evidence_evaluation");
-const hasCloseoutRouteEvaluationMarker = (record) => {
+    hasOwn(record, "closeout_route_evidence");
+const isCloseoutPrimaryApiSuccessRoute = (record) => {
     const routeRole = asString(record?.route_role);
     const pathKind = asString(record?.path_kind);
     const evidenceStatus = asString(record?.evidence_status);
-    return (routeRole === "primary" &&
-        pathKind === "api" &&
-        evidenceStatus === "success" &&
-        (hasOwn(record, "closeout_evidence") || hasOwn(record, "closeout_evidence_evaluation")));
+    return routeRole === "primary" && pathKind === "api" && evidenceStatus === "success";
+};
+const hasCloseoutRouteEvaluationMarker = (record) => {
+    if (isCloseoutPrimaryApiSuccessRoute(record) &&
+        (hasOwn(record, "closeout_evidence") || hasOwn(record, "closeout_evidence_evaluation"))) {
+        return true;
+    }
+    const routeEvidenceEvaluation = asObject(record?.route_evidence_evaluation);
+    if (isCloseoutPrimaryApiSuccessRoute(routeEvidenceEvaluation)) {
+        return true;
+    }
+    const closeoutRouteEvidence = asObject(record?.closeout_route_evidence);
+    if (isCloseoutPrimaryApiSuccessRoute(closeoutRouteEvidence)) {
+        return true;
+    }
+    const routeEvidence = asObject(record?.route_evidence);
+    return hasExplicitCloseoutProductionPathMarker(record) && isCloseoutPrimaryApiSuccessRoute(routeEvidence);
 };
 export const requiresCanonicalExecutionAuditForContract = (input) => {
     const payload = asObject(input.payload);
     const summary = asObject(input.summary) ?? asObject(payload?.summary);
     const details = asObject(input.details);
-    return [payload, summary, details].some((record) => hasCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record));
+    return [payload, summary, details].some((record) => hasExplicitCloseoutProductionPathMarker(record) || hasCloseoutRouteEvaluationMarker(record));
 };
 const assertCloseoutCanonicalExecutionAuditForRuntime = (ability, input) => {
     const result = "success" in input

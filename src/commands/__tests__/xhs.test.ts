@@ -1109,6 +1109,21 @@ describe("normalizeGateOptionsForContract", () => {
           }
         }
       })
+    ).toBe(false);
+
+    expect(
+      requiresCanonicalExecutionAuditForContract({
+        summary: {
+          closeout_evidence_evaluation: {
+            evaluator: "xhs-closeout-route-evidence"
+          },
+          route_evidence: {
+            route_role: "primary",
+            path_kind: "api",
+            evidence_status: "success"
+          }
+        }
+      })
     ).toBe(true);
 
     expect(
