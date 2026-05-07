@@ -1102,7 +1102,23 @@ describe("normalizeGateOptionsForContract", () => {
     expect(
       requiresCanonicalExecutionAuditForContract({
         summary: {
-          closeout_evidence_evaluation: {
+          route_evidence: {
+            route_role: "primary",
+            path_kind: "api",
+            evidence_status: "success"
+          }
+        }
+      })
+    ).toBe(true);
+
+    expect(
+      requiresCanonicalExecutionAuditForContract({
+        details: {
+          request_admission_result: {
+            request_ref: "upstream_req_closeout",
+            admission_decision: "allowed"
+          },
+          route_evidence_evaluation: {
             route_role: "primary",
             path_kind: "api",
             evidence_status: "success"

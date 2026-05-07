@@ -451,7 +451,10 @@ const pickCanonicalSummaryField = (
 const hasCloseoutProductionPathMarker = (record: JsonObject | null | undefined): boolean =>
   record?.closeout_audit_required === true ||
   hasOwn(record, "closeout_evidence_evaluation") ||
-  hasOwn(record, "closeout_readiness");
+  hasOwn(record, "closeout_readiness") ||
+  hasOwn(record, "route_evidence") ||
+  hasOwn(record, "closeout_route_evidence") ||
+  hasOwn(record, "route_evidence_evaluation");
 
 const hasCloseoutRouteEvaluationMarker = (record: JsonObject | null | undefined): boolean => {
   const routeRole = asString(record?.route_role);

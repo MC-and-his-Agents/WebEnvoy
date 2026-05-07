@@ -350,7 +350,10 @@ const pickCanonicalSummaryField = (payload, key) => {
 };
 const hasCloseoutProductionPathMarker = (record) => record?.closeout_audit_required === true ||
     hasOwn(record, "closeout_evidence_evaluation") ||
-    hasOwn(record, "closeout_readiness");
+    hasOwn(record, "closeout_readiness") ||
+    hasOwn(record, "route_evidence") ||
+    hasOwn(record, "closeout_route_evidence") ||
+    hasOwn(record, "route_evidence_evaluation");
 const hasCloseoutRouteEvaluationMarker = (record) => {
     const routeRole = asString(record?.route_role);
     const pathKind = asString(record?.path_kind);
