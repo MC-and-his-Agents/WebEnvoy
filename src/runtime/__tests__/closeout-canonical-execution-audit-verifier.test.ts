@@ -518,7 +518,12 @@ describe("closeout canonical execution audit verifier", () => {
     const input = failureInput();
     const admissionResult = {
       ...requestAdmissionResult(),
-      admission_decision: "blocked"
+      admission_decision: "blocked",
+      derived_from: {
+        ...requestAdmissionResult().derived_from,
+        approval_admission_ref: null,
+        audit_admission_ref: null
+      }
     };
     const blockedAudit = {
       ...executionAudit(),
@@ -527,10 +532,10 @@ describe("closeout canonical execution audit verifier", () => {
         gate_run_id: "run_issue645_001",
         approval_admission_ref: null,
         audit_admission_ref: null,
-        approval_record_ref: "gate_appr_issue645_001",
+        approval_record_ref: null,
         audit_record_ref: "gate_evt_issue645_001",
-        session_rhythm_window_id: "rhythm_window_issue645_001",
-        session_rhythm_decision_id: "rhythm_decision_issue645_001"
+        session_rhythm_window_id: null,
+        session_rhythm_decision_id: null
       }
     };
     const details = input.failure?.error?.details as Record<string, unknown>;
