@@ -43,6 +43,11 @@ const hasCanonicalAdmissionDerivedRefs = (value, decision) => value !== null &&
     asNonEmptyString(value.gate_input_ref) !== null &&
     hasOptionalBlockedAdmissionRef(value?.approval_admission_ref, decision) &&
     hasOptionalBlockedAdmissionRef(value?.audit_admission_ref, decision);
+const hasCanonicalAdmissionDecisionInvariants = (value) => value.runtime_target_match !== false &&
+    value.grant_match !== false &&
+    value.anonymous_isolation_ok !== false
+    ? true
+    : value.admission_decision === "blocked";
 const isCanonicalRequestAdmissionResult = (value) => value !== null &&
     asNonEmptyString(value.request_ref) !== null &&
     (value.admission_decision === "allowed" ||
@@ -56,6 +61,7 @@ const isCanonicalRequestAdmissionResult = (value) => value !== null &&
     isBoolean(value.anonymous_isolation_ok) &&
     asNonEmptyString(value.effective_runtime_mode) !== null &&
     isNonEmptyStringArray(value.reason_codes) &&
+    hasCanonicalAdmissionDecisionInvariants(value) &&
     hasCanonicalAdmissionDerivedRefs(asObject(value.derived_from), value.admission_decision);
 const hasNullableCompatibilityRef = (value, key) => hasOwn(value, key) && (value[key] === null || asNonEmptyString(value[key]) !== null);
 const hasCanonicalCompatibilityRefs = (value, decision) => value !== null &&

@@ -150,6 +150,13 @@ const hasCanonicalAdmissionDerivedRefs = (
   hasOptionalBlockedAdmissionRef(value?.approval_admission_ref, decision) &&
   hasOptionalBlockedAdmissionRef(value?.audit_admission_ref, decision);
 
+const hasCanonicalAdmissionDecisionInvariants = (value: JsonObject): boolean =>
+  value.runtime_target_match !== false &&
+  value.grant_match !== false &&
+  value.anonymous_isolation_ok !== false
+    ? true
+    : value.admission_decision === "blocked";
+
 const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is JsonObject =>
   value !== null &&
   asNonEmptyString(value.request_ref) !== null &&
@@ -164,6 +171,7 @@ const isCanonicalRequestAdmissionResult = (value: JsonObject | null): value is J
   isBoolean(value.anonymous_isolation_ok) &&
   asNonEmptyString(value.effective_runtime_mode) !== null &&
   isNonEmptyStringArray(value.reason_codes) &&
+  hasCanonicalAdmissionDecisionInvariants(value) &&
   hasCanonicalAdmissionDerivedRefs(asObject(value.derived_from), value.admission_decision);
 
 const hasNullableCompatibilityRef = (value: JsonObject, key: string): boolean =>

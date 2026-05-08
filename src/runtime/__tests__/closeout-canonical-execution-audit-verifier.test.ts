@@ -366,6 +366,27 @@ describe("closeout canonical execution audit verifier", () => {
     });
   });
 
+  it("fails closed when success admission is allowed despite failed admission checks", () => {
+    const input = successInput();
+    const summary = input.success?.summary as Record<string, unknown>;
+    summary.request_admission_result = {
+      ...requestAdmissionResult(),
+      runtime_target_match: false,
+      admission_decision: "allowed"
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_success_request_admission_result",
+          blocker_layer: "success_summary"
+        })
+      ])
+    });
+  });
+
   it("fails closed when success compatibility refs differ from admission derived refs", () => {
     const input = successInput();
     const summary = input.success?.summary as Record<string, unknown>;
@@ -529,6 +550,28 @@ describe("closeout canonical execution audit verifier", () => {
       request_ref: "upstream_req_issue645_001",
       admission_decision: "allowed",
       derived_from: {}
+    };
+
+    expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
+      decision: "FAIL",
+      passed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          blocker_code: "invalid_failure_request_admission_result",
+          blocker_layer: "failure_details",
+          path: "failure.payload.request_admission_result"
+        })
+      ])
+    });
+  });
+
+  it("fails closed when failure admission is allowed despite failed admission checks", () => {
+    const input = failureInput();
+    const payload = input.failure?.payload as Record<string, unknown>;
+    payload.request_admission_result = {
+      ...requestAdmissionResult(),
+      anonymous_isolation_ok: false,
+      admission_decision: "allowed"
     };
 
     expect(verifyCloseoutCanonicalExecutionAudit(input)).toMatchObject({
